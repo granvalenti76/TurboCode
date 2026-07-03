@@ -2,41 +2,35 @@ import SwiftUI
 
 // MARK: - WorkbenchSplitView — 3-column macOS native split view
 
-/// The primary layout container: resizable sidebar | main content | optional inspector.
-/// Persists widths to UserDefaults. Respects HIG split-view behavior with drag handles.
 struct WorkbenchSplitView: View {
     @Environment(ChatStore.self) private var chatStore
 
-    // Persisted widths
-    @AppStorage("leftSidebarWidth") private var leftWidth: Double = 280
+    @AppStorage("leftSidebarWidth") private var leftWidth: Double = 250
     @AppStorage("rightSidebarWidth") private var rightWidth: Double = 360
 
-    private let leftMinWidth: Double = 280
-    private let leftMaxWidth: Double = 480
+    private let leftMinWidth: Double = 220
+    private let leftMaxWidth: Double = 360
     private let mainMinWidth: Double = 560
     private let rightMinWidth: Double = 280
     private let rightMaxWidth: Double = 760
 
     var body: some View {
         HSplitView {
-            // Left sidebar
             if !chatStore.leftSidebarCollapsed {
                 SidebarView()
                     .frame(minWidth: leftMinWidth, maxWidth: leftMaxWidth)
-                    .frame(idealWidth: leftWidth, maxWidth: leftMaxWidth)
+                    .frame(idealWidth: leftWidth)
                     .layoutPriority(0)
             }
 
-            // Main content area: toolbar + timeline + composer
             MainStageView()
                 .frame(minWidth: mainMinWidth)
                 .layoutPriority(1)
 
-            // Right inspector panel
             if chatStore.rightPanelVisible {
                 InspectorPanelView()
                     .frame(minWidth: rightMinWidth, maxWidth: rightMaxWidth)
-                    .frame(idealWidth: rightWidth, maxWidth: rightMaxWidth)
+                    .frame(idealWidth: rightWidth)
                     .layoutPriority(0)
             }
         }
@@ -44,22 +38,15 @@ struct WorkbenchSplitView: View {
     }
 }
 
-// MARK: - MainStageView: toolbar + timeline + composer
+// MARK: - MainStageView
 
 struct MainStageView: View {
     @Environment(ChatStore.self) private var chatStore
 
     var body: some View {
         VStack(spacing: 0) {
-            // Top toolbar with model picker and right panel buttons
-            WorkbenchToolbar()
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(.bar)
-
+            TopBarView()
             Divider()
-
-            // Based on route, show different content
             switch chatStore.route {
             case .chat:
                 ChatContentView()
@@ -67,63 +54,44 @@ struct MainStageView: View {
                 WritePlaceholderView()
             case .settings:
                 SettingsTabView()
-            case .plugins:
-                PluginsPlaceholderView()
-            case .claw:
-                ClawPlaceholderView()
-            case .schedule:
-                SchedulePlaceholderView()
-            case .workflow:
-                WorkflowPlaceholderView()
+            default:
+                PlaceholderIcon(icon: "square.grid.2x2", label: "Workflow")
             }
         }
     }
 }
 
-// MARK: - ChatContentView: timeline + composer + terminal
+// MARK: - Top Bar
 
-struct ChatContentView: View {
+struct TopBarView: View {
     @Environment(ChatStore.self) private var chatStore
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Runtime status banner
-            RuntimeBannerView()
-
-            // Message timeline — main scrollable area
-            MessageTimelineView()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            Divider()
-
-            // Floating composer
-            FloatingComposerView()
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(.bar)
-
-            // Terminal drawer (optional)
-            if chatStore.terminalOpen {
-                Divider()
-                TerminalPlaceholderView()
-                    .frame(height: chatStore.terminalHeight)
+        HStack(spacing: 8) {
+            Button("Get Plus") {
+                // TODO: upsell flow
             }
-        }
-    }
-}
+            .buttonStyle(.plain)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(
+                LinearGradient(colors: [Color(red: 0.4, green: 0.2, blue: 0.9), Color(red: 0.6, green: 0.3, blue: 1.0)], startPoint: .leading, endPoint: .trailing),
+                in: RoundedRectangle(cornerRadius: 14)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color(red: 0.5, green: 0.25, blue: 0.95).opacity(0.3), lineWidth: 1)
+            )
 
-// MARK: - Toolbar
-
-struct WorkbenchToolbar: View {
-    @Environment(ChatStore.self) private var chatStore
-
-    var body: some View {
-        HStack(spacing: 6) {
-            routePicker
             Spacer()
+
             workspaceButton
-            rightPanelButtons
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color(.windowBackgroundColor))
     }
 
     private var workspaceButton: some View {
@@ -136,301 +104,242 @@ struct WorkbenchToolbar: View {
                 Text(chatStore.workspaceLabel)
                     .font(.system(size: 11))
                     .lineLimit(1)
-                    .frame(maxWidth: 150, alignment: .leading)
+                    .frame(maxWidth: 120, alignment: .leading)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
-            .foregroundStyle(chatStore.workspaceRoot.isEmpty ? .tertiary : .primary)
         }
         .buttonStyle(.plain)
-        .help(chatStore.workspaceRoot.isEmpty ? "Choose a workspace folder" : chatStore.workspaceRoot)
-        .contextMenu {
-            if !chatStore.workspaceRoot.isEmpty {
-                Button("Clear workspace") { chatStore.clearWorkspace() }
-            }
-        }
-    }
-
-    // MARK: - Route Picker
-
-    private var routePicker: some View {
-        HStack(spacing: 2) {
-            ForEach(RouteTab.allCases, id: \.self) { tab in
-                Button {
-                    chatStore.setRoute(tab.route)
-                } label: {
-                    Label(tab.label, systemImage: tab.icon)
-                        .font(.system(size: 12))
-                        .labelStyle(.iconOnly)
-                }
-                .buttonStyle(.borderless)
-                .help(tab.label)
-                .frame(width: 28, height: 22)
-                .background(
-                    chatStore.route == tab.route
-                        ? Color.accentColor.opacity(0.12)
-                        : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 6)
-                )
-            }
-        }
-        .padding(4)
-        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    // MARK: - Right Panel Buttons
-
-    private var rightPanelButtons: some View {
-        HStack(spacing: 4) {
-            ToolbarIconButton(
-                icon: "list.clipboard",
-                tooltip: "Todo",
-                isActive: chatStore.rightPanelMode == .todo
-            ) {
-                chatStore.toggleRightPanel(.todo)
-            }
-
-            ToolbarIconButton(
-                icon: "doc.text",
-                tooltip: "Changes",
-                isActive: chatStore.rightPanelMode == .changes
-            ) {
-                chatStore.toggleRightPanel(.changes)
-            }
-
-            ToolbarIconButton(
-                icon: "globe",
-                tooltip: "Browser",
-                isActive: chatStore.rightPanelMode == .browser
-            ) {
-                chatStore.toggleRightPanel(.browser)
-            }
-
-            ToolbarIconButton(
-                icon: "terminal",
-                tooltip: "Terminal",
-                isActive: chatStore.terminalOpen
-            ) {
-                chatStore.toggleTerminal()
-            }
-        }
+        .foregroundStyle(.secondary)
+        .help(chatStore.workspaceRoot.isEmpty ? "Choose a workspace" : chatStore.workspaceRoot)
     }
 }
 
-// MARK: - Toolbar Icon Button
+// MARK: - Chat Content (empty state + timeline + composer)
 
-struct ToolbarIconButton: View {
-    let icon: String
-    let tooltip: String
-    let isActive: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .medium))
-                .frame(width: 28, height: 22)
-        }
-        .buttonStyle(.borderless)
-        .help(tooltip)
-        .background(
-            isActive ? Color.accentColor.opacity(0.12) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 6)
-        )
-        .foregroundStyle(isActive ? Color.accentColor : .secondary)
-    }
-}
-
-// MARK: - Route tabs
-
-private enum RouteTab: String, CaseIterable {
-    case chat
-    case write
-    case schedule
-    case workflow
-
-    var route: AppRoute {
-        switch self {
-        case .chat: return .chat
-        case .write: return .write
-        case .schedule: return .schedule
-        case .workflow: return .workflow
-        }
-    }
-
-    var label: String {
-        switch self {
-        case .chat: return "Chat"
-        case .write: return "Write"
-        case .schedule: return "Schedule"
-        case .workflow: return "Workflow"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .chat: return "message"
-        case .write: return "pencil"
-        case .schedule: return "clock"
-        case .workflow: return "square.grid.2x2"
-        }
-    }
-}
-
-// MARK: - Runtime Banner
-
-struct RuntimeBannerView: View {
+struct ChatContentView: View {
     @Environment(ChatStore.self) private var chatStore
 
     var body: some View {
-        if chatStore.runtimeStatus != .ready {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 8, height: 8)
-                Text(statusText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if chatStore.runtimeStatus == .disconnected {
-                    Button("Connect") {
-                        chatStore.runtimeStatus = .connecting
-                        // TODO: start Kun runtime
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                RuntimeBannerView()
+
+                if chatStore.blocks.isEmpty && chatStore.liveAssistant.isEmpty && chatStore.liveReasoning.isEmpty {
+                    // Empty state — centered
+                    VStack(spacing: 8) {
+                        Spacer()
+                        Text("What should we build in TurboCode?")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(.primary)
+                        Text("Ask anything or describe what you want to create")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.tertiary)
+                        Spacer()
                     }
-                    .font(.caption)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                } else {
+                    // Message timeline
+                    MessageTimelineView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(statusColor.opacity(0.08))
-        }
-    }
 
-    private var statusColor: Color {
-        switch chatStore.runtimeStatus {
-        case .disconnected: return .red
-        case .connecting: return .orange
-        case .ready: return .green
-        case .error: return .red
-        }
-    }
-
-    private var statusText: String {
-        switch chatStore.runtimeStatus {
-        case .disconnected: return "Runtime disconnected"
-        case .connecting: return "Connecting to runtime..."
-        case .ready: return ""
-        case .error: return "Runtime error"
-        }
-    }
-}
-
-// MARK: - Placeholder views for other routes
-
-struct WritePlaceholderView: View {
-    var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 48))
-                .foregroundStyle(.tertiary)
-            Text("Write Workspace")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-            Text("Markdown editor with AI inline completion")
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.background)
-    }
-}
-
-struct PluginsPlaceholderView: View {
-    var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "puzzlepiece.extension")
-                .font(.system(size: 48))
-                .foregroundStyle(.tertiary)
-            Text("Plugin Marketplace")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.background)
-    }
-}
-
-struct ClawPlaceholderView: View {
-    var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "antenna.radiowaves.left.and.right")
-                .font(.system(size: 48))
-                .foregroundStyle(.tertiary)
-            Text("IM Channels (Claw)")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.background)
-    }
-}
-
-struct SchedulePlaceholderView: View {
-    var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "calendar.badge.clock")
-                .font(.system(size: 48))
-                .foregroundStyle(.tertiary)
-            Text("Scheduled Tasks")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.background)
-    }
-}
-
-struct WorkflowPlaceholderView: View {
-    var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "square.grid.2x2")
-                .font(.system(size: 48))
-                .foregroundStyle(.tertiary)
-            Text("Workflow Editor")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.background)
-    }
-}
-
-struct TerminalPlaceholderView: View {
-    var body: some View {
-        VStack {
-            HStack {
-                Image(systemName: "terminal")
-                    .foregroundStyle(.secondary)
-                Text("Terminal")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
+            // Composer area (overlay at bottom)
+            VStack(spacing: 0) {
+                if chatStore.terminalOpen {
+                    Divider()
+                    TerminalPlaceholderView()
+                        .frame(height: chatStore.terminalHeight)
+                }
+                ComposerAreaView()
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
+        }
+    }
+}
+
+// MARK: - Composer Area (warning + input + bottom bar)
+
+struct ComposerAreaView: View {
+    @Environment(ChatStore.self) private var chatStore
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Warning banner
+            WarningBannerView()
+
+            // Input field
+            InputFieldView()
+
+            // Bottom toolbar
+            ComposerToolbarView()
+        }
+        .background(Color(.windowBackgroundColor))
+    }
+}
+
+// MARK: - Warning Banner
+
+struct WarningBannerView: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "clock")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Text("You're out of Codex messages")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("Your rate limit resets on Jul 18, 2026, 7:55 AM. To continue using TurboCode, upgrade to Plus today.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button("Upgrade") {}
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 5)
+                .background(.black, in: RoundedRectangle(cornerRadius: 16))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.regularMaterial)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.separator.opacity(0.5), lineWidth: 1)
+                .padding(4)
+        )
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
+    }
+}
+
+// MARK: - Input Field
+
+struct InputFieldView: View {
+    @Environment(ChatStore.self) private var chatStore
+    @State private var messageText: String = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField("Do anything", text: $messageText, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .lineLimit(1...8)
+                .focused($isFocused)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+
+            Button {
+                let text = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { return }
+                messageText = ""
+                Task { await chatStore.sendMessage(text) }
+            } label: {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(messageText.trimmingCharacters(in: .whitespaces).isEmpty ? .quaternary : .primary)
+            }
+            .buttonStyle(.plain)
+            .disabled(messageText.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(.separator.opacity(0.4), lineWidth: 1)
+        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+}
+
+// MARK: - Composer Bottom Toolbar
+
+struct ComposerToolbarView: View {
+    @Environment(ChatStore.self) private var chatStore
+
+    var body: some View {
+        HStack(spacing: 6) {
+            // Attach button
+            Button {} label: {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 12))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+
+            // Approval mode
+            HStack(spacing: 2) {
+                Image(systemName: "checkmark.shield")
+                    .font(.system(size: 10))
+                Text("Ask for approval")
+                    .font(.system(size: 10))
+            }
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+
+            // Model picker
+            Menu {
+                Button("Auto") {}
+                Button("DeepSeek") {}
+                Button("GPT-4o") {}
+            } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: "cpu")
+                        .font(.system(size: 10))
+                    Text("5.5 Medium")
+                        .font(.system(size: 10))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
 
             Spacer()
 
-            Text("Terminal output will appear here")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            // Microphone
+            Button {} label: {
+                Image(systemName: "mic")
+                    .font(.system(size: 11))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Color(.windowBackgroundColor))
+    }
+}
 
+// MARK: - Empty State Icon Helper
+
+struct PlaceholderIcon: View {
+    let icon: String
+    let label: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: icon)
+                .font(.system(size: 36))
+                .foregroundStyle(.tertiary)
+            Text(label)
+                .font(.title3)
+                .foregroundStyle(.secondary)
             Spacer()
         }
-        .frame(maxWidth: .infinity)
-        .background(.background)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

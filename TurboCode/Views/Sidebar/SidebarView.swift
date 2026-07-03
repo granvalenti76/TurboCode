@@ -1,192 +1,254 @@
 import SwiftUI
 
-// MARK: - SidebarView — macOS native sidebar with thread list, search, and actions
+// MARK: - SidebarView
 
 struct SidebarView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var searchText: String = ""
+    @State private var selectedNav: String = "chat"
 
     var body: some View {
         VStack(spacing: 0) {
             // Header
-            sidebarHeader
-
+            headerView
             Divider()
-
-            // Section tabs: Conversations / Projects
-            WorkspaceModePickerView(
-                activeView: Binding(
-                    get: { chatStore.route },
-                    set: { chatStore.setRoute($0) }
-                )
-            )
-
-            // Search field
-            searchField
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-
-            // Thread list
-            threadList
+            // Navigation items
+            navItemsView
+            Divider()
+            // Projects section
+            projectsSection
+            // Chats section
+            chatsSection
+            Spacer()
+            // Footer — user profile
+            footerView
         }
-        .background(.background)
+        .background(Color(.windowBackgroundColor))
+        .frame(minWidth: 220)
     }
 
     // MARK: - Header
 
-    private var sidebarHeader: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "chevron.left")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.tertiary)
-                .opacity(0)
-
-            Spacer()
-
-            Text("Conversations")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.primary)
-
-            Spacer()
-
+    private var headerView: some View {
+        HStack {
             Button {
                 Task { await chatStore.createThread() }
             } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .medium))
+                HStack(spacing: 6) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 12, weight: .medium))
+                    Text("New chat")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 8))
             }
-            .buttonStyle(.borderless)
-            .help("New Chat")
+            .buttonStyle(.plain)
+            .padding(.leading, 12)
+
+            Spacer()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
     }
 
-    // MARK: - Search
+    // MARK: - Navigation Items
 
-    private var searchField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-
-            TextField("Search", text: $searchText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .onChange(of: searchText) { _, newValue in
-                    chatStore.threadSearch = newValue
-                }
-
-            if !searchText.isEmpty {
+    private var navItemsView: some View {
+        VStack(spacing: 0) {
+            ForEach(NavItem.allCases, id: \.self) { item in
                 Button {
-                    searchText = ""
-                    chatStore.threadSearch = ""
+                    selectedNav = item.id
                 } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
+                    HStack(spacing: 8) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 13))
+                            .frame(width: 18)
+                        Text(item.label)
+                            .font(.system(size: 12))
+                        Spacer()
+                        if let badge = item.badge {
+                            Text(badge)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .foregroundStyle(selectedNav == item.id ? .primary : .secondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        selectedNav == item.id
+                            ? .quaternary.opacity(0.3)
+                            : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 6)
+                    )
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
     }
 
-    // MARK: - Thread List
+    private enum NavItem: String, CaseIterable {
+        case search, scheduled, plugins
 
-    private var threadList: some View {
-        List(chatStore.sortedThreads) { thread in
-            ThreadRowView(
-                thread: thread,
-                isSelected: thread.id == chatStore.activeThreadId,
-                onSelect: {
-                    Task { await chatStore.selectThread(thread.id) }
-                },
-                onRename: { newTitle in
-                    Task { await chatStore.renameThread(id: thread.id, title: newTitle) }
-                },
-                onPin: {
-                    Task { await chatStore.pinThread(id: thread.id, pinned: !thread.isPinned) }
-                },
-                onArchive: {
-                    Task { await chatStore.archiveThread(id: thread.id) }
-                },
-                onDelete: {
-                    Task { await chatStore.deleteThread(id: thread.id) }
-                },
-                onRestore: {
-                    Task { await chatStore.restoreThread(id: thread.id) }
-                }
-            )
-            .listRowInsets(EdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8))
-            .listRowSeparator(.hidden)
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-    }
-}
-
-// MARK: - WorkspaceModePickerView — tab-like picker for sidebar sections
-
-struct WorkspaceModePickerView: View {
-    @Binding var activeView: AppRoute
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(SidebarTab.allCases, id: \.self) { tab in
-                Button {
-                    activeView = tab.route
-                } label: {
-                    Label(tab.label, systemImage: tab.icon)
-                        .font(.system(size: 11))
-                        .labelStyle(.iconOnly)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.borderless)
-                .help(tab.label)
-                .background(
-                    activeView == tab.route
-                        ? Color.accentColor.opacity(0.1)
-                        : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 6)
-                )
-                .foregroundStyle(activeView == tab.route ? Color.accentColor : .secondary)
+        var id: String { rawValue }
+        var label: String { rawValue.capitalized }
+        var icon: String {
+            switch self {
+            case .search: return "magnifyingglass"
+            case .scheduled: return "clock"
+            case .plugins: return "puzzlepiece.extension"
             }
         }
-        .padding(4)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        var badge: String? { nil }
     }
-}
 
-private enum SidebarTab: String, CaseIterable {
-    case chat
-    case write
-    case claw
-    case schedule
-    case workflow
+    // MARK: - Section Header
 
-    var route: AppRoute {
-        switch self {
-        case .chat: return .chat
-        case .write: return .write
-        case .claw: return .claw
-        case .schedule: return .schedule
-        case .workflow: return .workflow
+    private func sectionHeader(_ title: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .textCase(.uppercase)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 14)
+        .padding(.bottom, 4)
+    }
+
+    // MARK: - Projects Section
+
+    private var projectsSection: some View {
+        VStack(spacing: 0) {
+            sectionHeader("Projects")
+
+            ForEach(ProjectItem.allCases, id: \.self) { project in
+                Button {
+                    // TODO: select project
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "folder")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 16)
+                        Text(project.label)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        if let badge = project.badge {
+                            Text(badge)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
-    var label: String { rawValue.capitalized }
-    var icon: String {
-        switch self {
-        case .chat: return "message"
-        case .write: return "pencil"
-        case .claw: return "antenna.radiowaves.left.and.right"
-        case .schedule: return "clock"
-        case .workflow: return "square.grid.2x2"
+    private enum ProjectItem: String, CaseIterable {
+        case esempiUI = "EsempiUI"
+        case gemmaChat = "gemma-chat"
+        case articoli = "Articoli"
+        case blog = "blog"
+        case apostrophe = "Apostrophe"
+        case mimic = "Mimic"
+        case codechat = "Codechat"
+        case ciao = "  Ciao"
+
+        var label: String {
+            if self == .ciao { return "   Ciao" }
+            return rawValue
+        }
+        var badge: String? {
+            self == .ciao ? "1w" : nil
+        }
+    }
+
+    // MARK: - Chats Section
+
+    private var chatsSection: some View {
+        VStack(spacing: 0) {
+            sectionHeader("Chats")
+
+            if chatStore.threads.isEmpty {
+                HStack {
+                    Text("No chats")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 20)
+            } else {
+                ForEach(chatStore.sortedThreads.prefix(10)) { thread in
+                    ThreadRowView(
+                        thread: thread,
+                        isSelected: thread.id == chatStore.activeThreadId,
+                        onSelect: { Task { await chatStore.selectThread(thread.id) } },
+                        onRename: { Task { await chatStore.renameThread(id: thread.id, title: $0) } },
+                        onPin: { Task { await chatStore.pinThread(id: thread.id, pinned: !thread.isPinned) } },
+                        onArchive: { Task { await chatStore.archiveThread(id: thread.id) } },
+                        onDelete: { Task { await chatStore.deleteThread(id: thread.id) } },
+                        onRestore: { Task { await chatStore.restoreThread(id: thread.id) } }
+                    )
+                }
+            }
+        }
+    }
+
+    // MARK: - Footer
+
+    private var footerView: some View {
+        VStack(spacing: 8) {
+            Divider()
+            HStack(spacing: 8) {
+                // Avatar
+                ZStack {
+                    Circle()
+                        .fill(Color(red: 0.5, green: 0.3, blue: 0.8))
+                        .frame(width: 28, height: 28)
+                    Text("L")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("luca.trav@gm...")
+                        .font(.system(size: 11))
+                        .lineLimit(1)
+                    Text("Free")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                }
+
+                Spacer()
+
+                Button("Update") {}
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 3)
+                    .background(Color.blue, in: RoundedRectangle(cornerRadius: 8))
+
+                Button("Upgrade") {}
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.5, green: 0.3, blue: 0.8))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
         }
     }
 }
