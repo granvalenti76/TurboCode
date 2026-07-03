@@ -50,8 +50,13 @@ public final class ChatStore {
     public var terminalOpen: Bool = false
     public var terminalHeight: CGFloat = 360
 
-    // Session
-    private let session: LanguageModelSession
+    // Workspace
+    public var workspaceRoot: String = ""
+    public var workspaceLabel: String { workspaceRoot.isEmpty ? "No workspace" : URL(fileURLWithPath: workspaceRoot).lastPathComponent }
+
+    // Session — recreated when workspace changes
+    private var model: LlamaModel
+    private var session: LanguageModelSession
 
     public init() {
         let config = LlamaConfiguration(
@@ -59,8 +64,28 @@ public final class ChatStore {
             temperature: 0.0,
             baseURL: LlamaConfiguration.defaultURL
         )
-        let model = LlamaModel(configuration: config)
-        self.session = LanguageModelSession(model: model)
+        let m = LlamaModel(configuration: config)
+        self.model = m
+        self.session = LanguageModelSession(model: m)
+    }
+
+    /// Rebuild the session with current workspace-root instructions.
+    private func rebuildSession() {
+        var instructions = "You are TurboCode, an expert AI coding assistant."
+        instructions += "\nYou have access to tools for reading, writing, and searching files."
+        instructions += "\nYou can also execute shell commands."
+        if !workspaceRoot.isEmpty {
+            instructions += "\nThe current workspace is at: \(workspaceRoot)"
+            instructions += "\nAlways operate within this workspace unless the user explicitly asks otherwise."
+            instructions += "\nWhen running shell commands, always cd to the workspace first."
+            instructions += "\nNEVER access files outside the workspace."
+        }
+        let s = LanguageModelSession(
+            model: model,
+            tools: [],  // tools will be added after tool-registration support
+            instructions: instructions
+        )
+        self.session = s
     }
 
     // MARK: - Actions
@@ -102,6 +127,28 @@ public final class ChatStore {
         guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
         threads[i].isArchived = false
         threads[i].updatedAt = .now
+    }
+
+    /// Open a folder picker and set workspaceRoot.
+    public func chooseWorkspace() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.message = "Choose a workspace folder for the AI agent"
+        if !workspaceRoot.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: workspaceRoot)
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        workspaceRoot = url.path
+        rebuildSession()
+    }
+
+    /// Clear the workspace selection.
+    public func clearWorkspace() {
+        workspaceRoot = ""
+        rebuildSession()
     }
 
     public func sendMessage(_ text: String) async {

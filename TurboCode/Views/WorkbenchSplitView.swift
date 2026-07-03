@@ -119,13 +119,36 @@ struct WorkbenchToolbar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            // Route picker (segmented control style)
             routePicker
-
             Spacer()
-
-            // Right panel toggles
+            workspaceButton
             rightPanelButtons
+        }
+    }
+
+    private var workspaceButton: some View {
+        Button {
+            chatStore.chooseWorkspace()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: chatStore.workspaceRoot.isEmpty ? "folder" : "folder.fill")
+                    .font(.system(size: 11))
+                Text(chatStore.workspaceLabel)
+                    .font(.system(size: 11))
+                    .lineLimit(1)
+                    .frame(maxWidth: 150, alignment: .leading)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+            .foregroundStyle(chatStore.workspaceRoot.isEmpty ? .tertiary : .primary)
+        }
+        .buttonStyle(.plain)
+        .help(chatStore.workspaceRoot.isEmpty ? "Choose a workspace folder" : chatStore.workspaceRoot)
+        .contextMenu {
+            if !chatStore.workspaceRoot.isEmpty {
+                Button("Clear workspace") { chatStore.clearWorkspace() }
+            }
         }
     }
 
