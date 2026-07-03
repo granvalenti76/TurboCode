@@ -1,8 +1,10 @@
 import Foundation
 import Observation
 import SwiftUI
+import FoundationModels
+import LlamaModelExecutor
 
-// MARK: - Central ChatStore (replaces Zustand store)
+// MARK: - Central ChatStore
 
 @MainActor
 @Observable
@@ -26,8 +28,8 @@ public final class ChatStore {
     public var composerAttachments: Int = 0
 
     // Runtime
-    public var runtimeStatus: RuntimeStatus = .disconnected
-    public var runtimeConnection: RuntimeConnectionState = .disconnected
+    public var runtimeStatus: RuntimeStatus = .ready
+    public var runtimeConnection: RuntimeConnectionState = .ready
     public var busy: Bool = false
     public var error: String?
 
@@ -48,11 +50,23 @@ public final class ChatStore {
     public var terminalOpen: Bool = false
     public var terminalHeight: CGFloat = 360
 
+    // Session
+    private let session: LanguageModelSession
+
+    public init() {
+        let config = LlamaConfiguration(
+            modelName: "/Users/granvalenti/.modelli/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+            temperature: 0.0,
+            baseURL: LlamaConfiguration.defaultURL
+        )
+        let model = LlamaModel(configuration: config)
+        self.session = LanguageModelSession(model: model)
+    }
+
     // MARK: - Actions
 
     public func selectThread(_ id: String) async {
         activeThreadId = id
-        // TODO: load blocks from runtime
     }
 
     public func createThread(title: String = "New Chat", mode: ThreadMode = .agent) async {
@@ -62,21 +76,21 @@ public final class ChatStore {
     }
 
     public func renameThread(id: String, title: String) async {
-        guard let index = threads.firstIndex(where: { $0.id == id }) else { return }
-        threads[index].title = title
-        threads[index].updatedAt = .now
+        guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
+        threads[i].title = title
+        threads[i].updatedAt = .now
     }
 
     public func pinThread(id: String, pinned: Bool) async {
-        guard let index = threads.firstIndex(where: { $0.id == id }) else { return }
-        threads[index].isPinned = pinned
-        threads[index].updatedAt = .now
+        guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
+        threads[i].isPinned = pinned
+        threads[i].updatedAt = .now
     }
 
     public func archiveThread(id: String) async {
-        guard let index = threads.firstIndex(where: { $0.id == id }) else { return }
-        threads[index].isArchived = true
-        threads[index].updatedAt = .now
+        guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
+        threads[i].isArchived = true
+        threads[i].updatedAt = .now
     }
 
     public func deleteThread(id: String) async {
@@ -85,64 +99,129 @@ public final class ChatStore {
     }
 
     public func restoreThread(id: String) async {
-        guard let index = threads.firstIndex(where: { $0.id == id }) else { return }
-        threads[index].isArchived = false
-        threads[index].updatedAt = .now
+        guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
+        threads[i].isArchived = false
+        threads[i].updatedAt = .now
     }
 
     public func sendMessage(_ text: String) async {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
-        let userBlock = ChatBlock(kind: .user, text: text)
-        blocks.append(userBlock)
+        blocks.append(ChatBlock(kind: .user, text: text))
 
-        let placeholder = ChatBlock(kind: .assistant, text: "", model: composerModel)
-        blocks.append(placeholder)
+        let placeholderId = UUID().uuidString
+        blocks.append(ChatBlock(id: placeholderId, kind: .assistant, text: "", model: composerModel))
 
         busy = true
-        // TODO: send to Kun runtime via HTTP/SSE
+        runtimeStatus = .ready
+        error = nil
+
+        do {
+            let stream = session.streamResponse(to: text)
+            var accumulatedText = ""
+
+            for try await snapshot in stream {
+                // Fast path: update liveAssistant for quick UI feedback
+                // (re-renders only the live block, not the entire List)
+                if !snapshot.content.isEmpty {
+                    accumulatedText = snapshot.content
+                    liveAssistant = accumulatedText
+                }
+
+                // Reasoning from transcript — use = not += to avoid duplicates
+                // (transcript already has accumulated text)
+                for entry in snapshot.transcriptEntries {
+                    if case .reasoning(let reasoning) = entry {
+                        for segment in reasoning.segments {
+                            if case .text(let t) = segment {
+                                liveReasoning = t.content
+                            }
+                        }
+                    }
+                }
+
+                // Update the blocks array (triggers full List re-render)
+                // Keep this lightweight: just the placeholder replacement
+                if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
+                    blocks[i] = ChatBlock(
+                        id: placeholderId,
+                        kind: .assistant,
+                        text: accumulatedText,
+                        model: composerModel
+                    )
+                }
+            }
+
+            // Post-stream: handle reasoning-only responses
+            if !liveReasoning.isEmpty {
+                if accumulatedText.isEmpty {
+                    // Model output only reasoning (e.g. Gemma QAT).
+                    // Promote reasoning as the assistant's final text.
+                    if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
+                        blocks[i] = ChatBlock(
+                            id: placeholderId,
+                            kind: .assistant,
+                            text: liveReasoning,
+                            model: composerModel
+                        )
+                    }
+                } else {
+                    // Model output both reasoning AND content.
+                    // Show reasoning as a separate expandable block.
+                    if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
+                        blocks.insert(
+                            ChatBlock(kind: .reasoning, text: liveReasoning, model: composerModel),
+                            at: i
+                        )
+                    }
+                }
+                liveReasoning = ""
+            }
+            liveAssistant = ""  // hide live streaming block
+
+            if let i = threads.firstIndex(where: { $0.id == activeThreadId }) {
+                threads[i].updatedAt = .now
+            }
+        } catch {
+            self.error = error.localizedDescription
+            if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
+                blocks[i] = ChatBlock(
+                    id: placeholderId,
+                    kind: .assistant,
+                    text: "Error: \(error.localizedDescription)",
+                    model: composerModel
+                )
+            }
+        }
+
+        busy = false
     }
 
     public func interrupt() {
-        // TODO: interrupt current streaming
         busy = false
     }
 
     public func setRoute(_ route: AppRoute) {
         self.route = route
-        if route != .chat {
-            rightPanelMode = nil
-        }
+        if route != .chat { rightPanelMode = nil }
     }
 
     public func toggleRightPanel(_ mode: RightPanelMode) {
-        if rightPanelMode == mode {
-            rightPanelMode = nil
-        } else {
-            rightPanelMode = mode
-        }
+        rightPanelMode = rightPanelMode == mode ? nil : mode
     }
 
-    public func toggleTerminal() {
-        terminalOpen.toggle()
-    }
+    public func toggleTerminal() { terminalOpen.toggle() }
 
     public func toggleLeftSidebar() {
-        withAnimation(.easeInOut(duration: 0.2)) {
-            leftSidebarCollapsed.toggle()
-        }
+        withAnimation(.easeInOut(duration: 0.2)) { leftSidebarCollapsed.toggle() }
     }
 
-    /// Ordered list of threads for the sidebar (pinned first, then by updatedAt)
+    // MARK: - Sorted Threads
+
     public var sortedThreads: [Thread] {
-        let searchQuery = threadSearch.lowercased().trimmingCharacters(in: .whitespaces)
-        let filtered = threads.filter { thread in
-            if showArchivedThreads { return true }
-            return !thread.isArchived
-        }.filter { thread in
-            guard !searchQuery.isEmpty else { return true }
-            return thread.title.lowercased().contains(searchQuery)
-        }
+        let q = threadSearch.lowercased().trimmingCharacters(in: .whitespaces)
+        let filtered = threads.filter { t in showArchivedThreads ? true : !t.isArchived }
+            .filter { t in q.isEmpty ? true : t.title.lowercased().contains(q) }
         return filtered.sorted { a, b in
             if a.isPinned != b.isPinned { return a.isPinned }
             return a.updatedAt > b.updatedAt
@@ -153,14 +232,8 @@ public final class ChatStore {
 // MARK: - Runtime status
 
 public enum RuntimeStatus: String, Sendable, Hashable {
-    case disconnected
-    case connecting
-    case ready
-    case error
+    case disconnected; case connecting; case ready; case error
 }
-
 public enum RuntimeConnectionState: String, Sendable, Hashable {
-    case disconnected
-    case connecting
-    case ready
+    case disconnected; case connecting; case ready
 }
