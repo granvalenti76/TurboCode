@@ -68,23 +68,6 @@ struct TopBarView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Button("Get Plus") {
-                // TODO: upsell flow
-            }
-            .buttonStyle(.plain)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .background(
-                LinearGradient(colors: [Color(red: 0.4, green: 0.2, blue: 0.9), Color(red: 0.6, green: 0.3, blue: 1.0)], startPoint: .leading, endPoint: .trailing),
-                in: RoundedRectangle(cornerRadius: 14)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color(red: 0.5, green: 0.25, blue: 0.95).opacity(0.3), lineWidth: 1)
-            )
-
             Spacer()
 
             workspaceButton
@@ -122,30 +105,28 @@ struct ChatContentView: View {
     @Environment(ChatStore.self) private var chatStore
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-                RuntimeBannerView()
+        VStack(spacing: 0) {
+            RuntimeBannerView()
 
-                if chatStore.blocks.isEmpty && chatStore.liveAssistant.isEmpty && chatStore.liveReasoning.isEmpty {
-                    // Empty state — centered
-                    VStack(spacing: 8) {
-                        Spacer()
-                        Text("What should we build in TurboCode?")
-                            .font(.system(size: 24, weight: .bold))
-                            .foregroundStyle(.primary)
-                        Text("Ask anything or describe what you want to create")
-                            .font(.system(size: 14))
-                            .foregroundStyle(.tertiary)
-                        Spacer()
-                    }
-                } else {
-                    // Message timeline
-                    MessageTimelineView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if chatStore.blocks.isEmpty && chatStore.liveAssistant.isEmpty && chatStore.liveReasoning.isEmpty {
+                // Empty state — centered
+                VStack(spacing: 8) {
+                    Spacer()
+                    Text("What should we build in TurboCode?")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(.primary)
+                    Text("Ask anything or describe what you want to create")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.tertiary)
+                    Spacer()
                 }
+            } else {
+                // Message timeline
+                MessageTimelineView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-
-            // Composer area (overlay at bottom)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 16) {
             VStack(spacing: 0) {
                 if chatStore.terminalOpen {
                     Divider()
@@ -158,168 +139,150 @@ struct ChatContentView: View {
     }
 }
 
-// MARK: - Composer Area (warning + input + bottom bar)
+// MARK: - Composer Area (input card)
 
 struct ComposerAreaView: View {
     @Environment(ChatStore.self) private var chatStore
 
     var body: some View {
         VStack(spacing: 0) {
-            // Warning banner
-            WarningBannerView()
-
-            // Input field
+            // Input card (text field + controls + info bar in one unified card)
             InputFieldView()
-
-            // Bottom toolbar
-            ComposerToolbarView()
         }
         .background(Color(.windowBackgroundColor))
     }
 }
 
-// MARK: - Warning Banner
 
-struct WarningBannerView: View {
-    var body: some View {
-        HStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "clock")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Text("You're out of Codex messages")
-                    .font(.system(size: 11, weight: .semibold))
-                Text("Your rate limit resets on Jul 18, 2026, 7:55 AM. To continue using TurboCode, upgrade to Plus today.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button("Upgrade") {}
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 5)
-                .background(.black, in: RoundedRectangle(cornerRadius: 16))
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(.regularMaterial)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(.separator.opacity(0.5), lineWidth: 1)
-                .padding(4)
-        )
-        .padding(.horizontal, 12)
-        .padding(.top, 6)
-    }
-}
-
-// MARK: - Input Field
+// MARK: - Composer Input Card (text field + controls row + bottom info bar)
 
 struct InputFieldView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var messageText: String = ""
     @FocusState private var isFocused: Bool
 
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Do anything", text: $messageText, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 14))
-                .lineLimit(1...8)
-                .focused($isFocused)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 2)
+    @AppStorage("approvalMode") private var approvalMode: ApprovalMode = .askForApproval
+    @AppStorage("reasoningEffort") private var reasoningEffort: ReasoningEffort = .medium
+    @AppStorage("workMode") private var workMode: WorkMode = .local
+    @AppStorage("selectedBranch") private var selectedBranch: String = "main"
 
-            Button {
-                let text = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !text.isEmpty else { return }
-                messageText = ""
-                Task { await chatStore.sendMessage(text) }
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(messageText.trimmingCharacters(in: .whitespaces).isEmpty ? .quaternary : .primary)
-            }
-            .buttonStyle(.plain)
-            .disabled(messageText.trimmingCharacters(in: .whitespaces).isEmpty)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(.separator.opacity(0.4), lineWidth: 1)
-        )
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+    private let modelVersion = "GPT-5"
+    private let projectName = "TurboCode"
+    private let availableBranches = ["main", "feat/direct-llm-executor", "develop"]
+
+    private var canSend: Bool {
+        !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
-}
-
-// MARK: - Composer Bottom Toolbar
-
-struct ComposerToolbarView: View {
-    @Environment(ChatStore.self) private var chatStore
 
     var body: some View {
-        HStack(spacing: 6) {
-            // Attach button
-            Button {} label: {
-                Image(systemName: "plus.circle")
-                    .font(.system(size: 12))
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            // ── Top section: text field + controls ──
+            VStack(alignment: .leading, spacing: 12) {
+                TextField("Do anything", text: $messageText, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.body)
+                    .lineLimit(1...10)
+                    .focused($isFocused)
 
-            // Approval mode
-            HStack(spacing: 2) {
-                Image(systemName: "checkmark.shield")
-                    .font(.system(size: 10))
-                Text("Ask for approval")
-                    .font(.system(size: 10))
-            }
-            .foregroundStyle(.tertiary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
+                HStack(spacing: 14) {
+                    // Attach button
+                    Button {
+                        // TODO: attach files
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .buttonStyle(.plain)
 
-            // Model picker
-            Menu {
-                Button("Auto") {}
-                Button("DeepSeek") {}
-                Button("GPT-4o") {}
-            } label: {
-                HStack(spacing: 2) {
-                    Image(systemName: "cpu")
-                        .font(.system(size: 10))
-                    Text("5.5 Medium")
-                        .font(.system(size: 10))
+                    // Approval mode
+                    Menu {
+                        ForEach(ApprovalMode.allCases, id: \.self) { mode in
+                            Button(mode.rawValue) { approvalMode = mode }
+                        }
+                    } label: {
+                        Label(approvalMode.rawValue, systemImage: "hand.raised")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+
+                    Spacer()
+
+                    // Model picker
+                    Menu {
+                        ForEach(ReasoningEffort.allCases, id: \.self) { effort in
+                            Button(effort.rawValue) { reasoningEffort = effort }
+                        }
+                    } label: {
+                        Text("\(modelVersion) \(reasoningEffort.rawValue)")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+
+                    // Microphone
+                    Button {
+                        // TODO: voice input
+                    } label: {
+                        Image(systemName: "mic")
+                    }
+                    .buttonStyle(.plain)
+
+                    // Send button
+                    Button {
+                        let text = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !text.isEmpty else { return }
+                        messageText = ""
+                        Task { await chatStore.sendMessage(text) }
+                    } label: {
+                        Image(systemName: "arrow.up")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .clipShape(Circle())
+                    .disabled(!canSend)
                 }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
+            .padding(16)
 
-            Spacer()
+            Divider()
 
-            // Microphone
-            Button {} label: {
-                Image(systemName: "mic")
-                    .font(.system(size: 11))
+            // ── Bottom info bar ──
+            HStack(spacing: 16) {
+                Label(projectName, systemImage: "doc.plaintext")
+
+                Menu {
+                    ForEach(WorkMode.allCases, id: \.self) { mode in
+                        Button(mode.rawValue) { workMode = mode }
+                    }
+                } label: {
+                    Label(workMode.rawValue, systemImage: "laptopcomputer")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+
+                Menu {
+                    ForEach(availableBranches, id: \.self) { branch in
+                        Button(branch) { selectedBranch = branch }
+                    }
+                } label: {
+                    Label(selectedBranch, systemImage: "arrow.triangle.branch")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+
+                Spacer()
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.tertiary)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
-        .padding(.horizontal, 16)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(.separator, lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+        .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color(.windowBackgroundColor))
     }
 }
 

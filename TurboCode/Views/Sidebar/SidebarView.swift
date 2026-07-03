@@ -234,7 +234,6 @@ struct SidebarView: View {
             userInfo
             Spacer()
             updateButton
-            upgradeButton
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -272,10 +271,4 @@ struct SidebarView: View {
             .background(Color.blue, in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private var upgradeButton: some View {
-        Button("Upgrade") {}
-            .buttonStyle(.plain)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(Color(red: 0.5, green: 0.3, blue: 0.8))
-    }
 }

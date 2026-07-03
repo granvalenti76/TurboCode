@@ -48,10 +48,6 @@ struct MessageTimelineView: View {
                     Color.clear
                         .frame(height: 1)
                         .id("bottom-anchor")
-
-                    // Extra space for composer
-                    Color.clear
-                        .frame(height: 16)
                 }
             }
             .scrollContentBackground(.hidden)

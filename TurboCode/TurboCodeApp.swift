@@ -92,13 +92,7 @@ struct TurboCodeApp: App {
                     .keyboardShortcut("4", modifiers: [.command])
             }
 
-            // Settings via standard Settings scene
-            CommandGroup(replacing: .appTermination) {
-                Button("Settings...") {
-                    chatStore.setRoute(.settings)
-                }
-                .keyboardShortcut(",", modifiers: .command)
-            }
+            // Settings — handled by the native Settings scene below
         }
 
         // Native macOS Settings window
