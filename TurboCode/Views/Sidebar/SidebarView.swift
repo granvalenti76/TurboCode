@@ -217,9 +217,6 @@ struct SidebarView: View {
             onDelete: { Task { await chatStore.deleteThread(id: thread.id) } },
             onRestore: { Task { await chatStore.restoreThread(id: thread.id) } }
         )
-                }
-            }
-        }
     }
 
     // MARK: - Footer
