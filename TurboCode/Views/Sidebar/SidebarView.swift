@@ -182,26 +182,41 @@ struct SidebarView: View {
             sectionHeader("Chats")
 
             if chatStore.threads.isEmpty {
-                HStack {
-                    Text("No chats")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                    Spacer()
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 20)
+                emptyChatsView
             } else {
-                ForEach(chatStore.sortedThreads.prefix(10)) { thread in
-                    ThreadRowView(
-                        thread: thread,
-                        isSelected: thread.id == chatStore.activeThreadId,
-                        onSelect: { Task { await chatStore.selectThread(thread.id) } },
-                        onRename: { Task { await chatStore.renameThread(id: thread.id, title: $0) } },
-                        onPin: { Task { await chatStore.pinThread(id: thread.id, pinned: !thread.isPinned) } },
-                        onArchive: { Task { await chatStore.archiveThread(id: thread.id) } },
-                        onDelete: { Task { await chatStore.deleteThread(id: thread.id) } },
-                        onRestore: { Task { await chatStore.restoreThread(id: thread.id) } }
-                    )
+                chatsList
+            }
+        }
+    }
+
+    private var emptyChatsView: some View {
+        HStack {
+            Text("No chats")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 20)
+    }
+
+    private var chatsList: some View {
+        ForEach(chatStore.sortedThreads.prefix(10)) { thread in
+            threadRow(for: thread)
+        }
+    }
+
+    private func threadRow(for thread: Thread) -> some View {
+        ThreadRowView(
+            thread: thread,
+            isSelected: thread.id == chatStore.activeThreadId,
+            onSelect: { Task { await chatStore.selectThread(thread.id) } },
+            onRename: { newTitle in Task { await chatStore.renameThread(id: thread.id, title: newTitle) } },
+            onPin: { Task { await chatStore.pinThread(id: thread.id, pinned: !thread.isPinned) } },
+            onArchive: { Task { await chatStore.archiveThread(id: thread.id) } },
+            onDelete: { Task { await chatStore.deleteThread(id: thread.id) } },
+            onRestore: { Task { await chatStore.restoreThread(id: thread.id) } }
+        )
                 }
             }
         }
