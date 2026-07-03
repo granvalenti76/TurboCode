@@ -75,9 +75,9 @@ actor GitDiffService {
         p.arguments = ["git", "-C", repo] + args
         let out = Pipe()
         p.standardOutput = out
-        p.standardError = Pipe()
+        p.standardError = FileHandle.nullDevice  // evita deadlock se git scrive su stderr
         try p.run()
-        // Leggi i dati PRIMA di waitUntilExit() — evita deadlock sul buffer della pipe
+        // Leggi i dati PRIMA di waitUntilExit() — evita deadlock sul buffer di stdout
         let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
         return String(decoding: data, as: UTF8.self)
