@@ -187,12 +187,14 @@ public final class ChatStore {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         workspaceRoot = url.path
         rebuildSession()
+        rightPanelMode = .changes
     }
 
     /// Clear the workspace selection.
     public func clearWorkspace() {
         workspaceRoot = ""
         rebuildSession()
+        rightPanelMode = nil
     }
 
     public func sendMessage(_ text: String) async {
