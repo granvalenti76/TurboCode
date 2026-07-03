@@ -79,8 +79,8 @@ struct SidebarView: View {
                     .padding(.vertical, 6)
                     .background(
                         selectedNav == item.id
-                            ? .quaternary.opacity(0.3)
-                            : Color.clear,
+                            ? AnyShapeStyle(.quaternary.opacity(0.3))
+                            : AnyShapeStyle(.clear),
                         in: RoundedRectangle(cornerRadius: 6)
                     )
                     .contentShape(Rectangle())
@@ -212,43 +212,58 @@ struct SidebarView: View {
     private var footerView: some View {
         VStack(spacing: 8) {
             Divider()
-            HStack(spacing: 8) {
-                // Avatar
-                ZStack {
-                    Circle()
-                        .fill(Color(red: 0.5, green: 0.3, blue: 0.8))
-                        .frame(width: 28, height: 28)
-                    Text("L")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("luca.trav@gm...")
-                        .font(.system(size: 11))
-                        .lineLimit(1)
-                    Text("Free")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                }
-
-                Spacer()
-
-                Button("Update") {}
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 3)
-                    .background(Color.blue, in: RoundedRectangle(cornerRadius: 8))
-
-                Button("Upgrade") {}
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color(red: 0.5, green: 0.3, blue: 0.8))
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            userProfileRow
         }
+    }
+
+    private var userProfileRow: some View {
+        HStack(spacing: 8) {
+            userAvatar
+            userInfo
+            Spacer()
+            updateButton
+            upgradeButton
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    private var userAvatar: some View {
+        ZStack {
+            Circle()
+                .fill(Color(red: 0.5, green: 0.3, blue: 0.8))
+                .frame(width: 28, height: 28)
+            Text("L")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.white)
+        }
+    }
+
+    private var userInfo: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text("luca.trav@gm...")
+                .font(.system(size: 11))
+                .lineLimit(1)
+            Text("Free")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    private var updateButton: some View {
+        Button("Update") {}
+            .buttonStyle(.plain)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(Color.blue, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var upgradeButton: some View {
+        Button("Upgrade") {}
+            .buttonStyle(.plain)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(Color(red: 0.5, green: 0.3, blue: 0.8))
     }
 }
