@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - Models
+// MARK: 
 
 enum ApprovalMode: String, CaseIterable {
     case askForApproval = "Ask for approval"

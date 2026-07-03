@@ -126,6 +126,7 @@ struct InspectorPanelView: View {
     @State private var sections: [FileDiffSection] = []
     @State private var isLoading = true
     @State private var errorMsg: String?
+    @State private var loadTask: Task<Void, Never>?
 
     private let service = GitDiffService()
 
@@ -147,8 +148,13 @@ struct InspectorPanelView: View {
         }
         .background(.background)
         .frame(minWidth: 280)
-        .task { await load() }
-        .onChange(of: chatStore.workspaceRoot) { _, _ in Task { await load() } }
+        .onAppear { startLoad() }
+        .onChange(of: chatStore.workspaceRoot) { _, _ in startLoad() }
+    }
+
+    private func startLoad() {
+        loadTask?.cancel()
+        loadTask = Task { await load() }
     }
 
     private func emptyView(_ title: String, subtitle: String) -> some View {
@@ -161,21 +167,23 @@ struct InspectorPanelView: View {
     }
 
     private func load() async {
-        guard !chatStore.workspaceRoot.isEmpty else {
+        if chatStore.workspaceRoot.isEmpty {
             sections = []; errorMsg = "No workspace selected"; isLoading = false; return
         }
         isLoading = true
+        defer { isLoading = false }
         errorMsg = nil
         let url = URL(fileURLWithPath: chatStore.workspaceRoot)
 
         do {
             let result = try await service.fetchSections(at: url)
+            guard !Task.isCancelled else { return }
             sections = result
         } catch {
+            guard !Task.isCancelled else { return }
             errorMsg = error.localizedDescription
             sections = []
         }
-        isLoading = false
     }
 }
 
@@ -207,6 +215,8 @@ extension GitDiffService {
 struct FileInspectorView: View {
     let sections: [FileDiffSection]
     let projectFolderURL: URL?
+    @State private var collapsed: Set<String> = []
+    @State private var showOnlyChanges = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -222,6 +232,24 @@ struct FileInspectorView: View {
             Image(systemName: "doc.plaintext").font(.system(size: 10)).foregroundStyle(.secondary)
             Text("File modificati").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
             Spacer()
+
+            // Toggle: mostra solo +/- nascondendo il contesto
+            Button {
+                showOnlyChanges.toggle()
+            } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: showOnlyChanges ? "doc.text.below.ecg" : "doc.text")
+                        .font(.system(size: 9))
+                    Text(showOnlyChanges ? "Changes" : "Full")
+                        .font(.system(size: 9))
+                }
+                .foregroundStyle(showOnlyChanges ? Color.accentColor : Color.secondary.opacity(0.5))
+                .padding(.horizontal, 6).padding(.vertical, 3)
+                .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 4))
+            }
+            .buttonStyle(.plain)
+            .help(showOnlyChanges ? "Show full diff with context" : "Show only added/removed lines")
+
             Text("\(sections.count) file").font(.system(size: 10)).foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8).frame(minHeight: 36)
@@ -235,12 +263,22 @@ struct FileInspectorView: View {
             ScrollView(.vertical) {
                 LazyVStack(spacing: 0) {
                     ForEach(sections) { section in
-                        DiffSectionView(section: section)
+                        DiffSectionView(
+                            section: section,
+                            isCollapsed: collapsed.contains(section.id),
+                            showOnlyChanges: showOnlyChanges,
+                            onToggle: { toggle(section.id) }
+                        )
                         if section.id != sections.last?.id { Divider().padding(.leading, 12) }
                     }
                 }
             }
         }
+    }
+
+    private func toggle(_ id: String) {
+        if collapsed.contains(id) { collapsed.remove(id) }
+        else { collapsed.insert(id) }
     }
 
     private var emptyPlaceholder: some View {
@@ -256,16 +294,31 @@ struct FileInspectorView: View {
 
 struct DiffSectionView: View {
     let section: FileDiffSection
+    let isCollapsed: Bool
+    let showOnlyChanges: Bool
+    let onToggle: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionHeader.padding(.horizontal, 12).padding(.vertical, 6)
-            if !section.diffLines.isEmpty { DiffLinesView(lines: section.diffLines) }
+            sectionHeader
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .contentShape(Rectangle())
+                .onTapGesture { onToggle() }
+
+            if !isCollapsed, !section.diffLines.isEmpty {
+                DiffLinesView(lines: showOnlyChanges ? onlyChanges(section.diffLines) : section.diffLines)
+            }
         }
+    }
+
+    private func onlyChanges(_ lines: [DiffLine]) -> [DiffLine] {
+        lines.filter { $0.type != .context }
     }
 
     private var sectionHeader: some View {
         HStack(spacing: 6) {
+            Image(systemName: isCollapsed ? "chevron.forward" : "chevron.down")
+                .font(.system(size: 9)).foregroundStyle(.tertiary).frame(width: 10)
             Image(systemName: "doc.plaintext").font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 14)
             VStack(alignment: .leading, spacing: 1) {
                 Text(section.fileName).font(.system(size: 11, weight: .medium)).lineLimit(1)

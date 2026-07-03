@@ -71,10 +71,24 @@ struct TopBarView: View {
             Spacer()
 
             workspaceButton
+
+            inspectorToggleButton
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(Color(.windowBackgroundColor))
+    }
+
+    private var inspectorToggleButton: some View {
+        Button {
+            chatStore.toggleRightPanel(.changes)
+        } label: {
+            Image(systemName: chatStore.rightPanelVisible ? "sidebar.right" : "sidebar.right")
+                .font(.system(size: 11))
+                .foregroundStyle(chatStore.rightPanelVisible ? .primary : .tertiary)
+        }
+        .buttonStyle(.plain)
+        .help("Toggle inspector panel")
     }
 
     private var workspaceButton: some View {
@@ -255,6 +269,7 @@ struct InputFieldView: View {
                     .buttonStyle(.borderedProminent)
                     .clipShape(Circle())
                     .disabled(!canSend)
+                    .keyboardShortcut(.return, modifiers: []) 
                 }
             }
             .padding(16)
