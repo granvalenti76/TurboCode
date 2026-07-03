@@ -167,7 +167,6 @@ struct InputFieldView: View {
     @AppStorage("workMode") private var workMode: WorkMode = .local
     @AppStorage("selectedBranch") private var selectedBranch: String = "main"
 
-    private let modelVersion = "GPT-5"
     private let projectName = "TurboCode"
     private let availableBranches = ["main", "feat/direct-llm-executor", "develop"]
 
@@ -207,13 +206,31 @@ struct InputFieldView: View {
 
                     Spacer()
 
-                    // Model picker
+                    // Model picker (backend + reasoning effort)
                     Menu {
-                        ForEach(ReasoningEffort.allCases, id: \.self) { effort in
-                            Button(effort.rawValue) { reasoningEffort = effort }
+                        Section("Backend") {
+                            Button("Llama-server") {
+                                chatStore.switchBackend(to: .llamaServer)
+                            }
+                            Button("Foundation Apple") {
+                                chatStore.switchBackend(to: .foundationApple)
+                            }
+                        }
+
+                        if chatStore.activeBackend == .llamaServer {
+                            Divider()
+                            Section("Reasoning") {
+                                ForEach(ReasoningEffort.allCases, id: \.self) { effort in
+                                    Button(effort.rawValue) { reasoningEffort = effort }
+                                }
+                            }
                         }
                     } label: {
-                        Text("\(modelVersion) \(reasoningEffort.rawValue)")
+                        if chatStore.activeBackend == .llamaServer {
+                            Text("Llama-server \(reasoningEffort.rawValue)")
+                        } else {
+                            Text("Foundation Apple")
+                        }
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()

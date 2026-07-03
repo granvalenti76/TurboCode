@@ -4,6 +4,14 @@ import SwiftUI
 import FoundationModels
 import LlamaModelExecutor
 
+// MARK: - Model Backend
+
+/// The active inference backend.
+public enum ModelBackend: String, CaseIterable, Sendable {
+    case llamaServer = "Llama-server"
+    case foundationApple = "Foundation Apple"
+}
+
 // MARK: - Central ChatStore
 
 @MainActor
@@ -54,8 +62,11 @@ public final class ChatStore {
     public var workspaceRoot: String = ""
     public var workspaceLabel: String { workspaceRoot.isEmpty ? "No workspace" : URL(fileURLWithPath: workspaceRoot).lastPathComponent }
 
-    // Session — recreated when workspace changes
-    private var model: LlamaModel
+    // Backend
+    public var activeBackend: ModelBackend = .llamaServer
+
+    // Session — recreated when backend or workspace changes
+    private var llamaModel: LlamaModel
     private var session: LanguageModelSession
 
     public init() {
@@ -65,27 +76,60 @@ public final class ChatStore {
             baseURL: LlamaConfiguration.defaultURL
         )
         let m = LlamaModel(configuration: config)
-        self.model = m
+        self.llamaModel = m
         self.session = LanguageModelSession(model: m)
+        self.composerModel = ModelBackend.llamaServer.rawValue
     }
 
-    /// Rebuild the session with current workspace-root instructions.
-    private func rebuildSession() {
-        var instructions = "You are TurboCode, an expert AI coding assistant."
-        instructions += "\nYou have access to tools for reading, writing, and searching files."
-        instructions += "\nYou can also execute shell commands."
+    /// Switch inference backend and rebuild the session,
+    /// preserving the full conversation transcript.
+    public func switchBackend(to backend: ModelBackend) {
+        activeBackend = backend
+        composerModel = backend.rawValue
+        rebuildSession()
+    }
+
+    /// Build the instructions text from current workspace.
+    private var baseInstructions: String {
+        var text = "You are TurboCode, an expert AI coding assistant."
+        text += "\nYou have access to tools for reading, writing, and searching files."
+        text += "\nYou can also execute shell commands."
         if !workspaceRoot.isEmpty {
-            instructions += "\nThe current workspace is at: \(workspaceRoot)"
-            instructions += "\nAlways operate within this workspace unless the user explicitly asks otherwise."
-            instructions += "\nWhen running shell commands, always cd to the workspace first."
-            instructions += "\nNEVER access files outside the workspace."
+            text += "\nThe current workspace is at: \(workspaceRoot)"
+            text += "\nAlways operate within this workspace unless the user explicitly asks otherwise."
+            text += "\nWhen running shell commands, always cd to the workspace first."
+            text += "\nNEVER access files outside the workspace."
         }
-        let s = LanguageModelSession(
-            model: model,
-            tools: [ReadFileTool(), GrepTool(), BashTool(), WriteFileTool()],
-            instructions: instructions
-        )
-        self.session = s
+        return text
+    }
+
+    /// Rebuild the session preserving conversation history.
+    private func rebuildSession() {
+        // Capture existing transcript so we don't lose context
+        let history = Array(session.transcript)
+
+        let tools: [any Tool] = [ReadFileTool(), GrepTool(), BashTool(), WriteFileTool()]
+
+        switch activeBackend {
+        case .llamaServer:
+            session = LanguageModelSession(
+                model: llamaModel,
+                dynamicInstructions: SessionInstructions(
+                    instructionsText: baseInstructions,
+                    tools: tools
+                ),
+                history: history
+            )
+        case .foundationApple:
+            session = LanguageModelSession(
+                model: SystemLanguageModel.default,
+                dynamicInstructions: SessionInstructions(
+                    instructionsText: baseInstructions,
+                    tools: tools
+                ),
+                history: history
+            )
+        }
     }
 
     // MARK: - Actions
@@ -258,6 +302,20 @@ public final class ChatStore {
             if a.isPinned != b.isPinned { return a.isPinned }
             return a.updatedAt > b.updatedAt
         }
+    }
+}
+
+// MARK: - DynamicInstructions for session setup
+
+/// Wraps instructions text and tools into a single DynamicInstructions value,
+/// so LanguageModelSession can be initialized with both history and tools.
+private struct SessionInstructions: DynamicInstructions {
+    let instructionsText: String
+    let tools: [any Tool]
+
+    var body: some DynamicInstructions {
+        Instructions(instructionsText)
+        tools
     }
 }
 
