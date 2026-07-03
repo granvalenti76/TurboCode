@@ -82,7 +82,7 @@ public final class ChatStore {
         }
         let s = LanguageModelSession(
             model: model,
-            tools: [],  // tools will be added after tool-registration support
+            tools: [ReadFileTool(), GrepTool(), BashTool(), WriteFileTool()],
             instructions: instructions
         )
         self.session = s
@@ -186,44 +186,29 @@ public final class ChatStore {
                         }
                     }
                 }
+            }
 
-                // Update the blocks array (triggers full List re-render)
-                // Keep this lightweight: just the placeholder replacement
+            // Stream ended: finalize the assistant block.
+            let finalText = accumulatedText.isEmpty ? liveReasoning : accumulatedText
+            if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
+                blocks[i] = ChatBlock(
+                    id: placeholderId,
+                    kind: .assistant,
+                    text: finalText,
+                    model: composerModel
+                )
+            }
+
+            // Separate reasoning block if model output BOTH reasoning and content.
+            if !liveReasoning.isEmpty && !accumulatedText.isEmpty {
                 if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
-                    blocks[i] = ChatBlock(
-                        id: placeholderId,
-                        kind: .assistant,
-                        text: accumulatedText,
-                        model: composerModel
+                    blocks.insert(
+                        ChatBlock(kind: .reasoning, text: liveReasoning, model: composerModel),
+                        at: i
                     )
                 }
             }
-
-            // Post-stream: handle reasoning-only responses
-            if !liveReasoning.isEmpty {
-                if accumulatedText.isEmpty {
-                    // Model output only reasoning (e.g. Gemma QAT).
-                    // Promote reasoning as the assistant's final text.
-                    if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
-                        blocks[i] = ChatBlock(
-                            id: placeholderId,
-                            kind: .assistant,
-                            text: liveReasoning,
-                            model: composerModel
-                        )
-                    }
-                } else {
-                    // Model output both reasoning AND content.
-                    // Show reasoning as a separate expandable block.
-                    if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
-                        blocks.insert(
-                            ChatBlock(kind: .reasoning, text: liveReasoning, model: composerModel),
-                            at: i
-                        )
-                    }
-                }
-                liveReasoning = ""
-            }
+            liveReasoning = ""
             liveAssistant = ""  // hide live streaming block
 
             if let i = threads.firstIndex(where: { $0.id == activeThreadId }) {
