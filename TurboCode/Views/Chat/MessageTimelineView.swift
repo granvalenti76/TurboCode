@@ -141,7 +141,7 @@ struct LiveReasoningBlock: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "brain")
+            Image(systemName: "sparkles")
                 .font(.system(size: 14))
                 .foregroundStyle(.orange)
                 .frame(width: 24, height: 24)
