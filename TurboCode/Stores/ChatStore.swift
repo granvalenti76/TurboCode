@@ -174,6 +174,7 @@ public final class ChatStore {
     /// Build the instructions text from current workspace.
     private var baseInstructions: String {
         var text = "You are TurboCode, an expert AI coding assistant."
+        text += "\nAlways use Markdown formatting in your responses: **bold**, `code`, ```code blocks```, tables, etc."
         if !workspaceRoot.isEmpty {
             text += "\nThe current workspace is at: \(workspaceRoot)"
             text += "\nYou have access to the following tools: read_file, grep, file_system."
