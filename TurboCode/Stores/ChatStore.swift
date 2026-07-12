@@ -182,9 +182,10 @@ public final class ChatStore {
     }
 
     /// Rebuild the session preserving conversation history.
-    private func rebuildSession() {
+    /// Pass `keepingHistory: false` to start a fresh session (new thread).
+    private func rebuildSession(keepingHistory: Bool = true) {
         // Capture existing transcript so we don't lose context
-        let history = Array(session.transcript)
+        let history = keepingHistory ? Array(session.transcript) : []
 
         // Tools are loaded conditionally: file operations require a workspace
         var tools: [any Tool] = []
@@ -232,6 +233,7 @@ public final class ChatStore {
         liveReasoning = ""
         liveAssistant = ""
         isFirstMessage = true
+        rebuildSession(keepingHistory: false)
     }
 
     public func renameThread(id: String, title: String) async {
