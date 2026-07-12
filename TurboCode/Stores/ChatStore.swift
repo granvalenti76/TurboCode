@@ -415,13 +415,38 @@ public final class ChatStore {
         busy = false
     }
 
-    /// Approve a pending destructive operation and continue the conversation.
+    /// Approve a pending destructive operation — executes directly via FileManager,
+    /// then informs the model that the action was completed.
     public func approveAction() {
         guard let request = pendingApproval else { return }
         pendingApproval = nil
-        // Re-send original message with approval context
-        Task {
-            await sendMessage("[User approved: \(request.summary)]")
+
+        let summary = request.summary
+
+        // Extract the path from single quotes in the summary
+        let path: String? = {
+            guard let start = summary.firstIndex(of: "'"),
+                  let end = summary[start...].dropFirst().firstIndex(of: "'") else { return nil }
+            return String(summary[summary.index(after: start)..<end])
+        }()
+
+        guard let filePath = path else {
+            Task { await sendMessage("[User approved: \(summary)]") }
+            return
+        }
+
+        do {
+            if summary.contains("deletion") || summary.contains("Confirm deletion") {
+                try FileManager.default.removeItem(atPath: filePath)
+                Task { await sendMessage("[User approved and completed: deleted '\(filePath)']") }
+            } else if summary.contains("overwrite") || summary.contains("already exists") {
+                // Overwrite requires content — not available here, tell model to retry
+                Task { await sendMessage("[User approved: overwrite '\(filePath)'. Please retry the write operation.]") }
+            } else {
+                Task { await sendMessage("[User approved: \(summary)]") }
+            }
+        } catch {
+            Task { await sendMessage("[Action failed: \(error.localizedDescription)]") }
         }
     }
 
