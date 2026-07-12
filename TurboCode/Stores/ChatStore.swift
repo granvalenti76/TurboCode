@@ -66,6 +66,15 @@ public final class ChatStore {
     public var workspaceRoot: String = ""
     public var workspaceLabel: String { workspaceRoot.isEmpty ? "No workspace" : URL(fileURLWithPath: workspaceRoot).lastPathComponent }
 
+    // Recent workspace paths (persisted in UserDefaults, used by sidebar Projects)
+    public var recentWorkspaces: [String] {
+        get { UserDefaults.standard.stringArray(forKey: "recentWorkspaces") ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: "recentWorkspaces") }
+    }
+
+    // Selected project in sidebar (filters threads)
+    public var selectedProject: String? = nil
+
     // Backend
     public var activeBackend: ModelBackend = .llamaServer
 
@@ -212,7 +221,11 @@ public final class ChatStore {
     }
 
     public func createThread(title: String = "New Chat", mode: ThreadMode = .agent) async {
-        let thread = Thread(title: title, mode: mode)
+        let thread = Thread(
+            title: title,
+            workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
+            mode: mode
+        )
         threads.insert(thread, at: 0)
         activeThreadId = thread.id
         blocks = []
@@ -263,6 +276,14 @@ public final class ChatStore {
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         workspaceRoot = url.path
+
+        // Save to recent workspaces
+        var recent = recentWorkspaces
+        recent.removeAll { $0 == url.path }
+        recent.insert(url.path, at: 0)
+        recentWorkspaces = Array(recent.prefix(10))
+        selectedProject = url.lastPathComponent
+
         rebuildSession()
         rightPanelMode = .changes
         diffSections = []
@@ -383,12 +404,20 @@ public final class ChatStore {
 
     public var sortedThreads: [Thread] {
         let q = threadSearch.lowercased().trimmingCharacters(in: .whitespaces)
-        let filtered = threads.filter { t in showArchivedThreads ? true : !t.isArchived }
+        return threads
+            .filter { t in showArchivedThreads ? true : !t.isArchived }
+            .filter { t in
+                if let project = selectedProject {
+                    // Match by lastPathComponent of workspace
+                    return t.workspace.flatMap { URL(fileURLWithPath: $0).lastPathComponent } == project
+                }
+                return true
+            }
             .filter { t in q.isEmpty ? true : t.title.lowercased().contains(q) }
-        return filtered.sorted { a, b in
-            if a.isPinned != b.isPinned { return a.isPinned }
-            return a.updatedAt > b.updatedAt
-        }
+            .sorted { a, b in
+                if a.isPinned != b.isPinned { return a.isPinned }
+                return a.updatedAt > b.updatedAt
+            }
     }
 }
 

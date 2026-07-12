@@ -128,21 +128,43 @@ struct SidebarView: View {
         VStack(spacing: 0) {
             sectionHeader("Projects")
 
-            ForEach(ProjectItem.allCases, id: \.self) { project in
+            // All threads
+            Button {
+                chatStore.selectedProject = nil
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "tray.full")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 16)
+                    Text("All chats")
+                        .font(.system(size: 12))
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // Recent workspace projects
+            ForEach(chatStore.recentWorkspaces, id: \.self) { path in
+                let name = URL(fileURLWithPath: path).lastPathComponent
+                let threadCount = chatStore.threads.filter { $0.workspace == path }.count
                 Button {
-                    // TODO: select project
+                    chatStore.selectedProject = name
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "folder")
+                        Image(systemName: chatStore.selectedProject == name ? "folder.fill" : "folder")
                             .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(chatStore.selectedProject == name ? AnyShapeStyle(Color.blue) : AnyShapeStyle(.tertiary))
                             .frame(width: 16)
-                        Text(project.label)
+                        Text(name)
                             .font(.system(size: 12))
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(chatStore.selectedProject == name ? .primary : .primary)
                         Spacer()
-                        if let badge = project.badge {
-                            Text(badge)
+                        if threadCount > 0 {
+                            Text("\(threadCount)")
                                 .font(.system(size: 10))
                                 .foregroundStyle(.tertiary)
                         }
@@ -153,25 +175,26 @@ struct SidebarView: View {
                 }
                 .buttonStyle(.plain)
             }
-        }
-    }
 
-    private enum ProjectItem: String, CaseIterable {
-        case esempiUI = "EsempiUI"
-        case gemmaChat = "gemma-chat"
-        case articoli = "Articoli"
-        case blog = "blog"
-        case apostrophe = "Apostrophe"
-        case mimic = "Mimic"
-        case codechat = "Codechat"
-        case ciao = "  Ciao"
-
-        var label: String {
-            if self == .ciao { return "   Ciao" }
-            return rawValue
-        }
-        var badge: String? {
-            self == .ciao ? "1w" : nil
+            // Add workspace
+            Button {
+                chatStore.chooseWorkspace()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 16)
+                    Text("Add workspace...")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 
