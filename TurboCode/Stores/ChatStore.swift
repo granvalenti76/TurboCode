@@ -160,7 +160,7 @@ public final class ChatStore {
         var text = "You are TurboCode, an expert AI coding assistant."
         if !workspaceRoot.isEmpty {
             text += "\nThe current workspace is at: \(workspaceRoot)"
-            text += "\nYou have access to the following tools: read_file, write_file, grep, file_system."
+            text += "\nYou have access to the following tools: read_file, grep, file_system."
             text += "\nAll file operations are restricted to the workspace directory."
             text += "\nNEVER access files outside the workspace."
             text += "\nUse these tools when you need to interact with the workspace."
@@ -176,7 +176,7 @@ public final class ChatStore {
         // Tools are loaded conditionally: file operations require a workspace
         var tools: [any Tool] = []
         if !workspaceRoot.isEmpty {
-            tools += [ReadFileTool(), WriteFileTool(), GrepTool(), FileSystemTool(workspaceRoot: workspaceRoot)]
+            tools += [ReadFileTool(), GrepTool(), FileSystemTool(workspaceRoot: workspaceRoot)]
         }
 
         switch activeBackend {

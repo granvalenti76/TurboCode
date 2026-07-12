@@ -13,6 +13,10 @@ enum FileOperation: String, CaseIterable, Sendable {
     case find
     /// Create a directory (creates intermediates)
     case createDirectory
+    /// Write content to a new or existing file (overwrite requires approval)
+    case write
+    /// Append content to an existing file
+    case append
     /// Copy a file or directory
     case copy
     /// Move or rename a file or directory
@@ -25,14 +29,16 @@ enum FileOperation: String, CaseIterable, Sendable {
 
 @Generable
 struct FileSystemArguments {
-    /// Operation to perform: "list", "info", "find", "createDirectory", "copy", "move", "delete"
+    /// Operation to perform: "list", "info", "find", "createDirectory", "write", "append", "copy", "move", "delete"
     var operation: String
-    /// Path for the operation. For copy/move this is the source.
+    /// Path for the operation. For copy/move this is the source; for write/append the target file.
     var path: String
     /// Destination path (required for copy and move only).
     var destination: String?
     /// File name pattern (for find operation only, e.g. "*.swift").
     var pattern: String?
+    /// Content to write (required for write and append operations only).
+    var content: String?
 }
 
 // MARK: - Tool
@@ -54,10 +60,13 @@ struct FileSystemTool: Tool {
         - info: Get file metadata (size, dates, type)
         - find: Search for files matching a pattern
         - createDirectory: Create a new directory (parent directories are created automatically)
+        - write: Write content to a file (creates parent directories; overwrite requires approval)
+        - append: Append content to an existing file
         - copy: Copy a file or directory (requires destination)
         - move: Move or rename a file or directory (requires destination)
         - delete: Permanently delete a file or directory (requires approval)
 
+        write and append require the 'content' argument.
         All paths must be within the workspace root.
         """
     }
@@ -83,6 +92,12 @@ struct FileSystemTool: Tool {
         case .info:              return fileInfo(at: arguments.path)
         case .find:              return findFiles(in: arguments.path, pattern: arguments.pattern)
         case .createDirectory:   return makeDirectory(at: arguments.path)
+        case .write:
+            guard let content = arguments.content else { return "Error: 'content' is required for write." }
+            return writeFile(at: arguments.path, content: content)
+        case .append:
+            guard let content = arguments.content else { return "Error: 'content' is required for append." }
+            return appendFile(at: arguments.path, content: content)
         case .copy:
             guard let dest = arguments.destination else { return "Error: 'destination' is required for copy." }
             return copyItem(from: arguments.path, to: dest)
@@ -261,7 +276,47 @@ struct FileSystemTool: Tool {
         }
 
         // Safety: never delete directly — require explicit approval
-        return "⚠️ ACTION REQUIRED: Confirm deletion of '\(path)'. This action cannot be undone."
+        return "\u{26A0}\u{FE0F} ACTION REQUIRED: Confirm deletion of '\(path)'. This action cannot be undone."
+    }
+
+    // MARK: - Write / Append
+
+    private func writeFile(at path: String, content: String) -> String {
+        let url = URL(fileURLWithPath: path)
+        let parentDir = url.deletingLastPathComponent()
+
+        do {
+            try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
+        } catch {
+            return "Error creating parent directories: \(error.localizedDescription)"
+        }
+
+        if FileManager.default.fileExists(atPath: path) {
+            return "\u{26A0}\u{FE0F} ACTION REQUIRED: File already exists at '\(path)'. Needs approval to overwrite."
+        }
+
+        do {
+            try content.write(toFile: path, atomically: true, encoding: .utf8)
+            return "Created '\(path)' with \(content.utf8.count) bytes."
+        } catch {
+            return "Error writing '\(path)': \(error.localizedDescription)"
+        }
+    }
+
+    private func appendFile(at path: String, content: String) -> String {
+        guard FileManager.default.fileExists(atPath: path) else {
+            return "Error: File not found at '\(path)'. Use 'write' to create a new file."
+        }
+
+        do {
+            let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data(content.utf8))
+            try handle.close()
+            return "Appended \(content.utf8.count) bytes to '\(path)'."
+        } catch {
+            return "Error appending to '\(path)': \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Helpers
