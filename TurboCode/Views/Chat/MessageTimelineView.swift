@@ -156,8 +156,7 @@ struct LiveReasoningBlock: View {
                         .scaleEffect(0.5)
                 }
 
-                Text(text)
-                    .font(.system(size: 12))
+                Text(formattedText(text, size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(nil)
                     .textSelection(.enabled)
@@ -180,8 +179,7 @@ struct LiveAssistantBlock: View {
     let text: String
 
     var body: some View {
-        Text(formattedText(text))
-            .font(.system(size: 14))
+        Text(formattedText(text, size: 14))
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)

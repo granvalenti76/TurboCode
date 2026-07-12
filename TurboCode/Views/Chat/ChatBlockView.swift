@@ -38,8 +38,7 @@ struct ChatBlockView: View {
                 if isEditing {
                     editView
                 } else {
-                    Text(formattedText(block.text))
-                        .font(.system(size: 14))
+                    Text(formattedText(block.text, size: 14))
                         .textSelection(.enabled)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
@@ -102,8 +101,7 @@ struct ChatBlockView: View {
     private var assistantBubble: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(formattedText(block.text))
-                    .font(.system(size: 14))
+                Text(formattedText(block.text, size: 14))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -132,8 +130,7 @@ struct ChatBlockView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.orange)
 
-                Text(formattedText(block.text))
-                    .font(.system(size: 12))
+                Text(formattedText(block.text, size: 12))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
@@ -246,7 +243,9 @@ struct ModelBadgeView: View {
 
 /// Cleans up model output: unescapes \\n, \\t then tries markdown rendering.
 /// Falls back to plain AttributedString if markdown parsing fails.
-func formattedText(_ input: String) -> AttributedString {
+/// The base font size is embedded in the AttributedString so that
+/// markdown-specific fonts (bold, italic, code) are preserved.
+func formattedText(_ input: String, size: CGFloat = 14) -> AttributedString {
     let cleaned = input
         .replacingOccurrences(of: "\\\\", with: "\u{1D}")
         .replacingOccurrences(of: "\\n", with: "\n")
@@ -255,12 +254,16 @@ func formattedText(_ input: String) -> AttributedString {
         .replacingOccurrences(of: "\\\"", with: "\"")
         .replacingOccurrences(of: "\u{1D}", with: "\\\\")
         .replacingOccurrences(of: "\t", with: "    ")
-    // Try markdown parsing (inline only, preserve whitespace)
+    // Try markdown parsing (full, for code blocks and inline formatting)
     if let parsed = try? AttributedString(
         markdown: cleaned,
         options: .init(interpretedSyntax: .full)
     ) {
-        return parsed
+        var result = parsed
+        result.font = .systemFont(ofSize: size)
+        return result
     }
-    return AttributedString(cleaned)
+    var fallback = AttributedString(cleaned)
+    fallback.font = .systemFont(ofSize: size)
+    return fallback
 }
