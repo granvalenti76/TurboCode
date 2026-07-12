@@ -65,6 +65,39 @@ public final class ChatStore {
     // Backend
     public var activeBackend: ModelBackend = .llamaServer
 
+    // Diff inspector state (persiste oltre il ciclo di vita della view)
+    var diffSections: [FileDiffSection] = []
+    var isLoadingDiffs = false
+    var diffLoadError: String?
+    private let gitService = GitDiffService()
+
+    public func reloadDiffs() async {
+        guard !workspaceRoot.isEmpty else {
+            diffSections = []
+            diffLoadError = nil
+            isLoadingDiffs = false
+            return
+        }
+
+        isLoadingDiffs = true
+        diffLoadError = nil
+        diffSections = []
+
+        let url = URL(fileURLWithPath: workspaceRoot)
+        let sections = await FileDiffSection.fromGit(at: url, service: gitService)
+
+        guard !Task.isCancelled else { return }
+
+        if let sections {
+            diffSections = sections
+            diffLoadError = nil
+        } else {
+            diffSections = []
+            diffLoadError = "Not a git repository or git unavailable"
+        }
+        isLoadingDiffs = false
+    }
+
     // Session — recreated when backend or workspace changes
     private var llamaModel: LlamaModel
     private var session: LanguageModelSession
@@ -188,6 +221,9 @@ public final class ChatStore {
         workspaceRoot = url.path
         rebuildSession()
         rightPanelMode = .changes
+        diffSections = []
+        isLoadingDiffs = true         // anticipa lo stato così la view appare già in loading
+        Task { await reloadDiffs() }
     }
 
     /// Clear the workspace selection.
