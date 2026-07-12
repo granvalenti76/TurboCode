@@ -275,14 +275,24 @@ public final class ChatStore {
             panel.directoryURL = URL(fileURLWithPath: workspaceRoot)
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        workspaceRoot = url.path
+        setWorkspace(url.path)
+    }
+
+    /// Switch to a previously opened workspace by path.
+    public func switchToWorkspace(_ path: String) {
+        setWorkspace(path)
+    }
+
+    /// Internal: configure workspace, rebuild session, refresh git state.
+    private func setWorkspace(_ path: String) {
+        workspaceRoot = path
 
         // Save to recent workspaces
         var recent = recentWorkspaces
-        recent.removeAll { $0 == url.path }
-        recent.insert(url.path, at: 0)
+        recent.removeAll { $0 == path }
+        recent.insert(path, at: 0)
         recentWorkspaces = Array(recent.prefix(10))
-        selectedProject = url.lastPathComponent
+        selectedProject = URL(fileURLWithPath: path).lastPathComponent
 
         rebuildSession()
         rightPanelMode = .changes

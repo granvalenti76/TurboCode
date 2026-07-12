@@ -9,7 +9,7 @@ struct TopBarView: View {
         HStack(spacing: 8) {
             Spacer()
 
-            workspaceButton
+            workspaceMenu
 
             inspectorToggleButton
         }
@@ -30,9 +30,41 @@ struct TopBarView: View {
         .help("Toggle inspector panel")
     }
 
-    private var workspaceButton: some View {
-        Button {
-            chatStore.chooseWorkspace()
+    private var workspaceMenu: some View {
+        Menu {
+            if !chatStore.workspaceRoot.isEmpty {
+                Button {
+                    chatStore.chooseWorkspace()
+                } label: {
+                    Label("Change workspace...", systemImage: "arrow.triangle.swap")
+                }
+            }
+
+            if !chatStore.recentWorkspaces.isEmpty {
+                Section("Recent") {
+                    ForEach(chatStore.recentWorkspaces, id: \.self) { path in
+                        let name = URL(fileURLWithPath: path).lastPathComponent
+                        Button {
+                            chatStore.switchToWorkspace(path)
+                        } label: {
+                            HStack {
+                                Text(name)
+                                if path == chatStore.workspaceRoot {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            Button {
+                chatStore.chooseWorkspace()
+            } label: {
+                Label("Choose workspace...", systemImage: "folder")
+            }
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: chatStore.workspaceRoot.isEmpty ? "folder" : "folder.fill")
@@ -46,8 +78,8 @@ struct TopBarView: View {
             .padding(.vertical, 4)
             .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
         }
-        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .fixedSize()
         .foregroundStyle(.secondary)
-        .help(chatStore.workspaceRoot.isEmpty ? "Choose a workspace" : chatStore.workspaceRoot)
     }
 }
