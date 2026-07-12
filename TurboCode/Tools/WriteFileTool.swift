@@ -22,7 +22,7 @@ struct WriteFileTool: Tool {
 
     var name: String { "write_file" }
     var description: String { "Write or append content to a file on the local filesystem. Creates parent directories if they don't exist." }
-    var includesSchemaInInstructions: Bool { false }
+    var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: WriteFileArguments) async throws -> String {
         let url = URL(fileURLWithPath: arguments.filePath)

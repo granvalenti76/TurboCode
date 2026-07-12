@@ -158,11 +158,12 @@ public final class ChatStore {
     /// Build the instructions text from current workspace.
     private var baseInstructions: String {
         var text = "You are TurboCode, an expert AI coding assistant."
-        text += "\nYou have access to tools for reading, writing, searching, and managing files in the workspace."
         if !workspaceRoot.isEmpty {
             text += "\nThe current workspace is at: \(workspaceRoot)"
+            text += "\nYou have access to the following tools: read_file, write_file, grep, file_system."
             text += "\nAll file operations are restricted to the workspace directory."
             text += "\nNEVER access files outside the workspace."
+            text += "\nUse these tools when you need to interact with the workspace."
         }
         return text
     }

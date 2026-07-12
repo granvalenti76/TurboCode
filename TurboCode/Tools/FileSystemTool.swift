@@ -61,7 +61,7 @@ struct FileSystemTool: Tool {
         All paths must be within the workspace root.
         """
     }
-    var includesSchemaInInstructions: Bool { false }
+    var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: FileSystemArguments) async throws -> String {
         // 1. Resolve operation

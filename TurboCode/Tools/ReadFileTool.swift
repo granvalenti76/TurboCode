@@ -20,7 +20,7 @@ struct ReadFileTool: Tool {
 
     var name: String { "read_file" }
     var description: String { "Read the contents of a file from the local filesystem. Returns the file content or an error message if the file doesn't exist." }
-    var includesSchemaInInstructions: Bool { false }
+    var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: ReadFileArguments) async throws -> String {
         guard FileManager.default.isReadableFile(atPath: arguments.filePath) else {

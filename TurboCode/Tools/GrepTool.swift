@@ -22,7 +22,7 @@ struct GrepTool: Tool {
 
     var name: String { "grep" }
     var description: String { "Search for a text pattern in a file or directory. Returns matching lines with line numbers." }
-    var includesSchemaInInstructions: Bool { false }
+    var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: SearchArguments) async throws -> String {
         var isDirectory: ObjCBool = false
