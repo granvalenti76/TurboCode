@@ -78,49 +78,63 @@ struct FileSystemTool: Tool {
             return "Error: Unknown operation '\(arguments.operation)'. Valid: \(FileOperation.allCases.map(\.rawValue).joined(separator: ", "))"
         }
 
-        // 2. Validate path is within workspace
-        try validatePath(arguments.path)
-
-        // 3. For copy/move, validate destination too
-        if let dest = arguments.destination, (operation == .copy || operation == .move) {
-            try validatePath(dest)
+        // 2. Resolve paths (relative paths are resolved against workspaceRoot)
+        let resolvedPath: String
+        do {
+            resolvedPath = try resolveAndValidatePath(arguments.path)
+        } catch {
+            return "Error: \(error.localizedDescription)"
         }
 
-        // 4. Execute
+        var resolvedDest: String?
+        if let dest = arguments.destination, (operation == .copy || operation == .move) {
+            do {
+                resolvedDest = try resolveAndValidatePath(dest)
+            } catch {
+                return "Error: \(error.localizedDescription)"
+            }
+        }
+
+        // 3. Execute
         switch operation {
-        case .list:              return listDirectory(at: arguments.path)
-        case .info:              return fileInfo(at: arguments.path)
-        case .find:              return findFiles(in: arguments.path, pattern: arguments.pattern)
-        case .createDirectory:   return makeDirectory(at: arguments.path)
+        case .list:              return listDirectory(at: resolvedPath)
+        case .info:              return fileInfo(at: resolvedPath)
+        case .find:              return findFiles(in: resolvedPath, pattern: arguments.pattern)
+        case .createDirectory:   return makeDirectory(at: resolvedPath)
         case .write:
             guard let content = arguments.content else { return "Error: 'content' is required for write." }
-            return writeFile(at: arguments.path, content: content)
+            return writeFile(at: resolvedPath, content: content)
         case .append:
             guard let content = arguments.content else { return "Error: 'content' is required for append." }
-            return appendFile(at: arguments.path, content: content)
+            return appendFile(at: resolvedPath, content: content)
         case .copy:
-            guard let dest = arguments.destination else { return "Error: 'destination' is required for copy." }
-            return copyItem(from: arguments.path, to: dest)
+            guard let dest = resolvedDest else { return "Error: 'destination' is required for copy." }
+            return copyItem(from: resolvedPath, to: dest)
         case .move:
-            guard let dest = arguments.destination else { return "Error: 'destination' is required for move." }
-            return moveItem(from: arguments.path, to: dest)
-        case .delete:            return deleteItem(at: arguments.path)
+            guard let dest = resolvedDest else { return "Error: 'destination' is required for move." }
+            return moveItem(from: resolvedPath, to: dest)
+        case .delete:            return deleteItem(at: resolvedPath)
         }
     }
 
-    // MARK: - Path Validation
+    // MARK: - Path Resolution & Validation
 
-    private func validatePath(_ path: String) throws {
+    /// Resolves a potentially relative path against the workspace root,
+    /// then validates it's within the workspace boundary.
+    /// Returns the resolved absolute path on success, throws on error.
+    private func resolveAndValidatePath(_ path: String) throws -> String {
         guard !workspaceRoot.isEmpty else {
             throw FileSystemError.noWorkspace
         }
 
-        let resolved = URL(fileURLWithPath: path).standardized.resolvingSymlinksInPath().path
-        let workspace = URL(fileURLWithPath: workspaceRoot).standardized.resolvingSymlinksInPath().path
+        let workspaceURL = URL(fileURLWithPath: workspaceRoot).standardized
+        let resolved = URL(fileURLWithPath: path, relativeTo: workspaceURL).standardized.resolvingSymlinksInPath()
 
-        guard resolved.hasPrefix(workspace) else {
+        guard resolved.path.hasPrefix(workspaceURL.path) else {
             throw FileSystemError.outsideWorkspace(path: path, workspace: workspaceRoot)
         }
+
+        return resolved.path
     }
 
     // MARK: - Safe Operations

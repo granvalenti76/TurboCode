@@ -32,6 +32,9 @@ public final class ChatStore {
     // becomes false after the first message is sent
     public var isFirstMessage: Bool = true
 
+    // Pending user approval for a destructive tool operation
+    public var pendingApproval: ApprovalRequest? = nil
+
     // Composer
     public var composerModel: String = "auto"
     public var composerProviderId: String = ""
@@ -353,6 +356,21 @@ public final class ChatStore {
             }
 
             // Stream ended: finalize the assistant block.
+            // Check if any tool call returned ACTION REQUIRED
+            for entry in session.transcript {
+                if case .toolOutput(let output) = entry {
+                    let text = output.segments.compactMap { segment -> String? in
+                        if case .text(let t) = segment { return t.content }
+                        return nil
+                    }.joined()
+                    if text.contains("ACTION REQUIRED") {
+                        pendingApproval = ApprovalRequest(
+                            summary: text.replacingOccurrences(of: "\u{26A0}\u{FE0F} ACTION REQUIRED: ", with: "")
+                        )
+                        break
+                    }
+                }
+            }
             let finalText = accumulatedText.isEmpty ? liveReasoning : accumulatedText
             if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
                 blocks[i] = ChatBlock(
@@ -395,6 +413,25 @@ public final class ChatStore {
 
     public func interrupt() {
         busy = false
+    }
+
+    /// Approve a pending destructive operation and continue the conversation.
+    public func approveAction() {
+        guard let request = pendingApproval else { return }
+        pendingApproval = nil
+        // Re-send original message with approval context
+        Task {
+            await sendMessage("[User approved: \(request.summary)]")
+        }
+    }
+
+    /// Reject a pending destructive operation.
+    public func rejectAction() {
+        guard let request = pendingApproval else { return }
+        pendingApproval = nil
+        Task {
+            await sendMessage("[User rejected: \(request.summary). Do NOT perform this action.]")
+        }
     }
 
     public func setRoute(_ route: AppRoute) {
@@ -454,4 +491,10 @@ public enum RuntimeStatus: String, Sendable, Hashable {
 }
 public enum RuntimeConnectionState: String, Sendable, Hashable {
     case disconnected; case connecting; case ready
+}
+
+// MARK: - Pending Approval
+
+public struct ApprovalRequest: Sendable {
+    public let summary: String
 }
