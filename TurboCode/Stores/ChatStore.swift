@@ -125,12 +125,10 @@ public final class ChatStore {
     /// Build the instructions text from current workspace.
     private var baseInstructions: String {
         var text = "You are TurboCode, an expert AI coding assistant."
-        text += "\nYou have access to tools for reading, writing, and searching files."
-        text += "\nYou can also execute shell commands."
+        text += "\nYou have access to tools for reading, writing, searching, and managing files in the workspace."
         if !workspaceRoot.isEmpty {
             text += "\nThe current workspace is at: \(workspaceRoot)"
-            text += "\nAlways operate within this workspace unless the user explicitly asks otherwise."
-            text += "\nWhen running shell commands, always cd to the workspace first."
+            text += "\nAll file operations are restricted to the workspace directory."
             text += "\nNEVER access files outside the workspace."
         }
         return text
@@ -141,7 +139,11 @@ public final class ChatStore {
         // Capture existing transcript so we don't lose context
         let history = Array(session.transcript)
 
-        let tools: [any Tool] = [ReadFileTool(), GrepTool(), BashTool(), WriteFileTool()]
+        // Tools are loaded conditionally: file operations require a workspace
+        var tools: [any Tool] = []
+        if !workspaceRoot.isEmpty {
+            tools += [ReadFileTool(), WriteFileTool(), GrepTool(), FileSystemTool(workspaceRoot: workspaceRoot)]
+        }
 
         switch activeBackend {
         case .llamaServer:
