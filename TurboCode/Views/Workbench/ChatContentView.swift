@@ -37,7 +37,7 @@ struct ChatContentView: View {
             }
 
             InputFieldView()
-                .frame(maxWidth: 480)
+                .frame(maxWidth: 600)
 
             Spacer()
         }
