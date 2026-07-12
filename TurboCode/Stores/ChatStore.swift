@@ -28,6 +28,10 @@ public final class ChatStore {
     public var liveReasoning: String = ""
     public var liveAssistant: String = ""
 
+    // First-message layout state — true on launch and new chat,
+    // becomes false after the first message is sent
+    public var isFirstMessage: Bool = true
+
     // Composer
     public var composerModel: String = "auto"
     public var composerProviderId: String = ""
@@ -211,6 +215,10 @@ public final class ChatStore {
         let thread = Thread(title: title, mode: mode)
         threads.insert(thread, at: 0)
         activeThreadId = thread.id
+        blocks = []
+        liveReasoning = ""
+        liveAssistant = ""
+        isFirstMessage = true
     }
 
     public func renameThread(id: String, title: String) async {
@@ -274,6 +282,8 @@ public final class ChatStore {
 
     public func sendMessage(_ text: String) async {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        isFirstMessage = false
 
         blocks.append(ChatBlock(kind: .user, text: text))
 

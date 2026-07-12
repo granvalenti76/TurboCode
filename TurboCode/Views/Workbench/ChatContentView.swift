@@ -9,37 +9,55 @@ struct ChatContentView: View {
         VStack(spacing: 0) {
             RuntimeBannerView()
 
-            if chatStore.blocks.isEmpty && chatStore.liveAssistant.isEmpty && chatStore.liveReasoning.isEmpty {
-                emptyState
+            if chatStore.isFirstMessage {
+                firstMessageLayout
+                    .transition(.opacity)
             } else {
-                MessageTimelineView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                conversationLayout
+                    .transition(.opacity)
             }
         }
-        .safeAreaInset(edge: .bottom, spacing: 16) {
-            VStack(spacing: 0) {
-                if chatStore.terminalOpen {
-                    Divider()
-                    TerminalPlaceholderView()
-                        .frame(height: chatStore.terminalHeight)
-                }
-                InputFieldView()
-            }
-        }
+        .animation(.easeInOut(duration: 0.4), value: chatStore.isFirstMessage)
     }
 
-    // MARK: - Empty State
+    // MARK: - First Message Layout (centered, narrow input)
 
-    private var emptyState: some View {
-        VStack(spacing: 8) {
+    private var firstMessageLayout: some View {
+        VStack(spacing: 24) {
             Spacer()
-            Text("What should we build in TurboCode?")
-                .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(.primary)
-            Text("Ask anything or describe what you want to create")
-                .font(.system(size: 14))
-                .foregroundStyle(.tertiary)
+
+            VStack(spacing: 8) {
+                Text("What should we build in TurboCode?")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundStyle(.primary)
+
+                Text("Ask anything or describe what you want to create")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tertiary)
+            }
+
+            InputFieldView()
+                .frame(maxWidth: 480)
+
             Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Conversation Layout (timeline + bottom input)
+
+    private var conversationLayout: some View {
+        VStack(spacing: 0) {
+            MessageTimelineView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if chatStore.terminalOpen {
+                Divider()
+                TerminalPlaceholderView()
+                    .frame(height: chatStore.terminalHeight)
+            }
+
+            InputFieldView()
         }
     }
 }
