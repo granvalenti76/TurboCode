@@ -38,7 +38,7 @@ struct ChatBlockView: View {
                 if isEditing {
                     editView
                 } else {
-                    Text(unescape(block.text))
+                    Text(formattedText(block.text))
                         .font(.system(size: 14))
                         .textSelection(.enabled)
                         .padding(.horizontal, 16)
@@ -102,7 +102,7 @@ struct ChatBlockView: View {
     private var assistantBubble: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(unescape(block.text))
+                Text(formattedText(block.text))
                     .font(.system(size: 14))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -132,7 +132,7 @@ struct ChatBlockView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.orange)
 
-                Text(unescape(block.text))
+                Text(formattedText(block.text))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
@@ -242,16 +242,17 @@ struct ModelBadgeView: View {
     }
 }
 
-// MARK: - Escape unescape
+// MARK: - Text formatting
 
-/// Converts literal escape sequences (\n, \t, \\) in model output
-/// into actual control characters for SwiftUI Text rendering.
-func unescape(_ text: String) -> String {
-    text
-        .replacingOccurrences(of: "\\\\", with: "\u{1D}")  // placeholder for escaped backslash
+/// Cleans up model output: unescapes \\n, \\t and wraps in AttributedString.
+func formattedText(_ input: String) -> AttributedString {
+    let cleaned = input
+        .replacingOccurrences(of: "\\\\", with: "\u{1D}")
         .replacingOccurrences(of: "\\n", with: "\n")
         .replacingOccurrences(of: "\\t", with: "\t")
         .replacingOccurrences(of: "\\r", with: "\r")
         .replacingOccurrences(of: "\\\"", with: "\"")
-        .replacingOccurrences(of: "\u{1D}", with: "\\")  // restore placeholder back to \
+        .replacingOccurrences(of: "\u{1D}", with: "\\\\")
+        .replacingOccurrences(of: "\t", with: "    ")
+    return AttributedString(cleaned)
 }
