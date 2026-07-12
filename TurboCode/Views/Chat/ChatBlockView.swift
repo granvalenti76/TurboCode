@@ -109,7 +109,7 @@ struct ChatBlockView: View {
                 .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 4) {
-                MarkdownText(block.text)
+                Text(block.text)
                     .font(.system(size: 14))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -239,22 +239,5 @@ struct ModelBadgeView: View {
     }
 }
 
-// MARK: - Simple Markdown text renderer
-
-/// Basic markdown rendering using AttributedString.
-/// For full syntax highlighting, replace with a proper markdown library.
-struct MarkdownText: View {
-    let text: String
-
-    init(_ text: String) {
-        self.text = text
-    }
-
-    var body: some View {
-        if let attributed = try? AttributedString(markdown: text) {
-            Text(attributed)
-        } else {
-            Text(text)
-        }
-    }
-}
+// MARK: - Simple Markdown text renderer (deprecated — use plain Text for now)
+// Future: replace with proper syntax-highlighted markdown renderer
