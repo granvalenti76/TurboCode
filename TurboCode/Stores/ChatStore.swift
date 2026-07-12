@@ -336,14 +336,12 @@ public final class ChatStore {
 
             for try await snapshot in stream {
                 // Fast path: update liveAssistant for quick UI feedback
-                // (re-renders only the live block, not the entire List)
                 if !snapshot.content.isEmpty {
                     accumulatedText = snapshot.content
                     liveAssistant = accumulatedText
                 }
 
-                // Reasoning from transcript — use = not += to avoid duplicates
-                // (transcript already has accumulated text)
+                // Reasoning + tool output detection from incremental transcript entries
                 for entry in snapshot.transcriptEntries {
                     if case .reasoning(let reasoning) = entry {
                         for segment in reasoning.segments {
@@ -352,25 +350,22 @@ public final class ChatStore {
                             }
                         }
                     }
+                    // Check for ACTION REQUIRED in tool outputs (incremental — current stream only)
+                    if case .toolOutput(let output) = entry {
+                        let text = output.segments.compactMap { segment -> String? in
+                            if case .text(let t) = segment { return t.content }
+                            return nil
+                        }.joined()
+                        if text.contains("ACTION REQUIRED") {
+                            pendingApproval = ApprovalRequest(
+                                summary: text.replacingOccurrences(of: "\u{26A0}\u{FE0F} ACTION REQUIRED: ", with: "")
+                            )
+                        }
+                    }
                 }
             }
 
             // Stream ended: finalize the assistant block.
-            // Check if any tool call returned ACTION REQUIRED
-            for entry in session.transcript {
-                if case .toolOutput(let output) = entry {
-                    let text = output.segments.compactMap { segment -> String? in
-                        if case .text(let t) = segment { return t.content }
-                        return nil
-                    }.joined()
-                    if text.contains("ACTION REQUIRED") {
-                        pendingApproval = ApprovalRequest(
-                            summary: text.replacingOccurrences(of: "\u{26A0}\u{FE0F} ACTION REQUIRED: ", with: "")
-                        )
-                        break
-                    }
-                }
-            }
             let finalText = accumulatedText.isEmpty ? liveReasoning : accumulatedText
             if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
                 blocks[i] = ChatBlock(
