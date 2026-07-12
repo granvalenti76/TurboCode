@@ -151,7 +151,17 @@ struct ChatBlockView: View {
     // MARK: - Placeholders
 
     private var toolBlockPlaceholder: some View {
-        ToolEntryView(block: ToolBlock(kind: .toolCall, summary: block.text, status: .success))
+        HStack(spacing: 6) {
+            Image(systemName: "gearshape.2")
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+            Text(block.text)
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 2)
     }
 
     private var approvalBanner: some View {
