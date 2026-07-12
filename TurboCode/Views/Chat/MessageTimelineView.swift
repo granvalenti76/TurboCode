@@ -180,18 +180,10 @@ struct LiveAssistantBlock: View {
     let text: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "wand.and.stars")
-                .font(.system(size: 14))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 24, height: 24)
-                .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-
-            Text(text)
-                .font(.system(size: 14))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(12)
+        Text(text)
+            .font(.system(size: 14))
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
     }
 }

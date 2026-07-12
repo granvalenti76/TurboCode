@@ -101,13 +101,6 @@ struct ChatBlockView: View {
 
     private var assistantBubble: some View {
         HStack(alignment: .top, spacing: 12) {
-            // Avatar placeholder
-            Image(systemName: "wand.and.stars")
-                .font(.system(size: 14))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 28, height: 28)
-                .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-
             VStack(alignment: .leading, spacing: 4) {
                 Text(block.text)
                     .font(.system(size: 14))
