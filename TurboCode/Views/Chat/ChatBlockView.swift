@@ -244,7 +244,8 @@ struct ModelBadgeView: View {
 
 // MARK: - Text formatting
 
-/// Cleans up model output: unescapes \\n, \\t and wraps in AttributedString.
+/// Cleans up model output: unescapes \\n, \\t then tries markdown rendering.
+/// Falls back to plain AttributedString if markdown parsing fails.
 func formattedText(_ input: String) -> AttributedString {
     let cleaned = input
         .replacingOccurrences(of: "\\\\", with: "\u{1D}")
@@ -254,5 +255,12 @@ func formattedText(_ input: String) -> AttributedString {
         .replacingOccurrences(of: "\\\"", with: "\"")
         .replacingOccurrences(of: "\u{1D}", with: "\\\\")
         .replacingOccurrences(of: "\t", with: "    ")
+    // Try markdown parsing (inline only, preserve whitespace)
+    if let parsed = try? AttributedString(
+        markdown: cleaned,
+        options: .init(interpretedSyntax: .full)
+    ) {
+        return parsed
+    }
     return AttributedString(cleaned)
 }
