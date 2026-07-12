@@ -38,7 +38,7 @@ struct ChatBlockView: View {
                 if isEditing {
                     editView
                 } else {
-                    Text(block.text)
+                    FormattedText(block.text)
                         .font(.system(size: 14))
                         .textSelection(.enabled)
                         .padding(.horizontal, 16)
@@ -102,7 +102,7 @@ struct ChatBlockView: View {
     private var assistantBubble: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(block.text)
+                FormattedText(block.text)
                     .font(.system(size: 14))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -242,5 +242,136 @@ struct ModelBadgeView: View {
     }
 }
 
-// MARK: - Simple Markdown text renderer (deprecated — use plain Text for now)
-// Future: replace with proper syntax-highlighted markdown renderer
+// MARK: - FormattedText — inline markdown + code blocks + newline preservation
+
+/// Renders model output with:
+/// - Code blocks (triple backticks) in monospace with dark background
+/// - Inline markdown (bold, italic, inline code) via AttributedString
+/// - Single newlines preserved as line breaks, double newlines as paragraphs
+struct FormattedText: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        let segments = splitCodeBlocks(text)
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(segments.indices, id: \.self) { index in
+                if segments[index].isCode {
+                    codeBlock(segments[index].content)
+                } else {
+                    inlineText(segments[index].content)
+                }
+            }
+        }
+    }
+
+    // MARK: - Code Block
+
+    private func codeBlock(_ content: String) -> some View {
+        ScrollView(.horizontal) {
+            Text(content)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+                .padding(10)
+        }
+        .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(.separator.opacity(0.3), lineWidth: 0.5)
+        )
+    }
+
+    // MARK: - Inline Text (markdown)
+
+    private func inlineText(_ content: String) -> some View {
+        // Split into inline code segments and regular text
+        let segments = splitInlineCode(content)
+        var combined = AttributedString()
+
+        for segment in segments {
+            if segment.isCode {
+                // Inline code with monospace
+                var code = AttributedString(segment.content)
+                code.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+                combined += code
+            } else {
+                // Parse markdown on the non-code text
+                if let parsed = try? AttributedString(markdown: segment.content, options: .init(
+                    allowsExtendedAttributes: true,
+                    interpretedSyntax: .inlineOnlyPreservingWhitespace
+                )) {
+                    combined += parsed
+                } else {
+                    combined += AttributedString(segment.content)
+                }
+            }
+        }
+
+        return Text(combined)
+            .font(.system(size: 14))
+    }
+
+    // MARK: - Splitting
+
+    /// Splits text by triple-backtick code blocks, preserving non-code segments.
+    private func splitCodeBlocks(_ input: String) -> [(content: String, isCode: Bool)] {
+        var result: [(String, Bool)] = []
+        var remaining = input[...]
+        while let start = remaining.range(of: "```") {
+            // Text before this code block
+            if start.lowerBound > remaining.startIndex {
+                result.append((String(remaining[remaining.startIndex..<start.lowerBound]), false))
+            }
+            remaining = remaining[start.upperBound...]
+            if let end = remaining.range(of: "```") {
+                // Skip optional language tag (first line of code block)
+                var codeContent = String(remaining[..<end.lowerBound])
+                if let newline = codeContent.firstIndex(of: "\n") {
+                    codeContent = String(codeContent[codeContent.index(after: newline)...])
+                }
+                result.append((codeContent, true))
+                remaining = remaining[end.upperBound...]
+            } else {
+                // Unclosed code block — treat rest as code
+                result.append((String(remaining), true))
+                remaining = remaining[remaining.endIndex...]
+                break
+            }
+        }
+        if !remaining.isEmpty {
+            result.append((String(remaining), false))
+        }
+        if result.isEmpty { result = [(input, false)] }
+        return result
+    }
+
+    /// Splits inline text by single backtick code spans.
+    private func splitInlineCode(_ input: String) -> [(content: String, isCode: Bool)] {
+        var result: [(String, Bool)] = []
+        var remaining = input[...]
+        while let start = remaining.range(of: "`") {
+            if start.lowerBound > remaining.startIndex {
+                result.append((String(remaining[remaining.startIndex..<start.lowerBound]), false))
+            }
+            remaining = remaining[start.upperBound...]
+            if let end = remaining.range(of: "`") {
+                result.append((String(remaining[..<end.lowerBound]), true))
+                remaining = remaining[end.upperBound...]
+            } else {
+                result.append((String(remaining), false))
+                remaining = remaining[remaining.endIndex...]
+                break
+            }
+        }
+        if !remaining.isEmpty {
+            result.append((String(remaining), false))
+        }
+        if result.isEmpty { result = [(input, false)] }
+        return result
+    }
+}
