@@ -29,10 +29,8 @@ struct InputFieldView: View {
     @AppStorage("approvalMode") private var approvalMode: ApprovalMode = .askForApproval
     @AppStorage("reasoningEffort") private var reasoningEffort: ReasoningEffort = .medium
     @AppStorage("workMode") private var workMode: WorkMode = .local
-    @AppStorage("selectedBranch") private var selectedBranch: String = "main"
 
     private let projectName = "TurboCode"
-    private let availableBranches = ["main", "feat/direct-llm-executor", "develop"]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -202,12 +200,40 @@ struct InputFieldView: View {
     }
 
     private var branchMenu: some View {
-        Menu {
-            ForEach(availableBranches, id: \.self) { branch in
-                Button(branch) { selectedBranch = branch }
+        let label: String
+        let icon: String
+        if chatStore.workspaceRoot.isEmpty {
+            label = "no repo"
+            icon = "arrow.triangle.branch"
+        } else if chatStore.currentBranch.isEmpty {
+            label = "no repo"
+            icon = "arrow.triangle.branch"
+        } else {
+            label = chatStore.currentBranch
+            icon = "arrow.triangle.branch"
+        }
+
+        return Menu {
+            if chatStore.availableBranches.isEmpty {
+                Text("No branches available")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                ForEach(chatStore.availableBranches, id: \.self) { branch in
+                    Button {
+                        Task { await chatStore.switchToBranch(branch) }
+                    } label: {
+                        HStack {
+                            Text(branch)
+                            if branch == chatStore.currentBranch {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                    }
+                }
             }
         } label: {
-            Label(selectedBranch, systemImage: "arrow.triangle.branch")
+            Label(label, systemImage: icon)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()

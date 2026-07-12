@@ -57,6 +57,32 @@ actor GitDiffService {
         return URL(fileURLWithPath: path)
     }
 
+    // MARK: - Branch operations
+
+    /// Returns the name of the currently checked-out branch, or nil if not a git repo.
+    func currentBranch(at directory: URL) -> String? {
+        let result = shell("git", args: ["rev-parse", "--abbrev-ref", "HEAD"], cwd: directory)
+        guard result.exitCode == 0 else { return nil }
+        let branch = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return branch.isEmpty || branch == "HEAD" ? nil : branch
+    }
+
+    /// Returns all local branch names, or empty array if not a git repo.
+    func allBranches(at directory: URL) -> [String] {
+        let result = shell("git", args: ["branch", "--format=%(refname:short)"], cwd: directory)
+        guard result.exitCode == 0 else { return [] }
+        return result.stdout
+            .components(separatedBy: .newlines)
+            .filter { !$0.isEmpty }
+    }
+
+    /// Switch to the given branch. Returns true on success.
+    @discardableResult
+    func checkout(branch: String, at directory: URL) -> Bool {
+        let result = shell("git", args: ["checkout", branch], cwd: directory)
+        return result.exitCode == 0
+    }
+
     func fetchChangedFiles(at url: URL) throws -> [GitFileStatus] {
         let unstaged = try parseNumstat(shell("git", args: ["diff", "--numstat"], cwd: url))
         let staged = try parseNumstat(shell("git", args: ["diff", "--cached", "--numstat"], cwd: url))

@@ -69,6 +69,11 @@ public final class ChatStore {
     var diffSections: [FileDiffSection] = []
     var isLoadingDiffs = false
     var diffLoadError: String?
+
+    // Git branch state
+    var currentBranch: String = ""
+    var availableBranches: [String] = []
+
     private let gitService = GitDiffService()
 
     public func reloadDiffs() async {
@@ -96,6 +101,34 @@ public final class ChatStore {
             diffLoadError = "Not a git repository or git unavailable"
         }
         isLoadingDiffs = false
+    }
+
+    public func refreshGitBranches() async {
+        guard !workspaceRoot.isEmpty else {
+            currentBranch = ""
+            availableBranches = []
+            return
+        }
+
+        let url = URL(fileURLWithPath: workspaceRoot)
+        let branch = await gitService.currentBranch(at: url)
+        let branches = await gitService.allBranches(at: url)
+
+        guard !Task.isCancelled else { return }
+
+        currentBranch = branch ?? ""
+        availableBranches = branches
+    }
+
+    /// Switch to a different git branch. Refreshes state afterwards.
+    public func switchToBranch(_ branch: String) async {
+        guard !workspaceRoot.isEmpty else { return }
+        let url = URL(fileURLWithPath: workspaceRoot)
+        let success = await gitService.checkout(branch: branch, at: url)
+        if success {
+            currentBranch = branch
+            await refreshGitBranches()
+        }
     }
 
     // Session — recreated when backend or workspace changes
@@ -224,13 +257,16 @@ public final class ChatStore {
         rebuildSession()
         rightPanelMode = .changes
         diffSections = []
-        isLoadingDiffs = true         // anticipa lo stato così la view appare già in loading
+        isLoadingDiffs = true
         Task { await reloadDiffs() }
+        Task { await refreshGitBranches() }
     }
 
     /// Clear the workspace selection.
     public func clearWorkspace() {
         workspaceRoot = ""
+        currentBranch = ""
+        availableBranches = []
         rebuildSession()
         rightPanelMode = nil
     }
