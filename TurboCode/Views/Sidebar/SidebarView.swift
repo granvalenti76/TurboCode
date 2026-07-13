@@ -6,6 +6,7 @@ struct SidebarView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var searchText: String = ""
     @State private var selectedNav: String = "chat"
+    @State private var expandedWorkspaces: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,6 +24,14 @@ struct SidebarView: View {
         }
         .background(Color.clear)
         .frame(minWidth: 220)
+        .onAppear {
+            guard !chatStore.workspaceRoot.isEmpty else { return }
+            expandedWorkspaces.insert(chatStore.workspaceRoot)
+        }
+        .onChange(of: chatStore.workspaceRoot) { _, workspace in
+            guard !workspace.isEmpty else { return }
+            expandedWorkspaces.insert(workspace)
+        }
     }
 
     // MARK: - Header
@@ -125,6 +134,9 @@ struct SidebarView: View {
             // All threads
             Button {
                 chatStore.selectedProject = nil
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    expandedWorkspaces.removeAll()
+                }
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "tray.full")
@@ -145,10 +157,20 @@ struct SidebarView: View {
             // Recent workspace projects with expandable sessions
             ForEach(chatStore.recentWorkspaces, id: \.self) { path in
                 let name = URL(fileURLWithPath: path).lastPathComponent
-                let isSelected = chatStore.selectedProject == name
+                let isSelected = chatStore.workspaceRoot == path && chatStore.selectedProject != nil
+                let isExpanded = expandedWorkspaces.contains(path)
 
                 Button {
-                    chatStore.switchToWorkspace(path)
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        if isExpanded {
+                            expandedWorkspaces.remove(path)
+                        } else {
+                            expandedWorkspaces.insert(path)
+                            if chatStore.workspaceRoot != path || !isSelected {
+                                chatStore.switchToWorkspace(path)
+                            }
+                        }
+                    }
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: isSelected ? "folder.fill" : "folder")
@@ -158,11 +180,10 @@ struct SidebarView: View {
                         Text(name)
                             .font(AppTypography.sidebarLabel)
                         Spacer()
-                        if isSelected {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                        }
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
@@ -171,11 +192,11 @@ struct SidebarView: View {
                 }
                 .buttonStyle(.plain)
 
-                // Keep project conversations visually attached to the selected
-                // workspace. The standalone Chats section is hidden in this
-                // state, so the same thread never appears twice.
-                if isSelected {
-                    if chatStore.sortedThreads.isEmpty {
+                // Keep each workspace's conversations visually attached to its
+                // folder and let the user expand more than one project.
+                if isExpanded {
+                    let workspaceThreads = threads(forWorkspace: path)
+                    if workspaceThreads.isEmpty {
                         Text("No chats in this project")
                             .font(AppTypography.sidebarMetadata)
                             .foregroundStyle(.secondary)
@@ -183,7 +204,7 @@ struct SidebarView: View {
                             .padding(.leading, 36)
                             .padding(.vertical, 8)
                     } else {
-                        ForEach(chatStore.sortedThreads.prefix(10)) { thread in
+                        ForEach(workspaceThreads.prefix(10)) { thread in
                             threadRow(for: thread)
                                 .padding(.leading, 20)
                         }
@@ -244,6 +265,15 @@ struct SidebarView: View {
         ForEach(chatStore.sortedThreads.prefix(10)) { thread in
             threadRow(for: thread)
         }
+    }
+
+    private func threads(forWorkspace path: String) -> [Conversation] {
+        chatStore.threads
+            .filter { !$0.isArchived && $0.workspace == path }
+            .sorted { lhs, rhs in
+                if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
+                return lhs.updatedAt > rhs.updatedAt
+            }
     }
 
     private func threadRow(for thread: Conversation) -> some View {

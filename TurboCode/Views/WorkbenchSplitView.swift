@@ -14,6 +14,13 @@ struct WorkbenchSplitView: View {
     private let rightMinWidth: Double = 280
     private let rightMaxWidth: Double = 760
 
+    /// Keep the window's layout constraint stable while the inspector appears.
+    /// A changing root minimum makes NavigationSplitView rebalance its sidebar,
+    /// which causes the project labels to shift or become clipped.
+    private var workbenchMinWidth: Double {
+        leftMinWidth + mainMinWidth + rightMinWidth
+    }
+
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
@@ -37,7 +44,7 @@ struct WorkbenchSplitView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
-        .frame(minWidth: mainMinWidth + (chatStore.rightPanelVisible ? rightMinWidth : 0))
+        .frame(minWidth: workbenchMinWidth)
         .onChange(of: chatStore.leftSidebarCollapsed, initial: true) { _, collapsed in
             let target: NavigationSplitViewVisibility = collapsed ? .detailOnly : .all
             guard columnVisibility != target else { return }

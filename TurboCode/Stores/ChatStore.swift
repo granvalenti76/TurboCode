@@ -399,6 +399,32 @@ public final class ChatStore {
         rebuildSession(keepingHistory: false)
     }
 
+    /// Makes every message entry point safe to use without requiring the user
+    /// to press New Chat first. If an older buggy flow already produced blocks
+    /// without a thread, attach them to the new metadata instead of discarding
+    /// the visible conversation.
+    private func ensureActiveThread() {
+        guard let activeThreadId,
+              threads.contains(where: { $0.id == activeThreadId }) else {
+            let hasOrphanedBlocks = !blocks.isEmpty
+            let thread = Conversation(
+                title: "New Chat",
+                workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
+                mode: composerMode
+            )
+            threads.insert(thread, at: 0)
+            self.activeThreadId = thread.id
+
+            if !hasOrphanedBlocks {
+                liveReasoning = ""
+                liveAssistant = ""
+                isFirstMessage = true
+                rebuildSession(keepingHistory: false)
+            }
+            return
+        }
+    }
+
     /// Generates a concise title from the first user prompt using the
     /// Apple on-device model, then updates the active thread's title.
     public func generateTitle(from prompt: String) async {
@@ -555,7 +581,8 @@ public final class ChatStore {
         selectedProject = URL(fileURLWithPath: path).lastPathComponent
 
         rebuildSession()
-        rightPanelMode = .changes
+        // The inspector is opt-in: changing workspace must not open it.
+        rightPanelMode = nil
         diffSections = []
         isLoadingDiffs = true
         Task { await reloadDiffs() }
@@ -575,6 +602,7 @@ public final class ChatStore {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !busy else { return }
 
+        ensureActiveThread()
         busy = true
         let task = Task<Void, Never> { [weak self] in
             guard let self else { return }
@@ -589,8 +617,12 @@ public final class ChatStore {
     private func performSendMessage(_ text: String) async {
 
         isFirstMessage = false
-        // Generate a title from the first user prompt using the Apple on-device model.
-        Task { await generateTitle(from: text) }
+        // Generate the title concurrently with the response, but retain the
+        // task so persistence can wait for the final title.
+        let titleTask = Task<Void, Never> { [weak self] in
+            guard let self else { return }
+            await self.generateTitle(from: text)
+        }
 
         blocks.append(ChatBlock(kind: .user, text: text))
 
@@ -695,9 +727,11 @@ public final class ChatStore {
                 )
             }
         }
-        // Persist session after each turn (success or error).
+        // Persist after the title task finishes so the JSON never races with
+        // the Apple on-device title generator and stores a stale "New Chat".
+        await titleTask.value
         if let tid = activeThreadId {
-            Task { await persistSession(for: tid) }
+            await persistSession(for: tid)
         }
 
     }
