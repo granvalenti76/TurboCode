@@ -434,12 +434,10 @@ public final class ChatStore {
         do {
             let stream = session.streamResponse(to: text)
             var accumulatedText = ""
-            // Track content stalls to detect delegation.
-            // When the orchestrator outputs an acknowledgment and then calls
-            // call_powerful_model, the content stops growing until Llama
-            // responds and Apple synthesises the final answer.
-            var lastContentLength = 0
-            var contentStalledSnapshots = 0
+            // Track which transcript entries we've already processed to avoid
+            // re-scanning old entries on every snapshot.
+            let initialTranscriptCount = session.transcript.count
+            var processedEntryCount = initialTranscriptCount
 
             for try await snapshot in stream {
                 // Fast path: update liveAssistant for quick UI feedback
@@ -448,48 +446,52 @@ public final class ChatStore {
                     liveAssistant = accumulatedText
                 }
 
-                // Detect delegation by content stall (runs on every snapshot,
-                // even empty ones — the model may not yield content while
-                // waiting for a tool response).
-                if orchestratorMode == .orchestrator {
-                    let currentLen = accumulatedText.count
-                    if currentLen > lastContentLength {
-                        // Content grew → not delegating / just finished delegating
-                        contentStalledSnapshots = 0
-                        isDelegating = false
-                    } else if currentLen == lastContentLength && lastContentLength > 0 {
-                        // Content stalled → model is waiting for a tool
-                        contentStalledSnapshots += 1
-                        if contentStalledSnapshots >= 2 {
-                            isDelegating = true
-                        }
-                    }
-                    lastContentLength = currentLen
-                }
+                // Process only NEW transcript entries (beyond processedEntryCount).
+                let fullTranscript = session.transcript
+                let newEntries = fullTranscript.dropFirst(processedEntryCount)
+                let newCount = newEntries.count
+                if newCount > 0 {
+                    processedEntryCount = fullTranscript.count
 
-                // Process transcript entries for reasoning and ACTION REQUIRED
-                for entry in snapshot.transcriptEntries {
-                    switch entry {
-                    case .reasoning(let reasoning):
-                        for segment in reasoning.segments {
-                            if case .text(let t) = segment {
-                                liveReasoning = t.content
+                    for entry in newEntries {
+                        switch entry {
+                        case .toolCalls(let calls):
+                            // Detect delegation: orchestrator called call_powerful_model
+                            if orchestratorMode == .orchestrator {
+                                for call in calls {
+                                    if call.toolName == "call_powerful_model" {
+                                        isDelegating = true
+                                    }
+                                }
                             }
-                        }
 
-                    case .toolOutput(let output):
-                        let text = output.segments.compactMap { segment -> String? in
-                            if case .text(let t) = segment { return t.content }
-                            return nil
-                        }.joined()
-                        if text.contains("ACTION REQUIRED") {
-                            pendingApproval = ApprovalRequest(
-                                summary: text.replacingOccurrences(of: "\u{26A0}\u{FE0F} ACTION REQUIRED: ", with: "")
-                            )
-                        }
+                        case .response:
+                            // Once the orchestrator speaks after a delegation, turn indicator off.
+                            if isDelegating {
+                                isDelegating = false
+                            }
 
-                    default:
-                        break
+                        case .reasoning(let reasoning):
+                            for segment in reasoning.segments {
+                                if case .text(let t) = segment {
+                                    liveReasoning = t.content
+                                }
+                            }
+
+                        case .toolOutput(let output):
+                            let text = output.segments.compactMap { segment -> String? in
+                                if case .text(let t) = segment { return t.content }
+                                return nil
+                            }.joined()
+                            if text.contains("ACTION REQUIRED") {
+                                pendingApproval = ApprovalRequest(
+                                    summary: text.replacingOccurrences(of: "\u{26A0}\u{FE0F} ACTION REQUIRED: ", with: "")
+                                )
+                            }
+
+                        default:
+                            break
+                        }
                     }
                 }
             }
