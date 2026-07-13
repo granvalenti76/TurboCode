@@ -81,6 +81,10 @@ public final class ChatStore {
     // Backend
     public var activeBackend: ModelBackend = .llamaServer
 
+    // Delegation state — true when the orchestrator has called call_powerful_model
+    // and is waiting for a response from the powerful model.
+    public var isDelegating: Bool = false
+
     // Orchestrator mode
     public var orchestratorMode: OrchestratorMode {
         didSet {
@@ -282,7 +286,7 @@ public final class ChatStore {
             Your role is:
             1. Understand what the user wants.
             2. For file listing/info: use `file_system` directly.
-            3. For everything else: call `call_powerful_model` with a complete, self-contained task description that includes all relevant context (file paths, code snippets, error messages, requirements). Include full paths so the powerful model can navigate the workspace at: \(workspaceRoot).
+            3. For everything else: first output a brief acknowledgment to the user (e.g. "Let me ask the powerful model to refactor this..."), then call `call_powerful_model` with a complete, self-contained task description that includes all relevant context (file paths, code snippets, error messages, requirements). Include full paths so the powerful model can navigate the workspace at: \(workspaceRoot).
             4. Synthesise the powerful model's response into a clear, well-formatted answer for the user.
 
             === APPROVAL REQUESTS ===
@@ -447,6 +451,21 @@ public final class ChatStore {
                             }
                         }
                     }
+
+                    // Detect delegation: orchestrator called call_powerful_model
+                    if case .toolCalls(let calls) = entry {
+                        for call in calls {
+                            if call.toolName == "call_powerful_model" {
+                                isDelegating = true
+                            }
+                        }
+                    }
+
+                    // Once the orchestrator speaks again after delegation, turn off the indicator
+                    if case .response = entry, isDelegating {
+                        isDelegating = false
+                    }
+
                     // Check for ACTION REQUIRED in tool outputs (incremental — current stream only)
                     if case .toolOutput(let output) = entry {
                         let text = output.segments.compactMap { segment -> String? in
@@ -463,6 +482,8 @@ public final class ChatStore {
             }
 
             // Stream ended: finalize the assistant block.
+            // Reset delegation state once streaming is done.
+            isDelegating = false
             let finalText = accumulatedText.isEmpty ? liveReasoning : accumulatedText
             if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
                 blocks[i] = ChatBlock(

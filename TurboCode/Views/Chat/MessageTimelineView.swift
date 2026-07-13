@@ -44,6 +44,14 @@ struct MessageTimelineView: View {
                             .id("live-assistant")
                     }
 
+                    // Delegation indicator — shown when orchestrator is waiting for Llama
+                    if chatStore.isDelegating {
+                        DelegationIndicator()
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 4)
+                            .id("delegation-indicator")
+                    }
+
                     // Bottom anchor for auto-scroll
                     Color.clear
                         .frame(height: 1)
@@ -169,6 +177,33 @@ struct LiveReasoningBlock: View {
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(.orange.opacity(0.15), lineWidth: 1)
+        )
+    }
+}
+
+// MARK: - Delegation Indicator
+
+struct DelegationIndicator: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .scaleEffect(0.8)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Delegating to powerful model")
+                    .font(.system(size: 12, weight: .medium))
+                Text("Waiting for response...")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+            }
+            
+            Spacer()
+        }
+        .padding(12)
+        .background(.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(.blue.opacity(0.15), lineWidth: 1)
         )
     }
 }
