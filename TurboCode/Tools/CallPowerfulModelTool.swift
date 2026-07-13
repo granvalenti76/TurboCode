@@ -1,7 +1,6 @@
 import Foundation
 import FoundationModels
 import FoundationModelsUtilities
-import LlamaModelExecutor
 
 // MARK: - Delegate Profile
 
@@ -9,7 +8,7 @@ import LlamaModelExecutor
 private struct DelegateProfile: LanguageModelSession.DynamicProfile {
     let instructions: String
     let tools: [any Tool]
-    let model: LlamaModel
+    let model: ChatCompletionsLanguageModel
 
     var body: some LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
@@ -33,15 +32,15 @@ struct CallPowerfulModelArguments {
 }
 
 /// A tool that lets the Apple on-device model delegate a task to a powerful
-/// remote model via **LlamaModelExecutor**.
+/// remote model via a `ChatCompletionsLanguageModel` (OpenAI-compatible API).
 ///
 /// When the Apple orchestrator invokes this tool, it creates a temporary
-/// `LanguageModelSession` backed by `LlamaModel`/`LlamaExecutor`, streams the
+/// `LanguageModelSession` backed by `ChatCompletionsLanguageModel`, streams the
 /// response, and returns the accumulated text as tool output. The Apple model
 /// then synthesises the final answer for the user.
 ///
 /// Because `LanguageModelSession` is `@MainActor`-isolated, the tool bridges
-/// to the main actor inside its `call()` method via `MainActor.run`.
+/// to the main actor inside its `call()` method via a `Task`.
 struct CallPowerfulModelTool: Tool {
     typealias Arguments = CallPowerfulModelArguments
     typealias Output = String
@@ -65,36 +64,45 @@ struct CallPowerfulModelTool: Tool {
     }
     var includesSchemaInInstructions: Bool { true }
 
-    /// The Llama configuration used to create the delegate model session.
-    private let configuration: LlamaConfiguration
+    /// Configuration for the remote OpenAI-compatible model server.
+    private let modelName: String
+    private let baseURL: URL
+    private let temperature: Double
     /// Tools registered with the delegate session (e.g. read_file, grep, file_system).
     private let delegateTools: [any Tool]
     /// System instructions for the delegate session (workspace context, rules, etc.).
     private let delegateInstructions: String
 
-    /// Creates a tool that delegates to a Llama model server via `LlamaModelExecutor`.
+    /// Creates a tool that delegates to a remote model via `ChatCompletionsLanguageModel`.
     /// - Parameters:
-    ///   - configuration: The Llama connection and generation parameters.
+    ///   - modelName: The model identifier sent in API requests.
+    ///   - baseURL: The server's base URL (e.g. `http://127.0.0.1:8080/v1`).
+    ///   - temperature: Default sampling temperature.
     ///   - delegateTools: Tools to register with the delegate session.
     ///   - delegateInstructions: System instructions for the delegate session.
     init(
-        configuration: LlamaConfiguration,
+        modelName: String,
+        baseURL: URL,
+        temperature: Double,
         delegateTools: [any Tool],
         delegateInstructions: String
     ) {
-        self.configuration = configuration
+        self.modelName = modelName
+        self.baseURL = baseURL
+        self.temperature = temperature
         self.delegateTools = delegateTools
         self.delegateInstructions = delegateInstructions
     }
 
     func call(arguments: CallPowerfulModelArguments) async throws -> String {
-        let config = configuration
         let task = arguments.task
         let tools = delegateTools
         let instructions = delegateInstructions
+        let name = modelName
+        let url = baseURL
 
         return try await Task { @MainActor in
-            let model = LlamaModel(configuration: config)
+            let model = ChatCompletionsLanguageModel(name: name, url: url)
 
             let heavySession = LanguageModelSession(
                 profile: DelegateProfile(

@@ -3,7 +3,6 @@ import Observation
 import SwiftUI
 import FoundationModels
 import FoundationModelsUtilities
-import LlamaModelExecutor
 
 // MARK: - Model Backend
 
@@ -180,17 +179,16 @@ public final class ChatStore {
     }
 
     // Session — recreated when backend or workspace changes
-    private var llamaModel: LlamaModel
     private var session: LanguageModelSession
+    /// Configuration for the remote Llama server (OpenAI-compatible endpoint).
+    private let llamaModelName: String
+    private let llamaBaseURL: URL
+    private let llamaTemperature: Double
 
     public init() {
-        let config = LlamaConfiguration(
-            modelName: "/Users/granvalenti/.modelli/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
-            temperature: 0.6,
-            baseURL: LlamaConfiguration.defaultURL
-        )
-        let m = LlamaModel(configuration: config)
-        self.llamaModel = m
+        self.llamaModelName = "/Users/granvalenti/.modelli/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf"
+        self.llamaBaseURL = URL(string: "http://127.0.0.1:8080/v1")!
+        self.llamaTemperature = 0.6
 
         // Restore orchestrator mode from UserDefaults
         let saved = UserDefaults.standard.string(forKey: "orchestratorMode")
@@ -202,7 +200,7 @@ public final class ChatStore {
         self.activeBackend = mode == .orchestrator ? .foundationApple : .llamaServer
         let initialModel: any LanguageModel = mode == .orchestrator
             ? SystemLanguageModel.default
-            : m
+            : ChatCompletionsLanguageModel(name: llamaModelName, url: llamaBaseURL)
         self.session = LanguageModelSession(model: initialModel)
         self.composerModel = mode == .orchestrator
             ? "Apple \u{00B7} Orchestrator"
@@ -258,9 +256,10 @@ public final class ChatStore {
         let effectiveInstructions: String
 
         if isOrchestrating {
-            let llamaConfig = llamaModel.executorConfiguration
             let powerfulTool = CallPowerfulModelTool(
-                configuration: llamaConfig,
+                modelName: llamaModelName,
+                baseURL: llamaBaseURL,
+                temperature: llamaTemperature,
                 delegateTools: workspaceTools,
                 delegateInstructions: baseInstructions
             )
@@ -303,7 +302,7 @@ public final class ChatStore {
         // ── Build the session via DynamicProfile ──
         let activeModel: any LanguageModel = activeBackend == .foundationApple
             ? SystemLanguageModel.default
-            : llamaModel
+            : ChatCompletionsLanguageModel(name: llamaModelName, url: llamaBaseURL)
 
         if isOrchestrating {
             // Orchestrator profile: Apple + lifecycle callbacks for delegation detection
