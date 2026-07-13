@@ -85,13 +85,15 @@ public final class ChatStore {
     public var orchestratorMode: OrchestratorMode {
         didSet {
             UserDefaults.standard.set(orchestratorMode.rawValue, forKey: "orchestratorMode")
-            // When switching to orchestrator mode, force Apple as the active model
-            // (the orchestrator is always the Apple on-device model).
-            if orchestratorMode == .orchestrator, activeBackend != .foundationApple {
+            if orchestratorMode == .orchestrator {
+                // Switching to orchestrator: force Apple as the active model
+                // and rebuild so CallPowerfulModelTool is registered.
                 activeBackend = .foundationApple
                 composerModel = "Apple · Orchestrator"
                 rebuildSession()
-            } else if orchestratorMode == .standalone {
+            } else {
+                // Switching back to standalone: rebuild without the tool;
+                // keep whatever backend was active (Apple stays Apple, Llama stays Llama).
                 composerModel = activeBackend.rawValue
                 rebuildSession()
             }
