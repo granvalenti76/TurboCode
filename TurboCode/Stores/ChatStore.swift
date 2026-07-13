@@ -231,21 +231,19 @@ public final class ChatStore {
     /// Rebuild the session preserving conversation history.
     /// Pass `keepingHistory: false` to start a fresh session (new thread).
     private func rebuildSession(keepingHistory: Bool = true) {
-        // Capture existing transcript so we don't lose context
         let history = keepingHistory ? Array(session.transcript) : []
 
-        // Tools are loaded conditionally: file operations require a workspace
-        var tools: [any Tool] = []
-        // Workspace tools that the powerful delegate model will use.
+        let isOrchestrating = orchestratorMode == .orchestrator
+
+        // ── Workspace tools for the delegate model ──
         var workspaceTools: [any Tool] = []
         if !workspaceRoot.isEmpty {
             workspaceTools += [ReadFileTool(), GrepTool(), FileSystemTool(workspaceRoot: workspaceRoot)]
         }
 
-        // In orchestrator mode, the Apple on-device model gets ONLY the
-        // call_powerful_model tool — no file/grep/fs tools — so it is forced
-        // to delegate everything through the powerful Llama model.
-        let isOrchestrating = orchestratorMode == .orchestrator
+        // ── Profile tools ──
+        let tools: [any Tool]
+        let effectiveInstructions: String
 
         if isOrchestrating {
             let llamaConfig = llamaModel.executorConfiguration
@@ -254,20 +252,12 @@ public final class ChatStore {
                 delegateTools: workspaceTools,
                 delegateInstructions: baseInstructions
             )
-            // Apple can list files/info locally; everything else goes to Llama.
-            var orchestratorTools: [any Tool] = [powerfulTool]
+            var t: [any Tool] = [powerfulTool]
             if !workspaceRoot.isEmpty {
-                orchestratorTools.append(FileSystemTool(workspaceRoot: workspaceRoot))
+                t.append(FileSystemTool(workspaceRoot: workspaceRoot))
             }
-            tools = orchestratorTools
-        } else {
-            tools = workspaceTools
-        }
+            tools = t
 
-        // Build the effective instructions: in orchestrator mode, Apple is told
-        // to delegate all file, code, and system operations to the powerful model.
-        let effectiveInstructions: String
-        if isOrchestrating {
             var text = baseInstructions
             text += """
 
@@ -286,33 +276,48 @@ public final class ChatStore {
             Your role is:
             1. Understand what the user wants.
             2. For file listing/info: use `file_system` directly.
-            3. For everything else: first output a brief acknowledgment to the user (e.g. "Let me ask the powerful model to refactor this..."), then call `call_powerful_model` with a complete, self-contained task description that includes all relevant context (file paths, code snippets, error messages, requirements). Include full paths so the powerful model can navigate the workspace at: \(workspaceRoot).
+            3. For everything else: first output a brief acknowledgment to the user, then call `call_powerful_model` with a complete, self-contained task description that includes all relevant context (file paths, code snippets, error messages, requirements). Include full paths so the powerful model can navigate the workspace at: \(workspaceRoot).
             4. Synthesise the powerful model's response into a clear, well-formatted answer for the user.
 
             === APPROVAL REQUESTS ===
-            If the powerful model's response contains "ACTION REQUIRED", do NOT synthesise or rephrase it. Pass it through verbatim to the user and ask them to confirm or reject. When the user responds with approval or rejection, delegate another `call_powerful_model` call including the user's decision as part of the context.
+            If the powerful model's response contains "ACTION REQUIRED", do NOT synthesise or rephrase it. Pass it through verbatim to the user and ask them to confirm or reject.
             """
             effectiveInstructions = text
         } else {
+            tools = workspaceTools
             effectiveInstructions = baseInstructions
         }
 
-        switch activeBackend {
-        case .llamaServer:
+        // ── Build the session via DynamicProfile ──
+        let activeModel: any LanguageModel = activeBackend == .foundationApple
+            ? SystemLanguageModel.default
+            : llamaModel
+
+        if isOrchestrating {
+            // Orchestrator profile: Apple + lifecycle callbacks for delegation detection
             session = LanguageModelSession(
-                model: llamaModel,
-                dynamicInstructions: SessionInstructions(
-                    instructionsText: effectiveInstructions,
-                    tools: tools
+                profile: TurboCodeDynamicProfile(
+                    instructions: effectiveInstructions,
+                    tools: tools,
+                    model: activeModel,
+                    onDelegationStart: { [weak self] in
+                        await MainActor.run { self?.isDelegating = true }
+                    },
+                    onDelegationEnd: { [weak self] in
+                        await MainActor.run { self?.isDelegating = false }
+                    }
                 ),
                 history: history
             )
-        case .foundationApple:
+        } else {
+            // Standalone profile: no lifecycle callbacks needed
             session = LanguageModelSession(
-                model: SystemLanguageModel.default,
-                dynamicInstructions: SessionInstructions(
-                    instructionsText: effectiveInstructions,
-                    tools: tools
+                profile: TurboCodeDynamicProfile(
+                    instructions: effectiveInstructions,
+                    tools: tools,
+                    model: activeModel,
+                    onDelegationStart: nil,
+                    onDelegationEnd: nil
                 ),
                 history: history
             )
@@ -434,10 +439,8 @@ public final class ChatStore {
         do {
             let stream = session.streamResponse(to: text)
             var accumulatedText = ""
-            // Track which transcript entries we've already processed to avoid
-            // re-scanning old entries on every snapshot.
-            let initialTranscriptCount = session.transcript.count
-            var processedEntryCount = initialTranscriptCount
+            // Delegation detection is handled by TurboCodeDynamicProfile's
+            // onToolCall / onToolOutput lifecycle callbacks — no scanning needed.
 
             for try await snapshot in stream {
                 // Fast path: update liveAssistant for quick UI feedback
@@ -446,51 +449,25 @@ public final class ChatStore {
                     liveAssistant = accumulatedText
                 }
 
-                // Process only NEW transcript entries (beyond processedEntryCount).
-                let fullTranscript = session.transcript
-                let newEntries = fullTranscript.dropFirst(processedEntryCount)
-                let newCount = newEntries.count
-                if newCount > 0 {
-                    processedEntryCount = fullTranscript.count
-
-                    for entry in newEntries {
-                        switch entry {
-                        case .toolCalls(let calls):
-                            // Detect delegation: orchestrator called call_powerful_model
-                            if orchestratorMode == .orchestrator {
-                                for call in calls {
-                                    if call.toolName == "call_powerful_model" {
-                                        isDelegating = true
-                                    }
-                                }
+                // Process transcript entries for reasoning and ACTION REQUIRED
+                for entry in snapshot.transcriptEntries {
+                    if case .reasoning(let reasoning) = entry {
+                        for segment in reasoning.segments {
+                            if case .text(let t) = segment {
+                                liveReasoning = t.content
                             }
+                        }
+                    }
 
-                        case .response:
-                            // Once the orchestrator speaks after a delegation, turn indicator off.
-                            if isDelegating {
-                                isDelegating = false
-                            }
-
-                        case .reasoning(let reasoning):
-                            for segment in reasoning.segments {
-                                if case .text(let t) = segment {
-                                    liveReasoning = t.content
-                                }
-                            }
-
-                        case .toolOutput(let output):
-                            let text = output.segments.compactMap { segment -> String? in
-                                if case .text(let t) = segment { return t.content }
-                                return nil
-                            }.joined()
-                            if text.contains("ACTION REQUIRED") {
-                                pendingApproval = ApprovalRequest(
-                                    summary: text.replacingOccurrences(of: "\u{26A0}\u{FE0F} ACTION REQUIRED: ", with: "")
-                                )
-                            }
-
-                        default:
-                            break
+                    if case .toolOutput(let output) = entry {
+                        let text = output.segments.compactMap { segment -> String? in
+                            if case .text(let t) = segment { return t.content }
+                            return nil
+                        }.joined()
+                        if text.contains("ACTION REQUIRED") {
+                            pendingApproval = ApprovalRequest(
+                                summary: text.replacingOccurrences(of: "\u{26A0}\u{FE0F} ACTION REQUIRED: ", with: "")
+                            )
                         }
                     }
                 }
@@ -623,17 +600,40 @@ public final class ChatStore {
     }
 }
 
-// MARK: - DynamicInstructions for session setup
+// MARK: - DynamicProfile for session setup
 
-/// Wraps instructions text and tools into a single DynamicInstructions value,
-/// so LanguageModelSession can be initialized with both history and tools.
-private struct SessionInstructions: DynamicInstructions {
-    let instructionsText: String
+/// A DynamicProfile that wraps instructions, tools, model selection, and
+/// delegation lifecycle callbacks for the orchestrator feature.
+///
+/// When `onDelegationStart` / `onDelegationEnd` are non-nil, the profile
+/// registers `onToolCall` / `onToolOutput` callbacks that fire on the
+/// orchestrator's `call_powerful_model` invocations — no manual transcript
+/// scanning required.
+private struct TurboCodeDynamicProfile: LanguageModelSession.DynamicProfile {
+    let instructions: String
     let tools: [any Tool]
+    let model: any LanguageModel
+    let onDelegationStart: (@Sendable () async -> Void)?
+    let onDelegationEnd: (@Sendable () async -> Void)?
 
-    var body: some DynamicInstructions {
-        Instructions(instructionsText)
-        tools
+    var body: some LanguageModelSession.DynamicProfile {
+        Profile {
+            Instructions(instructions)
+            tools
+        }
+        .model(model)
+        .onToolCall { toolCall in
+            if toolCall.toolName == "call_powerful_model",
+               let action = onDelegationStart {
+                await action()
+            }
+        }
+        .onToolOutput { call, _ in
+            if call.toolName == "call_powerful_model",
+               let action = onDelegationEnd {
+                await action()
+            }
+        }
     }
 }
 
