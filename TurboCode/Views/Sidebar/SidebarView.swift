@@ -6,6 +6,7 @@ struct SidebarView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var searchText: String = ""
     @State private var selectedNav: String = "chat"
+    @State private var expandedProject: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -147,33 +148,52 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
 
-            // Recent workspace projects
+            // Recent workspace projects with expandable sessions
             ForEach(chatStore.recentWorkspaces, id: \.self) { path in
                 let name = URL(fileURLWithPath: path).lastPathComponent
-                let threadCount = chatStore.threads.filter { $0.workspace == path }.count
+                let sessions = chatStore.sortedThreads.filter { t in
+                    t.workspace.flatMap { URL(fileURLWithPath: $0).lastPathComponent } == name
+                }
+                let isSelected = chatStore.selectedProject == name
+
                 Button {
-                    chatStore.selectedProject = name
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        if expandedProject == name {
+                            expandedProject = nil
+                            chatStore.selectedProject = nil
+                        } else {
+                            expandedProject = name
+                            chatStore.selectedProject = name
+                        }
+                    }
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: chatStore.selectedProject == name ? "folder.fill" : "folder")
+                        Image(systemName: isSelected ? "folder.fill" : "folder")
                             .font(.system(size: 11))
-                            .foregroundStyle(chatStore.selectedProject == name ? AnyShapeStyle(Color.blue) : AnyShapeStyle(.tertiary))
+                            .foregroundColor(isSelected ? .blue : .secondary)
                             .frame(width: 16)
                         Text(name)
                             .font(.system(size: 12))
-                            .foregroundStyle(chatStore.selectedProject == name ? .primary : .primary)
                         Spacer()
-                        if threadCount > 0 {
-                            Text("\(threadCount)")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                        }
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8))
+                            .foregroundStyle(Color.secondary)
+                            .rotationEffect(.degrees(expandedProject == name ? 90 : 0))
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+
+                // Sessions under this project
+                if expandedProject == name {
+                    ForEach(sessions) { thread in
+                        threadRow(for: thread)
+                            .padding(.leading, 28)
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                }
             }
 
             // Add workspace
@@ -202,12 +222,15 @@ struct SidebarView: View {
 
     private var chatsSection: some View {
         VStack(spacing: 0) {
-            sectionHeader("Chats")
+            // Hide Chats header when a project is expanded (already shown under it).
+            if expandedProject == nil {
+                sectionHeader("Chats")
 
-            if chatStore.threads.isEmpty {
-                emptyChatsView
-            } else {
-                chatsList
+                if chatStore.threads.isEmpty {
+                    emptyChatsView
+                } else {
+                    chatsList
+                }
             }
         }
     }
