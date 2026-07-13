@@ -248,7 +248,12 @@ public final class ChatStore {
                 delegateTools: workspaceTools,
                 delegateInstructions: baseInstructions
             )
-            tools = [powerfulTool]
+            // Apple can list files/info locally; everything else goes to Llama.
+            var orchestratorTools: [any Tool] = [powerfulTool]
+            if !workspaceRoot.isEmpty {
+                orchestratorTools.append(FileSystemTool(workspaceRoot: workspaceRoot))
+            }
+            tools = orchestratorTools
         } else {
             tools = workspaceTools
         }
@@ -262,14 +267,21 @@ public final class ChatStore {
 
 
             === ORCHESTRATOR MODE ===
-            You are the orchestrator. The ONLY tool available to you is `call_powerful_model`, which delegates to a powerful coding model. You MUST use it for EVERY user request — you have no direct access to files, git, or any other operations.
+            You are the orchestrator. You have the `file_system` tool to list directories, get file info, and find files — use it for navigation and discovery.
+
+            For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, file_system for write/delete/copy/move).
+
+            CRITICAL — Never trust your own knowledge:
+            - If you need to answer with file contents, always delegate reading to `call_powerful_model`.
+            - If you need to modify code, always delegate to `call_powerful_model`.
+            - Never rely on your training data for what a file contains or what code looks like in this project.
+            - Always use the tools — `file_system` for listing, `call_powerful_model` for actual file work.
 
             Your role is:
             1. Understand what the user wants.
-            2. Call `call_powerful_model` with a complete, self-contained task description that includes all relevant context (file paths, code snippets, error messages, requirements).
-            3. Synthesise the powerful model's response into a clear, well-formatted answer for the user.
-
-            The powerful model has direct access to the file system, git, and all coding tools through the workspace at: \(workspaceRoot). So include full paths and file names in your delegation.
+            2. For file listing/info: use `file_system` directly.
+            3. For everything else: call `call_powerful_model` with a complete, self-contained task description that includes all relevant context (file paths, code snippets, error messages, requirements). Include full paths so the powerful model can navigate the workspace at: \(workspaceRoot).
+            4. Synthesise the powerful model's response into a clear, well-formatted answer for the user.
 
             === APPROVAL REQUESTS ===
             If the powerful model's response contains "ACTION REQUIRED", do NOT synthesise or rephrase it. Pass it through verbatim to the user and ask them to confirm or reject. When the user responds with approval or rejection, delegate another `call_powerful_model` call including the user's decision as part of the context.
