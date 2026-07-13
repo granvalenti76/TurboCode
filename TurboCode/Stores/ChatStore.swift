@@ -193,6 +193,18 @@ public final class ChatStore {
 
     // Session — recreated when backend or workspace changes
     private var session: LanguageModelSession
+
+    // MARK: - Onboarding
+
+    /// Ensures `~/.turbocode/` exists. Called once at app launch.
+    public func ensureOnboarding() async {
+        guard !TurboCodeConfig.shared.isOnboarded else { return }
+        do {
+            try TurboCodeConfig.shared.performOnboarding()
+        } catch {
+            print("[TurboCode] Onboarding failed: \(error.localizedDescription)")
+        }
+    }
     /// Configuration for the remote Llama server (OpenAI-compatible endpoint).
     private let llamaModelName: String
     private let llamaBaseURL: URL
@@ -379,6 +391,81 @@ public final class ChatStore {
         rebuildSession(keepingHistory: false)
     }
 
+    /// Generates a concise title from the first user prompt using the
+    /// Apple on-device model, then updates the active thread's title.
+    public func generateTitle(from prompt: String) async {
+        guard let idx = threads.firstIndex(where: { $0.id == activeThreadId }),
+              threads[idx].title == "New Chat" else { return }
+
+        let titlePrompt = """
+        Generate a very short title (max 6 words) for a conversation that starts with this message.
+        Respond with ONLY the title, no quotes, no punctuation.
+
+        Message: \(prompt)
+        """
+
+        do {
+            let model = SystemLanguageModel.default
+            let titleSession = LanguageModelSession(model: model)
+            var generated = ""
+            for try await snapshot in titleSession.streamResponse(to: titlePrompt) {
+                if !snapshot.content.isEmpty {
+                    generated = snapshot.content
+                }
+            }
+            let clean = generated
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "\"", with: "")
+            if !clean.isEmpty {
+                threads[idx].title = String(clean.prefix(60))
+                threads[idx].updatedAt = .now
+            }
+        } catch {
+            // Silently fall back to "New Chat"
+        }
+    }
+
+    // MARK: - Session Persistence
+
+    /// Persists all active threads to `~/.turbocode/sessions.json`.
+    public func persistSessions() async {
+        let archived = threads.map { thread in
+            ArchivedSession(
+                id: thread.id,
+                title: thread.title,
+                projectName: thread.workspace
+                    .flatMap { URL(fileURLWithPath: $0).lastPathComponent }
+                    ?? "_general",
+                workspacePath: thread.workspace,
+                createdAt: thread.createdAt,
+                updatedAt: thread.updatedAt,
+                modelBackend: activeBackend.rawValue
+            )
+        }
+        do {
+            try TurboCodeConfig.shared.saveSessions(archived)
+        } catch {
+            print("[TurboCode] Failed to persist sessions: \(error.localizedDescription)")
+        }
+    }
+
+    /// Restores threads from disk on launch.
+    public func restoreSessions() async {
+        guard let loaded = try? TurboCodeConfig.shared.loadSessions(),
+              !loaded.isEmpty else { return }
+        let existingIDs = Set(threads.map(\.id))
+        for archived in loaded where !existingIDs.contains(archived.id) {
+            threads.append(Conversation(
+                id: archived.id,
+                title: archived.title,
+                createdAt: archived.createdAt,
+                updatedAt: archived.updatedAt,
+                workspace: archived.workspacePath,
+                mode: .agent
+            ))
+        }
+    }
+
     public func renameThread(id: String, title: String) async {
         guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
         threads[i].title = title
@@ -460,6 +547,8 @@ public final class ChatStore {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
         isFirstMessage = false
+        // Generate a title from the first user prompt using the Apple on-device model.
+        Task { await generateTitle(from: text) }
 
         blocks.append(ChatBlock(kind: .user, text: text))
 
@@ -545,6 +634,8 @@ public final class ChatStore {
                     model: composerModel
                 )
             }
+            // Persist session metadata after each completed turn.
+            Task { await persistSessions() }
         }
 
         busy = false

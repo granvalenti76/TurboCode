@@ -18,7 +18,11 @@ struct TurboCodeApp: App {
             WorkbenchSplitView()
                 .environment(chatStore)
                 .environment(settingsStore)
-                .onAppear {
+                .task {
+                    // First-launch onboarding
+                    await chatStore.ensureOnboarding()
+                    // Restore persisted sessions
+                    await chatStore.restoreSessions()
                     settingsStore.loadFromUserDefaults()
                 }
         }
