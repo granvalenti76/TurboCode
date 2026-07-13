@@ -10,7 +10,7 @@ import FoundationModelsUtilities
 public enum ModelBackend: String, CaseIterable, Sendable {
     case llamaServer = "Llama-server"
     case foundationApple = "Foundation Apple"
-    case foundationServe = "fm Serve"
+    case foundationServe = "Apple PCC"
 }
 
 // MARK: - Central ChatStore

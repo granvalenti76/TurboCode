@@ -124,7 +124,7 @@ struct InputFieldView: View {
                         Button("Foundation Apple") {
                             chatStore.switchBackend(to: .foundationApple)
                         }
-                        Button("fm Serve") {
+                        Button("Apple PCC") {
                             chatStore.switchBackend(to: .foundationServe)
                         }
                     }
@@ -141,7 +141,7 @@ struct InputFieldView: View {
                     if chatStore.activeBackend == .llamaServer {
                         Text("Llama-server \(reasoningEffort.rawValue)")
                     } else if chatStore.activeBackend == .foundationServe {
-                        Text("fm Serve")
+                        Text("Apple PCC")
                     } else {
                         Text("Foundation Apple")
                     }
