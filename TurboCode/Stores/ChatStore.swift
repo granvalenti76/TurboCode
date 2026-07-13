@@ -10,6 +10,7 @@ import FoundationModelsUtilities
 public enum ModelBackend: String, CaseIterable, Sendable {
     case llamaServer = "Llama-server"
     case foundationApple = "Foundation Apple"
+    case foundationServe = "fm Serve"
 }
 
 // MARK: - Central ChatStore
@@ -90,9 +91,9 @@ public final class ChatStore {
     public let skillActivations = SkillActivations()
 
     /// Maps the persisted ReasoningEffort to FoundationModels' ReasoningLevel.
-    /// Returns `nil` for the Apple on-device model (which doesn't support it).
+    /// Returns `nil` for Apple models (on-device and PCC) which don't support it.
     public var reasoningLevel: ContextOptions.ReasoningLevel? {
-        guard activeBackend != .foundationApple else { return nil }
+        guard activeBackend != .foundationApple, activeBackend != .foundationServe else { return nil }
         let raw = UserDefaults.standard.string(forKey: "reasoningEffort") ?? ReasoningEffort.medium.rawValue
         switch ReasoningEffort(rawValue: raw) ?? .medium {
         case .low:    return .light
@@ -196,11 +197,14 @@ public final class ChatStore {
     private let llamaModelName: String
     private let llamaBaseURL: URL
     private let llamaTemperature: Double
+    /// Configuration for fm serve (Apple Foundation Models local server).
+    private let fmServeBaseURL: URL
 
     public init() {
         self.llamaModelName = "/Users/granvalenti/.modelli/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf"
         self.llamaBaseURL = URL(string: "http://127.0.0.1:8080/v1")!
         self.llamaTemperature = 0.6
+        self.fmServeBaseURL = URL(string: "http://127.0.0.1:1976/v1")!
 
         // Restore orchestrator mode from UserDefaults
         let saved = UserDefaults.standard.string(forKey: "orchestratorMode")
@@ -312,9 +316,15 @@ public final class ChatStore {
         }
 
         // ── Build the session via DynamicProfile ──
-        let activeModel: any LanguageModel = activeBackend == .foundationApple
-            ? SystemLanguageModel.default
-            : ChatCompletionsLanguageModel(name: llamaModelName, url: llamaBaseURL)
+        let activeModel: any LanguageModel
+        switch activeBackend {
+        case .foundationApple:
+            activeModel = SystemLanguageModel.default
+        case .foundationServe:
+            activeModel = ChatCompletionsLanguageModel(name: "default", url: fmServeBaseURL)
+        case .llamaServer:
+            activeModel = ChatCompletionsLanguageModel(name: llamaModelName, url: llamaBaseURL)
+        }
 
         if isOrchestrating {
             // Orchestrator profile: Apple + lifecycle callbacks for delegation detection
