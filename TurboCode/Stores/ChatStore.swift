@@ -90,7 +90,9 @@ public final class ChatStore {
     public let skillActivations = SkillActivations()
 
     /// Maps the persisted ReasoningEffort to FoundationModels' ReasoningLevel.
-    public var reasoningLevel: ContextOptions.ReasoningLevel {
+    /// Returns `nil` for the Apple on-device model (which doesn't support it).
+    public var reasoningLevel: ContextOptions.ReasoningLevel? {
+        guard activeBackend != .foundationApple else { return nil }
         let raw = UserDefaults.standard.string(forKey: "reasoningEffort") ?? ReasoningEffort.medium.rawValue
         switch ReasoningEffort(rawValue: raw) ?? .medium {
         case .low:    return .light
@@ -696,7 +698,7 @@ private struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let activations: SkillActivations
     let workspaceRoot: String
     let model: any LanguageModel
-    let reasoningLevel: ContextOptions.ReasoningLevel
+    let reasoningLevel: ContextOptions.ReasoningLevel?
 
     var body: some LanguageModelSession.DynamicProfile {
         Profile {
@@ -725,7 +727,7 @@ private struct TurboCodeDynamicProfile: LanguageModelSession.DynamicProfile {
     let model: any LanguageModel
     let onDelegationStart: (@Sendable () async -> Void)?
     let onDelegationEnd: (@Sendable () async -> Void)?
-    let reasoningLevel: ContextOptions.ReasoningLevel
+    let reasoningLevel: ContextOptions.ReasoningLevel?
 
     var body: some LanguageModelSession.DynamicProfile {
         Profile {
