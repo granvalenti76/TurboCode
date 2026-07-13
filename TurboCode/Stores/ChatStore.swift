@@ -434,6 +434,9 @@ public final class ChatStore {
         do {
             let stream = session.streamResponse(to: text)
             var accumulatedText = ""
+            // Track delegation state: true when a .toolCalls for
+            // call_powerful_model has been seen, reset on next .response.
+            var sawDelegationCall = false
 
             for try await snapshot in stream {
                 // Fast path: update liveAssistant for quick UI feedback
@@ -442,35 +445,36 @@ public final class ChatStore {
                     liveAssistant = accumulatedText
                 }
 
-                // Detect delegation state from the session transcript.
-                // In orchestrator mode, any tool call is a delegation.
-                // We check the last entry: if it's .toolCalls the model is
-                // waiting on a tool; if it's .toolOutput or .response, we're back.
-                if orchestratorMode == .orchestrator {
-                    if let lastEntry = session.transcript.last {
-                        switch lastEntry {
-                        case .toolCalls:
-                            isDelegating = true
-                        case .response, .toolOutput:
-                            isDelegating = false
-                        default:
-                            break
-                        }
-                    }
-                }
-
-                // Reasoning + tool output detection from incremental transcript entries
+                // Process new transcript entries: delegation detection,
+                // reasoning updates, and ACTION REQUIRED from tool outputs.
                 for entry in snapshot.transcriptEntries {
-                    if case .reasoning(let reasoning) = entry {
+                    switch entry {
+                    case .toolCalls(let calls):
+                        // Detect delegation call from orchestrator
+                        if orchestratorMode == .orchestrator {
+                            for call in calls {
+                                if call.toolName == "call_powerful_model" {
+                                    sawDelegationCall = true
+                                    isDelegating = true
+                                }
+                            }
+                        }
+
+                    case .response:
+                        // Once the orchestrator speaks after delegation, turn indicator off.
+                        if sawDelegationCall {
+                            sawDelegationCall = false
+                            isDelegating = false
+                        }
+
+                    case .reasoning(let reasoning):
                         for segment in reasoning.segments {
                             if case .text(let t) = segment {
                                 liveReasoning = t.content
                             }
                         }
-                    }
 
-                    // Check for ACTION REQUIRED in tool outputs (incremental — current stream only)
-                    if case .toolOutput(let output) = entry {
+                    case .toolOutput(let output):
                         let text = output.segments.compactMap { segment -> String? in
                             if case .text(let t) = segment { return t.content }
                             return nil
@@ -480,6 +484,9 @@ public final class ChatStore {
                                 summary: text.replacingOccurrences(of: "\u{26A0}\u{FE0F} ACTION REQUIRED: ", with: "")
                             )
                         }
+
+                    default:
+                        break
                     }
                 }
             }
