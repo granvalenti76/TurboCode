@@ -310,14 +310,12 @@ public final class ChatStore {
                 history: history
             )
         } else {
-            // Standalone profile: no lifecycle callbacks needed
+            // Standalone: use direct init (proven to work) with DynamicInstructions
             session = LanguageModelSession(
-                profile: TurboCodeDynamicProfile(
-                    instructions: effectiveInstructions,
-                    tools: tools,
-                    model: activeModel,
-                    onDelegationStart: nil,
-                    onDelegationEnd: nil
+                model: activeModel,
+                dynamicInstructions: SessionInstructions(
+                    instructionsText: effectiveInstructions,
+                    tools: tools
                 ),
                 history: history
             )
@@ -597,6 +595,19 @@ public final class ChatStore {
                 if a.isPinned != b.isPinned { return a.isPinned }
                 return a.updatedAt > b.updatedAt
             }
+    }
+}
+
+// MARK: - DynamicInstructions for session setup
+
+/// Wraps instructions text and tools into a single DynamicInstructions value.
+private struct SessionInstructions: DynamicInstructions {
+    let instructionsText: String
+    let tools: [any Tool]
+
+    var body: some DynamicInstructions {
+        Instructions(instructionsText)
+        tools
     }
 }
 
