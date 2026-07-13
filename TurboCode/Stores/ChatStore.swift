@@ -434,9 +434,12 @@ public final class ChatStore {
         do {
             let stream = session.streamResponse(to: text)
             var accumulatedText = ""
-            // Track delegation state: true when a .toolCalls for
-            // call_powerful_model has been seen, reset on next .response.
-            var sawDelegationCall = false
+            // Track content stalls to detect delegation.
+            // When the orchestrator outputs an acknowledgment and then calls
+            // call_powerful_model, the content stops growing until Llama
+            // responds and Apple synthesises the final answer.
+            var lastContentLength = 0
+            var contentStalledSnapshots = 0
 
             for try await snapshot in stream {
                 // Fast path: update liveAssistant for quick UI feedback
@@ -445,28 +448,28 @@ public final class ChatStore {
                     liveAssistant = accumulatedText
                 }
 
-                // Process new transcript entries: delegation detection,
-                // reasoning updates, and ACTION REQUIRED from tool outputs.
+                // Detect delegation by content stall (runs on every snapshot,
+                // even empty ones — the model may not yield content while
+                // waiting for a tool response).
+                if orchestratorMode == .orchestrator {
+                    let currentLen = accumulatedText.count
+                    if currentLen > lastContentLength {
+                        // Content grew → not delegating / just finished delegating
+                        contentStalledSnapshots = 0
+                        isDelegating = false
+                    } else if currentLen == lastContentLength && lastContentLength > 0 {
+                        // Content stalled → model is waiting for a tool
+                        contentStalledSnapshots += 1
+                        if contentStalledSnapshots >= 2 {
+                            isDelegating = true
+                        }
+                    }
+                    lastContentLength = currentLen
+                }
+
+                // Process transcript entries for reasoning and ACTION REQUIRED
                 for entry in snapshot.transcriptEntries {
                     switch entry {
-                    case .toolCalls(let calls):
-                        // Detect delegation call from orchestrator
-                        if orchestratorMode == .orchestrator {
-                            for call in calls {
-                                if call.toolName == "call_powerful_model" {
-                                    sawDelegationCall = true
-                                    isDelegating = true
-                                }
-                            }
-                        }
-
-                    case .response:
-                        // Once the orchestrator speaks after delegation, turn indicator off.
-                        if sawDelegationCall {
-                            sawDelegationCall = false
-                            isDelegating = false
-                        }
-
                     case .reasoning(let reasoning):
                         for segment in reasoning.segments {
                             if case .text(let t) = segment {
