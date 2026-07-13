@@ -321,7 +321,7 @@ public final class ChatStore {
         case .foundationApple:
             activeModel = SystemLanguageModel.default
         case .foundationServe:
-            activeModel = ChatCompletionsLanguageModel(name: "default", url: fmServeBaseURL)
+            activeModel = ChatCompletionsLanguageModel(name: "pcc", url: fmServeBaseURL)
         case .llamaServer:
             activeModel = ChatCompletionsLanguageModel(name: llamaModelName, url: llamaBaseURL)
         }
