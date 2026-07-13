@@ -230,8 +230,10 @@ public final class ChatStore {
 
         // Tools are loaded conditionally: file operations require a workspace
         var tools: [any Tool] = []
+        // Workspace tools that the powerful delegate model will use.
+        var workspaceTools: [any Tool] = []
         if !workspaceRoot.isEmpty {
-            tools += [ReadFileTool(), GrepTool(), FileSystemTool(workspaceRoot: workspaceRoot)]
+            workspaceTools += [ReadFileTool(), GrepTool(), FileSystemTool(workspaceRoot: workspaceRoot)]
         }
 
         // In orchestrator mode, the Apple on-device model gets ONLY the
@@ -241,7 +243,14 @@ public final class ChatStore {
 
         if isOrchestrating {
             let llamaConfig = llamaModel.executorConfiguration
-            tools = [CallPowerfulModelTool(configuration: llamaConfig)]
+            let powerfulTool = CallPowerfulModelTool(
+                configuration: llamaConfig,
+                delegateTools: workspaceTools,
+                delegateInstructions: baseInstructions
+            )
+            tools = [powerfulTool]
+        } else {
+            tools = workspaceTools
         }
 
         // Build the effective instructions: in orchestrator mode, Apple is told

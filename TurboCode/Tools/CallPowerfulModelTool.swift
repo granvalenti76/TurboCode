@@ -47,22 +47,39 @@ struct CallPowerfulModelTool: Tool {
 
     /// The Llama configuration used to create the delegate model session.
     private let configuration: LlamaConfiguration
+    /// Tools registered with the delegate session (e.g. read_file, grep, file_system).
+    private let delegateTools: [any Tool]
+    /// System instructions for the delegate session (workspace context, rules, etc.).
+    private let delegateInstructions: String
 
     /// Creates a tool that delegates to a Llama model server via `LlamaModelExecutor`.
-    /// - Parameter configuration: The Llama connection and generation parameters.
-    init(configuration: LlamaConfiguration) {
+    /// - Parameters:
+    ///   - configuration: The Llama connection and generation parameters.
+    ///   - delegateTools: Tools to register with the delegate session.
+    ///   - delegateInstructions: System instructions for the delegate session.
+    init(
+        configuration: LlamaConfiguration,
+        delegateTools: [any Tool],
+        delegateInstructions: String
+    ) {
         self.configuration = configuration
+        self.delegateTools = delegateTools
+        self.delegateInstructions = delegateInstructions
     }
 
     func call(arguments: CallPowerfulModelArguments) async throws -> String {
-        // LanguageModelSession is @MainActor-isolated, so we bridge to the
-        // main actor via a Task to create the session and stream the response.
         let config = configuration
         let task = arguments.task
+        let tools = delegateTools
+        let instructions = delegateInstructions
 
         return try await Task { @MainActor in
             let model = LlamaModel(configuration: config)
-            let heavySession = LanguageModelSession(model: model)
+            let heavySession = LanguageModelSession(
+                model: model,
+                tools: tools,
+                instructions: instructions
+            )
             var result = ""
 
             for try await snapshot in heavySession.streamResponse(to: task) {
