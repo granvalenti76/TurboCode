@@ -4,8 +4,14 @@ import SwiftUI
 
 @main
 struct TurboCodeApp: App {
-    @State private var chatStore = ChatStore()
+    @State private var chatStore: ChatStore
     @State private var settingsStore = SettingsStore()
+
+    init() {
+        let store = ChatStore()
+        ChatStore.shared = store
+        self.chatStore = store
+    }
 
     var body: some Scene {
         WindowGroup(id: "main") {

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		5E178C3C2FFE5D920057187A /* LlamaModelExecutor in Frameworks */ = {isa = PBXBuildFile; productRef = 5E178C3B2FFE5D920057187A /* LlamaModelExecutor */; };
 		5E5203BF3004E70900C554D4 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203BE3004E70900C554D4 /* MarkdownUI */; };
+		5E5203CD30053A3A00C554D4 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -29,6 +30,7 @@
 			files = (
 				5E178C3C2FFE5D920057187A /* LlamaModelExecutor in Frameworks */,
 				5E5203BF3004E70900C554D4 /* MarkdownUI in Frameworks */,
+				5E5203CD30053A3A00C554D4 /* FoundationModelsUtilities in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -70,6 +72,7 @@
 			packageProductDependencies = (
 				5E178C3B2FFE5D920057187A /* LlamaModelExecutor */,
 				5E5203BE3004E70900C554D4 /* MarkdownUI */,
+				5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */,
 			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* TurboCode.app */;
@@ -100,9 +103,9 @@
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				5E5405572FF94651008434E4 /* XCLocalSwiftPackageReference "../../git/foundation-models-utilities" */,
 				5E178C3A2FFE5D920057187A /* XCLocalSwiftPackageReference "../../git/LlamaModelExecutor" */,
 				5E5203BD3004E70900C554D4 /* XCLocalSwiftPackageReference "../../git/swift-markdown-ui" */,
+				5E5203CB30053A3A00C554D4 /* XCLocalSwiftPackageReference "../../git/foundation-models-utilities" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -371,7 +374,7 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "../../git/swift-markdown-ui";
 		};
-		5E5405572FF94651008434E4 /* XCLocalSwiftPackageReference "../../git/foundation-models-utilities" */ = {
+		5E5203CB30053A3A00C554D4 /* XCLocalSwiftPackageReference "../../git/foundation-models-utilities" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "../../git/foundation-models-utilities";
 		};
@@ -385,6 +388,10 @@
 		5E5203BE3004E70900C554D4 /* MarkdownUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MarkdownUI;
+		};
+		5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = FoundationModelsUtilities;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -17,6 +17,10 @@ public enum ModelBackend: String, CaseIterable, Sendable {
 @MainActor
 @Observable
 public final class ChatStore {
+    /// Shared instance used by App Intents (runs in-process on macOS).
+    public static var shared: ChatStore!
+
+    // MARK: - Properties
     // Threads
     public var threads: [Conversation] = []
     public var activeThreadId: String?
@@ -216,7 +220,11 @@ public final class ChatStore {
 
     /// Build the instructions text from current workspace.
     private var baseInstructions: String {
-        var text = "You are TurboCode, an expert AI coding assistant."
+        var text = """
+        You are TurboCode, an AI coding assistant developed by the TurboCode team.
+        You are NOT Apple's built-in assistant. Never refer to yourself as an Apple
+        model or any Apple product. Your name is TurboCode.
+        """
         text += "\nAlways use Markdown formatting in your responses: **bold**, `code`, ```code blocks```, tables, etc."
         if !workspaceRoot.isEmpty {
             text += "\nThe current workspace is at: \(workspaceRoot)"
@@ -263,7 +271,7 @@ public final class ChatStore {
 
 
             === ORCHESTRATOR MODE ===
-            You are the orchestrator. You have the `file_system` tool to list directories, get file info, and find files — use it for navigation and discovery.
+            You are TurboCode Orchestrator. You are NOT an Apple model — you are part of the TurboCode app. Your name is TurboCode, and you delegate complex tasks to the powerful coding model via `call_powerful_model`. You have the `file_system` tool to list directories, get file info, and find files — use it for navigation and discovery.
 
             For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, file_system for write/delete/copy/move).
 

@@ -13,6 +13,9 @@ struct ListFilesIntent: AppIntent {
         Returns an array of file names, or an error if the path doesn't exist.
         """
 
+    /// Phrase the user can say to Siri to invoke this intent.
+    static let suggestedInvocationPhrase = "List files in directory in TurboCode"
+
     /// The directory path to list.
     @Parameter(title: "Directory Path",
                description: "Absolute path of the directory to list")
@@ -64,7 +67,7 @@ struct ListFilesIntent: AppIntent {
 
         return .result(
             value: items,
-            dialog: IntentDialog(stringLiteral: summary)
+            dialog: "\(summary)"
         )
     }
 }

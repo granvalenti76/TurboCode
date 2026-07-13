@@ -1,6 +1,26 @@
 import Foundation
 import FoundationModels
+import FoundationModelsUtilities
 import LlamaModelExecutor
+
+// MARK: - Delegate Profile
+
+/// DynamicProfile for the delegate Llama session with history management.
+private struct DelegateProfile: LanguageModelSession.DynamicProfile {
+    let instructions: String
+    let tools: [any Tool]
+    let model: LlamaModel
+
+    var body: some LanguageModelSession.DynamicProfile {
+        LanguageModelSession.Profile {
+            Instructions(instructions)
+            tools
+        }
+        .model(model)
+        .droppingCompletedToolCalls()
+        .rollingWindow(entries: 20)
+    }
+}
 
 // MARK: - Call Powerful Model Tool
 
@@ -75,10 +95,14 @@ struct CallPowerfulModelTool: Tool {
 
         return try await Task { @MainActor in
             let model = LlamaModel(configuration: config)
+
             let heavySession = LanguageModelSession(
-                model: model,
-                tools: tools,
-                instructions: instructions
+                profile: DelegateProfile(
+                    instructions: instructions,
+                    tools: tools,
+                    model: model
+                ),
+                history: []
             )
             var result = ""
 
