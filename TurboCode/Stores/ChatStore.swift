@@ -654,10 +654,10 @@ public final class ChatStore {
                     model: composerModel
                 )
             }
-            // Persist session after each completed turn.
-            if let tid = activeThreadId {
-                Task { await persistSession(for: tid) }
-            }
+        }
+        // Persist session after each turn (success or error).
+        if let tid = activeThreadId {
+            Task { await persistSession(for: tid) }
         }
 
         busy = false

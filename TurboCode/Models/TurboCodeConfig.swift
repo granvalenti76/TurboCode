@@ -4,7 +4,7 @@ import Foundation
 
 /// Manages the `~/.turbocode/` directory and configuration files.
 /// Created on first launch with sensible defaults.
-public final class TurboCodeConfig: Sendable {
+public final class TurboCodeConfig {
     public static let shared = TurboCodeConfig()
 
     private var rootURL: URL {
@@ -53,8 +53,15 @@ public final class TurboCodeConfig: Sendable {
     // MARK: - Per-Session Persistence
 
     /// Saves one session to `~/.turbocode/sessions/<id>.json`.
+    /// Creates the sessions directory if needed.
     public func saveSession(_ session: StoredSession) throws {
-        try encoder.encode(session).write(to: sessionURL(for: session.id), options: .atomic)
+        let dir = sessionsDir
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        let url = sessionURL(for: session.id)
+        try encoder.encode(session).write(to: url, options: .atomic)
+        print("[TurboCode] Saved session \(session.id) → \(url.path)")
     }
 
     /// Loads one session by id.
@@ -66,7 +73,10 @@ public final class TurboCodeConfig: Sendable {
 
     /// Lists all session files, optionally filtered by project name.
     public func listSessions(project: String? = nil) throws -> [StoredSession] {
-        guard FileManager.default.fileExists(atPath: sessionsDir.path) else { return [] }
+        guard FileManager.default.fileExists(atPath: sessionsDir.path) else {
+            try FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+            return []
+        }
         let files = try FileManager.default.contentsOfDirectory(at: sessionsDir,
             includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }
