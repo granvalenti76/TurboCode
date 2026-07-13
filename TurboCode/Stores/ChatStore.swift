@@ -270,6 +270,9 @@ public final class ChatStore {
             3. Synthesise the powerful model's response into a clear, well-formatted answer for the user.
 
             The powerful model has direct access to the file system, git, and all coding tools through the workspace at: \(workspaceRoot). So include full paths and file names in your delegation.
+
+            === APPROVAL REQUESTS ===
+            If the powerful model's response contains "ACTION REQUIRED", do NOT synthesise or rephrase it. Pass it through verbatim to the user and ask them to confirm or reject. When the user responds with approval or rejection, delegate another `call_powerful_model` call including the user's decision as part of the context.
             """
             effectiveInstructions = text
         } else {
