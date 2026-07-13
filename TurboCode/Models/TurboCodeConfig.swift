@@ -57,7 +57,7 @@ public final class TurboCodeConfig: Sendable {
         ]
 
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
 
         let modelsData = try encoder.encode(defaultModels)
         try modelsData.write(to: modelsURL, options: .atomic)
@@ -82,7 +82,7 @@ public final class TurboCodeConfig: Sendable {
     /// Persists session metadata to disk.
     public func saveSessions(_ sessions: [ArchivedSession]) throws {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let data = try encoder.encode(sessions)
         try data.write(to: sessionsURL, options: .atomic)
     }
