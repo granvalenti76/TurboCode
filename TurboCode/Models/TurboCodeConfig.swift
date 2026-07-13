@@ -7,93 +7,89 @@ import Foundation
 public final class TurboCodeConfig: Sendable {
     public static let shared = TurboCodeConfig()
 
-    /// Root directory: `~/.turbocode/`
     private var rootURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".turbocode")
     }
 
-    /// `~/.turbocode/models.json` — remote model configurations.
-    private var modelsURL: URL {
-        rootURL.appendingPathComponent("models.json")
-    }
+    private var modelsURL: URL { rootURL.appendingPathComponent("models.json") }
+    private var sessionsDir: URL { rootURL.appendingPathComponent("sessions") }
 
-    /// `~/.turbocode/sessions.json` — persisted session metadata.
-    private var sessionsURL: URL {
-        rootURL.appendingPathComponent("sessions.json")
+    private var encoder: JSONEncoder {
+        let e = JSONEncoder()
+        e.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        return e
     }
 
     // MARK: - First Launch
 
-    /// Returns `true` if the config directory exists (not first launch).
     public var isOnboarded: Bool {
-        let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".turbocode").path
-        return FileManager.default.fileExists(atPath: path)
+        FileManager.default.fileExists(atPath: rootURL.path)
     }
 
-    /// Creates `~/.turbocode/` with default configuration files.
     public func performOnboarding() throws {
-        try FileManager.default.createDirectory(
-            at: rootURL,
-            withIntermediateDirectories: true
-        )
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
 
         let defaultModels: [RemoteModelConfig] = [
-            RemoteModelConfig(
-                id: "llama",
-                name: "Llama-server",
+            RemoteModelConfig(id: "llama", name: "Llama-server",
                 url: "http://127.0.0.1:8080/v1",
                 modelName: "/Users/granvalenti/.modelli/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
-                temperature: 0.6
-            ),
-            RemoteModelConfig(
-                id: "apple-pcc",
-                name: "Apple PCC",
+                temperature: 0.6),
+            RemoteModelConfig(id: "apple-pcc", name: "Apple PCC",
                 url: "http://127.0.0.1:1976/v1",
-                modelName: "pcc",
-                temperature: 0.6
-            )
+                modelName: "pcc", temperature: 0.6),
         ]
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-
-        let modelsData = try encoder.encode(defaultModels)
-        try modelsData.write(to: modelsURL, options: .atomic)
-
-        let emptySessions = try encoder.encode([ArchivedSession]())
-        try emptySessions.write(to: sessionsURL, options: .atomic)
+        try encoder.encode(defaultModels).write(to: modelsURL, options: .atomic)
     }
 
     // MARK: - Remote Models
 
-    /// Reads the current remote model configurations.
     public func loadRemoteModels() throws -> [RemoteModelConfig] {
-        guard FileManager.default.fileExists(atPath: modelsURL.path) else {
-            return []
-        }
-        let data = try Data(contentsOf: modelsURL)
-        return try JSONDecoder().decode([RemoteModelConfig].self, from: data)
+        guard FileManager.default.fileExists(atPath: modelsURL.path) else { return [] }
+        return try JSONDecoder().decode([RemoteModelConfig].self, from: Data(contentsOf: modelsURL))
     }
 
-    // MARK: - Session Persistence
+    // MARK: - Per-Session Persistence
 
-    /// Persists session metadata to disk.
-    public func saveSessions(_ sessions: [ArchivedSession]) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        let data = try encoder.encode(sessions)
-        try data.write(to: sessionsURL, options: .atomic)
+    /// Saves one session to `~/.turbocode/sessions/<id>.json`.
+    public func saveSession(_ session: StoredSession) throws {
+        try encoder.encode(session).write(to: sessionURL(for: session.id), options: .atomic)
     }
 
-    /// Loads persisted session metadata.
-    public func loadSessions() throws -> [ArchivedSession] {
-        guard FileManager.default.fileExists(atPath: sessionsURL.path) else {
-            return []
+    /// Loads one session by id.
+    public func loadSession(id: String) throws -> StoredSession? {
+        let url = sessionURL(for: id)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try JSONDecoder().decode(StoredSession.self, from: Data(contentsOf: url))
+    }
+
+    /// Lists all session files, optionally filtered by project name.
+    public func listSessions(project: String? = nil) throws -> [StoredSession] {
+        guard FileManager.default.fileExists(atPath: sessionsDir.path) else { return [] }
+        let files = try FileManager.default.contentsOfDirectory(at: sessionsDir,
+            includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }
+
+        let all: [StoredSession] = try files.compactMap { url in
+            try JSONDecoder().decode(StoredSession.self, from: Data(contentsOf: url))
         }
-        let data = try Data(contentsOf: sessionsURL)
-        return try JSONDecoder().decode([ArchivedSession].self, from: data)
+        if let project {
+            return all.filter { $0.projectName == project }
+        }
+        return all
+    }
+
+    /// Deletes a session file.
+    public func deleteSession(id: String) throws {
+        let url = sessionURL(for: id)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private func sessionURL(for id: String) -> URL {
+        sessionsDir.appendingPathComponent("\(id).json")
     }
 }
 
@@ -107,41 +103,50 @@ public struct RemoteModelConfig: Codable, Hashable, Sendable {
     public var temperature: Double
 
     public init(id: String, name: String, url: String, modelName: String, temperature: Double) {
-        self.id = id
-        self.name = name
-        self.url = url
-        self.modelName = modelName
-        self.temperature = temperature
+        self.id = id; self.name = name; self.url = url
+        self.modelName = modelName; self.temperature = temperature
     }
 }
 
-// MARK: - Archived Session
+// MARK: - Stored Session
 
-/// Lightweight metadata for a persisted session, grouped under a project.
-public struct ArchivedSession: Codable, Hashable, Sendable, Identifiable {
+/// A full persisted session: metadata + conversation blocks.
+public struct StoredSession: Codable, Hashable, Sendable, Identifiable {
     public let id: String
     public var title: String
-    public var projectName: String       // workspace last path component
-    public var workspacePath: String?    // full path
+    public var projectName: String
+    public var workspacePath: String?
     public var createdAt: Date
     public var updatedAt: Date
-    public var modelBackend: String      // rawValue of ModelBackend
+    public var modelBackend: String
+    public var blocks: [StoredBlock]
 
-    public init(
-        id: String = UUID().uuidString,
-        title: String,
-        projectName: String,
-        workspacePath: String? = nil,
-        createdAt: Date = .now,
-        updatedAt: Date = .now,
-        modelBackend: String = "Llama-server"
-    ) {
-        self.id = id
-        self.title = title
-        self.projectName = projectName
-        self.workspacePath = workspacePath
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-        self.modelBackend = modelBackend
+    public init(id: String = UUID().uuidString, title: String,
+                projectName: String, workspacePath: String? = nil,
+                createdAt: Date = .now, updatedAt: Date = .now,
+                modelBackend: String = "Llama-server",
+                blocks: [StoredBlock] = []) {
+        self.id = id; self.title = title; self.projectName = projectName
+        self.workspacePath = workspacePath; self.createdAt = createdAt
+        self.updatedAt = updatedAt; self.modelBackend = modelBackend
+        self.blocks = blocks
+    }
+}
+
+// MARK: - Stored Block
+
+/// Codable snapshot of a ChatBlock.
+public struct StoredBlock: Codable, Hashable, Sendable, Identifiable {
+    public let id: String
+    public let kind: String     // ChatBlockKind rawValue
+    public let text: String
+    public let createdAt: Date
+    public var model: String?
+    public var providerId: String?
+
+    public init(id: String = UUID().uuidString, kind: String, text: String,
+                createdAt: Date = .now, model: String? = nil, providerId: String? = nil) {
+        self.id = id; self.kind = kind; self.text = text
+        self.createdAt = createdAt; self.model = model; self.providerId = providerId
     }
 }

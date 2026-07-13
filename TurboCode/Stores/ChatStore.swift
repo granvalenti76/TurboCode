@@ -427,43 +427,63 @@ public final class ChatStore {
 
     // MARK: - Session Persistence
 
-    /// Persists all active threads to `~/.turbocode/sessions.json`.
-    public func persistSessions() async {
-        let archived = threads.map { thread in
-            ArchivedSession(
-                id: thread.id,
-                title: thread.title,
-                projectName: thread.workspace
-                    .flatMap { URL(fileURLWithPath: $0).lastPathComponent }
-                    ?? "_general",
-                workspacePath: thread.workspace,
-                createdAt: thread.createdAt,
-                updatedAt: thread.updatedAt,
-                modelBackend: activeBackend.rawValue
-            )
-        }
+    /// Saves the active thread and its blocks to `~/.turbocode/sessions/<id>.json`.
+    public func persistSession(for threadId: String) async {
+        guard let thread = threads.first(where: { $0.id == threadId }) else { return }
+        let stored = StoredSession(
+            id: thread.id,
+            title: thread.title,
+            projectName: thread.workspace
+                .flatMap { URL(fileURLWithPath: $0).lastPathComponent }
+                ?? "_general",
+            workspacePath: thread.workspace,
+            createdAt: thread.createdAt,
+            updatedAt: thread.updatedAt,
+            modelBackend: activeBackend.rawValue,
+            blocks: blocks.map {
+                StoredBlock(id: $0.id, kind: $0.kind.rawValue, text: $0.text,
+                    createdAt: $0.createdAt, model: $0.model, providerId: $0.providerId)
+            }
+        )
         do {
-            try TurboCodeConfig.shared.saveSessions(archived)
+            try TurboCodeConfig.shared.saveSession(stored)
         } catch {
-            print("[TurboCode] Failed to persist sessions: \(error.localizedDescription)")
+            print("[TurboCode] Failed to persist session: \(error.localizedDescription)")
         }
     }
 
-    /// Restores threads from disk on launch.
+    /// Loads all session files and populates the thread list.
     public func restoreSessions() async {
-        guard let loaded = try? TurboCodeConfig.shared.loadSessions(),
-              !loaded.isEmpty else { return }
+        guard let all = try? TurboCodeConfig.shared.listSessions(),
+              !all.isEmpty else { return }
         let existingIDs = Set(threads.map(\.id))
-        for archived in loaded where !existingIDs.contains(archived.id) {
+        for stored in all where !existingIDs.contains(stored.id) {
             threads.append(Conversation(
-                id: archived.id,
-                title: archived.title,
-                createdAt: archived.createdAt,
-                updatedAt: archived.updatedAt,
-                workspace: archived.workspacePath,
+                id: stored.id,
+                title: stored.title,
+                createdAt: stored.createdAt,
+                updatedAt: stored.updatedAt,
+                workspace: stored.workspacePath,
                 mode: .agent
             ))
         }
+    }
+
+    /// Fully restores a past session with its blocks.
+    public func restoreSession(id: String) async {
+        guard let stored = try? TurboCodeConfig.shared.loadSession(id: id),
+              let _ = threads.firstIndex(where: { $0.id == id }) else { return }
+        activeThreadId = id
+        blocks = stored.blocks.map {
+            ChatBlock(id: $0.id, kind: ChatBlockKind(rawValue: $0.kind) ?? .assistant,
+                text: $0.text, createdAt: $0.createdAt, model: $0.model, providerId: $0.providerId)
+        }
+        liveReasoning = ""; liveAssistant = ""
+        isFirstMessage = blocks.isEmpty
+        if let wp = stored.workspacePath, workspaceRoot != wp {
+            workspaceRoot = wp
+        }
+        rebuildSession(keepingHistory: false)
     }
 
     public func renameThread(id: String, title: String) async {
@@ -634,8 +654,10 @@ public final class ChatStore {
                     model: composerModel
                 )
             }
-            // Persist session metadata after each completed turn.
-            Task { await persistSessions() }
+            // Persist session after each completed turn.
+            if let tid = activeThreadId {
+                Task { await persistSession(for: tid) }
+            }
         }
 
         busy = false

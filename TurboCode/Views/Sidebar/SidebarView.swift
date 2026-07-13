@@ -233,7 +233,16 @@ struct SidebarView: View {
         ThreadRowView(
             thread: thread,
             isSelected: thread.id == chatStore.activeThreadId,
-            onSelect: { Task { await chatStore.selectThread(thread.id) } },
+            onSelect: {
+                Task {
+                    // If blocks are empty, it's a restored session — load full data.
+                    if chatStore.blocks.isEmpty || chatStore.activeThreadId != thread.id {
+                        await chatStore.restoreSession(id: thread.id)
+                    } else {
+                        await chatStore.selectThread(thread.id)
+                    }
+                }
+            },
             onRename: { newTitle in Task { await chatStore.renameThread(id: thread.id, title: newTitle) } },
             onPin: { Task { await chatStore.pinThread(id: thread.id, pinned: !thread.isPinned) } },
             onArchive: { Task { await chatStore.archiveThread(id: thread.id) } },
