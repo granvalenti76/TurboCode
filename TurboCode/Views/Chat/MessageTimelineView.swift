@@ -1,4 +1,5 @@
 import SwiftUI
+import MarkdownUI
 
 // MARK: - MessageTimelineView — scrollable, turn-based message list
 
@@ -6,6 +7,8 @@ import SwiftUI
 /// live streaming updates, and turn grouping.
 struct MessageTimelineView: View {
     @Environment(ChatStore.self) private var chatStore
+    @Environment(SettingsStore.self) private var settings
+    @Environment(\.chatFontSize) private var chatFontSize
     @State private var scrollID: String?
     @State private var autoScroll: Bool = true
 
@@ -57,6 +60,8 @@ struct MessageTimelineView: View {
                         .frame(height: 1)
                         .id("bottom-anchor")
                 }
+                .frame(maxWidth: CGFloat(settings.maxChatWidth))
+                .frame(maxWidth: .infinity)
             }
             .scrollContentBackground(.hidden)
             .onChange(of: chatStore.blocks.count) { _, _ in
@@ -164,7 +169,8 @@ struct LiveReasoningBlock: View {
                         .scaleEffect(0.5)
                 }
 
-                Text(formattedText(text, size: 12))
+                Text(formattedText(text))
+                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(nil)
                     .textSelection(.enabled)
@@ -212,9 +218,15 @@ struct DelegationIndicator: View {
 
 struct LiveAssistantBlock: View {
     let text: String
+    @Environment(\.chatFontSize) private var chatFontSize
 
     var body: some View {
-        Text(verbatim: text)
+        Markdown(text)
+            .markdownTheme(.basic)
+            .markdownTextStyle {
+                FontSize(chatFontSize)
+                ForegroundColor(.primary)
+            }
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)

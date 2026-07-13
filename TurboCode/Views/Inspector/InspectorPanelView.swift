@@ -75,7 +75,7 @@ struct FileInspectorView: View {
     private var headerBar: some View {
         HStack(spacing: 6) {
             Image(systemName: "doc.plaintext").font(.system(size: 10)).foregroundStyle(.secondary)
-            Text("File modificati").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+            Text("Changed Files").font(AppTypography.controlEmphasized).foregroundStyle(.secondary)
             Spacer()
 
             Button {
@@ -83,9 +83,9 @@ struct FileInspectorView: View {
             } label: {
                 HStack(spacing: 2) {
                     Image(systemName: showOnlyChanges ? "doc.text.below.ecg" : "doc.text")
-                        .font(.system(size: 9))
+                        .font(.system(size: 11))
                     Text(showOnlyChanges ? "Changes" : "Full")
-                        .font(.system(size: 9))
+                        .font(AppTypography.metadata)
                 }
                 .foregroundStyle(showOnlyChanges ? Color.accentColor : Color.secondary.opacity(0.5))
                 .padding(.horizontal, 6).padding(.vertical, 3)
@@ -94,7 +94,9 @@ struct FileInspectorView: View {
             .buttonStyle(.plain)
             .help(showOnlyChanges ? "Show full diff with context" : "Show only added/removed lines")
 
-            Text("\(sections.count) file").font(.system(size: 10)).foregroundStyle(.tertiary)
+            Text("\(sections.count) \(sections.count == 1 ? "file" : "files")")
+                .font(AppTypography.metadata)
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8).frame(minHeight: 36)
     }
@@ -128,7 +130,7 @@ struct FileInspectorView: View {
     private var emptyPlaceholder: some View {
         VStack(spacing: 8) {
             Image(systemName: "checkmark.circle").font(.system(size: 24)).foregroundStyle(.secondary)
-            Text("Nessun file modificato").font(.system(size: 11)).foregroundStyle(.secondary)
+            Text("No changed files").font(AppTypography.sidebarLabel).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -162,15 +164,15 @@ struct DiffSectionView: View {
     private var sectionHeader: some View {
         HStack(spacing: 6) {
             Image(systemName: isCollapsed ? "chevron.forward" : "chevron.down")
-                .font(.system(size: 9)).foregroundStyle(.tertiary).frame(width: 10)
+                .font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 10)
             Image(systemName: "doc.plaintext").font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 14)
             VStack(alignment: .leading, spacing: 1) {
-                Text(section.fileName).font(.system(size: 11, weight: .medium)).lineLimit(1)
-                Text(section.path).font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                Text(section.fileName).font(AppTypography.controlEmphasized).lineLimit(1)
+                Text(section.path).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: 4)
-            if section.added > 0 { Text("+\(section.added)").font(.system(size: 9, design: .monospaced)).foregroundStyle(.green) }
-            if section.removed > 0 { Text("-\(section.removed)").font(.system(size: 9, design: .monospaced)).foregroundStyle(.red) }
+            if section.added > 0 { Text("+\(section.added)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.green) }
+            if section.removed > 0 { Text("-\(section.removed)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.red) }
         }
     }
 }
@@ -188,7 +190,7 @@ struct DiffLinesView: View {
                     DiffLineView(line: line)
                 }
             }
-            .font(.system(size: 11, design: .monospaced))
+            .font(AppTypography.code)
             .textSelection(.enabled)
             .frame(minWidth: contentWidth, alignment: .leading)
         }

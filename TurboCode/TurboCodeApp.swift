@@ -18,6 +18,8 @@ struct TurboCodeApp: App {
             WorkbenchSplitView()
                 .environment(chatStore)
                 .environment(settingsStore)
+                .environment(\.chatFontSize, CGFloat(settingsStore.fontSize))
+                .preferredColorScheme(settingsStore.theme.colorScheme)
                 .task {
                     // First-launch onboarding
                     await chatStore.ensureOnboarding()
@@ -27,6 +29,7 @@ struct TurboCodeApp: App {
                 }
         }
         .windowStyle(.titleBar)
+        .windowToolbarStyle(.unified(showsTitle: true))
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1200, height: 800)
         .commands {
@@ -47,8 +50,10 @@ struct TurboCodeApp: App {
 
                 Divider()
 
-                Button("Choose Workspace...") {}
-                .keyboardShortcut("o", modifiers: [.command, .shift])
+                Button("Choose Workspace...") {
+                    chatStore.chooseWorkspace()
+                }
+                    .keyboardShortcut("o", modifiers: [.command, .shift])
             }
 
             // Edit menu — standard

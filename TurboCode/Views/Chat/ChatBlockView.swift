@@ -7,6 +7,7 @@ import MarkdownUI
 /// Each block kind gets its own visual treatment following Kun's design language.
 struct ChatBlockView: View {
     let block: ChatBlock
+    @Environment(\.chatFontSize) private var chatFontSize
     @State private var isEditing = false
     @State private var editText: String = ""
 
@@ -39,7 +40,8 @@ struct ChatBlockView: View {
                 if isEditing {
                     editView
                 } else {
-                    Text(formattedText(block.text, size: 14))
+                    Text(block.text)
+                        .font(AppTypography.chatBody(size: chatFontSize))
                         .textSelection(.enabled)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
@@ -102,7 +104,12 @@ struct ChatBlockView: View {
     private var assistantBubble: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(block.text)
+                Markdown(block.text)
+                    .markdownTheme(.basic)
+                    .markdownTextStyle {
+                        FontSize(chatFontSize)
+                        ForegroundColor(.primary)
+                    }
                     .textSelection(.enabled)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -132,7 +139,8 @@ struct ChatBlockView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.orange)
 
-                Text(formattedText(block.text, size: 12))
+                Text(formattedText(block.text))
+                    .font(.system(size: max(12, chatFontSize - 2)))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
@@ -152,11 +160,11 @@ struct ChatBlockView: View {
     private var toolBlockPlaceholder: some View {
         HStack(spacing: 6) {
             Image(systemName: "gearshape.2")
-                .font(.system(size: 9))
-                .foregroundStyle(.tertiary)
-            Text(block.text)
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
+            Text(block.text)
+                .font(AppTypography.metadata)
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -223,11 +231,11 @@ struct ModelBadgeView: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: "cpu")
-                .font(.system(size: 8))
+                .font(.system(size: 11))
             Text(displayName)
-                .font(.system(size: 10, design: .monospaced))
+                .font(AppTypography.badge)
         }
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.secondary)
         .padding(.horizontal, 8)
         .padding(.vertical, 3)
         .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
@@ -248,7 +256,7 @@ struct ModelBadgeView: View {
 /// The base font size is embedded in the AttributedString so that
 /// markdown-specific fonts (bold, italic, code) are preserved.
 ///  DEAD CODE
-func formattedText(_ input: String, size: CGFloat = 14) -> AttributedString {
+func formattedText(_ input: String) -> AttributedString {
     let cleaned = input
         .replacingOccurrences(of: "\\\\", with: "\u{1D}")
         .replacingOccurrences(of: "\\n", with: "\n")
@@ -262,11 +270,7 @@ func formattedText(_ input: String, size: CGFloat = 14) -> AttributedString {
         markdown: cleaned,
         options: .init(interpretedSyntax: .full)
     ) {
-        var result = parsed
-        result.font = .systemFont(ofSize: size)
-        return result
+        return parsed
     }
-    var fallback = AttributedString(cleaned)
-    fallback.font = .systemFont(ofSize: size)
-    return fallback
+    return AttributedString(cleaned)
 }

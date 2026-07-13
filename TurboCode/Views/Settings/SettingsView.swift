@@ -54,8 +54,8 @@ struct GeneralSettingsView: View {
                 }
 
                 HStack {
-                    Text("Font size")
-                    Slider(value: s.fontSize, in: 10...24, step: 1)
+                    Text("Chat text size")
+                    Slider(value: s.fontSize, in: 13...20, step: 1)
                     Text("\(Int(settings.fontSize))")
                         .font(.system(size: 11, design: .monospaced))
                         .frame(width: 24)
@@ -65,7 +65,6 @@ struct GeneralSettingsView: View {
             Section("Language") {
                 Picker("Language", selection: s.language) {
                     Text("English").tag("en")
-                    Text("中文").tag("zh")
                 }
             }
 

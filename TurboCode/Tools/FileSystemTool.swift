@@ -123,18 +123,7 @@ struct FileSystemTool: Tool {
     /// then validates it's within the workspace boundary.
     /// Returns the resolved absolute path on success, throws on error.
     private func resolveAndValidatePath(_ path: String) throws -> String {
-        guard !workspaceRoot.isEmpty else {
-            throw FileSystemError.noWorkspace
-        }
-
-        let workspaceURL = URL(fileURLWithPath: workspaceRoot).standardized
-        let resolved = URL(fileURLWithPath: path, relativeTo: workspaceURL).standardized.resolvingSymlinksInPath()
-
-        guard resolved.path.hasPrefix(workspaceURL.path) else {
-            throw FileSystemError.outsideWorkspace(path: path, workspace: workspaceRoot)
-        }
-
-        return resolved.path
+        try WorkspacePathResolver.resolve(path, within: workspaceRoot).path
     }
 
     // MARK: - Safe Operations
@@ -355,6 +344,43 @@ enum FileSystemError: LocalizedError {
         case .outsideWorkspace(let path, let workspace):
             return "Access denied: '\(path)' is outside the workspace '\(workspace)'."
         }
+    }
+}
+
+// MARK: - Shared Workspace Path Validation
+
+/// Resolves relative and absolute paths while enforcing a strict workspace
+/// boundary. Both the workspace and candidate are symlink-resolved so a link
+/// inside the workspace cannot be used to access files outside it.
+enum WorkspacePathResolver {
+    nonisolated static func resolve(_ path: String, within workspaceRoot: String) throws -> URL {
+        guard !workspaceRoot.isEmpty else {
+            throw FileSystemError.noWorkspace
+        }
+
+        let workspaceURL = URL(fileURLWithPath: workspaceRoot)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+
+        let candidateURL: URL
+        if (path as NSString).isAbsolutePath {
+            candidateURL = URL(fileURLWithPath: path)
+        } else {
+            candidateURL = workspaceURL.appendingPathComponent(path)
+        }
+
+        let resolvedURL = candidateURL
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        let workspacePath = workspaceURL.path
+        let candidatePath = resolvedURL.path
+
+        guard candidatePath == workspacePath
+                || candidatePath.hasPrefix(workspacePath + "/") else {
+            throw FileSystemError.outsideWorkspace(path: path, workspace: workspaceRoot)
+        }
+
+        return resolvedURL
     }
 }
 

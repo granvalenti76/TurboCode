@@ -1,15 +1,22 @@
 import Foundation
 import Observation
+import SwiftUI
 
 // MARK: - SettingsStore
 
 @MainActor
 @Observable
 public final class SettingsStore {
-    public var theme: ThemePreference = .system
+    public var theme: ThemePreference = .system {
+        didSet { UserDefaults.standard.set(theme.rawValue, forKey: "theme") }
+    }
     public var language: String = "en"
-    public var fontSize: Double = 14.0
-    public var maxChatWidth: Double = 720.0
+    public var fontSize: Double = 15.0 {
+        didSet { UserDefaults.standard.set(fontSize, forKey: "fontSize") }
+    }
+    public var maxChatWidth: Double = 820.0 {
+        didSet { UserDefaults.standard.set(maxChatWidth, forKey: "maxChatWidth") }
+    }
     public var workspacePaths: [String] = []
 
     public var openaiAPIKey: String = ""
@@ -33,9 +40,9 @@ public final class SettingsStore {
         theme = ThemePreference(rawValue: defaults.string(forKey: "theme") ?? "system") ?? .system
         language = defaults.string(forKey: "language") ?? "en"
         let savedFontSize = defaults.double(forKey: "fontSize")
-        fontSize = savedFontSize == 0 ? 14.0 : savedFontSize
+        fontSize = savedFontSize == 0 ? 15.0 : savedFontSize
         let savedMaxWidth = defaults.double(forKey: "maxChatWidth")
-        maxChatWidth = savedMaxWidth == 0 ? 720.0 : savedMaxWidth
+        maxChatWidth = savedMaxWidth == 0 ? 820.0 : savedMaxWidth
         deepseekAPIKey = defaults.string(forKey: "deepseekAPIKey") ?? ""
         deepseekBaseURL = defaults.string(forKey: "deepseekBaseURL") ?? ""
         // TODO: load from Keychain for API keys
@@ -55,6 +62,12 @@ public enum ThemePreference: String, Sendable, Hashable, CaseIterable {
     case system
     case light
     case dark
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
 }
-
-

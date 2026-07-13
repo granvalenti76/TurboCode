@@ -18,16 +18,25 @@ struct ReadFileTool: Tool {
     typealias Arguments = ReadFileArguments
     typealias Output = String
 
+    let workspaceRoot: String
+
     var name: String { "read_file" }
     var description: String { "Read the contents of a file from the local filesystem. Returns the file content or an error message if the file doesn't exist." }
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: ReadFileArguments) async throws -> String {
-        guard FileManager.default.isReadableFile(atPath: arguments.filePath) else {
+        let fileURL: URL
+        do {
+            fileURL = try WorkspacePathResolver.resolve(arguments.filePath, within: workspaceRoot)
+        } catch {
+            return "Error: \(error.localizedDescription)"
+        }
+
+        guard FileManager.default.isReadableFile(atPath: fileURL.path) else {
             return "Error: File not found or not readable at path '\(arguments.filePath)'"
         }
 
-        let content = try String(contentsOfFile: arguments.filePath, encoding: .utf8)
+        let content = try String(contentsOf: fileURL, encoding: .utf8)
         let lines = content.components(separatedBy: .newlines)
 
         if let limit = arguments.limit, limit > 0, lines.count > limit {

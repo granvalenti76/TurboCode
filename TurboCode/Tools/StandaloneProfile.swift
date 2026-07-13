@@ -53,8 +53,8 @@ struct StandaloneSkills: DynamicInstructions {
                 Instructions {
                     "Use this skill when you need to read file contents or search for code patterns with grep."
                 }
-                ReadFileTool()
-                GrepTool()
+                ReadFileTool(workspaceRoot: workspaceRoot)
+                GrepTool(workspaceRoot: workspaceRoot)
             }
         }
     }

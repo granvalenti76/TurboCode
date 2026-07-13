@@ -20,20 +20,29 @@ struct GrepTool: Tool {
     typealias Arguments = SearchArguments
     typealias Output = String
 
+    let workspaceRoot: String
+
     var name: String { "grep" }
     var description: String { "Search for a text pattern in a file or directory. Returns matching lines with line numbers." }
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: SearchArguments) async throws -> String {
+        let searchURL: URL
+        do {
+            searchURL = try WorkspacePathResolver.resolve(arguments.path, within: workspaceRoot)
+        } catch {
+            return "Error: \(error.localizedDescription)"
+        }
+
         var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: arguments.path, isDirectory: &isDirectory) else {
+        guard FileManager.default.fileExists(atPath: searchURL.path, isDirectory: &isDirectory) else {
             return "Error: Path '\(arguments.path)' does not exist"
         }
 
         if isDirectory.boolValue {
-            return try searchDirectory(arguments.path, pattern: arguments.pattern, maxResults: arguments.maxResults)
+            return try searchDirectory(searchURL.path, pattern: arguments.pattern, maxResults: arguments.maxResults)
         } else {
-            return try searchFile(arguments.path, pattern: arguments.pattern, maxResults: arguments.maxResults)
+            return try searchFile(searchURL.path, pattern: arguments.pattern, maxResults: arguments.maxResults)
         }
     }
 
@@ -72,14 +81,21 @@ struct GrepTool: Tool {
                 break
             }
 
-            let resourceValues = try fileURL.resourceValues(forKeys: [.isRegularFileKey])
+            // The enumerator can encounter symlinks. Resolve every file again
+            // before reading it so links escaping the workspace are ignored.
+            guard let safeFileURL = try? WorkspacePathResolver.resolve(
+                fileURL.path,
+                within: workspaceRoot
+            ) else { continue }
+
+            let resourceValues = try safeFileURL.resourceValues(forKeys: [.isRegularFileKey])
             guard resourceValues.isRegularFile == true else { continue }
-            guard !fileURL.pathComponents.contains(".git") else { continue }
+            guard !safeFileURL.pathComponents.contains(".git") else { continue }
 
             do {
-                let matches = try searchFile(fileURL.path, pattern: pattern, maxResults: resultLimit - totalMatches)
+                let matches = try searchFile(safeFileURL.path, pattern: pattern, maxResults: resultLimit - totalMatches)
                 if !matches.hasPrefix("No matches") {
-                    allResults.append("--- \(fileURL.path) ---\n\(matches)")
+                    allResults.append("--- \(safeFileURL.path) ---\n\(matches)")
                     let countLine = matches.components(separatedBy: .newlines).first ?? ""
                     let count = Int(countLine.components(separatedBy: " ").dropLast().last ?? "0") ?? 1
                     totalMatches += count

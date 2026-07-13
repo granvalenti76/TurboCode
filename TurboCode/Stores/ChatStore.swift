@@ -194,6 +194,10 @@ public final class ChatStore {
     // Session — recreated when backend or workspace changes
     private var session: LanguageModelSession
 
+    // The currently running response task. Keeping the handle makes the Stop
+    // button cancel the actual model stream rather than only changing the UI.
+    private var responseTask: Task<Void, Never>?
+
     // MARK: - Onboarding
 
     /// Ensures `~/.turbocode/` exists. Called once at app launch.
@@ -276,7 +280,11 @@ public final class ChatStore {
         // ── Workspace tools for the delegate model ──
         var workspaceTools: [any Tool] = []
         if !workspaceRoot.isEmpty {
-            workspaceTools += [ReadFileTool(), GrepTool(), FileSystemTool(workspaceRoot: workspaceRoot)]
+            workspaceTools += [
+                ReadFileTool(workspaceRoot: workspaceRoot),
+                GrepTool(workspaceRoot: workspaceRoot),
+                FileSystemTool(workspaceRoot: workspaceRoot)
+            ]
         }
 
         // ── Profile tools ──
@@ -564,7 +572,21 @@ public final class ChatStore {
     }
 
     public func sendMessage(_ text: String) async {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !busy else { return }
+
+        busy = true
+        let task = Task<Void, Never> { [weak self] in
+            guard let self else { return }
+            await self.performSendMessage(text)
+        }
+        responseTask = task
+        await task.value
+        responseTask = nil
+        busy = false
+    }
+
+    private func performSendMessage(_ text: String) async {
 
         isFirstMessage = false
         // Generate a title from the first user prompt using the Apple on-device model.
@@ -575,17 +597,18 @@ public final class ChatStore {
         let placeholderId = UUID().uuidString
         blocks.append(ChatBlock(id: placeholderId, kind: .assistant, text: "", model: composerModel))
 
-        busy = true
         runtimeStatus = .ready
         error = nil
+        var accumulatedText = ""
 
         do {
             let stream = session.streamResponse(to: text)
-            var accumulatedText = ""
             // Delegation detection is handled by TurboCodeDynamicProfile's
             // onToolCall / onToolOutput lifecycle callbacks — no scanning needed.
 
             for try await snapshot in stream {
+                try Task.checkCancellation()
+
                 // Fast path: update liveAssistant for quick UI feedback
                 if !snapshot.content.isEmpty {
                     accumulatedText = snapshot.content
@@ -615,6 +638,7 @@ public final class ChatStore {
                     }
                 }
             }
+            try Task.checkCancellation()
 
             // Stream ended: finalize the assistant block.
             // Reset delegation state once streaming is done.
@@ -644,6 +668,22 @@ public final class ChatStore {
             if let i = threads.firstIndex(where: { $0.id == activeThreadId }) {
                 threads[i].updatedAt = .now
             }
+        } catch where error is CancellationError || Task.isCancelled {
+            // Keep whatever the model had already produced and mark an empty
+            // response clearly, without presenting cancellation as an error.
+            let partialText = accumulatedText.isEmpty ? liveReasoning : accumulatedText
+            if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
+                blocks[i] = ChatBlock(
+                    id: placeholderId,
+                    kind: .assistant,
+                    text: partialText.isEmpty ? "Response interrupted." : partialText,
+                    model: composerModel
+                )
+            }
+            liveReasoning = ""
+            liveAssistant = ""
+            isDelegating = false
+            self.error = nil
         } catch {
             self.error = error.localizedDescription
             if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
@@ -660,11 +700,10 @@ public final class ChatStore {
             Task { await persistSession(for: tid) }
         }
 
-        busy = false
     }
 
     public func interrupt() {
-        busy = false
+        responseTask?.cancel()
     }
 
     /// Approve a pending destructive operation — executes directly via FileManager,

@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ChatContentView: View {
     @Environment(ChatStore.self) private var chatStore
+    @Environment(SettingsStore.self) private var settings
 
     var body: some View {
         VStack(spacing: 0) {
@@ -37,7 +38,7 @@ struct ChatContentView: View {
             }
 
             InputFieldView()
-                .frame(maxWidth: 600)
+                .frame(maxWidth: min(CGFloat(settings.maxChatWidth), 720))
 
             Spacer()
         }
@@ -63,6 +64,8 @@ struct ChatContentView: View {
             }
 
             InputFieldView()
+                .frame(maxWidth: CGFloat(settings.maxChatWidth) + 24)
+                .frame(maxWidth: .infinity)
         }
     }
 

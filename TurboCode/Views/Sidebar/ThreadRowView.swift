@@ -22,7 +22,7 @@ struct ThreadRowView: View {
                 // Pin indicator
                 if thread.isPinned {
                     Image(systemName: "pin.fill")
-                        .font(.system(size: 8))
+                        .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                         .rotationEffect(.degrees(45))
                 }
@@ -38,17 +38,17 @@ struct ThreadRowView: View {
                             isRenaming = false
                         })
                         .textFieldStyle(.plain)
-                        .font(.system(size: 12.5, weight: .medium))
+                        .font(AppTypography.sidebarTitle)
                     } else {
                         Text(thread.title)
-                            .font(.system(size: 12.5, weight: .medium))
+                            .font(AppTypography.sidebarTitle)
                             .lineLimit(1)
                             .foregroundStyle(isSelected ? .primary : .primary)
                     }
 
                     Text(thread.updatedAt, style: .relative)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
+                        .font(AppTypography.sidebarMetadata)
+                        .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -57,7 +57,7 @@ struct ThreadRowView: View {
                 // Mode badge
                 if thread.mode == .plan {
                     Text("PLAN")
-                        .font(.system(size: 8, weight: .bold))
+                        .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.orange)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 2)
@@ -67,13 +67,12 @@ struct ThreadRowView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(
-                isSelected
-                    ? Color.accentColor.opacity(0.1)
-                    : isHovering
-                        ? Color.primary.opacity(0.04)
-                        : Color.clear,
+                isHovering && !isSelected
+                    ? Color.primary.opacity(0.05)
+                    : Color.clear,
                 in: RoundedRectangle(cornerRadius: 8)
             )
+            .sidebarSelectionBackground(isSelected)
             .overlay(alignment: .trailing) {
                 if isHovering && !isSelected {
                     // Quick action buttons on hover (like Kun)

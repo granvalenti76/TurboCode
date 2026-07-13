@@ -17,14 +17,13 @@ enum ReasoningEffort: String, CaseIterable {
 
 struct InputFieldView: View {
     @Environment(ChatStore.self) private var chatStore
+    @Environment(\.chatFontSize) private var chatFontSize
     @State private var viewModel = ComposerViewModel()
     @FocusState private var isFocused: Bool
 
     // Persisted preferences
     @AppStorage("approvalMode") private var approvalMode: ApprovalMode = .askForApproval
     @AppStorage("reasoningEffort") private var reasoningEffort: ReasoningEffort = .medium
-
-    private let projectName = "TurboCode"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -74,9 +73,10 @@ struct InputFieldView: View {
     private var textField: some View {
         TextField("Do anything", text: $viewModel.messageText, axis: .vertical)
             .textFieldStyle(.plain)
-            .font(.body)
+            .font(AppTypography.chatBody(size: chatFontSize))
             .lineLimit(1...10)
             .focused($isFocused)
+            .disabled(chatStore.busy)
     }
 
     // MARK: - Attach Button
@@ -86,8 +86,10 @@ struct InputFieldView: View {
             // TODO: attach files
         } label: {
             Image(systemName: "plus")
+                .frame(width: 28, height: 28)
         }
         .buttonStyle(.plain)
+        .help("Attach files")
     }
 
     // MARK: - Approval Mode Menu
@@ -101,6 +103,7 @@ struct InputFieldView: View {
             Label(approvalMode.rawValue, systemImage: "hand.raised")
         }
         .menuStyle(.borderlessButton)
+        .font(AppTypography.control)
         .fixedSize()
     }
 
@@ -147,6 +150,7 @@ struct InputFieldView: View {
                     }
                 }
                 .menuStyle(.borderlessButton)
+                .font(AppTypography.control)
                 .fixedSize()
             }
         }
@@ -159,39 +163,45 @@ struct InputFieldView: View {
             // TODO: voice input
         } label: {
             Image(systemName: "mic")
+                .frame(width: 28, height: 28)
         }
         .buttonStyle(.plain)
+        .help("Voice input")
     }
 
     // MARK: - Send Button
 
     private var sendButton: some View {
         Button {
+            if chatStore.busy {
+                chatStore.interrupt()
+                return
+            }
             let text = viewModel.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return }
             viewModel.reset()
             Task { await chatStore.sendMessage(text) }
         } label: {
-            Image(systemName: "arrow.up")
+            Image(systemName: chatStore.busy ? "stop.fill" : "arrow.up")
         }
         .buttonStyle(.borderedProminent)
+        .controlSize(.regular)
         .clipShape(Circle())
-        .disabled(!viewModel.canSend)
+        .disabled(!chatStore.busy && !viewModel.canSend)
         .keyboardShortcut(.return, modifiers: [])
+        .help(chatStore.busy ? "Stop response" : "Send message")
     }
 
     // MARK: - Bottom Info Bar
 
     private var bottomInfoBar: some View {
         HStack(spacing: 16) {
-            Label(projectName, systemImage: "doc.plaintext")
-
             orchestratorModeMenu
             branchMenu
 
             Spacer()
         }
-        .font(.caption)
+        .font(AppTypography.metadata)
         .foregroundStyle(.secondary)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

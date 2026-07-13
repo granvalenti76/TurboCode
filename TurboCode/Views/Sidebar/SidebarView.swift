@@ -6,7 +6,6 @@ struct SidebarView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var searchText: String = ""
     @State private var selectedNav: String = "chat"
-    @State private var expandedProject: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,10 +20,8 @@ struct SidebarView: View {
             // Chats section
             chatsSection
             Spacer()
-            // Footer — user profile
-            footerView
         }
-        .background(Color(.windowBackgroundColor))
+        .background(Color.clear)
         .frame(minWidth: 220)
     }
 
@@ -39,12 +36,12 @@ struct SidebarView: View {
                     Image(systemName: "pencil")
                         .font(.system(size: 12, weight: .medium))
                     Text("New chat")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(AppTypography.controlEmphasized)
                 }
                 .foregroundStyle(.primary)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
-                .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 8))
+                .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
             .padding(.leading, 12)
@@ -67,7 +64,7 @@ struct SidebarView: View {
                             .font(.system(size: 13))
                             .frame(width: 18)
                         Text(item.label)
-                            .font(.system(size: 12))
+                            .font(AppTypography.sidebarLabel)
                         Spacer()
                         if let badge = item.badge {
                             Text(badge)
@@ -78,15 +75,11 @@ struct SidebarView: View {
                     .foregroundStyle(selectedNav == item.id ? .primary : .secondary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background(
-                        selectedNav == item.id
-                            ? AnyShapeStyle(.quaternary.opacity(0.3))
-                            : AnyShapeStyle(.clear),
-                        in: RoundedRectangle(cornerRadius: 6)
-                    )
                     .contentShape(Rectangle())
+                    .sidebarSelectionBackground(selectedNav == item.id)
                 }
                 .buttonStyle(.plain)
+
             }
         }
         .padding(.horizontal, 8)
@@ -113,8 +106,8 @@ struct SidebarView: View {
     private func sectionHeader(_ title: String) -> some View {
         HStack {
             Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.tertiary)
+                .font(AppTypography.sectionLabel)
+                .foregroundStyle(.secondary)
                 .textCase(.uppercase)
             Spacer()
         }
@@ -139,33 +132,23 @@ struct SidebarView: View {
                         .foregroundStyle(.tertiary)
                         .frame(width: 16)
                     Text("All chats")
-                        .font(.system(size: 12))
+                        .font(AppTypography.sidebarLabel)
                     Spacer()
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
                 .contentShape(Rectangle())
+                .sidebarSelectionBackground(chatStore.selectedProject == nil)
             }
             .buttonStyle(.plain)
 
             // Recent workspace projects with expandable sessions
             ForEach(chatStore.recentWorkspaces, id: \.self) { path in
                 let name = URL(fileURLWithPath: path).lastPathComponent
-                let sessions = chatStore.sortedThreads.filter { t in
-                    t.workspace.flatMap { URL(fileURLWithPath: $0).lastPathComponent } == name
-                }
                 let isSelected = chatStore.selectedProject == name
 
                 Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
-                        if expandedProject == name {
-                            expandedProject = nil
-                            chatStore.selectedProject = nil
-                        } else {
-                            expandedProject = name
-                            chatStore.selectedProject = name
-                        }
-                    }
+                    chatStore.switchToWorkspace(path)
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: isSelected ? "folder.fill" : "folder")
@@ -173,25 +156,37 @@ struct SidebarView: View {
                             .foregroundColor(isSelected ? .blue : .secondary)
                             .frame(width: 16)
                         Text(name)
-                            .font(.system(size: 12))
+                            .font(AppTypography.sidebarLabel)
                         Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 8))
-                            .foregroundStyle(Color.secondary)
-                            .rotationEffect(.degrees(expandedProject == name ? 90 : 0))
+                        if isSelected {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 6)
                     .contentShape(Rectangle())
+                    .sidebarSelectionBackground(isSelected)
                 }
                 .buttonStyle(.plain)
 
-                // Sessions under this project
-                if expandedProject == name {
-                    ForEach(sessions) { thread in
-                        threadRow(for: thread)
-                            .padding(.leading, 28)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+                // Keep project conversations visually attached to the selected
+                // workspace. The standalone Chats section is hidden in this
+                // state, so the same thread never appears twice.
+                if isSelected {
+                    if chatStore.sortedThreads.isEmpty {
+                        Text("No chats in this project")
+                            .font(AppTypography.sidebarMetadata)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.leading, 36)
+                            .padding(.vertical, 8)
+                    } else {
+                        ForEach(chatStore.sortedThreads.prefix(10)) { thread in
+                            threadRow(for: thread)
+                                .padding(.leading, 20)
+                        }
                     }
                 }
             }
@@ -206,7 +201,7 @@ struct SidebarView: View {
                         .foregroundStyle(.tertiary)
                         .frame(width: 16)
                     Text("Add workspace...")
-                        .font(.system(size: 12))
+                        .font(AppTypography.sidebarLabel)
                         .foregroundStyle(.secondary)
                     Spacer()
                 }
@@ -222,8 +217,7 @@ struct SidebarView: View {
 
     private var chatsSection: some View {
         VStack(spacing: 0) {
-            // Hide Chats header when a project is expanded (already shown under it).
-            if expandedProject == nil {
+            if chatStore.selectedProject == nil {
                 sectionHeader("Chats")
 
                 if chatStore.threads.isEmpty {
@@ -238,8 +232,8 @@ struct SidebarView: View {
     private var emptyChatsView: some View {
         HStack {
             Text("No chats")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
+                .font(AppTypography.sidebarMetadata)
+                .foregroundStyle(.secondary)
             Spacer()
         }
         .padding(.horizontal, 12)
@@ -272,58 +266,6 @@ struct SidebarView: View {
             onDelete: { Task { await chatStore.deleteThread(id: thread.id) } },
             onRestore: { Task { await chatStore.restoreThread(id: thread.id) } }
         )
-    }
-
-    // MARK: - Footer
-
-    private var footerView: some View {
-        VStack(spacing: 8) {
-            Divider()
-            userProfileRow
-        }
-    }
-
-    private var userProfileRow: some View {
-        HStack(spacing: 8) {
-            userAvatar
-            userInfo
-            Spacer()
-            updateButton
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-    }
-
-    private var userAvatar: some View {
-        ZStack {
-            Circle()
-                .fill(Color(red: 0.5, green: 0.3, blue: 0.8))
-                .frame(width: 28, height: 28)
-            Text("L")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.white)
-        }
-    }
-
-    private var userInfo: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text("luca.trav@gm...")
-                .font(.system(size: 11))
-                .lineLimit(1)
-            Text("Free")
-                .font(.system(size: 9))
-                .foregroundStyle(.tertiary)
-        }
-    }
-
-    private var updateButton: some View {
-        Button("Update") {}
-            .buttonStyle(.plain)
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
-            .background(Color.blue, in: RoundedRectangle(cornerRadius: 8))
     }
 
 }

@@ -1,33 +1,12 @@
 import SwiftUI
 
-// MARK: - TopBarView
+// MARK: - Native Toolbar Workspace Menu
 
-struct TopBarView: View {
+struct WorkspaceToolbarMenu: View {
     @Environment(ChatStore.self) private var chatStore
 
     var body: some View {
-        HStack(spacing: 8) {
-            Spacer()
-
-            workspaceMenu
-
-            inspectorToggleButton
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color(.windowBackgroundColor))
-    }
-
-    private var inspectorToggleButton: some View {
-        Button {
-            chatStore.toggleRightPanel(.changes)
-        } label: {
-            Image(systemName: "sidebar.right")
-                .font(.system(size: 11))
-                .foregroundStyle(chatStore.rightPanelVisible ? .primary : .tertiary)
-        }
-        .buttonStyle(.plain)
-        .help("Toggle inspector panel")
+        workspaceMenu
     }
 
     private var workspaceMenu: some View {
@@ -68,18 +47,13 @@ struct TopBarView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: chatStore.workspaceRoot.isEmpty ? "folder" : "folder.fill")
-                    .font(.system(size: 11))
+                    .font(AppTypography.control)
                 Text(chatStore.workspaceLabel)
-                    .font(.system(size: 11))
+                    .font(AppTypography.controlEmphasized)
                     .lineLimit(1)
-                    .frame(maxWidth: 120, alignment: .leading)
+                    .frame(maxWidth: 180, alignment: .leading)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 6))
         }
-        .menuStyle(.borderlessButton)
         .fixedSize()
-        .foregroundStyle(.secondary)
     }
 }
