@@ -243,12 +243,44 @@ public final class ChatStore {
             tools.append(CallPowerfulModelTool(configuration: llamaConfig))
         }
 
+        // Build the effective instructions: in orchestrator mode, Apple is told
+        // to delegate all file, code, and system operations to the powerful model.
+        let effectiveInstructions: String
+        if isOrchestrating {
+            var text = baseInstructions
+            text += """
+
+
+            === ORCHESTRATOR MODE ===
+            You are the orchestrator. You MUST use the `call_powerful_model` tool for ALL of the following tasks — do NOT attempt them yourself:
+
+            - Reading files
+            - Writing or editing files
+            - Creating, moving, copying, or deleting files and directories
+            - Listing directory contents
+            - Searching file contents (grep)
+            - Generating or modifying code
+            - Performing git operations
+            - Any complex analysis or multi-step reasoning
+
+            Your role is to:
+            1. Understand the user's request
+            2. Delegate concrete sub-tasks to `call_powerful_model` with full context (include relevant file content, error messages, requirements)
+            3. Synthesise the powerful model's response into a clear, well-formatted answer for the user
+
+            Always include all necessary context when calling `call_powerful_model` — the other model does NOT have access to this conversation history.
+            """
+            effectiveInstructions = text
+        } else {
+            effectiveInstructions = baseInstructions
+        }
+
         switch activeBackend {
         case .llamaServer:
             session = LanguageModelSession(
                 model: llamaModel,
                 dynamicInstructions: SessionInstructions(
-                    instructionsText: baseInstructions,
+                    instructionsText: effectiveInstructions,
                     tools: tools
                 ),
                 history: history
@@ -257,7 +289,7 @@ public final class ChatStore {
             session = LanguageModelSession(
                 model: SystemLanguageModel.default,
                 dynamicInstructions: SessionInstructions(
-                    instructionsText: baseInstructions,
+                    instructionsText: effectiveInstructions,
                     tools: tools
                 ),
                 history: history
