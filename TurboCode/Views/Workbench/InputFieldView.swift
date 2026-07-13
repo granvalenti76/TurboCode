@@ -13,11 +13,6 @@ enum ReasoningEffort: String, CaseIterable {
     case high = "High"
 }
 
-enum WorkMode: String, CaseIterable {
-    case local = "Work locally"
-    case cloud = "Work in cloud"
-}
-
 // MARK: - InputFieldView — Composer input card
 
 struct InputFieldView: View {
@@ -28,7 +23,6 @@ struct InputFieldView: View {
     // Persisted preferences
     @AppStorage("approvalMode") private var approvalMode: ApprovalMode = .askForApproval
     @AppStorage("reasoningEffort") private var reasoningEffort: ReasoningEffort = .medium
-    @AppStorage("workMode") private var workMode: WorkMode = .local
 
     private let projectName = "TurboCode"
 
@@ -113,33 +107,44 @@ struct InputFieldView: View {
     // MARK: - Backend Menu
 
     private var backendMenu: some View {
-        Menu {
-            Section("Backend") {
-                Button("Llama-server") {
-                    chatStore.switchBackend(to: .llamaServer)
-                }
-                Button("Foundation Apple") {
-                    chatStore.switchBackend(to: .foundationApple)
-                }
-            }
+        let isOrchestrating = chatStore.orchestratorMode == .orchestrator
 
-            if chatStore.activeBackend == .llamaServer {
-                Divider()
-                Section("Reasoning") {
-                    ForEach(ReasoningEffort.allCases, id: \.self) { effort in
-                        Button(effort.rawValue) { reasoningEffort = effort }
+        return Group {
+            if isOrchestrating {
+                // In orchestrator mode: Apple always responds, Llama is the delegate
+                Label("Apple · Orchestrator", systemImage: "square.2.layers.3d")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                Menu {
+                    Section("Backend") {
+                        Button("Llama-server") {
+                            chatStore.switchBackend(to: .llamaServer)
+                        }
+                        Button("Foundation Apple") {
+                            chatStore.switchBackend(to: .foundationApple)
+                        }
+                    }
+
+                    if chatStore.activeBackend == .llamaServer {
+                        Divider()
+                        Section("Reasoning") {
+                            ForEach(ReasoningEffort.allCases, id: \.self) { effort in
+                                Button(effort.rawValue) { reasoningEffort = effort }
+                            }
+                        }
+                    }
+                } label: {
+                    if chatStore.activeBackend == .llamaServer {
+                        Text("Llama-server \(reasoningEffort.rawValue)")
+                    } else {
+                        Text("Foundation Apple")
                     }
                 }
-            }
-        } label: {
-            if chatStore.activeBackend == .llamaServer {
-                Text("Llama-server \(reasoningEffort.rawValue)")
-            } else {
-                Text("Foundation Apple")
+                .menuStyle(.borderlessButton)
+                .fixedSize()
             }
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
     }
 
     // MARK: - Microphone Button
@@ -176,7 +181,7 @@ struct InputFieldView: View {
         HStack(spacing: 16) {
             Label(projectName, systemImage: "doc.plaintext")
 
-            workModeMenu
+            orchestratorModeMenu
             branchMenu
 
             Spacer()
@@ -187,13 +192,18 @@ struct InputFieldView: View {
         .padding(.vertical, 10)
     }
 
-    private var workModeMenu: some View {
+    private var orchestratorModeMenu: some View {
         Menu {
-            ForEach(WorkMode.allCases, id: \.self) { mode in
-                Button(mode.rawValue) { workMode = mode }
+            ForEach(OrchestratorMode.allCases, id: \.self) { mode in
+                Button(mode.rawValue) {
+                    chatStore.orchestratorMode = mode
+                }
             }
         } label: {
-            Label(workMode.rawValue, systemImage: "laptopcomputer")
+            let icon: String = chatStore.orchestratorMode == .orchestrator
+                ? "square.2.layers.3d"
+                : "laptopcomputer"
+            Label(chatStore.orchestratorMode.rawValue, systemImage: icon)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()

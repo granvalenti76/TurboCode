@@ -81,6 +81,23 @@ public final class ChatStore {
     // Backend
     public var activeBackend: ModelBackend = .llamaServer
 
+    // Orchestrator mode
+    public var orchestratorMode: OrchestratorMode {
+        didSet {
+            UserDefaults.standard.set(orchestratorMode.rawValue, forKey: "orchestratorMode")
+            // When switching to orchestrator mode, force Apple as the active model
+            // (the orchestrator is always the Apple on-device model).
+            if orchestratorMode == .orchestrator, activeBackend != .foundationApple {
+                activeBackend = .foundationApple
+                composerModel = "Apple · Orchestrator"
+                rebuildSession()
+            } else if orchestratorMode == .standalone {
+                composerModel = activeBackend.rawValue
+                rebuildSession()
+            }
+        }
+    }
+
     // Diff inspector state (persiste oltre il ciclo di vita della view)
     var diffSections: [FileDiffSection] = []
     var isLoadingDiffs = false
@@ -159,13 +176,33 @@ public final class ChatStore {
         )
         let m = LlamaModel(configuration: config)
         self.llamaModel = m
-        self.session = LanguageModelSession(model: m)
-        self.composerModel = ModelBackend.llamaServer.rawValue
+
+        // Restore orchestrator mode from UserDefaults
+        let saved = UserDefaults.standard.string(forKey: "orchestratorMode")
+            ?? OrchestratorMode.standalone.rawValue
+        let mode = OrchestratorMode(rawValue: saved) ?? .standalone
+
+        // Initialise ALL stored properties BEFORE any didSet observers fire.
+        // We set orchestratorMode last so that session is already valid.
+        self.activeBackend = mode == .orchestrator ? .foundationApple : .llamaServer
+        let initialModel: any LanguageModel = mode == .orchestrator
+            ? SystemLanguageModel.default
+            : m
+        self.session = LanguageModelSession(model: initialModel)
+        self.composerModel = mode == .orchestrator
+            ? "Apple \u{00B7} Orchestrator"
+            : ModelBackend.llamaServer.rawValue
+
+        // Now safe — didSet fires and calls rebuildSession() as needed.
+        self.orchestratorMode = mode
     }
 
     /// Switch inference backend and rebuild the session,
     /// preserving the full conversation transcript.
+    /// In orchestrator mode the backend is always Apple on-device;
+    /// calling this method has no effect.
     public func switchBackend(to backend: ModelBackend) {
+        guard orchestratorMode == .standalone else { return }
         activeBackend = backend
         composerModel = backend.rawValue
         rebuildSession()
@@ -195,6 +232,15 @@ public final class ChatStore {
         var tools: [any Tool] = []
         if !workspaceRoot.isEmpty {
             tools += [ReadFileTool(), GrepTool(), FileSystemTool(workspaceRoot: workspaceRoot)]
+        }
+
+        // In orchestrator mode, the Apple on-device model gets a special tool
+        // to delegate complex tasks to Llama.
+        let isOrchestrating = orchestratorMode == .orchestrator
+
+        if isOrchestrating {
+            let llamaConfig = llamaModel.executorConfiguration
+            tools.append(CallPowerfulModelTool(configuration: llamaConfig))
         }
 
         switch activeBackend {
