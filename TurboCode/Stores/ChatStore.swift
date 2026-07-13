@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import SwiftUI
 import FoundationModels
+import FoundationModelsUtilities
 import LlamaModelExecutor
 
 // MARK: - Model Backend
@@ -84,6 +85,10 @@ public final class ChatStore {
 
     // Backend
     public var activeBackend: ModelBackend = .llamaServer
+
+    // Skill activations for standalone mode — lets the model activate only
+    // the tools it needs for the current task.
+    public let skillActivations = SkillActivations()
 
     // Delegation state — true when the orchestrator has called call_powerful_model
     // and is waiting for a response from the powerful model.
@@ -228,10 +233,9 @@ public final class ChatStore {
         text += "\nAlways use Markdown formatting in your responses: **bold**, `code`, ```code blocks```, tables, etc."
         if !workspaceRoot.isEmpty {
             text += "\nThe current workspace is at: \(workspaceRoot)"
-            text += "\nYou have access to the following tools: read_file, grep, file_system."
+            text += "\nActivate the appropriate skill below to access file and code tools."
             text += "\nAll file operations are restricted to the workspace directory."
             text += "\nNEVER access files outside the workspace."
-            text += "\nUse these tools when you need to interact with the workspace."
         }
         return text
     }
@@ -318,12 +322,13 @@ public final class ChatStore {
                 history: history
             )
         } else {
-            // Standalone: use direct init (proven to work) with DynamicInstructions
+            // Standalone: use Skills so the model activates only the tools it needs.
             session = LanguageModelSession(
                 model: activeModel,
-                dynamicInstructions: SessionInstructions(
+                dynamicInstructions: StandaloneSessionInstructions(
                     instructionsText: effectiveInstructions,
-                    tools: tools
+                    activations: skillActivations,
+                    workspaceRoot: workspaceRoot
                 ),
                 history: history
             )
@@ -616,6 +621,47 @@ private struct SessionInstructions: DynamicInstructions {
     var body: some DynamicInstructions {
         Instructions(instructionsText)
         tools
+    }
+}
+
+// MARK: - Standalone instructions with Skills
+
+/// DynamicInstructions for standalone mode that wraps tools into Skills,
+/// letting the model activate only what it needs.
+private struct StandaloneSessionInstructions: DynamicInstructions {
+    let instructionsText: String
+    let activations: SkillActivations
+    let workspaceRoot: String
+
+    var body: some DynamicInstructions {
+        Instructions(instructionsText)
+
+        if !workspaceRoot.isEmpty {
+            Skills(activations: activations) {
+                Skill(
+                    name: "file-browser",
+                    description: "List files, get file metadata, find files by name, and perform file operations in the workspace",
+                    allowsDeactivation: true
+                ) {
+                    Instructions {
+                        "Use this skill when you need to explore the workspace, list directory contents, get file info, find files, or perform file write/delete/copy/move operations."
+                    }
+                    FileSystemTool(workspaceRoot: workspaceRoot)
+                }
+
+                Skill(
+                    name: "code-reader",
+                    description: "Read file contents and search for text patterns in the workspace",
+                    allowsDeactivation: true
+                ) {
+                    Instructions {
+                        "Use this skill when you need to read file contents or search for code patterns with grep."
+                    }
+                    ReadFileTool()
+                    GrepTool()
+                }
+            }
+        }
     }
 }
 
