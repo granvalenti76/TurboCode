@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		5E178C3C2FFE5D920057187A /* LlamaModelExecutor in Frameworks */ = {isa = PBXBuildFile; productRef = 5E178C3B2FFE5D920057187A /* LlamaModelExecutor */; };
+		5E5203BF3004E70900C554D4 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203BE3004E70900C554D4 /* MarkdownUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +28,7 @@
 			isa = PBXFrameworksBuildPhase;
 			files = (
 				5E178C3C2FFE5D920057187A /* LlamaModelExecutor in Frameworks */,
+				5E5203BF3004E70900C554D4 /* MarkdownUI in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -67,6 +69,7 @@
 			name = TurboCode;
 			packageProductDependencies = (
 				5E178C3B2FFE5D920057187A /* LlamaModelExecutor */,
+				5E5203BE3004E70900C554D4 /* MarkdownUI */,
 			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* TurboCode.app */;
@@ -99,6 +102,7 @@
 			packageReferences = (
 				5E5405572FF94651008434E4 /* XCLocalSwiftPackageReference "../../git/foundation-models-utilities" */,
 				5E178C3A2FFE5D920057187A /* XCLocalSwiftPackageReference "../../git/LlamaModelExecutor" */,
+				5E5203BD3004E70900C554D4 /* XCLocalSwiftPackageReference "../../git/swift-markdown-ui" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -363,6 +367,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../../git/LlamaModelExecutor;
 		};
+		5E5203BD3004E70900C554D4 /* XCLocalSwiftPackageReference "../../git/swift-markdown-ui" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../../git/swift-markdown-ui";
+		};
 		5E5405572FF94651008434E4 /* XCLocalSwiftPackageReference "../../git/foundation-models-utilities" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "../../git/foundation-models-utilities";
@@ -373,6 +381,10 @@
 		5E178C3B2FFE5D920057187A /* LlamaModelExecutor */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LlamaModelExecutor;
+		};
+		5E5203BE3004E70900C554D4 /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MarkdownUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

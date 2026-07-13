@@ -179,7 +179,7 @@ struct LiveAssistantBlock: View {
     let text: String
 
     var body: some View {
-        Text(formattedText(text, size: 14))
+        Text(verbatim: text)
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)

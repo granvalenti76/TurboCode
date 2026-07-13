@@ -18,7 +18,7 @@ public enum ModelBackend: String, CaseIterable, Sendable {
 @Observable
 public final class ChatStore {
     // Threads
-    public var threads: [Thread] = []
+    public var threads: [Conversation] = []
     public var activeThreadId: String?
     public var threadSearch: String = ""
     public var showArchivedThreads: Bool = false
@@ -38,7 +38,7 @@ public final class ChatStore {
     // Composer
     public var composerModel: String = "auto"
     public var composerProviderId: String = ""
-    public var composerMode: ThreadMode = .agent
+    public var composerMode: ConversationMode = .agent
     public var composerInput: String = ""
     public var composerAttachments: Int = 0
 
@@ -154,7 +154,7 @@ public final class ChatStore {
     public init() {
         let config = LlamaConfiguration(
             modelName: "/Users/granvalenti/.modelli/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
-            temperature: 0.0,
+            temperature: 0.6,
             baseURL: LlamaConfiguration.defaultURL
         )
         let m = LlamaModel(configuration: config)
@@ -225,8 +225,8 @@ public final class ChatStore {
         activeThreadId = id
     }
 
-    public func createThread(title: String = "New Chat", mode: ThreadMode = .agent) async {
-        let thread = Thread(
+    public func createThread(title: String = "New Chat", mode: ConversationMode = .agent) async {
+        let thread = Conversation(
             title: title,
             workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
             mode: mode
@@ -472,7 +472,7 @@ public final class ChatStore {
 
     // MARK: - Sorted Threads
 
-    public var sortedThreads: [Thread] {
+    public var sortedThreads: [Conversation] {
         let q = threadSearch.lowercased().trimmingCharacters(in: .whitespaces)
         return threads
             .filter { t in showArchivedThreads ? true : !t.isArchived }

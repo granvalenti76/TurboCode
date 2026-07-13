@@ -1,4 +1,5 @@
 import SwiftUI
+import MarkdownUI
 
 // MARK: - ChatBlockView — renders a single message block
 
@@ -101,10 +102,11 @@ struct ChatBlockView: View {
     private var assistantBubble: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(formattedText(block.text, size: 14))
+                Text(block.text)
                     .textSelection(.enabled)
+                    .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
-
+                    
                 if let model = block.model {
                     ModelBadgeView(model: model, providerId: block.providerId)
                 }
@@ -114,7 +116,7 @@ struct ChatBlockView: View {
         }
         .padding(8)
     }
-
+    
     // MARK: - Reasoning Block
 
     private var reasoningBlock: some View {
@@ -245,6 +247,7 @@ struct ModelBadgeView: View {
 /// Falls back to plain AttributedString if markdown parsing fails.
 /// The base font size is embedded in the AttributedString so that
 /// markdown-specific fonts (bold, italic, code) are preserved.
+///  DEAD CODE
 func formattedText(_ input: String, size: CGFloat = 14) -> AttributedString {
     let cleaned = input
         .replacingOccurrences(of: "\\\\", with: "\u{1D}")

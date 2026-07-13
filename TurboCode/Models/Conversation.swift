@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Thread — Sendable model for a conversation thread
 
-public struct Thread: Identifiable, Sendable, Hashable {
+public struct Conversation: Identifiable, Sendable, Hashable {
     public let id: String
     public var title: String
     public var createdAt: Date
@@ -10,7 +10,7 @@ public struct Thread: Identifiable, Sendable, Hashable {
     public var isPinned: Bool
     public var isArchived: Bool
     public var workspace: String?
-    public var mode: ThreadMode
+    public var mode: ConversationMode
 
     public init(
         id: String = UUID().uuidString,
@@ -20,7 +20,7 @@ public struct Thread: Identifiable, Sendable, Hashable {
         isPinned: Bool = false,
         isArchived: Bool = false,
         workspace: String? = nil,
-        mode: ThreadMode = .agent
+        mode: ConversationMode = .agent
     ) {
         self.id = id
         self.title = title
@@ -33,7 +33,7 @@ public struct Thread: Identifiable, Sendable, Hashable {
     }
 }
 
-public enum ThreadMode: String, Sendable, Hashable, CaseIterable {
+public enum ConversationMode: String, Sendable, Hashable, CaseIterable {
     case agent
     case plan
 }

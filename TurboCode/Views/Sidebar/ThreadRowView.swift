@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - ThreadRowView — single row in the sidebar thread list
 
 struct ThreadRowView: View {
-    let thread: Thread
+    let thread: Conversation
     let isSelected: Bool
     let onSelect: () -> Void
     let onRename: (String) -> Void

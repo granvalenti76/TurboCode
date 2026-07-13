@@ -229,7 +229,7 @@ struct SidebarView: View {
         }
     }
 
-    private func threadRow(for thread: Thread) -> some View {
+    private func threadRow(for thread: Conversation) -> some View {
         ThreadRowView(
             thread: thread,
             isSelected: thread.id == chatStore.activeThreadId,
