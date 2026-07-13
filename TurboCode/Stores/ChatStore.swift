@@ -442,6 +442,23 @@ public final class ChatStore {
                     liveAssistant = accumulatedText
                 }
 
+                // Detect delegation state from the session transcript.
+                // In orchestrator mode, any tool call is a delegation.
+                // We check the last entry: if it's .toolCalls the model is
+                // waiting on a tool; if it's .toolOutput or .response, we're back.
+                if orchestratorMode == .orchestrator {
+                    if let lastEntry = session.transcript.last {
+                        switch lastEntry {
+                        case .toolCalls:
+                            isDelegating = true
+                        case .response, .toolOutput:
+                            isDelegating = false
+                        default:
+                            break
+                        }
+                    }
+                }
+
                 // Reasoning + tool output detection from incremental transcript entries
                 for entry in snapshot.transcriptEntries {
                     if case .reasoning(let reasoning) = entry {
@@ -450,20 +467,6 @@ public final class ChatStore {
                                 liveReasoning = t.content
                             }
                         }
-                    }
-
-                    // Detect delegation: orchestrator called call_powerful_model
-                    if case .toolCalls(let calls) = entry {
-                        for call in calls {
-                            if call.toolName == "call_powerful_model" {
-                                isDelegating = true
-                            }
-                        }
-                    }
-
-                    // Once the orchestrator speaks again after delegation, turn off the indicator
-                    if case .response = entry, isDelegating {
-                        isDelegating = false
                     }
 
                     // Check for ACTION REQUIRED in tool outputs (incremental — current stream only)
