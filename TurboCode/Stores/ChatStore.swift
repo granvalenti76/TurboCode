@@ -89,6 +89,16 @@ public final class ChatStore {
     // the tools it needs for the current task.
     public let skillActivations = SkillActivations()
 
+    /// Maps the persisted ReasoningEffort to FoundationModels' ReasoningLevel.
+    public var reasoningLevel: ContextOptions.ReasoningLevel {
+        let raw = UserDefaults.standard.string(forKey: "reasoningEffort") ?? ReasoningEffort.medium.rawValue
+        switch ReasoningEffort(rawValue: raw) ?? .medium {
+        case .low:    return .light
+        case .medium: return .moderate
+        case .high:   return .deep
+        }
+    }
+
     // Delegation state — true when the orchestrator has called call_powerful_model
     // and is waiting for a response from the powerful model.
     public var isDelegating: Bool = false
@@ -316,18 +326,20 @@ public final class ChatStore {
                     },
                     onDelegationEnd: { [weak self] in
                         await MainActor.run { self?.isDelegating = false }
-                    }
+                    },
+                    reasoningLevel: reasoningLevel
                 ),
                 history: history
             )
         } else {
-            // Standalone: use Skills so the model activates only the tools it needs.
+            // Standalone: profile with Skills and reasoning level.
             session = LanguageModelSession(
-                model: activeModel,
-                dynamicInstructions: StandaloneSessionInstructions(
-                    instructionsText: effectiveInstructions,
+                profile: StandaloneProfile(
+                    instructions: effectiveInstructions,
                     activations: skillActivations,
-                    workspaceRoot: workspaceRoot
+                    workspaceRoot: workspaceRoot,
+                    model: activeModel,
+                    reasoningLevel: reasoningLevel
                 ),
                 history: history
             )
@@ -634,37 +646,71 @@ private struct StandaloneSessionInstructions: DynamicInstructions {
 
     var body: some DynamicInstructions {
         Instructions(instructionsText)
-
         if !workspaceRoot.isEmpty {
-            Skills(activations: activations) {
-                Skill(
-                    name: "file-browser",
-                    description: "List files, get file metadata, find files by name, and perform file operations in the workspace",
-                    allowsDeactivation: true
-                ) {
-                    Instructions {
-                        "Use this skill when you need to explore the workspace, list directory contents, get file info, find files, or perform file write/delete/copy/move operations."
-                    }
-                    FileSystemTool(workspaceRoot: workspaceRoot)
-                }
+            StandaloneSkills(activations: activations, workspaceRoot: workspaceRoot)
+        }
+    }
+}
 
-                Skill(
-                    name: "code-reader",
-                    description: "Read file contents and search for text patterns in the workspace",
-                    allowsDeactivation: true
-                ) {
-                    Instructions {
-                        "Use this skill when you need to read file contents or search for code patterns with grep."
-                    }
-                    ReadFileTool()
-                    GrepTool()
+/// Skills-only component for standalone mode (reused by StandaloneProfile).
+private struct StandaloneSkills: DynamicInstructions {
+    let activations: SkillActivations
+    let workspaceRoot: String
+
+    var body: some DynamicInstructions {
+        Skills(activations: activations) {
+            Skill(
+                name: "file-browser",
+                description: "List files, get file metadata, find files by name, and perform file operations in the workspace",
+                allowsDeactivation: true
+            ) {
+                Instructions {
+                    "Use this skill when you need to explore the workspace, list directory contents, get file info, find files, or perform file write/delete/copy/move operations."
                 }
+                FileSystemTool(workspaceRoot: workspaceRoot)
+            }
+
+            Skill(
+                name: "code-reader",
+                description: "Read file contents and search for text patterns in the workspace",
+                allowsDeactivation: true
+            ) {
+                Instructions {
+                    "Use this skill when you need to read file contents or search for code patterns with grep."
+                }
+                ReadFileTool()
+                GrepTool()
             }
         }
     }
 }
 
 // MARK: - DynamicProfile for session setup
+
+// MARK: - Standalone Profile
+
+/// DynamicProfile for standalone mode with Skills, model selection,
+/// and reasoning level control.
+private struct StandaloneProfile: LanguageModelSession.DynamicProfile {
+    let instructions: String
+    let activations: SkillActivations
+    let workspaceRoot: String
+    let model: any LanguageModel
+    let reasoningLevel: ContextOptions.ReasoningLevel
+
+    var body: some LanguageModelSession.DynamicProfile {
+        Profile {
+            Instructions(instructions)
+            if !workspaceRoot.isEmpty {
+                StandaloneSkills(activations: activations, workspaceRoot: workspaceRoot)
+            }
+        }
+        .model(model)
+        .reasoningLevel(reasoningLevel)
+    }
+}
+
+// MARK: - Orchestrator Profile
 
 /// A DynamicProfile that wraps instructions, tools, model selection, and
 /// delegation lifecycle callbacks for the orchestrator feature.
@@ -679,6 +725,7 @@ private struct TurboCodeDynamicProfile: LanguageModelSession.DynamicProfile {
     let model: any LanguageModel
     let onDelegationStart: (@Sendable () async -> Void)?
     let onDelegationEnd: (@Sendable () async -> Void)?
+    let reasoningLevel: ContextOptions.ReasoningLevel
 
     var body: some LanguageModelSession.DynamicProfile {
         Profile {
@@ -686,6 +733,7 @@ private struct TurboCodeDynamicProfile: LanguageModelSession.DynamicProfile {
             tools
         }
         .model(model)
+        .reasoningLevel(reasoningLevel)
         .onToolCall { toolCall in
             if toolCall.toolName == "call_powerful_model",
                let action = onDelegationStart {
