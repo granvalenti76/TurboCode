@@ -234,13 +234,14 @@ public final class ChatStore {
             tools += [ReadFileTool(), GrepTool(), FileSystemTool(workspaceRoot: workspaceRoot)]
         }
 
-        // In orchestrator mode, the Apple on-device model gets a special tool
-        // to delegate complex tasks to Llama.
+        // In orchestrator mode, the Apple on-device model gets ONLY the
+        // call_powerful_model tool — no file/grep/fs tools — so it is forced
+        // to delegate everything through the powerful Llama model.
         let isOrchestrating = orchestratorMode == .orchestrator
 
         if isOrchestrating {
             let llamaConfig = llamaModel.executorConfiguration
-            tools.append(CallPowerfulModelTool(configuration: llamaConfig))
+            tools = [CallPowerfulModelTool(configuration: llamaConfig)]
         }
 
         // Build the effective instructions: in orchestrator mode, Apple is told
@@ -252,23 +253,14 @@ public final class ChatStore {
 
 
             === ORCHESTRATOR MODE ===
-            You are the orchestrator. You MUST use the `call_powerful_model` tool for ALL of the following tasks — do NOT attempt them yourself:
+            You are the orchestrator. The ONLY tool available to you is `call_powerful_model`, which delegates to a powerful coding model. You MUST use it for EVERY user request — you have no direct access to files, git, or any other operations.
 
-            - Reading files
-            - Writing or editing files
-            - Creating, moving, copying, or deleting files and directories
-            - Listing directory contents
-            - Searching file contents (grep)
-            - Generating or modifying code
-            - Performing git operations
-            - Any complex analysis or multi-step reasoning
+            Your role is:
+            1. Understand what the user wants.
+            2. Call `call_powerful_model` with a complete, self-contained task description that includes all relevant context (file paths, code snippets, error messages, requirements).
+            3. Synthesise the powerful model's response into a clear, well-formatted answer for the user.
 
-            Your role is to:
-            1. Understand the user's request
-            2. Delegate concrete sub-tasks to `call_powerful_model` with full context (include relevant file content, error messages, requirements)
-            3. Synthesise the powerful model's response into a clear, well-formatted answer for the user
-
-            Always include all necessary context when calling `call_powerful_model` — the other model does NOT have access to this conversation history.
+            The powerful model has direct access to the file system, git, and all coding tools through the workspace at: \(workspaceRoot). So include full paths and file names in your delegation.
             """
             effectiveInstructions = text
         } else {
