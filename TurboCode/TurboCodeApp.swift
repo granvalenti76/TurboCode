@@ -31,7 +31,7 @@ struct TurboCodeApp: App {
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified(showsTitle: true))
         .windowResizability(.contentMinSize)
-        .defaultSize(width: 1200, height: 800)
+        .defaultSize(width: 1200, height: 650)
         .commands {
             // Application menu
             CommandGroup(replacing: .appInfo) {

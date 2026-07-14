@@ -12,6 +12,8 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let workspaceRoot: String
     let model: any LanguageModel
     let reasoningLevel: ContextOptions.ReasoningLevel?
+    let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
+    let onToolEnd: (@Sendable (Transcript.ToolCall) async -> Void)?
 
     var body: some LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
@@ -22,6 +24,16 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
         }
         .model(model)
         .reasoningLevel(reasoningLevel)
+        .onToolCall { call in
+            if let action = onToolStart {
+                await action(call)
+            }
+        }
+        .onToolOutput { call, _ in
+            if let action = onToolEnd {
+                await action(call)
+            }
+        }
     }
 }
 

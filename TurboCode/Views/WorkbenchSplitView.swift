@@ -8,7 +8,7 @@ struct WorkbenchSplitView: View {
 
     @AppStorage("rightSidebarWidth") private var rightWidth: Double = 360
 
-    private let leftMinWidth: Double = 220
+    private let leftMinWidth: Double = 240
     private let leftMaxWidth: Double = 360
     private let mainMinWidth: Double = 560
     private let rightMinWidth: Double = 280
@@ -26,7 +26,7 @@ struct WorkbenchSplitView: View {
             SidebarView()
                 .navigationSplitViewColumnWidth(
                     min: leftMinWidth,
-                    ideal: 250,
+                    ideal: 280,
                     max: leftMaxWidth
                 )
         } detail: {

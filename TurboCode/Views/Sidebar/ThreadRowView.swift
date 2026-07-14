@@ -18,7 +18,7 @@ struct ThreadRowView: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: 8) {
+            HStack(spacing: 7) {
                 // Pin indicator
                 if thread.isPinned {
                     Image(systemName: "pin.fill")
@@ -27,8 +27,7 @@ struct ThreadRowView: View {
                         .rotationEffect(.degrees(45))
                 }
 
-                // Thread info
-                VStack(alignment: .leading, spacing: 2) {
+                Group {
                     if isRenaming {
                         TextField("Thread name", text: $renameText, onCommit: {
                             let trimmed = renameText.trimmingCharacters(in: .whitespaces)
@@ -41,14 +40,10 @@ struct ThreadRowView: View {
                         .font(AppTypography.sidebarTitle)
                     } else {
                         Text(thread.title)
-                            .font(AppTypography.sidebarTitle)
+                            .font(isSelected ? AppTypography.sidebarTitle.weight(.medium) : AppTypography.sidebarTitle)
                             .lineLimit(1)
-                            .foregroundStyle(isSelected ? .primary : .primary)
+                            .foregroundStyle(.primary)
                     }
-
-                    Text(thread.updatedAt, style: .relative)
-                        .font(AppTypography.sidebarMetadata)
-                        .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -64,7 +59,7 @@ struct ThreadRowView: View {
                         .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
                 }
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(
                 isHovering && !isSelected

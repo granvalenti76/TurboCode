@@ -4,10 +4,10 @@ import SwiftUI
 
 /// A semantic type scale based on SF Pro and SF Mono.
 enum AppTypography {
-    static let sidebarLabel = Font.system(size: 13)
-    static let sidebarTitle = Font.system(size: 13, weight: .medium)
-    static let sidebarMetadata = Font.system(size: 11)
-    static let sectionLabel = Font.system(size: 11, weight: .semibold)
+    static let sidebarLabel = Font.system(size: 15)
+    static let sidebarTitle = Font.system(size: 15)
+    static let sidebarMetadata = Font.system(size: 12)
+    static let sectionLabel = Font.system(size: 13, weight: .semibold)
     static let control = Font.system(size: 13)
     static let controlEmphasized = Font.system(size: 13, weight: .medium)
     static let metadata = Font.system(size: 11)
@@ -37,8 +37,8 @@ extension View {
     func sidebarSelectionBackground(_ isSelected: Bool) -> some View {
         if isSelected {
             self.background(
-                Color.accentColor.opacity(0.12),
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                Color.primary.opacity(0.07),
+                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
             )
         } else {
             self

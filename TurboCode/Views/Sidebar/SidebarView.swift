@@ -10,20 +10,21 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             headerView
-            Divider()
-            // Navigation items
             navItemsView
-            Divider()
-            // Projects section
-            projectsSection
-            // Chats section
-            chatsSection
-            Spacer()
+            ScrollView(.vertical) {
+                VStack(spacing: 0) {
+                    projectsSection
+                    chatsSection
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 12)
+            }
+            .scrollIndicators(.automatic)
+            .frame(maxHeight: .infinity)
         }
         .background(Color.clear)
-        .frame(minWidth: 220)
+        .frame(minWidth: 240)
         .onAppear {
             guard !chatStore.workspaceRoot.isEmpty else { return }
             expandedWorkspaces.insert(chatStore.workspaceRoot)
@@ -38,76 +39,77 @@ struct SidebarView: View {
 
     private var headerView: some View {
         HStack {
-            Button {
-                Task { await chatStore.createThread() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "pencil")
-                        .font(.system(size: 12, weight: .medium))
-                    Text("New chat")
-                        .font(AppTypography.controlEmphasized)
-                }
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 8))
-            }
-            .buttonStyle(.plain)
-            .padding(.leading, 12)
+            Text("TurboCode")
+                .font(.system(size: 22, weight: .semibold))
 
             Spacer()
+
+            Button {
+                selectedNav = "search"
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15, weight: .medium))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Search")
         }
-        .padding(.vertical, 8)
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        .padding(.bottom, 10)
     }
 
     // MARK: - Navigation Items
 
     private var navItemsView: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 2) {
+            Button {
+                Task { await chatStore.createThread() }
+            } label: {
+                navigationLabel(icon: "square.and.pencil", title: "New chat")
+            }
+            .buttonStyle(.plain)
+
             ForEach(NavItem.allCases, id: \.self) { item in
                 Button {
                     selectedNav = item.id
                 } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: item.icon)
-                            .font(.system(size: 13))
-                            .frame(width: 18)
-                        Text(item.label)
-                            .font(AppTypography.sidebarLabel)
-                        Spacer()
-                        if let badge = item.badge {
-                            Text(badge)
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .foregroundStyle(selectedNav == item.id ? .primary : .secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
-                    .sidebarSelectionBackground(selectedNav == item.id)
+                    navigationLabel(icon: item.icon, title: item.label)
                 }
                 .buttonStyle(.plain)
-
             }
         }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 8)
+    }
+
+    private func navigationLabel(icon: String, title: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 15))
+                .frame(width: 20)
+            Text(title)
+                .font(AppTypography.sidebarLabel)
+            Spacer()
+        }
+        .foregroundStyle(.primary)
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.vertical, 7)
+        .contentShape(Rectangle())
     }
 
     private enum NavItem: String, CaseIterable {
-        case search, scheduled, plugins
+        case scheduled, plugins
 
         var id: String { rawValue }
         var label: String { rawValue.capitalized }
         var icon: String {
             switch self {
-            case .search: return "magnifyingglass"
             case .scheduled: return "clock"
             case .plugins: return "puzzlepiece.extension"
             }
         }
-        var badge: String? { nil }
     }
 
     // MARK: - Section Header
@@ -116,13 +118,12 @@ struct SidebarView: View {
         HStack {
             Text(title)
                 .font(AppTypography.sectionLabel)
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
+                .foregroundStyle(.tertiary)
             Spacer()
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 14)
-        .padding(.bottom, 4)
+        .padding(.horizontal, 16)
+        .padding(.top, 18)
+        .padding(.bottom, 8)
     }
 
     // MARK: - Projects Section
@@ -140,19 +141,20 @@ struct SidebarView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "tray.full")
-                        .font(.system(size: 11))
+                        .font(.system(size: 14))
                         .foregroundStyle(.tertiary)
-                        .frame(width: 16)
+                        .frame(width: 20)
                     Text("All chats")
                         .font(AppTypography.sidebarLabel)
                     Spacer()
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 7)
                 .contentShape(Rectangle())
                 .sidebarSelectionBackground(chatStore.selectedProject == nil)
             }
             .buttonStyle(.plain)
+            .padding(.horizontal, 10)
 
             // Recent workspace projects with expandable sessions
             ForEach(chatStore.recentWorkspaces, id: \.self) { path in
@@ -174,23 +176,23 @@ struct SidebarView: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: isSelected ? "folder.fill" : "folder")
-                            .font(.system(size: 11))
+                            .font(.system(size: 14))
                             .foregroundColor(isSelected ? .blue : .secondary)
-                            .frame(width: 16)
+                            .frame(width: 20)
                         Text(name)
                             .font(AppTypography.sidebarLabel)
                         Spacer()
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(.tertiary)
                             .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 7)
                     .contentShape(Rectangle())
-                    .sidebarSelectionBackground(isSelected)
                 }
                 .buttonStyle(.plain)
+                .padding(.horizontal, 10)
 
                 // Keep each workspace's conversations visually attached to its
                 // folder and let the user expand more than one project.
@@ -201,12 +203,13 @@ struct SidebarView: View {
                             .font(AppTypography.sidebarMetadata)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.leading, 36)
+                            .padding(.leading, 52)
                             .padding(.vertical, 8)
                     } else {
                         ForEach(workspaceThreads.prefix(10)) { thread in
                             threadRow(for: thread)
-                                .padding(.leading, 20)
+                                .padding(.leading, 38)
+                                .padding(.trailing, 10)
                         }
                     }
                 }
@@ -218,19 +221,20 @@ struct SidebarView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "plus")
-                        .font(.system(size: 11))
+                        .font(.system(size: 14))
                         .foregroundStyle(.tertiary)
-                        .frame(width: 16)
+                        .frame(width: 20)
                     Text("Add workspace...")
                         .font(AppTypography.sidebarLabel)
                         .foregroundStyle(.secondary)
                     Spacer()
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 7)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .padding(.horizontal, 10)
         }
     }
 
@@ -264,6 +268,7 @@ struct SidebarView: View {
     private var chatsList: some View {
         ForEach(chatStore.sortedThreads.prefix(10)) { thread in
             threadRow(for: thread)
+                .padding(.horizontal, 10)
         }
     }
 

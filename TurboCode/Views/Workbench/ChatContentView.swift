@@ -73,19 +73,15 @@ struct ChatContentView: View {
 
     @ViewBuilder
     private func approvalBanner(_ approval: ApprovalRequest) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "exclamationmark.shield")
-                .font(.system(size: 14))
-                .foregroundStyle(.orange)
+        HStack(spacing: 8) {
+            Image(systemName: "hand.raised")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Action requires approval")
-                    .font(.system(size: 11, weight: .semibold))
-                Text(approval.summary)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+            Text(approval.displaySummary)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
 
             Spacer()
 
@@ -93,30 +89,23 @@ struct ChatContentView: View {
                 chatStore.approveAction()
             } label: {
                 Text("Allow")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 11, weight: .medium))
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            .tint(.green)
 
             Button {
                 chatStore.rejectAction()
             } label: {
                 Text("Deny")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 11, weight: .medium))
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .tint(.red)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(.orange.opacity(0.2), lineWidth: 1)
-        )
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
+        .padding(.vertical, 7)
+        .background(.bar)
+        .overlay(alignment: .top) { Divider() }
     }
 }

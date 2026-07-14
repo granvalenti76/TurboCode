@@ -100,20 +100,20 @@ struct FileSystemTool: Tool {
         case .list:              return listDirectory(at: resolvedPath)
         case .info:              return fileInfo(at: resolvedPath)
         case .find:              return findFiles(in: resolvedPath, pattern: arguments.pattern)
-        case .createDirectory:   return makeDirectory(at: resolvedPath)
+        case .createDirectory:   return await requestApprovalIfNeeded(operation: .createDirectory, path: resolvedPath)
         case .write:
             guard let content = arguments.content else { return "Error: 'content' is required for write." }
-            return writeFile(at: resolvedPath, content: content)
+            return await requestApprovalIfNeeded(operation: .write, path: resolvedPath, content: content)
         case .append:
             guard let content = arguments.content else { return "Error: 'content' is required for append." }
-            return appendFile(at: resolvedPath, content: content)
+            return await requestApprovalIfNeeded(operation: .append, path: resolvedPath, content: content)
         case .copy:
             guard let dest = resolvedDest else { return "Error: 'destination' is required for copy." }
-            return copyItem(from: resolvedPath, to: dest)
+            return await requestApprovalIfNeeded(operation: .copy, path: resolvedPath, destination: dest)
         case .move:
             guard let dest = resolvedDest else { return "Error: 'destination' is required for move." }
-            return moveItem(from: resolvedPath, to: dest)
-        case .delete:            return deleteItem(at: resolvedPath)
+            return await requestApprovalIfNeeded(operation: .move, path: resolvedPath, destination: dest)
+        case .delete:            return await requestApprovalIfNeeded(operation: .delete, path: resolvedPath)
         }
     }
 
@@ -245,7 +245,11 @@ struct FileSystemTool: Tool {
         }
 
         if FileManager.default.fileExists(atPath: destination) {
-            return "⚠️ ACTION REQUIRED: Destination already exists at '\(destination)'. Needs approval to overwrite."
+            do {
+                try FileManager.default.removeItem(atPath: destination)
+            } catch {
+                return "Error removing existing destination '\(destination)': \(error.localizedDescription)"
+            }
         }
 
         do {
@@ -262,7 +266,11 @@ struct FileSystemTool: Tool {
         }
 
         if FileManager.default.fileExists(atPath: destination) {
-            return "⚠️ ACTION REQUIRED: Destination already exists at '\(destination)'. Needs approval to overwrite."
+            do {
+                try FileManager.default.removeItem(atPath: destination)
+            } catch {
+                return "Error removing existing destination '\(destination)': \(error.localizedDescription)"
+            }
         }
 
         do {
@@ -278,8 +286,12 @@ struct FileSystemTool: Tool {
             return "Error: File or directory not found at '\(path)'"
         }
 
-        // Safety: never delete directly — require explicit approval
-        return "\u{26A0}\u{FE0F} ACTION REQUIRED: Confirm deletion of '\(path)'. This action cannot be undone."
+        do {
+            try FileManager.default.removeItem(atPath: path)
+            return "Deleted '\(path)'"
+        } catch {
+            return "Error deleting '\(path)': \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Write / Append
@@ -287,6 +299,7 @@ struct FileSystemTool: Tool {
     private func writeFile(at path: String, content: String) -> String {
         let url = URL(fileURLWithPath: path)
         let parentDir = url.deletingLastPathComponent()
+        let existedBeforeWrite = FileManager.default.fileExists(atPath: path)
 
         do {
             try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
@@ -294,13 +307,9 @@ struct FileSystemTool: Tool {
             return "Error creating parent directories: \(error.localizedDescription)"
         }
 
-        if FileManager.default.fileExists(atPath: path) {
-            return "\u{26A0}\u{FE0F} ACTION REQUIRED: File already exists at '\(path)'. Needs approval to overwrite."
-        }
-
         do {
             try content.write(toFile: path, atomically: true, encoding: .utf8)
-            return "Created '\(path)' with \(content.utf8.count) bytes."
+            return "\(existedBeforeWrite ? "Wrote" : "Created") '\(path)' with \(content.utf8.count) bytes."
         } catch {
             return "Error writing '\(path)': \(error.localizedDescription)"
         }
@@ -322,12 +331,131 @@ struct FileSystemTool: Tool {
         }
     }
 
+    // MARK: - Approval Gate
+
+    private func requestApprovalIfNeeded(
+        operation: FileOperation,
+        path: String,
+        destination: String? = nil,
+        content: String? = nil
+    ) async -> String {
+        if UserDefaults.standard.string(forKey: "approvalMode") == "Auto-run" {
+            return execute(operation: operation, path: path, destination: destination, content: content)
+        }
+
+        let id = UUID().uuidString
+        let summary = approvalSummary(operation: operation, path: path, destination: destination)
+        let request = PendingToolApproval(
+            id: id,
+            operation: operation.rawValue,
+            path: path,
+            destination: destination,
+            summary: summary,
+            action: { [path, destination, content] in
+                execute(operation: operation, path: path, destination: destination, content: content)
+            }
+        )
+        await ToolApprovalRegistry.shared.register(request)
+
+        return """
+        TURBOCODE_APPROVAL_REQUIRED
+        approval_id: \(id)
+        operation: \(operation.rawValue)
+        path: \(path)
+        \(destination.map { "destination: \($0)\n" } ?? "")summary: \(summary)
+        """
+    }
+
+    private func approvalSummary(operation: FileOperation, path: String, destination: String?) -> String {
+        switch operation {
+        case .createDirectory:
+            return "Create directory '\(path)'"
+        case .write:
+            let verb = FileManager.default.fileExists(atPath: path) ? "Overwrite" : "Create"
+            return "\(verb) file '\(path)'"
+        case .append:
+            return "Append to file '\(path)'"
+        case .copy:
+            return "Copy '\(path)' to '\(destination ?? "")'"
+        case .move:
+            return "Move '\(path)' to '\(destination ?? "")'"
+        case .delete:
+            return "Delete '\(path)'. This action cannot be undone."
+        case .list, .info, .find:
+            return "Run \(operation.rawValue) on '\(path)'"
+        }
+    }
+
+    private func execute(
+        operation: FileOperation,
+        path: String,
+        destination: String?,
+        content: String?
+    ) -> String {
+        switch operation {
+        case .createDirectory:
+            return makeDirectory(at: path)
+        case .write:
+            guard let content else { return "Error: 'content' is required for write." }
+            return writeFile(at: path, content: content)
+        case .append:
+            guard let content else { return "Error: 'content' is required for append." }
+            return appendFile(at: path, content: content)
+        case .copy:
+            guard let destination else { return "Error: 'destination' is required for copy." }
+            return copyItem(from: path, to: destination)
+        case .move:
+            guard let destination else { return "Error: 'destination' is required for move." }
+            return moveItem(from: path, to: destination)
+        case .delete:
+            return deleteItem(at: path)
+        case .list:
+            return listDirectory(at: path)
+        case .info:
+            return fileInfo(at: path)
+        case .find:
+            return findFiles(in: path, pattern: nil)
+        }
+    }
+
     // MARK: - Helpers
 
     private func fmtDate(_ date: Date) -> String {
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd HH:mm"
         return fmt.string(from: date)
+    }
+}
+
+// MARK: - Tool Approval Registry
+
+public struct PendingToolApproval: Sendable {
+    public let id: String
+    public let operation: String
+    public let path: String
+    public let destination: String?
+    public let summary: String
+    let action: @Sendable () -> String
+}
+
+public actor ToolApprovalRegistry {
+    public static let shared = ToolApprovalRegistry()
+
+    private var requests: [String: PendingToolApproval] = [:]
+
+    public func register(_ request: PendingToolApproval) {
+        requests[request.id] = request
+    }
+
+    public func approve(id: String) -> String {
+        guard let request = requests.removeValue(forKey: id) else {
+            return "Error: Approval request expired or was already handled."
+        }
+        return request.action()
+    }
+
+    public func reject(id: String) {
+        requests.removeValue(forKey: id)
     }
 }
 

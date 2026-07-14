@@ -53,6 +53,8 @@ struct CallPowerfulModelTool: Tool {
     private let delegateTools: [any Tool]
     /// System instructions for the delegate session (workspace context, rules, etc.).
     private let delegateInstructions: String
+    private let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
+    private let onToolEnd: (@Sendable (Transcript.ToolCall) async -> Void)?
 
     /// Creates a tool that delegates to a remote model via `ChatCompletionsLanguageModel`.
     /// - Parameters:
@@ -66,13 +68,17 @@ struct CallPowerfulModelTool: Tool {
         baseURL: URL,
         temperature: Double,
         delegateTools: [any Tool],
-        delegateInstructions: String
+        delegateInstructions: String,
+        onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)? = nil,
+        onToolEnd: (@Sendable (Transcript.ToolCall) async -> Void)? = nil
     ) {
         self.modelName = modelName
         self.baseURL = baseURL
         self.temperature = temperature
         self.delegateTools = delegateTools
         self.delegateInstructions = delegateInstructions
+        self.onToolStart = onToolStart
+        self.onToolEnd = onToolEnd
     }
 
     func call(arguments: CallPowerfulModelArguments) async throws -> String {
@@ -81,6 +87,8 @@ struct CallPowerfulModelTool: Tool {
         let instructions = delegateInstructions
         let name = modelName
         let url = baseURL
+        let toolStart = onToolStart
+        let toolEnd = onToolEnd
 
         return try await Task { @MainActor in
             let model = ChatCompletionsLanguageModel(name: name, url: url)
@@ -89,7 +97,9 @@ struct CallPowerfulModelTool: Tool {
                 profile: DelegateProfile(
                     instructions: instructions,
                     tools: tools,
-                    model: model
+                    model: model,
+                    onToolStart: toolStart,
+                    onToolEnd: toolEnd
                 ),
                 history: []
             )

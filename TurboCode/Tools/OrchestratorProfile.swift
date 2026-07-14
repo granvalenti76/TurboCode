@@ -14,6 +14,8 @@ struct TurboCodeDynamicProfile: LanguageModelSession.DynamicProfile {
     let instructions: String
     let tools: [any Tool]
     let model: any LanguageModel
+    let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
+    let onToolEnd: (@Sendable (Transcript.ToolCall) async -> Void)?
     let onDelegationStart: (@Sendable () async -> Void)?
     let onDelegationEnd: (@Sendable () async -> Void)?
     let reasoningLevel: ContextOptions.ReasoningLevel?
@@ -26,12 +28,18 @@ struct TurboCodeDynamicProfile: LanguageModelSession.DynamicProfile {
         .model(model)
         .reasoningLevel(reasoningLevel)
         .onToolCall { toolCall in
+            if let action = onToolStart {
+                await action(toolCall)
+            }
             if toolCall.toolName == "call_powerful_model",
                let action = onDelegationStart {
                 await action()
             }
         }
         .onToolOutput { call, _ in
+            if let action = onToolEnd {
+                await action(call)
+            }
             if call.toolName == "call_powerful_model",
                let action = onDelegationEnd {
                 await action()

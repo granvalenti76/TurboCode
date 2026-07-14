@@ -14,7 +14,11 @@ struct ChatBlockView: View {
     var body: some View {
         switch block.kind {
         case .user:
-            userBubble
+            if let event = internalActionEvent {
+                internalActionRow(icon: event.icon, text: event.text)
+            } else {
+                userBubble
+            }
         case .assistant:
             assistantBubble
         case .reasoning:
@@ -104,7 +108,7 @@ struct ChatBlockView: View {
     private var assistantBubble: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Markdown(block.text)
+                Markdown(visibleAssistantText)
                     .markdownTheme(.basic)
                     .markdownTextStyle {
                         FontSize(chatFontSize)
@@ -171,6 +175,80 @@ struct ChatBlockView: View {
         .padding(.vertical, 2)
     }
 
+    private func internalActionRow(icon: String, text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+            Text(text)
+                .font(AppTypography.metadata)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer()
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var internalActionEvent: (icon: String, text: String)? {
+        let approved = block.text.hasPrefix("[User approved tool action]")
+        let rejected = block.text.hasPrefix("[User rejected tool action:")
+        guard approved || rejected else { return nil }
+
+        let values = Dictionary(uniqueKeysWithValues: block.text
+            .components(separatedBy: .newlines)
+            .compactMap { line -> (String, String)? in
+                let parts = line.split(separator: ":", maxSplits: 1)
+                guard parts.count == 2 else { return nil }
+                return (
+                    String(parts[0]).trimmingCharacters(in: .whitespacesAndNewlines),
+                    String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+            })
+
+        let operation = values["Operation"] ?? "action"
+        let path = values["Path"].map { URL(fileURLWithPath: $0).lastPathComponent }
+        let action = compactAction(operation: operation, item: path)
+        return approved
+            ? ("checkmark.circle", "Allowed: \(action)")
+            : ("xmark.circle", "Denied: \(action)")
+    }
+
+    private func compactAction(operation: String, item: String?) -> String {
+        let target = item ?? "item"
+        switch operation {
+        case "createDirectory": return "Create \(target)"
+        case "write": return "Write \(target)"
+        case "append": return "Update \(target)"
+        case "copy": return "Copy \(target)"
+        case "move": return "Move \(target)"
+        case "delete": return "Delete \(target)"
+        default: return operation.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    private var visibleAssistantText: String {
+        let approvalKeys = Set(["approval_id", "operation", "path", "destination", "summary"])
+        var isSkippingApproval = false
+        var visibleLines: [String] = []
+
+        for line in block.text.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.contains("TURBOCODE_APPROVAL_REQUIRED") {
+                isSkippingApproval = true
+                continue
+            }
+            if isSkippingApproval {
+                let key = trimmed.split(separator: ":", maxSplits: 1).first.map(String.init) ?? ""
+                if trimmed.isEmpty || approvalKeys.contains(key) { continue }
+                isSkippingApproval = false
+            }
+            visibleLines.append(line)
+        }
+
+        return visibleLines.joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var approvalBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.shield")
@@ -178,12 +256,9 @@ struct ChatBlockView: View {
             Text("Approval required")
                 .font(.system(size: 12))
             Spacer()
-            Button("Approve") {}
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            Button("Reject") {}
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            Text("Use the action bar below")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
         }
         .padding(12)
         .background(.orange.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))

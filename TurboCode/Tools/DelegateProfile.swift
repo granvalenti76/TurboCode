@@ -9,6 +9,8 @@ struct DelegateProfile: LanguageModelSession.DynamicProfile {
     let instructions: String
     let tools: [any Tool]
     let model: ChatCompletionsLanguageModel
+    let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
+    let onToolEnd: (@Sendable (Transcript.ToolCall) async -> Void)?
 
     var body: some LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
@@ -16,6 +18,16 @@ struct DelegateProfile: LanguageModelSession.DynamicProfile {
             tools
         }
         .model(model)
+        .onToolCall { call in
+            if let action = onToolStart {
+                await action(call)
+            }
+        }
+        .onToolOutput { call, _ in
+            if let action = onToolEnd {
+                await action(call)
+            }
+        }
         .droppingCompletedToolCalls()
         .rollingWindow(entries: 20)
     }

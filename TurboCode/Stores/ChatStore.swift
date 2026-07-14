@@ -32,6 +32,8 @@ public final class ChatStore {
     public var blocks: [ChatBlock] = []
     public var liveReasoning: String = ""
     public var liveAssistant: String = ""
+    public var toolActivities: [ToolActivity] = []
+    public var activeToolActivity: ToolActivity? { toolActivities.last }
 
     // First-message layout state — true on launch and new chat,
     // becomes false after the first message is sent
@@ -266,6 +268,7 @@ public final class ChatStore {
             text += "\nActivate the appropriate skill below to access file and code tools."
             text += "\nAll file operations are restricted to the workspace directory."
             text += "\nNEVER access files outside the workspace."
+            text += "\nIf a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
         }
         return text
     }
@@ -297,7 +300,13 @@ public final class ChatStore {
                 baseURL: llamaBaseURL,
                 temperature: llamaTemperature,
                 delegateTools: workspaceTools,
-                delegateInstructions: baseInstructions
+                delegateInstructions: baseInstructions,
+                onToolStart: { [weak self] call in
+                    await MainActor.run { self?.beginToolActivity(call) }
+                },
+                onToolEnd: { [weak self] call in
+                    await MainActor.run { self?.endToolActivity(call) }
+                }
             )
             var t: [any Tool] = [powerfulTool]
             if !workspaceRoot.isEmpty {
@@ -327,7 +336,7 @@ public final class ChatStore {
             4. Synthesise the powerful model's response into a clear, well-formatted answer for the user.
 
             === APPROVAL REQUESTS ===
-            If the powerful model's response contains "ACTION REQUIRED", do NOT synthesise or rephrase it. Pass it through verbatim to the user and ask them to confirm or reject.
+            If the powerful model's response contains "TURBOCODE_APPROVAL_REQUIRED", stop and wait for the user. The app presents the approval UI; never expose the technical approval block in your response.
             """
             effectiveInstructions = text
         } else {
@@ -353,6 +362,12 @@ public final class ChatStore {
                     instructions: effectiveInstructions,
                     tools: tools,
                     model: activeModel,
+                    onToolStart: { [weak self] call in
+                        await MainActor.run { self?.beginToolActivity(call) }
+                    },
+                    onToolEnd: { [weak self] call in
+                        await MainActor.run { self?.endToolActivity(call) }
+                    },
                     onDelegationStart: { [weak self] in
                         await MainActor.run { self?.isDelegating = true }
                     },
@@ -371,7 +386,13 @@ public final class ChatStore {
                     activations: skillActivations,
                     workspaceRoot: workspaceRoot,
                     model: activeModel,
-                    reasoningLevel: reasoningLevel
+                    reasoningLevel: reasoningLevel,
+                    onToolStart: { [weak self] call in
+                        await MainActor.run { self?.beginToolActivity(call) }
+                    },
+                    onToolEnd: { [weak self] call in
+                        await MainActor.run { self?.endToolActivity(call) }
+                    }
                 ),
                 history: history
             )
@@ -599,6 +620,10 @@ public final class ChatStore {
     }
 
     public func sendMessage(_ text: String) async {
+        await sendMessage(text, visibleInTimeline: true)
+    }
+
+    private func sendMessage(_ text: String, visibleInTimeline: Bool) async {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !busy else { return }
 
@@ -606,7 +631,7 @@ public final class ChatStore {
         busy = true
         let task = Task<Void, Never> { [weak self] in
             guard let self else { return }
-            await self.performSendMessage(text)
+            await self.performSendMessage(text, visibleInTimeline: visibleInTimeline)
         }
         responseTask = task
         await task.value
@@ -614,17 +639,19 @@ public final class ChatStore {
         busy = false
     }
 
-    private func performSendMessage(_ text: String) async {
+    private func performSendMessage(_ text: String, visibleInTimeline: Bool) async {
 
         isFirstMessage = false
         // Generate the title concurrently with the response, but retain the
         // task so persistence can wait for the final title.
-        let titleTask = Task<Void, Never> { [weak self] in
+        let titleTask: Task<Void, Never>? = visibleInTimeline ? Task { [weak self] in
             guard let self else { return }
             await self.generateTitle(from: text)
-        }
+        } : nil
 
-        blocks.append(ChatBlock(kind: .user, text: text))
+        if visibleInTimeline {
+            blocks.append(ChatBlock(kind: .user, text: text))
+        }
 
         let placeholderId = UUID().uuidString
         blocks.append(ChatBlock(id: placeholderId, kind: .assistant, text: "", model: composerModel))
@@ -644,10 +671,10 @@ public final class ChatStore {
                 // Fast path: update liveAssistant for quick UI feedback
                 if !snapshot.content.isEmpty {
                     accumulatedText = snapshot.content
-                    liveAssistant = accumulatedText
+                    liveAssistant = userVisibleAssistantText(accumulatedText)
                 }
 
-                // Process transcript entries for reasoning and ACTION REQUIRED
+                // Process transcript entries for reasoning and tool approvals.
                 for entry in snapshot.transcriptEntries {
                     if case .reasoning(let reasoning) = entry {
                         for segment in reasoning.segments {
@@ -662,10 +689,8 @@ public final class ChatStore {
                             if case .text(let t) = segment { return t.content }
                             return nil
                         }.joined()
-                        if text.contains("ACTION REQUIRED") {
-                            pendingApproval = ApprovalRequest(
-                                summary: text.replacingOccurrences(of: "\u{26A0}\u{FE0F} ACTION REQUIRED: ", with: "")
-                            )
+                        if let request = ApprovalRequest(toolOutput: text) {
+                            pendingApproval = request
                         }
                     }
                 }
@@ -675,14 +700,21 @@ public final class ChatStore {
             // Stream ended: finalize the assistant block.
             // Reset delegation state once streaming is done.
             isDelegating = false
-            let finalText = accumulatedText.isEmpty ? liveReasoning : accumulatedText
+            toolActivities.removeAll()
+            let finalText = accumulatedText.isEmpty
+                ? liveReasoning
+                : userVisibleAssistantText(accumulatedText)
             if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
-                blocks[i] = ChatBlock(
-                    id: placeholderId,
-                    kind: .assistant,
-                    text: finalText,
-                    model: composerModel
-                )
+                if finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    blocks.remove(at: i)
+                } else {
+                    blocks[i] = ChatBlock(
+                        id: placeholderId,
+                        kind: .assistant,
+                        text: finalText,
+                        model: composerModel
+                    )
+                }
             }
 
             // Separate reasoning block if model output BOTH reasoning and content.
@@ -715,8 +747,10 @@ public final class ChatStore {
             liveReasoning = ""
             liveAssistant = ""
             isDelegating = false
+            toolActivities.removeAll()
             self.error = nil
         } catch {
+            toolActivities.removeAll()
             self.error = error.localizedDescription
             if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
                 blocks[i] = ChatBlock(
@@ -729,7 +763,9 @@ public final class ChatStore {
         }
         // Persist after the title task finishes so the JSON never races with
         // the Apple on-device title generator and stores a stale "New Chat".
-        await titleTask.value
+        if let titleTask {
+            await titleTask.value
+        }
         if let tid = activeThreadId {
             await persistSession(for: tid)
         }
@@ -740,48 +776,106 @@ public final class ChatStore {
         responseTask?.cancel()
     }
 
-    /// Approve a pending destructive operation — executes directly via FileManager,
-    /// then informs the model that the action was completed.
+    /// Approve a pending tool operation, execute the exact registered action,
+    /// then inform the model that the action completed.
     public func approveAction() {
         guard let request = pendingApproval else { return }
         pendingApproval = nil
 
-        let summary = request.summary
-
-        // Extract the path from single quotes in the summary
-        let path: String? = {
-            guard let start = summary.firstIndex(of: "'"),
-                  let end = summary[start...].dropFirst().firstIndex(of: "'") else { return nil }
-            return String(summary[summary.index(after: start)..<end])
-        }()
-
-        guard let filePath = path else {
-            Task { await sendMessage("[User approved: \(summary)]") }
-            return
-        }
-
-        do {
-            if summary.contains("deletion") || summary.contains("Confirm deletion") {
-                try FileManager.default.removeItem(atPath: filePath)
-                Task { await sendMessage("[User approved and completed: deleted '\(filePath)']") }
-            } else if summary.contains("overwrite") || summary.contains("already exists") {
-                // Overwrite requires content — not available here, tell model to retry
-                Task { await sendMessage("[User approved: overwrite '\(filePath)'. Please retry the write operation.]") }
-            } else {
-                Task { await sendMessage("[User approved: \(summary)]") }
-            }
-        } catch {
-            Task { await sendMessage("[Action failed: \(error.localizedDescription)]") }
+        Task {
+            let result = await ToolApprovalRegistry.shared.approve(id: request.id)
+            await sendInternalMessageWhenIdle("""
+            [User approved tool action]
+            Operation: \(request.operation)
+            Path: \(request.path)
+            Result:
+            \(result)
+            """)
         }
     }
 
-    /// Reject a pending destructive operation.
+    /// Reject a pending tool operation.
     public func rejectAction() {
         guard let request = pendingApproval else { return }
         pendingApproval = nil
         Task {
-            await sendMessage("[User rejected: \(request.summary). Do NOT perform this action.]")
+            await ToolApprovalRegistry.shared.reject(id: request.id)
+            await sendInternalMessageWhenIdle("[User rejected tool action: \(request.summary). Do NOT perform this action.]")
         }
+    }
+
+    private func sendInternalMessageWhenIdle(_ text: String) async {
+        while busy {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        await sendMessage(text, visibleInTimeline: false)
+    }
+
+    private func beginToolActivity(_ call: Transcript.ToolCall) {
+        toolActivities.removeAll { $0.id == call.id }
+        toolActivities.append(ToolActivity(id: call.id, summary: toolSummary(for: call)))
+    }
+
+    private func endToolActivity(_ call: Transcript.ToolCall) {
+        toolActivities.removeAll { $0.id == call.id }
+    }
+
+    private func toolSummary(for call: Transcript.ToolCall) -> String {
+        let path = (try? call.arguments.value(String.self, forProperty: "filePath"))
+            ?? (try? call.arguments.value(String.self, forProperty: "path"))
+        let item = path.map { URL(fileURLWithPath: $0).lastPathComponent }
+
+        switch call.toolName {
+        case "read_file":
+            return item.map { "Reading \($0)" } ?? "Reading file"
+        case "grep":
+            return item.map { "Searching in \($0)" } ?? "Searching workspace"
+        case "file_system":
+            let operation = try? call.arguments.value(String.self, forProperty: "operation")
+            switch operation {
+            case "list": return item.map { "Listing \($0)" } ?? "Listing files"
+            case "info": return item.map { "Inspecting \($0)" } ?? "Inspecting item"
+            case "find": return item.map { "Finding files in \($0)" } ?? "Finding files"
+            case "createDirectory": return item.map { "Creating \($0)" } ?? "Creating folder"
+            case "write": return item.map { "Writing \($0)" } ?? "Writing file"
+            case "append": return item.map { "Updating \($0)" } ?? "Updating file"
+            case "copy": return item.map { "Copying \($0)" } ?? "Copying item"
+            case "move": return item.map { "Moving \($0)" } ?? "Moving item"
+            case "delete": return item.map { "Deleting \($0)" } ?? "Deleting item"
+            default: return "Working with files"
+            }
+        case "call_powerful_model":
+            return "Working with coding model"
+        default:
+            return "Using \(call.toolName.replacingOccurrences(of: "_", with: " "))"
+        }
+    }
+
+    private func userVisibleAssistantText(_ text: String) -> String {
+        let approvalKeys = Set(["approval_id", "operation", "path", "destination", "summary"])
+        var isSkippingApproval = false
+        var visibleLines: [String] = []
+
+        for line in text.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.contains("TURBOCODE_APPROVAL_REQUIRED") {
+                isSkippingApproval = true
+                continue
+            }
+
+            if isSkippingApproval {
+                let key = trimmed.split(separator: ":", maxSplits: 1).first.map(String.init) ?? ""
+                if trimmed.isEmpty || approvalKeys.contains(key) {
+                    continue
+                }
+                isSkippingApproval = false
+            }
+
+            visibleLines.append(line)
+        }
+
+        return visibleLines.joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     public func setRoute(_ route: AppRoute) {
@@ -832,8 +926,72 @@ public enum RuntimeConnectionState: String, Sendable, Hashable {
     case disconnected; case connecting; case ready
 }
 
+// MARK: - Tool Activity
+
+public struct ToolActivity: Identifiable, Sendable, Hashable {
+    public let id: String
+    public let summary: String
+}
+
 // MARK: - Pending Approval
 
 public struct ApprovalRequest: Sendable {
+    public let id: String
+    public let operation: String
+    public let path: String
+    public let destination: String?
     public let summary: String
+
+    public var displaySummary: String {
+        let item = URL(fileURLWithPath: path).lastPathComponent
+        switch operation {
+        case "createDirectory": return "Create \(item)"
+        case "write": return "Write \(item)"
+        case "append": return "Update \(item)"
+        case "copy": return "Copy \(item)"
+        case "move": return "Move \(item)"
+        case "delete": return "Delete \(item)"
+        default: return summary
+        }
+    }
+
+    public init(
+        id: String,
+        operation: String,
+        path: String,
+        destination: String? = nil,
+        summary: String
+    ) {
+        self.id = id
+        self.operation = operation
+        self.path = path
+        self.destination = destination
+        self.summary = summary
+    }
+
+    public init?(toolOutput: String) {
+        guard toolOutput.contains("TURBOCODE_APPROVAL_REQUIRED") else { return nil }
+
+        var values: [String: String] = [:]
+        for line in toolOutput.components(separatedBy: .newlines) {
+            let parts = line.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else { continue }
+            let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            values[key] = value
+        }
+
+        guard let id = values["approval_id"],
+              let operation = values["operation"],
+              let path = values["path"],
+              let summary = values["summary"] else { return nil }
+
+        self.init(
+            id: id,
+            operation: operation,
+            path: path,
+            destination: values["destination"],
+            summary: summary
+        )
+    }
 }

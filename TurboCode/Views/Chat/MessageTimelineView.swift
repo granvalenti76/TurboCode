@@ -47,12 +47,11 @@ struct MessageTimelineView: View {
                             .id("live-assistant")
                     }
 
-                    // Delegation indicator — shown when orchestrator is waiting for Llama
-                    if chatStore.isDelegating {
-                        DelegationIndicator()
+                    if let activity = chatStore.activeToolActivity {
+                        ToolActivityIndicator(activity: activity)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 4)
-                            .id("delegation-indicator")
+                            .id("tool-activity-\(activity.id)")
                     }
 
                     // Bottom anchor for auto-scroll
@@ -68,6 +67,9 @@ struct MessageTimelineView: View {
                 scrollToBottom(proxy)
             }
             .onChange(of: chatStore.liveAssistant) { _, _ in
+                if autoScroll { scrollToBottom(proxy) }
+            }
+            .onChange(of: chatStore.activeToolActivity?.id) { _, _ in
                 if autoScroll { scrollToBottom(proxy) }
             }
         }
@@ -100,6 +102,29 @@ struct MessageTimelineView: View {
         withAnimation(.easeOut(duration: 0.2)) {
             proxy.scrollTo("bottom-anchor", anchor: .bottom)
         }
+    }
+}
+
+// MARK: - Tool Activity Indicator
+
+struct ToolActivityIndicator: View {
+    let activity: ToolActivity
+
+    var body: some View {
+        HStack(spacing: 7) {
+            ProgressView()
+                .controlSize(.mini)
+
+            Text(activity.summary)
+                .font(AppTypography.metadata)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Spacer()
+        }
+        .padding(.vertical, 3)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel("\(activity.summary), in progress")
     }
 }
 
@@ -183,33 +208,6 @@ struct LiveReasoningBlock: View {
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(.orange.opacity(0.15), lineWidth: 1)
-        )
-    }
-}
-
-// MARK: - Delegation Indicator
-
-struct DelegationIndicator: View {
-    var body: some View {
-        HStack(spacing: 10) {
-            ProgressView()
-                .scaleEffect(0.8)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Delegating to powerful model")
-                    .font(.system(size: 12, weight: .medium))
-                Text("Waiting for response...")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-            }
-            
-            Spacer()
-        }
-        .padding(12)
-        .background(.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(.blue.opacity(0.15), lineWidth: 1)
         )
     }
 }
