@@ -61,10 +61,16 @@ actor GitDiffService {
 
     /// Returns the name of the currently checked-out branch, or nil if not a git repo.
     func currentBranch(at directory: URL) -> String? {
-        let result = shell("git", args: ["rev-parse", "--abbrev-ref", "HEAD"], cwd: directory)
-        guard result.exitCode == 0 else { return nil }
-        let branch = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-        return branch.isEmpty || branch == "HEAD" ? nil : branch
+        let symbolic = shell("git", args: ["symbolic-ref", "--quiet", "--short", "HEAD"], cwd: directory)
+        if symbolic.exitCode == 0 {
+            let branch = symbolic.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            return branch.isEmpty ? nil : branch
+        }
+
+        let detached = shell("git", args: ["rev-parse", "--short", "HEAD"], cwd: directory)
+        guard detached.exitCode == 0 else { return nil }
+        let commit = detached.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return commit.isEmpty ? nil : "detached@\(commit)"
     }
 
     /// Returns all local branch names, or empty array if not a git repo.

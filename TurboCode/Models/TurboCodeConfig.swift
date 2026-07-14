@@ -235,12 +235,15 @@ public final class TurboCodeConfig {
     - `read_file` reads complete files or focused numbered line ranges.
     - `grep` searches workspace text.
     - `file_system` lists and manages files inside the workspace.
+    - `git` initializes repositories and provides complete structured local and
+      remote Git workflows. Git writes are independent from the read-only bash
+      sandbox. Destructive operations are presented for approval before execution.
     - `bash` runs bounded commands with read-only workspace access in a macOS process sandbox.
     - Every model uses the flat single-change `edit_file` schema. TurboCode handles
       transaction assembly internally and presents the review widget with additions,
       deletions, Review, and Undo.
-    - Text creation and editing run automatically. Only file or directory deletion
-      asks for approval.
+    - Text creation and editing run automatically. File or directory deletion and
+      destructive Git operations ask for approval.
 
     TurboCode never removes project files when a workspace is removed from the
     sidebar. It removes only the workspace reference and associated chat sessions.

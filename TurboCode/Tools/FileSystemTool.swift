@@ -64,7 +64,7 @@ struct FileSystemTool: Tool {
         - append: Append content through TurboCode's atomic change transaction
         - copy: Copy a file or directory (requires destination)
         - move: Move or rename a file or directory (requires destination)
-        - delete: Permanently delete a file or directory (the only operation requiring approval)
+        - delete: Permanently delete a file or directory (requires approval)
 
         write and append require the 'content' argument and automatically produce the
         same Review/Undo change widget as the structured editing tools.
@@ -72,8 +72,8 @@ struct FileSystemTool: Tool {
         readable paragraphs separated by blank lines. Never write the whole document
         as one long line.
         Prefer read_file for numbered source ranges and the active structured editor
-        for existing source and text files in Git workspaces. Use bash for builds, tests,
-        Git queries, and commands that are not covered by these structured operations.
+        for existing source and text files in Git workspaces. Use git for every Git
+        operation and bash for builds, tests, and other read-only inspection.
         All paths must be within the workspace root.
         """
     }

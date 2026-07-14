@@ -158,6 +158,7 @@ public final class ChatStore {
     var diffLoadError: String?
 
     // Git branch state
+    var isGitRepository = false
     var currentBranch: String = ""
     var availableBranches: [String] = []
 
@@ -193,19 +194,35 @@ public final class ChatStore {
 
     public func refreshGitBranches() async {
         guard !workspaceRoot.isEmpty else {
+            isGitRepository = false
             currentBranch = ""
             availableBranches = []
             return
         }
 
-        let url = URL(fileURLWithPath: workspaceRoot)
+        let requestedWorkspace = workspaceRoot
+        let url = URL(fileURLWithPath: requestedWorkspace)
+        let isRepository = await gitService.isGitRepository(at: url)
+        guard workspaceRoot == requestedWorkspace, !Task.isCancelled else { return }
+        guard isRepository else {
+            isGitRepository = false
+            currentBranch = ""
+            availableBranches = []
+            return
+        }
         let branch = await gitService.currentBranch(at: url)
         let branches = await gitService.allBranches(at: url)
 
-        guard !Task.isCancelled else { return }
+        guard workspaceRoot == requestedWorkspace, !Task.isCancelled else { return }
 
+        isGitRepository = true
         currentBranch = branch ?? ""
         availableBranches = branches
+    }
+
+    public func refreshGitAfterToolMutation() async {
+        await refreshGitBranches()
+        await reloadDiffs()
     }
 
     /// Switch to a different git branch. Refreshes state afterwards.
@@ -418,10 +435,10 @@ public final class ChatStore {
             text += "\nAll file operations are restricted to the workspace directory."
             text += "\nNEVER access files outside the workspace."
             text += "\nUse read_file with startLine and endLine to inspect only the relevant numbered source range and preserve context."
-            text += "\nUse bash for Git queries, builds, tests, and precise inspection. Bash can read the workspace but cannot write to it."
+            text += "\nUse git for every Git operation, including the init operation when the workspace is not yet a repository. Git mutations are supported directly; never claim they are blocked by the bash sandbox. Use bash for builds, tests, and precise non-Git inspection. Bash can read the workspace but cannot write to it."
             text += "\nUse edit_file for every source or text-file creation and modification. Read the relevant range immediately before editing, copy its Revision, and request one contiguous change per call. Never generate unified diff hunks."
             text += "\nWhen writing articles, biographies, documentation, or other long-form prose, preserve readable paragraphs with a blank line between them. The tool content must contain real newline characters; never collapse the whole document into one long line."
-            text += "\nFile and directory deletion is the only operation that requires approval. If a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
+            text += "\nFile and directory deletion and destructive Git operations require approval. If a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
         }
         return text
     }
@@ -440,6 +457,11 @@ public final class ChatStore {
                 ReadFileTool(workspaceRoot: workspaceRoot),
                 GrepTool(workspaceRoot: workspaceRoot),
                 FileSystemTool(workspaceRoot: workspaceRoot),
+                GitTool(
+                    workspaceRoot: workspaceRoot,
+                    policy: agentTuning.git,
+                    executionPolicy: agentTuning.execution
+                ),
                 BashTool(
                     workspaceRoot: workspaceRoot,
                     executionPolicy: agentTuning.execution
@@ -487,7 +509,7 @@ public final class ChatStore {
             === ORCHESTRATOR MODE ===
             You are TurboCode Orchestrator. You are NOT an Apple model — you are part of the TurboCode app. Your name is TurboCode, and you delegate complex tasks to the powerful coding model via `call_powerful_model`. You have the `file_system` tool to list directories, get file info, and find files — use it for navigation and discovery.
 
-            For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, bash, file_system, and edit_file).
+            For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, git, bash, file_system, and edit_file).
 
             CRITICAL — Never trust your own knowledge:
             - If you need to answer with file contents, always delegate reading to `call_powerful_model`.
@@ -556,6 +578,7 @@ public final class ChatStore {
                     reasoningLevel: reasoningLevel,
                     dropsCompletedToolCalls: shouldDropCompletedToolCalls,
                     executionPolicy: agentTuning.execution,
+                    gitPolicy: agentTuning.git,
                     onToolStart: { [weak self] call in
                         await self?.beginToolActivity(call, backend: sessionBackend)
                     },
@@ -798,6 +821,7 @@ public final class ChatStore {
             responseTask?.cancel()
             workspaceRoot = ""
             selectedProject = nil
+            isGitRepository = false
             currentBranch = ""
             availableBranches = []
             diffSections = []
@@ -840,6 +864,9 @@ public final class ChatStore {
     /// Internal: configure workspace, rebuild session, refresh git state.
     private func setWorkspace(_ path: String) {
         workspaceRoot = path
+        isGitRepository = false
+        currentBranch = ""
+        availableBranches = []
 
         // Save to recent workspaces
         var recent = recentWorkspaces
@@ -860,6 +887,7 @@ public final class ChatStore {
     /// Clear the workspace selection.
     public func clearWorkspace() {
         workspaceRoot = ""
+        isGitRepository = false
         currentBranch = ""
         availableBranches = []
         rebuildSession()
@@ -1404,6 +1432,9 @@ public final class ChatStore {
             return item.map { "Searching in \($0)" } ?? "Searching workspace"
         case "bash":
             return "Running command"
+        case "git":
+            let operation = try? call.arguments.value(String.self, forProperty: "operation")
+            return operation.map { "Git \($0)" } ?? "Working with Git"
         case "apply_edits", "edit_file":
             return "Preparing file changes"
         case "file_system":

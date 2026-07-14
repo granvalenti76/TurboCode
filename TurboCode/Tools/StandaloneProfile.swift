@@ -16,6 +16,7 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let reasoningLevel: ContextOptions.ReasoningLevel?
     let dropsCompletedToolCalls: Bool
     let executionPolicy: ExecutionPolicy
+    let gitPolicy: GitPolicy
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
 
@@ -32,9 +33,14 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
             Instructions(instructions)
             if !workspaceRoot.isEmpty {
                 Instructions {
-                    "read_file, bash, and edit_file are active directly in this session. Use read_file with small line ranges and its Revision for focused context. Use bash only for Git queries, builds, tests, and read-only workspace inspection. Use edit_file for every text-file creation or modification, one contiguous change per call. When writing articles, biographies, documentation, or other long prose, include real newline characters and separate paragraphs with a blank line; never collapse the document into one long line."
+                    "read_file, git, bash, and edit_file are active directly in this session. Use read_file with small line ranges and its Revision for focused context. Use git for every Git operation, including init when the workspace is not yet a repository; Git writes are not blocked by the bash sandbox. Use bash only for builds, tests, and precise read-only inspection not covered by a structured tool. Use edit_file for every text-file creation or modification, one contiguous change per call. When writing articles, biographies, documentation, or other long prose, include real newline characters and separate paragraphs with a blank line; never collapse the document into one long line."
                 }
                 ReadFileTool(workspaceRoot: workspaceRoot)
+                GitTool(
+                    workspaceRoot: workspaceRoot,
+                    policy: gitPolicy,
+                    executionPolicy: executionPolicy
+                )
                 BashTool(workspaceRoot: workspaceRoot, executionPolicy: executionPolicy)
                 StandaloneSkills(activations: activations, workspaceRoot: workspaceRoot)
                 Instructions {

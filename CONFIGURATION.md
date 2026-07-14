@@ -72,9 +72,14 @@ is disabled.
 ## Git
 
 `allowsCommits`, `allowsRemoteWrites`, and `confirmsDestructiveOperations` define
-the policy contract for the structured Git service. They are stored now so the
-Git implementation can adopt the stable schema without another user migration.
-Until that service is available, they do not relax the current command sandbox.
+the policy contract for the structured Git service. The service supports init, status,
+diff, history, branches, staging, commits, merge/rebase flows, remotes, fetch,
+pull, and push without routing Git through the shell tool.
+
+Commit and remote-write policies are enforced before process launch. Discard,
+clean, hard reset, rebase, force-delete, and force-push operations require the
+user's approval by default. Git arguments are passed directly to `/usr/bin/git`;
+they are never interpolated into a shell command.
 
 ## Validation And Recovery
 

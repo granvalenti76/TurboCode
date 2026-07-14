@@ -332,8 +332,11 @@ struct InputFieldView: View {
         if chatStore.workspaceRoot.isEmpty {
             label = "no repo"
             icon = "arrow.triangle.branch"
-        } else if chatStore.currentBranch.isEmpty {
+        } else if !chatStore.isGitRepository {
             label = "no repo"
+            icon = "arrow.triangle.branch"
+        } else if chatStore.currentBranch.isEmpty {
+            label = "detached HEAD"
             icon = "arrow.triangle.branch"
         } else {
             label = chatStore.currentBranch
@@ -342,7 +345,9 @@ struct InputFieldView: View {
 
         return Menu {
             if chatStore.availableBranches.isEmpty {
-                Text("No branches available")
+                Text(chatStore.currentBranch.isEmpty
+                     ? "No branches available"
+                     : "No commits yet on \(chatStore.currentBranch)")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             } else {

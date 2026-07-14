@@ -38,10 +38,24 @@ struct WorkbenchSplitView: View {
                         .zIndex(1)
                 }
             }
+            .background {
+                Color(nsColor: .windowBackgroundColor)
+                    .ignoresSafeArea(edges: .top)
+            }
             .clipped()
             .animation(.easeInOut(duration: 0.18), value: chatStore.rightPanelVisible)
         }
         .navigationSplitViewStyle(.balanced)
+        .containerBackground(.ultraThinMaterial.opacity(0.62), for: .window)
+        .background(alignment: .top) {
+            HStack(spacing: 0) {
+                Color.clear
+                    .frame(width: sidebarWidth)
+                Color(nsColor: .windowBackgroundColor)
+            }
+            .frame(height: 52)
+            .ignoresSafeArea(edges: .top)
+        }
         .frame(minWidth: workbenchMinWidth)
         .onChange(of: chatStore.leftSidebarCollapsed, initial: true) { _, collapsed in
             let target: NavigationSplitViewVisibility = collapsed ? .detailOnly : .all
