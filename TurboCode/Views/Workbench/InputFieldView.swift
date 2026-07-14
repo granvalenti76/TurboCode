@@ -2,11 +2,6 @@ import SwiftUI
 
 // MARK: - Composer Enums
 
-enum ApprovalMode: String, CaseIterable {
-    case askForApproval = "Ask for approval"
-    case autoRun = "Auto-run"
-}
-
 enum ReasoningEffort: String, CaseIterable {
     case low = "Low"
     case medium = "Medium"
@@ -22,7 +17,6 @@ struct InputFieldView: View {
     @FocusState private var isFocused: Bool
 
     // Persisted preferences
-    @AppStorage("approvalMode") private var approvalMode: ApprovalMode = .askForApproval
     @AppStorage("reasoningEffort") private var reasoningEffort: ReasoningEffort = .medium
 
     var body: some View {
@@ -50,7 +44,6 @@ struct InputFieldView: View {
 
                 HStack(spacing: 14) {
                     attachButton
-                    approvalModeMenu
 
                     Spacer()
 
@@ -190,21 +183,6 @@ struct InputFieldView: View {
         .help("Attach files")
     }
 
-    // MARK: - Approval Mode Menu
-
-    private var approvalModeMenu: some View {
-        Menu {
-            ForEach(ApprovalMode.allCases, id: \.self) { mode in
-                Button(mode.rawValue) { approvalMode = mode }
-            }
-        } label: {
-            Label(approvalMode.rawValue, systemImage: "hand.raised")
-        }
-        .menuStyle(.borderlessButton)
-        .font(AppTypography.control)
-        .fixedSize()
-    }
-
     // MARK: - Backend Menu
 
     private var backendMenu: some View {
@@ -277,6 +255,11 @@ struct InputFieldView: View {
             }
             let text = viewModel.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return }
+            if chatStore.isIncompleteSkillCommand(text) {
+                viewModel.messageText = "/skill "
+                isFocused = true
+                return
+            }
             viewModel.reset()
             Task { await chatStore.sendMessage(text) }
         } label: {
@@ -285,7 +268,7 @@ struct InputFieldView: View {
         .buttonStyle(.borderedProminent)
         .controlSize(.regular)
         .clipShape(Circle())
-        .disabled(!chatStore.busy && !viewModel.canSend)
+        .disabled(!chatStore.busy && (!viewModel.canSend || chatStore.isIncompleteSkillCommand(viewModel.messageText)))
         .keyboardShortcut(.return, modifiers: [])
         .help(chatStore.busy ? "Stop response" : "Send message")
     }

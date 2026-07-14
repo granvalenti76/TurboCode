@@ -1,6 +1,6 @@
 import SwiftUI
 
-// MARK: - InspectorPanelView
+// MARK: - Inspector Panel
 
 struct InspectorPanelView: View {
     @Environment(ChatStore.self) private var chatStore
@@ -8,242 +8,410 @@ struct InspectorPanelView: View {
     var body: some View {
         Group {
             if chatStore.isLoadingDiffs {
-                loadingView
+                stateView(icon: nil, title: "Loading changes", subtitle: nil, showsProgress: true)
             } else if let error = chatStore.diffLoadError {
-                emptyView(title: "Choose a workspace", subtitle: error)
-            } else if chatStore.diffSections.isEmpty {
-                emptyView(title: "No changes yet", subtitle: "Working tree is clean")
-            } else {
-                FileInspectorView(
-                    sections: chatStore.diffSections,
-                    projectFolderURL: URL(fileURLWithPath: chatStore.workspaceRoot)
+                stateView(
+                    icon: "exclamationmark.triangle",
+                    title: "Changes unavailable",
+                    subtitle: error
                 )
+            } else if chatStore.diffSections.isEmpty {
+                stateView(
+                    icon: "checkmark.circle",
+                    title: "No changes",
+                    subtitle: "The working tree is clean"
+                )
+            } else {
+                FileInspectorView(sections: chatStore.diffSections)
             }
         }
         .background(.background)
-        .frame(minWidth: 280)
     }
 
-    // MARK: - Loading View
+    private func stateView(
+        icon: String?,
+        title: String,
+        subtitle: String?,
+        showsProgress: Bool = false
+    ) -> some View {
+        VStack(spacing: 8) {
+            if showsProgress {
+                ProgressView()
+                    .controlSize(.small)
+            } else if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundStyle(.secondary)
+            }
 
-    private var loadingView: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-                .scaleEffect(0.8)
-            Text("Loading…")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    // MARK: - Empty / Error View
-
-    private func emptyView(title: String, subtitle: String) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "checkmark.circle")
-                .font(.system(size: 32))
-                .foregroundStyle(.green)
             Text(title)
-                .font(.subheadline)
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
-            Text(subtitle)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+
+            if let subtitle {
+                Text(subtitle)
+                    .font(AppTypography.metadata)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 240)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(24)
     }
 }
 
-// MARK: - FileInspectorView
+// MARK: - File Inspector
+
+private enum DiffContextMode: String, CaseIterable, Identifiable {
+    case focused = "Focused"
+    case full = "Full"
+
+    var id: Self { self }
+}
 
 struct FileInspectorView: View {
     let sections: [FileDiffSection]
-    let projectFolderURL: URL?
+
+    @Environment(ChatStore.self) private var chatStore
     @State private var collapsed: Set<String> = []
-    @State private var showOnlyChanges = false
+    @State private var contextMode: DiffContextMode = .focused
+
+    private var additions: Int { sections.reduce(0) { $0 + $1.added } }
+    private var deletions: Int { sections.reduce(0) { $0 + $1.removed } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             headerBar
             Divider()
-            contentArea
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
 
-    private var headerBar: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "doc.plaintext").font(.system(size: 10)).foregroundStyle(.secondary)
-            Text("Changed Files").font(AppTypography.controlEmphasized).foregroundStyle(.secondary)
-            Spacer()
-
-            Button {
-                showOnlyChanges.toggle()
-            } label: {
-                HStack(spacing: 2) {
-                    Image(systemName: showOnlyChanges ? "doc.text.below.ecg" : "doc.text")
-                        .font(.system(size: 11))
-                    Text(showOnlyChanges ? "Changes" : "Full")
-                        .font(AppTypography.metadata)
-                }
-                .foregroundStyle(showOnlyChanges ? Color.accentColor : Color.secondary.opacity(0.5))
-                .padding(.horizontal, 6).padding(.vertical, 3)
-                .background(.quaternary.opacity(0.2), in: RoundedRectangle(cornerRadius: 4))
-            }
-            .buttonStyle(.plain)
-            .help(showOnlyChanges ? "Show full diff with context" : "Show only added/removed lines")
-
-            Text("\(sections.count) \(sections.count == 1 ? "file" : "files")")
-                .font(AppTypography.metadata)
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8).frame(minHeight: 36)
-    }
-
-    @ViewBuilder
-    private var contentArea: some View {
-        if sections.isEmpty {
-            emptyPlaceholder
-        } else {
             ScrollView(.vertical) {
                 LazyVStack(spacing: 0) {
                     ForEach(sections) { section in
                         DiffSectionView(
                             section: section,
                             isCollapsed: collapsed.contains(section.id),
-                            showOnlyChanges: showOnlyChanges,
+                            contextMode: contextMode,
                             onToggle: { toggle(section.id) }
                         )
-                        if section.id != sections.last?.id { Divider().padding(.leading, 12) }
+
+                        if section.id != sections.last?.id {
+                            Divider()
+                        }
                     }
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var headerBar: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Changes")
+                    .font(.system(size: 15, weight: .semibold))
+
+                HStack(spacing: 7) {
+                    Text("\(sections.count) \(sections.count == 1 ? "file" : "files")")
+                        .foregroundStyle(.secondary)
+                    Text("+\(additions)")
+                        .foregroundStyle(.green)
+                    Text("-\(deletions)")
+                        .foregroundStyle(.red)
+                }
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+            }
+
+            Spacer(minLength: 8)
+
+            Picker("Context", selection: $contextMode) {
+                ForEach(DiffContextMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+            .frame(width: 126)
+
+            Button {
+                Task { await chatStore.reloadDiffs() }
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+            .help("Refresh changes")
+
+            Button {
+                chatStore.rightPanelMode = nil
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .help("Close inspector")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(minHeight: 52)
     }
 
     private func toggle(_ id: String) {
-        if collapsed.contains(id) { collapsed.remove(id) }
-        else { collapsed.insert(id) }
-    }
-
-    private var emptyPlaceholder: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "checkmark.circle").font(.system(size: 24)).foregroundStyle(.secondary)
-            Text("No changed files").font(AppTypography.sidebarLabel).foregroundStyle(.secondary)
+        withAnimation(.easeInOut(duration: 0.16)) {
+            if collapsed.contains(id) {
+                collapsed.remove(id)
+            } else {
+                collapsed.insert(id)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-// MARK: - DiffSectionView
+// MARK: - File Section
 
 struct DiffSectionView: View {
     let section: FileDiffSection
     let isCollapsed: Bool
-    let showOnlyChanges: Bool
+    fileprivate let contextMode: DiffContextMode
     let onToggle: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            sectionHeader
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .contentShape(Rectangle())
-                .onTapGesture { onToggle() }
+            Button(action: onToggle) {
+                sectionHeader
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
 
             if !isCollapsed, !section.diffLines.isEmpty {
-                DiffLinesView(lines: showOnlyChanges ? onlyChanges(section.diffLines) : section.diffLines)
+                DiffLinesView(rows: displayRows)
             }
         }
-    }
-
-    private func onlyChanges(_ lines: [DiffLine]) -> [DiffLine] {
-        lines.filter { $0.type != .context }
     }
 
     private var sectionHeader: some View {
-        HStack(spacing: 6) {
-            Image(systemName: isCollapsed ? "chevron.forward" : "chevron.down")
-                .font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 10)
-            Image(systemName: "doc.plaintext").font(.system(size: 10)).foregroundStyle(.secondary).frame(width: 14)
+        HStack(spacing: 8) {
+            Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 12)
+
+            Image(systemName: "doc.text")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+
             VStack(alignment: .leading, spacing: 1) {
-                Text(section.fileName).font(AppTypography.controlEmphasized).lineLimit(1)
-                Text(section.path).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                Text(section.fileName)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary.opacity(0.88))
+                    .lineLimit(1)
+
+                if section.path != section.fileName {
+                    Text(section.path)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
-            Spacer(minLength: 4)
-            if section.added > 0 { Text("+\(section.added)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.green) }
-            if section.removed > 0 { Text("-\(section.removed)").font(.system(size: 10, design: .monospaced)).foregroundStyle(.red) }
+
+            Spacer(minLength: 6)
+
+            HStack(spacing: 6) {
+                if section.added > 0 {
+                    Text("+\(section.added)")
+                        .foregroundStyle(.green)
+                }
+                if section.removed > 0 {
+                    Text("-\(section.removed)")
+                        .foregroundStyle(.red)
+                }
+            }
+            .font(.system(size: 11, weight: .medium, design: .monospaced))
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(minHeight: 46)
+        .background(Color.primary.opacity(0.025))
+    }
+
+    private var displayRows: [InspectorDiffRow] {
+        switch contextMode {
+        case .full:
+            return section.diffLines.enumerated().map { index, line in
+                InspectorDiffRow(id: "line-\(index)-\(line.id)", content: .line(line))
+            }
+        case .focused:
+            return focusedRows(section.diffLines, contextRadius: 3)
+        }
+    }
+
+    private func focusedRows(_ lines: [DiffLine], contextRadius: Int) -> [InspectorDiffRow] {
+        let changedIndices = lines.indices.filter { lines[$0].type != .context }
+        guard !changedIndices.isEmpty else { return [] }
+
+        var visibleIndices = Set<Int>()
+        for index in changedIndices {
+            let lower = max(lines.startIndex, index - contextRadius)
+            let upper = min(lines.endIndex - 1, index + contextRadius)
+            visibleIndices.formUnion(lower...upper)
+        }
+
+        var rows: [InspectorDiffRow] = []
+        var omittedStart: Int?
+
+        func appendOmitted(endingAt end: Int) {
+            guard let start = omittedStart else { return }
+            rows.append(
+                InspectorDiffRow(
+                    id: "omitted-\(start)-\(end)",
+                    content: .omitted(end - start + 1)
+                )
+            )
+            omittedStart = nil
+        }
+
+        for index in lines.indices {
+            if visibleIndices.contains(index) {
+                appendOmitted(endingAt: index - 1)
+                rows.append(
+                    InspectorDiffRow(
+                        id: "line-\(index)-\(lines[index].id)",
+                        content: .line(lines[index])
+                    )
+                )
+            } else if omittedStart == nil {
+                omittedStart = index
+            }
+        }
+        appendOmitted(endingAt: lines.endIndex - 1)
+        return rows
     }
 }
 
-// MARK: - DiffLinesView
+// MARK: - Diff Rows
+
+private struct InspectorDiffRow: Identifiable {
+    enum Content {
+        case line(DiffLine)
+        case omitted(Int)
+    }
+
+    let id: String
+    let content: Content
+}
 
 struct DiffLinesView: View {
-    let lines: [DiffLine]
-    @State private var contentWidth: CGFloat = 300
+    fileprivate let rows: [InspectorDiffRow]
 
     var body: some View {
         ScrollView(.horizontal) {
             LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(lines) { line in
-                    DiffLineView(line: line)
+                ForEach(rows) { row in
+                    switch row.content {
+                    case .line(let line):
+                        DiffLineView(line: line)
+                    case .omitted(let count):
+                        omittedRow(count)
+                    }
                 }
             }
-            .font(AppTypography.code)
+            .font(.system(size: 11.5, design: .monospaced))
             .textSelection(.enabled)
-            .frame(minWidth: contentWidth, alignment: .leading)
-        }
-        .overlay {
-            GeometryReader { geo in
-                Color.clear.task(id: geo.size.width) { contentWidth = geo.size.width }
-            }
+            .frame(minWidth: 419, alignment: .leading)
         }
     }
-}
 
-// MARK: - DiffLineView
+    private func omittedRow(_ count: Int) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 10, weight: .medium))
+            Text("\(count) unchanged \(count == 1 ? "line" : "lines")")
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
+        .padding(.leading, 12)
+        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+        .background(Color.primary.opacity(0.035))
+    }
+}
 
 struct DiffLineView: View {
     let line: DiffLine
 
     var body: some View {
         HStack(spacing: 0) {
-            HStack(spacing: 2) {
-                Text(prefix).foregroundStyle(prefixColor).frame(width: 10, alignment: .center)
-                Text(lineNumberStr).foregroundStyle(.secondary).frame(width: 24, alignment: .trailing)
+            HStack(spacing: 0) {
+                Text(number(line.oldLineNumber))
+                    .frame(width: 30, alignment: .trailing)
+                Text(number(line.newLineNumber))
+                    .frame(width: 30, alignment: .trailing)
             }
-            .padding(.leading, 6).padding(.trailing, 8).background(gutterBg)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .frame(height: 20)
+            .background(gutterBackground)
 
-            Rectangle().fill(stripeColor).frame(width: 3)
+            Rectangle()
+                .fill(stripeColor)
+                .frame(width: 2, height: 20)
 
-            Text(line.content).foregroundStyle(.primary).lineLimit(nil)
-                .padding(.leading, 10).padding(.trailing, 8)
+            Text(prefix)
+                .foregroundStyle(prefixColor)
+                .frame(width: 18, alignment: .center)
+
+            Text(line.content.isEmpty ? " " : line.content)
+                .foregroundStyle(.primary.opacity(0.82))
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.trailing, 12)
+
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 1).background(contentBg)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
+        .background(contentBackground)
     }
 
-    private var gutterBg: Color {
-        switch line.type { case .added: return .green.opacity(0.18); case .removed: return .red.opacity(0.18); case .context: return .clear }
+    private func number(_ value: Int?) -> String {
+        value.map(String.init) ?? ""
     }
-    private var contentBg: Color {
-        switch line.type { case .added: return .green.opacity(0.08); case .removed: return .red.opacity(0.08); case .context: return .clear }
+
+    private var gutterBackground: Color {
+        switch line.type {
+        case .added: return .green.opacity(0.13)
+        case .removed: return .red.opacity(0.13)
+        case .context: return .clear
+        }
     }
+
+    private var contentBackground: Color {
+        switch line.type {
+        case .added: return .green.opacity(0.075)
+        case .removed: return .red.opacity(0.075)
+        case .context: return .clear
+        }
+    }
+
     private var prefix: String {
-        switch line.type { case .added: return "+"; case .removed: return "-"; case .context: return " " }
+        switch line.type {
+        case .added: return "+"
+        case .removed: return "-"
+        case .context: return ""
+        }
     }
-    private var displayLineNumber: Int? {
-        switch line.type { case .added: return line.newLineNumber; case .removed: return line.oldLineNumber; case .context: return line.newLineNumber ?? line.oldLineNumber }
-    }
-    private var lineNumberStr: String {
-        guard let ln = displayLineNumber else { return " " }; return String(format: "%3d", ln)
-    }
+
     private var prefixColor: Color {
-        switch line.type { case .added: return .green; case .removed: return .red; case .context: return .clear }
+        switch line.type {
+        case .added: return .green
+        case .removed: return .red
+        case .context: return .clear
+        }
     }
+
     private var stripeColor: Color {
-        switch line.type { case .added: return .green.opacity(0.5); case .removed: return .red.opacity(0.5); case .context: return .clear }
+        switch line.type {
+        case .added: return .green.opacity(0.7)
+        case .removed: return .red.opacity(0.7)
+        case .context: return .clear
+        }
     }
 }

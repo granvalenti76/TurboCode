@@ -29,8 +29,8 @@ struct ReadFileTool: Tool {
         """
         Read all or a precise inclusive line range from a UTF-8 text file in the workspace.
         Every returned source line is prefixed with its one-based line number, and the
-        response reports the selected range and total line count. Prefer small ranges
-        around relevant code before preparing a diff_patch.
+        response reports a stable content revision, selected range, and total line count.
+        Prefer small ranges around relevant code before calling apply_edits.
         """
     }
     var includesSchemaInInstructions: Bool { true }
@@ -105,6 +105,7 @@ struct ReadFileTool: Tool {
 
         return """
         File: \(fileURL.path)
+        Revision: \(FileRevision.hash(content))
         Lines: \(startLine)-\(endLine) of \(totalLines)
 
         \(numberedLines.joined(separator: "\n"))

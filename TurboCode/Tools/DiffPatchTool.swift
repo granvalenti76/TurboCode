@@ -99,52 +99,21 @@ struct DiffPatchTool: Tool {
             return "Error validating patch: \(error.localizedDescription)"
         }
 
-        let autoRun = UserDefaults.standard.string(forKey: "approvalMode") == "Auto-run"
-        let initialStatus: DiffPatchStatus = autoRun ? .running : .awaitingApproval
         await MainActor.run {
             ChatStore.shared?.beginDiffPatchBlock(
                 id: id,
                 patch: patch,
                 files: files,
-                status: initialStatus
+                status: .running
             )
         }
 
-        if autoRun {
-            return await apply(
-                patch: patch,
-                files: files,
-                id: id,
-                tolerateInaccurateEOF: !usesStructuredEdits
-            )
-        }
-
-        let additions = files.reduce(0) { $0 + $1.additions }
-        let deletions = files.reduce(0) { $0 + $1.deletions }
-        let summary = "Edit \(files.count) \(files.count == 1 ? "file" : "files") (+\(additions) -\(deletions))"
-        await ToolApprovalRegistry.shared.register(PendingToolApproval(
+        return await apply(
+            patch: patch,
+            files: files,
             id: id,
-            operation: "diffPatch",
-            path: workspaceRoot,
-            destination: nil,
-            summary: summary,
-            action: { [patch, files, id] in
-                await apply(
-                    patch: patch,
-                    files: files,
-                    id: id,
-                    tolerateInaccurateEOF: !usesStructuredEdits
-                )
-            }
-        ))
-
-        return """
-        TURBOCODE_APPROVAL_REQUIRED
-        approval_id: \(id)
-        operation: diffPatch
-        path: \(workspaceRoot)
-        summary: \(summary)
-        """
+            tolerateInaccurateEOF: !usesStructuredEdits
+        )
     }
 
     private func normalizedRawPatch(_ value: String) -> String {

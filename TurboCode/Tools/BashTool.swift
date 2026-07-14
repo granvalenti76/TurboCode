@@ -26,9 +26,9 @@ struct BashTool: Tool {
         """
         Run a zsh command from the workspace root. Use this for precise inspection,
         Git queries, builds, and tests. Prefer read_file for source ranges and
-        diff_patch for text edits. Shell writes are confined to the workspace by a
-        macOS process sandbox. Commands require user approval unless Auto-run is active.
-        Output is bounded to keep model context small.
+        apply_edits for text changes. The macOS process sandbox makes the workspace
+        read-only; commands may write only to the private temporary directory exposed
+        as TMPDIR. Output and execution time are bounded to keep model context small.
         """
     }
     var includesSchemaInInstructions: Bool { true }
@@ -42,52 +42,12 @@ struct BashTool: Tool {
         let timeout = min(max(arguments.timeoutSeconds ?? 30, 1), 120)
         let outputLimit = min(max(arguments.maxOutputCharacters ?? 12_000, 1_000), 30_000)
 
-        if UserDefaults.standard.string(forKey: "approvalMode") == "Auto-run" {
-            return await service.run(
-                command: command,
-                workspaceRoot: workspaceRoot,
-                timeoutSeconds: timeout,
-                outputLimit: outputLimit
-            )
-        }
-
-        let id = UUID().uuidString
-        let summary = Self.approvalSummary(for: command)
-        await ToolApprovalRegistry.shared.register(PendingToolApproval(
-            id: id,
-            operation: "bash",
-            path: workspaceRoot,
-            destination: nil,
-            summary: summary,
-            action: { [service, command, workspaceRoot] in
-                await service.run(
-                    command: command,
-                    workspaceRoot: workspaceRoot,
-                    timeoutSeconds: timeout,
-                    outputLimit: outputLimit
-                )
-            }
-        ))
-
-        return """
-        TURBOCODE_APPROVAL_REQUIRED
-        approval_id: \(id)
-        operation: bash
-        path: \(workspaceRoot)
-        summary: \(summary)
-        """
-    }
-
-    private static func approvalSummary(for command: String) -> String {
-        let singleLine = command
-            .components(separatedBy: .whitespacesAndNewlines)
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
-        let limit = 140
-        if singleLine.count <= limit {
-            return "Run: \(singleLine)"
-        }
-        return "Run: \(singleLine.prefix(limit))..."
+        return await service.run(
+            command: command,
+            workspaceRoot: workspaceRoot,
+            timeoutSeconds: timeout,
+            outputLimit: outputLimit
+        )
     }
 }
 
@@ -223,7 +183,6 @@ private actor BashService {
         (allow file-read* (subpath "\(workspace)"))
         (allow file-read* (subpath "\(output)"))
         (deny file-write*)
-        (allow file-write* (subpath "\(workspace)"))
         (allow file-write* (subpath "\(output)"))
         (allow file-write-data (literal "/dev/null"))
         """

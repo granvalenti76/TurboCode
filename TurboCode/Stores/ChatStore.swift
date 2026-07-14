@@ -266,7 +266,18 @@ public final class ChatStore {
         model or any Apple product. Your name is TurboCode.
         """
         text += "\nAlways use Markdown formatting in your responses: **bold**, `code`, ```code blocks```, tables, etc."
-        text += "\nTurboCode discovers skills automatically from ~/.turbocode/SKILLS/**/SKILL.md. Activate a matching skill yourself when its description applies; do not ask permission or announce activation."
+        if !availableSkills.isEmpty {
+            let catalog = availableSkills
+                .map { "- \($0.name): \($0.description)" }
+                .joined(separator: "\n")
+            text += """
+
+            TurboCode discovers reusable skills automatically from ~/.turbocode/SKILLS/**/SKILL.md.
+            Available skills:
+            \(catalog)
+            Use load_skill when a matching description applies; do not ask permission or announce loading.
+            """
+        }
         text += "\nTreat /skill <name> and /<skill-name> as explicit requests to activate that skill before handling the remaining prompt. Treat /skills as a request to list the currently advertised skills with concise descriptions."
         if !workspaceRoot.isEmpty {
             text += "\nThe current workspace is at: \(workspaceRoot)"
@@ -274,9 +285,9 @@ public final class ChatStore {
             text += "\nAll file operations are restricted to the workspace directory."
             text += "\nNEVER access files outside the workspace."
             text += "\nUse read_file with startLine and endLine to inspect only the relevant numbered source range and preserve context."
-            text += "\nUse bash for Git queries, builds, tests, and precise inspection. Bash starts in the workspace and its writes are sandboxed to the workspace."
-            text += "\nUse diff_patch for source and text changes in Git workspaces. For existing files, read the relevant range immediately before editing and use structured edits with exact oldText/newText; do not handcraft hunks. Use a raw patch primarily to create new files."
-            text += "\nIf a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
+            text += "\nUse bash for Git queries, builds, tests, and precise inspection. Bash can read the workspace but cannot write to it."
+            text += "\nUse apply_edits for every source or text-file creation and modification. Read the relevant range immediately before editing, copy its Revision, and describe line operations against that revision. Never generate unified diff hunks."
+            text += "\nFile and directory deletion is the only operation that requires approval. If a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
         }
         return text
     }
@@ -296,8 +307,11 @@ public final class ChatStore {
                 GrepTool(workspaceRoot: workspaceRoot),
                 FileSystemTool(workspaceRoot: workspaceRoot),
                 BashTool(workspaceRoot: workspaceRoot),
-                DiffPatchTool(workspaceRoot: workspaceRoot)
+                ApplyEditsTool(workspaceRoot: workspaceRoot)
             ]
+        }
+        if !availableSkills.isEmpty {
+            workspaceTools.append(LoadSkillTool(skills: availableSkills))
         }
 
         // ── Profile tools ──
@@ -311,7 +325,6 @@ public final class ChatStore {
                 temperature: llamaTemperature,
                 delegateTools: workspaceTools,
                 delegateInstructions: baseInstructions,
-                delegateSkills: availableSkills,
                 onToolStart: { [weak self] call in
                     await MainActor.run { self?.beginToolActivity(call) }
                 },
@@ -323,6 +336,9 @@ public final class ChatStore {
             if !workspaceRoot.isEmpty {
                 t.append(FileSystemTool(workspaceRoot: workspaceRoot))
             }
+            if !availableSkills.isEmpty {
+                t.append(LoadSkillTool(skills: availableSkills))
+            }
             tools = t
 
             var text = baseInstructions
@@ -332,7 +348,7 @@ public final class ChatStore {
             === ORCHESTRATOR MODE ===
             You are TurboCode Orchestrator. You are NOT an Apple model — you are part of the TurboCode app. Your name is TurboCode, and you delegate complex tasks to the powerful coding model via `call_powerful_model`. You have the `file_system` tool to list directories, get file info, and find files — use it for navigation and discovery.
 
-            For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, bash, file_system, and diff_patch).
+            For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, bash, file_system, and apply_edits).
 
             CRITICAL — Never trust your own knowledge:
             - If you need to answer with file contents, always delegate reading to `call_powerful_model`.
@@ -372,8 +388,6 @@ public final class ChatStore {
                 profile: TurboCodeDynamicProfile(
                     instructions: effectiveInstructions,
                     tools: tools,
-                    activations: skillActivations,
-                    skills: availableSkills,
                     model: activeModel,
                     onToolStart: { [weak self] call in
                         await MainActor.run { self?.beginToolActivity(call) }
@@ -691,7 +705,12 @@ public final class ChatStore {
 
     public func sendMessage(_ text: String) async {
         refreshSkillsIfNeeded()
-        await sendMessage(text, visibleInTimeline: true)
+        guard let promptText = resolvedPrompt(for: text) else { return }
+        await sendMessage(text, promptText: promptText, visibleInTimeline: true)
+    }
+
+    func isIncompleteSkillCommand(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines) == "/skill"
     }
 
     public func reloadSkills() {
@@ -705,15 +724,60 @@ public final class ChatStore {
         rebuildSession()
     }
 
-    private func sendMessage(_ text: String, visibleInTimeline: Bool) async {
+    private func resolvedPrompt(for displayText: String) -> String? {
+        let trimmed = displayText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isIncompleteSkillCommand(trimmed) else { return nil }
+        guard trimmed.hasPrefix("/") else { return displayText }
+
+        let parts = trimmed.split(separator: " ", maxSplits: 2).map(String.init)
+        let skillName: String
+        let request: String
+
+        if parts.first == "/skill" {
+            guard parts.count >= 2 else { return nil }
+            skillName = parts[1]
+            request = parts.count == 3 ? parts[2] : ""
+        } else {
+            skillName = String((parts.first ?? "").dropFirst())
+            request = parts.count >= 2 ? parts.dropFirst().joined(separator: " ") : ""
+        }
+
+        guard let skill = availableSkills.first(where: { $0.name == skillName }) else {
+            return displayText
+        }
+        let userRequest = request.isEmpty
+            ? "Apply this skill and respond appropriately to the selected command."
+            : request
+        return """
+        The user explicitly selected the TurboCode skill '\(skill.name)'. Its instructions follow.
+
+        <skill name="\(skill.name)">
+        \(skill.prompt)
+        </skill>
+
+        User request:
+        \(userRequest)
+        """
+    }
+
+    private func sendMessage(
+        _ text: String,
+        promptText: String? = nil,
+        visibleInTimeline: Bool
+    ) async {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !busy else { return }
 
+        let effectivePrompt = promptText ?? text
         ensureActiveThread()
         busy = true
         let task = Task<Void, Never> { [weak self] in
             guard let self else { return }
-            await self.performSendMessage(text, visibleInTimeline: visibleInTimeline)
+            await self.performSendMessage(
+                displayText: text,
+                promptText: effectivePrompt,
+                visibleInTimeline: visibleInTimeline
+            )
         }
         responseTask = task
         await task.value
@@ -721,18 +785,22 @@ public final class ChatStore {
         busy = false
     }
 
-    private func performSendMessage(_ text: String, visibleInTimeline: Bool) async {
+    private func performSendMessage(
+        displayText: String,
+        promptText: String,
+        visibleInTimeline: Bool
+    ) async {
 
         isFirstMessage = false
         // Generate the title concurrently with the response, but retain the
         // task so persistence can wait for the final title.
         let titleTask: Task<Void, Never>? = visibleInTimeline ? Task { [weak self] in
             guard let self else { return }
-            await self.generateTitle(from: text)
+            await self.generateTitle(from: displayText)
         } : nil
 
         if visibleInTimeline {
-            blocks.append(ChatBlock(kind: .user, text: text))
+            blocks.append(ChatBlock(kind: .user, text: displayText))
         }
 
         let placeholderId = UUID().uuidString
@@ -743,7 +811,7 @@ public final class ChatStore {
         var accumulatedText = ""
 
         do {
-            let stream = session.streamResponse(to: text)
+            let stream = session.streamResponse(to: promptText)
             // Delegation detection is handled by TurboCodeDynamicProfile's
             // onToolCall / onToolOutput lifecycle callbacks — no scanning needed.
 
@@ -914,7 +982,7 @@ public final class ChatStore {
     }
 
     private func beginToolActivity(_ call: Transcript.ToolCall) {
-        guard call.toolName != "diff_patch" else { return }
+        guard call.toolName != "diff_patch", call.toolName != "apply_edits" else { return }
         toolActivities.removeAll { $0.id == call.id }
         toolActivities.append(ToolActivity(id: call.id, summary: toolSummary(for: call)))
     }
@@ -1006,6 +1074,8 @@ public final class ChatStore {
             return item.map { "Searching in \($0)" } ?? "Searching workspace"
         case "bash":
             return "Running command"
+        case "apply_edits":
+            return "Preparing file changes"
         case "file_system":
             let operation = try? call.arguments.value(String.self, forProperty: "operation")
             switch operation {
@@ -1022,7 +1092,7 @@ public final class ChatStore {
             }
         case "call_powerful_model":
             return "Working with coding model"
-        case "activate_skill", "toggle_skill":
+        case "activate_skill", "toggle_skill", "load_skill":
             let skill = try? call.arguments.value(String.self, forProperty: "skill")
             return skill.map { "Loading \($0)" } ?? "Loading skill"
         default:

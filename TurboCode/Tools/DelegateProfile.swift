@@ -8,8 +8,6 @@ import FoundationModelsUtilities
 struct DelegateProfile: LanguageModelSession.DynamicProfile {
     let instructions: String
     let tools: [any Tool]
-    let activations: SkillActivations
-    let skills: [TurboCodeSkillDefinition]
     let model: ChatCompletionsLanguageModel
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     let onToolEnd: (@Sendable (Transcript.ToolCall) async -> Void)?
@@ -18,9 +16,6 @@ struct DelegateProfile: LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
             Instructions(instructions)
             tools
-            if !skills.isEmpty {
-                DiskSkills(activations: activations, skills: skills)
-            }
         }
         .model(model)
         .onToolCall { call in

@@ -6,42 +6,40 @@ struct WorkbenchSplitView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
-    @AppStorage("rightSidebarWidth") private var rightWidth: Double = 360
-
-    private let leftMinWidth: Double = 240
-    private let leftMaxWidth: Double = 360
-    private let mainMinWidth: Double = 560
-    private let rightMinWidth: Double = 280
-    private let rightMaxWidth: Double = 760
+    private let sidebarWidth: Double = 280
+    private let mainMinWidth: Double = 520
 
     /// Keep the window's layout constraint stable while the inspector appears.
     /// A changing root minimum makes NavigationSplitView rebalance its sidebar,
     /// which causes the project labels to shift or become clipped.
-    private var workbenchMinWidth: Double {
-        leftMinWidth + mainMinWidth + rightMinWidth
-    }
+    private var workbenchMinWidth: Double { sidebarWidth + mainMinWidth }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
                 .navigationSplitViewColumnWidth(
-                    min: leftMinWidth,
-                    ideal: 280,
-                    max: leftMaxWidth
+                    min: sidebarWidth,
+                    ideal: sidebarWidth,
+                    max: sidebarWidth
                 )
         } detail: {
-            HSplitView {
+            ZStack(alignment: .trailing) {
                 MainStageView()
                     .frame(minWidth: mainMinWidth)
-                    .layoutPriority(1)
 
                 if chatStore.rightPanelVisible {
                     InspectorPanelView()
-                        .frame(minWidth: rightMinWidth, maxWidth: rightMaxWidth)
-                        .frame(idealWidth: rightWidth)
-                        .layoutPriority(0)
+                        .frame(width: 420)
+                        .background(.background)
+                        .overlay(alignment: .leading) {
+                            Divider()
+                        }
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .zIndex(1)
                 }
             }
+            .clipped()
+            .animation(.easeInOut(duration: 0.18), value: chatStore.rightPanelVisible)
         }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: workbenchMinWidth)

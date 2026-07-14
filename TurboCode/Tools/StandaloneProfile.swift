@@ -21,21 +21,18 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
             Instructions(instructions)
             if !workspaceRoot.isEmpty {
                 Instructions {
-                    "read_file and bash are active directly in this session. Use read_file with small line ranges for focused context. Use bash for Git queries, builds, tests, and precise workspace inspection; every Bash command requires approval unless Auto-run is selected. For existing source and text files, use diff_patch structured edits with exact oldText/newText copied from a fresh read_file result."
+                    "read_file, bash, and apply_edits are active directly in this session. Use read_file with small line ranges and its Revision for focused context. Use bash only for Git queries, builds, tests, and read-only workspace inspection. Use apply_edits for every text-file creation or modification."
                 }
                 ReadFileTool(workspaceRoot: workspaceRoot)
                 BashTool(workspaceRoot: workspaceRoot)
-                StandaloneSkills(
-                    activations: activations,
-                    workspaceRoot: workspaceRoot,
-                    diskSkills: diskSkills
-                )
+                StandaloneSkills(activations: activations, workspaceRoot: workspaceRoot)
                 Instructions {
-                    "diff_patch is active directly in this session. Prefer structured edits for existing files and raw unified patches for new files; do not claim that an editing skill must be activated first."
+                    "apply_edits generates and validates changes internally. Provide line operations against a fresh revision and never write unified diff syntax yourself."
                 }
-                DiffPatchTool(workspaceRoot: workspaceRoot)
-            } else if !diskSkills.isEmpty {
-                DiskSkills(activations: activations, skills: diskSkills)
+                ApplyEditsTool(workspaceRoot: workspaceRoot)
+            }
+            if !diskSkills.isEmpty {
+                LoadSkillTool(skills: diskSkills)
             }
         }
         .model(model)
@@ -59,11 +56,6 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
 struct StandaloneSkills: DynamicInstructions {
     let activations: SkillActivations
     let workspaceRoot: String
-    let diskSkills: [TurboCodeSkillDefinition]
-
-    private var eligibleDiskSkills: [TurboCodeSkillDefinition] {
-        diskSkills.filter { $0.name != "file-browser" && $0.name != "code-reader" }
-    }
 
     var body: some DynamicInstructions {
         Skills(activations: activations) {
@@ -89,28 +81,6 @@ struct StandaloneSkills: DynamicInstructions {
                 GrepTool(workspaceRoot: workspaceRoot)
             }
 
-            for skill in eligibleDiskSkills {
-                Skill(
-                    name: skill.name,
-                    description: skill.description,
-                    prompt: skill.prompt
-                )
-            }
         }
-    }
-}
-
-struct DiskSkills: DynamicInstructions {
-    let activations: SkillActivations
-    let skills: [TurboCodeSkillDefinition]
-
-    var body: some DynamicInstructions {
-        Skills(
-            activations: activations,
-            strictSchema: true,
-            skills: skills.map {
-                Skill(name: $0.name, description: $0.description, prompt: $0.prompt)
-            }
-        )
     }
 }

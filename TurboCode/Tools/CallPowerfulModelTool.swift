@@ -53,7 +53,6 @@ struct CallPowerfulModelTool: Tool {
     private let delegateTools: [any Tool]
     /// System instructions for the delegate session (workspace context, rules, etc.).
     private let delegateInstructions: String
-    private let delegateSkills: [TurboCodeSkillDefinition]
     private let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     private let onToolEnd: (@Sendable (Transcript.ToolCall) async -> Void)?
 
@@ -70,7 +69,6 @@ struct CallPowerfulModelTool: Tool {
         temperature: Double,
         delegateTools: [any Tool],
         delegateInstructions: String,
-        delegateSkills: [TurboCodeSkillDefinition],
         onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)? = nil,
         onToolEnd: (@Sendable (Transcript.ToolCall) async -> Void)? = nil
     ) {
@@ -79,7 +77,6 @@ struct CallPowerfulModelTool: Tool {
         self.temperature = temperature
         self.delegateTools = delegateTools
         self.delegateInstructions = delegateInstructions
-        self.delegateSkills = delegateSkills
         self.onToolStart = onToolStart
         self.onToolEnd = onToolEnd
     }
@@ -88,7 +85,6 @@ struct CallPowerfulModelTool: Tool {
         let task = arguments.task
         let tools = delegateTools
         let instructions = delegateInstructions
-        let skills = delegateSkills
         let name = modelName
         let url = baseURL
         let toolStart = onToolStart
@@ -101,8 +97,6 @@ struct CallPowerfulModelTool: Tool {
                 profile: DelegateProfile(
                     instructions: instructions,
                     tools: tools,
-                    activations: SkillActivations(),
-                    skills: skills,
                     model: model,
                     onToolStart: toolStart,
                     onToolEnd: toolEnd

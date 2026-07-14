@@ -13,7 +13,7 @@ enum FileOperation: String, CaseIterable, Sendable {
     case find
     /// Create a directory (creates intermediates)
     case createDirectory
-    /// Write content to a new or existing file (overwrite requires approval)
+    /// Write content to a new or existing file
     case write
     /// Append content to an existing file
     case append
@@ -60,14 +60,15 @@ struct FileSystemTool: Tool {
         - info: Get file metadata (size, dates, type)
         - find: Search for files matching a pattern
         - createDirectory: Create a new directory (parent directories are created automatically)
-        - write: Write content to a file (creates parent directories; overwrite requires approval)
-        - append: Append content to an existing file
+        - write: Write content through TurboCode's atomic change transaction
+        - append: Append content through TurboCode's atomic change transaction
         - copy: Copy a file or directory (requires destination)
         - move: Move or rename a file or directory (requires destination)
-        - delete: Permanently delete a file or directory (requires approval)
+        - delete: Permanently delete a file or directory (the only operation requiring approval)
 
-        write and append require the 'content' argument.
-        Prefer read_file for numbered source ranges and diff_patch structured edits
+        write and append require the 'content' argument and automatically produce the
+        same Review/Undo change widget as apply_edits.
+        Prefer read_file for numbered source ranges and apply_edits
         for existing source and text files in Git workspaces. Use bash for builds, tests,
         Git queries, and commands that are not covered by these structured operations.
         All paths must be within the workspace root.
@@ -103,20 +104,20 @@ struct FileSystemTool: Tool {
         case .list:              return listDirectory(at: resolvedPath)
         case .info:              return fileInfo(at: resolvedPath)
         case .find:              return findFiles(in: resolvedPath, pattern: arguments.pattern)
-        case .createDirectory:   return await requestApprovalIfNeeded(operation: .createDirectory, path: resolvedPath)
+        case .createDirectory:   return execute(operation: .createDirectory, path: resolvedPath, destination: nil, content: nil)
         case .write:
             guard let content = arguments.content else { return "Error: 'content' is required for write." }
-            return await requestApprovalIfNeeded(operation: .write, path: resolvedPath, content: content)
+            return try await applyTextChange(path: resolvedPath, content: content, append: false)
         case .append:
             guard let content = arguments.content else { return "Error: 'content' is required for append." }
-            return await requestApprovalIfNeeded(operation: .append, path: resolvedPath, content: content)
+            return try await applyTextChange(path: resolvedPath, content: content, append: true)
         case .copy:
             guard let dest = resolvedDest else { return "Error: 'destination' is required for copy." }
-            return await requestApprovalIfNeeded(operation: .copy, path: resolvedPath, destination: dest)
+            return execute(operation: .copy, path: resolvedPath, destination: dest, content: nil)
         case .move:
             guard let dest = resolvedDest else { return "Error: 'destination' is required for move." }
-            return await requestApprovalIfNeeded(operation: .move, path: resolvedPath, destination: dest)
-        case .delete:            return await requestApprovalIfNeeded(operation: .delete, path: resolvedPath)
+            return execute(operation: .move, path: resolvedPath, destination: dest, content: nil)
+        case .delete:            return await requestDeletionApproval(path: resolvedPath)
         }
     }
 
@@ -248,11 +249,7 @@ struct FileSystemTool: Tool {
         }
 
         if FileManager.default.fileExists(atPath: destination) {
-            do {
-                try FileManager.default.removeItem(atPath: destination)
-            } catch {
-                return "Error removing existing destination '\(destination)': \(error.localizedDescription)"
-            }
+            return "Error: Destination already exists at '\(destination)'. Delete it explicitly first."
         }
 
         do {
@@ -269,11 +266,7 @@ struct FileSystemTool: Tool {
         }
 
         if FileManager.default.fileExists(atPath: destination) {
-            do {
-                try FileManager.default.removeItem(atPath: destination)
-            } catch {
-                return "Error removing existing destination '\(destination)': \(error.localizedDescription)"
-            }
+            return "Error: Destination already exists at '\(destination)'. Delete it explicitly first."
         }
 
         do {
@@ -297,65 +290,63 @@ struct FileSystemTool: Tool {
         }
     }
 
-    // MARK: - Write / Append
+    // MARK: - Transactional Text Changes
 
-    private func writeFile(at path: String, content: String) -> String {
-        let url = URL(fileURLWithPath: path)
-        let parentDir = url.deletingLastPathComponent()
-        let existedBeforeWrite = FileManager.default.fileExists(atPath: path)
-
-        do {
-            try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
-        } catch {
-            return "Error creating parent directories: \(error.localizedDescription)"
-        }
-
-        do {
-            try content.write(toFile: path, atomically: true, encoding: .utf8)
-            return "\(existedBeforeWrite ? "Wrote" : "Created") '\(path)' with \(content.utf8.count) bytes."
-        } catch {
-            return "Error writing '\(path)': \(error.localizedDescription)"
-        }
-    }
-
-    private func appendFile(at path: String, content: String) -> String {
-        guard FileManager.default.fileExists(atPath: path) else {
+    private func applyTextChange(path: String, content: String, append: Bool) async throws -> String {
+        let exists = FileManager.default.fileExists(atPath: path)
+        if append && !exists {
             return "Error: File not found at '\(path)'. Use 'write' to create a new file."
         }
 
-        do {
-            let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
-            try handle.seekToEnd()
-            try handle.write(contentsOf: Data(content.utf8))
-            try handle.close()
-            return "Appended \(content.utf8.count) bytes to '\(path)'."
-        } catch {
-            return "Error appending to '\(path)': \(error.localizedDescription)"
+        let operation: LineEditOperation
+        let revision: String?
+        if exists {
+            let original: String
+            do {
+                original = try String(contentsOfFile: path, encoding: .utf8)
+            } catch {
+                return "Error: '\(path)' is not a readable UTF-8 text file."
+            }
+            revision = FileRevision.hash(original)
+            operation = LineEditOperation(
+                operation: "replace_file",
+                startLine: nil,
+                endLine: nil,
+                content: append ? original + content : content
+            )
+        } else {
+            revision = nil
+            operation = LineEditOperation(
+                operation: "create",
+                startLine: nil,
+                endLine: nil,
+                content: content
+            )
         }
+
+        let request = FileEditRequest(
+            filePath: path,
+            revision: revision,
+            operations: [operation]
+        )
+        return try await ApplyEditsTool(workspaceRoot: workspaceRoot).call(
+            arguments: ApplyEditsArguments(files: [request])
+        )
     }
 
     // MARK: - Approval Gate
 
-    private func requestApprovalIfNeeded(
-        operation: FileOperation,
-        path: String,
-        destination: String? = nil,
-        content: String? = nil
-    ) async -> String {
-        if UserDefaults.standard.string(forKey: "approvalMode") == "Auto-run" {
-            return execute(operation: operation, path: path, destination: destination, content: content)
-        }
-
+    private func requestDeletionApproval(path: String) async -> String {
         let id = UUID().uuidString
-        let summary = approvalSummary(operation: operation, path: path, destination: destination)
+        let summary = "Delete '\(path)'. This action cannot be undone."
         let request = PendingToolApproval(
             id: id,
-            operation: operation.rawValue,
+            operation: FileOperation.delete.rawValue,
             path: path,
-            destination: destination,
+            destination: nil,
             summary: summary,
-            action: { [path, destination, content] in
-                execute(operation: operation, path: path, destination: destination, content: content)
+            action: { [path] in
+                deleteItem(at: path)
             }
         )
         await ToolApprovalRegistry.shared.register(request)
@@ -363,30 +354,10 @@ struct FileSystemTool: Tool {
         return """
         TURBOCODE_APPROVAL_REQUIRED
         approval_id: \(id)
-        operation: \(operation.rawValue)
+        operation: delete
         path: \(path)
-        \(destination.map { "destination: \($0)\n" } ?? "")summary: \(summary)
+        summary: \(summary)
         """
-    }
-
-    private func approvalSummary(operation: FileOperation, path: String, destination: String?) -> String {
-        switch operation {
-        case .createDirectory:
-            return "Create directory '\(path)'"
-        case .write:
-            let verb = FileManager.default.fileExists(atPath: path) ? "Overwrite" : "Create"
-            return "\(verb) file '\(path)'"
-        case .append:
-            return "Append to file '\(path)'"
-        case .copy:
-            return "Copy '\(path)' to '\(destination ?? "")'"
-        case .move:
-            return "Move '\(path)' to '\(destination ?? "")'"
-        case .delete:
-            return "Delete '\(path)'. This action cannot be undone."
-        case .list, .info, .find:
-            return "Run \(operation.rawValue) on '\(path)'"
-        }
     }
 
     private func execute(
@@ -398,12 +369,8 @@ struct FileSystemTool: Tool {
         switch operation {
         case .createDirectory:
             return makeDirectory(at: path)
-        case .write:
-            guard let content else { return "Error: 'content' is required for write." }
-            return writeFile(at: path, content: content)
-        case .append:
-            guard let content else { return "Error: 'content' is required for append." }
-            return appendFile(at: path, content: content)
+        case .write, .append:
+            return "Error: Text writes must run through the asynchronous change transaction."
         case .copy:
             guard let destination else { return "Error: 'destination' is required for copy." }
             return copyItem(from: path, to: destination)

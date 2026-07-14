@@ -118,9 +118,11 @@ public final class TurboCodeConfig {
     - `read_file` reads complete files or focused numbered line ranges.
     - `grep` searches workspace text.
     - `file_system` lists and manages files inside the workspace.
-    - `bash` runs bounded, approval-aware commands in a macOS process sandbox.
-    - `diff_patch` applies validated atomic edits in Git workspaces and presents a
-      review widget with additions, deletions, Review, and Undo.
+    - `bash` runs bounded commands with read-only workspace access in a macOS process sandbox.
+    - `apply_edits` accepts revision-bound line operations, creates an internal Git
+      patch, and presents a review widget with additions, deletions, Review, and Undo.
+    - Text creation and editing run automatically. Only file or directory deletion
+      asks for approval.
 
     TurboCode never removes project files when a workspace is removed from the
     sidebar. It removes only the workspace reference and associated chat sessions.
