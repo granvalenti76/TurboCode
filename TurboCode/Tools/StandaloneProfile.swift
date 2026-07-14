@@ -9,6 +9,7 @@ import FoundationModelsUtilities
 struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let instructions: String
     let activations: SkillActivations
+    let diskSkills: [TurboCodeSkillDefinition]
     let workspaceRoot: String
     let model: any LanguageModel
     let reasoningLevel: ContextOptions.ReasoningLevel?
@@ -24,11 +25,17 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                 }
                 ReadFileTool(workspaceRoot: workspaceRoot)
                 BashTool(workspaceRoot: workspaceRoot)
-                StandaloneSkills(activations: activations, workspaceRoot: workspaceRoot)
+                StandaloneSkills(
+                    activations: activations,
+                    workspaceRoot: workspaceRoot,
+                    diskSkills: diskSkills
+                )
                 Instructions {
                     "diff_patch is active directly in this session. Prefer structured edits for existing files and raw unified patches for new files; do not claim that an editing skill must be activated first."
                 }
                 DiffPatchTool(workspaceRoot: workspaceRoot)
+            } else if !diskSkills.isEmpty {
+                DiskSkills(activations: activations, skills: diskSkills)
             }
         }
         .model(model)
@@ -52,6 +59,11 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
 struct StandaloneSkills: DynamicInstructions {
     let activations: SkillActivations
     let workspaceRoot: String
+    let diskSkills: [TurboCodeSkillDefinition]
+
+    private var eligibleDiskSkills: [TurboCodeSkillDefinition] {
+        diskSkills.filter { $0.name != "file-browser" && $0.name != "code-reader" }
+    }
 
     var body: some DynamicInstructions {
         Skills(activations: activations) {
@@ -76,6 +88,29 @@ struct StandaloneSkills: DynamicInstructions {
                 }
                 GrepTool(workspaceRoot: workspaceRoot)
             }
+
+            for skill in eligibleDiskSkills {
+                Skill(
+                    name: skill.name,
+                    description: skill.description,
+                    prompt: skill.prompt
+                )
+            }
         }
+    }
+}
+
+struct DiskSkills: DynamicInstructions {
+    let activations: SkillActivations
+    let skills: [TurboCodeSkillDefinition]
+
+    var body: some DynamicInstructions {
+        Skills(
+            activations: activations,
+            strictSchema: true,
+            skills: skills.map {
+                Skill(name: $0.name, description: $0.description, prompt: $0.prompt)
+            }
+        )
     }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModels
+import FoundationModelsUtilities
 
 // MARK: - Orchestrator Profile
 
@@ -13,6 +14,8 @@ import FoundationModels
 struct TurboCodeDynamicProfile: LanguageModelSession.DynamicProfile {
     let instructions: String
     let tools: [any Tool]
+    let activations: SkillActivations
+    let skills: [TurboCodeSkillDefinition]
     let model: any LanguageModel
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     let onToolEnd: (@Sendable (Transcript.ToolCall) async -> Void)?
@@ -24,6 +27,9 @@ struct TurboCodeDynamicProfile: LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
             Instructions(instructions)
             tools
+            if !skills.isEmpty {
+                DiskSkills(activations: activations, skills: skills)
+            }
         }
         .model(model)
         .reasoningLevel(reasoningLevel)

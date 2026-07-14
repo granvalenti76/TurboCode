@@ -89,9 +89,9 @@ public final class ChatStore {
     // Backend
     public var activeBackend: ModelBackend = .llamaServer
 
-    // Skill activations for standalone mode — lets the model activate only
-    // the tools it needs for the current task.
+    // Shared activation state for the current session profile.
     public let skillActivations = SkillActivations()
+    private(set) var availableSkills: [TurboCodeSkillDefinition] = []
 
     /// Maps the persisted ReasoningEffort to FoundationModels' ReasoningLevel.
     /// Returns `nil` for Apple models (on-device and PCC) which don't support it.
@@ -204,11 +204,12 @@ public final class ChatStore {
 
     // MARK: - Onboarding
 
-    /// Ensures `~/.turbocode/` exists. Called once at app launch.
+    /// Ensures the current `~/.turbocode/` layout exists and applies additive migrations.
     public func ensureOnboarding() async {
-        guard !TurboCodeConfig.shared.isOnboarded else { return }
         do {
             try TurboCodeConfig.shared.performOnboarding()
+            availableSkills = TurboCodeConfig.shared.loadSkills()
+            rebuildSession()
         } catch {
             print("[TurboCode] Onboarding failed: \(error.localizedDescription)")
         }
@@ -265,6 +266,8 @@ public final class ChatStore {
         model or any Apple product. Your name is TurboCode.
         """
         text += "\nAlways use Markdown formatting in your responses: **bold**, `code`, ```code blocks```, tables, etc."
+        text += "\nTurboCode discovers skills automatically from ~/.turbocode/SKILLS/**/SKILL.md. Activate a matching skill yourself when its description applies; do not ask permission or announce activation."
+        text += "\nTreat /skill <name> and /<skill-name> as explicit requests to activate that skill before handling the remaining prompt. Treat /skills as a request to list the currently advertised skills with concise descriptions."
         if !workspaceRoot.isEmpty {
             text += "\nThe current workspace is at: \(workspaceRoot)"
             text += "\nActivate the appropriate skill below to access file and code tools."
@@ -308,6 +311,7 @@ public final class ChatStore {
                 temperature: llamaTemperature,
                 delegateTools: workspaceTools,
                 delegateInstructions: baseInstructions,
+                delegateSkills: availableSkills,
                 onToolStart: { [weak self] call in
                     await MainActor.run { self?.beginToolActivity(call) }
                 },
@@ -368,6 +372,8 @@ public final class ChatStore {
                 profile: TurboCodeDynamicProfile(
                     instructions: effectiveInstructions,
                     tools: tools,
+                    activations: skillActivations,
+                    skills: availableSkills,
                     model: activeModel,
                     onToolStart: { [weak self] call in
                         await MainActor.run { self?.beginToolActivity(call) }
@@ -391,6 +397,7 @@ public final class ChatStore {
                 profile: StandaloneProfile(
                     instructions: effectiveInstructions,
                     activations: skillActivations,
+                    diskSkills: availableSkills,
                     workspaceRoot: workspaceRoot,
                     model: activeModel,
                     reasoningLevel: reasoningLevel,
@@ -683,7 +690,19 @@ public final class ChatStore {
     }
 
     public func sendMessage(_ text: String) async {
+        refreshSkillsIfNeeded()
         await sendMessage(text, visibleInTimeline: true)
+    }
+
+    public func reloadSkills() {
+        refreshSkillsIfNeeded(forceRebuild: true)
+    }
+
+    private func refreshSkillsIfNeeded(forceRebuild: Bool = false) {
+        let discovered = TurboCodeConfig.shared.loadSkills()
+        guard forceRebuild || discovered != availableSkills else { return }
+        availableSkills = discovered
+        rebuildSession()
     }
 
     private func sendMessage(_ text: String, visibleInTimeline: Bool) async {
@@ -1003,6 +1022,9 @@ public final class ChatStore {
             }
         case "call_powerful_model":
             return "Working with coding model"
+        case "activate_skill", "toggle_skill":
+            let skill = try? call.arguments.value(String.self, forProperty: "skill")
+            return skill.map { "Loading \($0)" } ?? "Loading skill"
         default:
             return "Using \(call.toolName.replacingOccurrences(of: "_", with: " "))"
         }

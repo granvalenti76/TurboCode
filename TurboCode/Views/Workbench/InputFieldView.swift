@@ -71,12 +71,110 @@ struct InputFieldView: View {
     // MARK: - Text Field
 
     private var textField: some View {
-        TextField("Do anything", text: $viewModel.messageText, axis: .vertical)
-            .textFieldStyle(.plain)
-            .font(AppTypography.chatBody(size: chatFontSize))
-            .lineLimit(1...10)
-            .focused($isFocused)
-            .disabled(chatStore.busy)
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("Do anything", text: $viewModel.messageText, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(AppTypography.chatBody(size: chatFontSize))
+                .lineLimit(1...10)
+                .focused($isFocused)
+                .disabled(chatStore.busy)
+
+            if isFocused && !slashSuggestions.isEmpty {
+                slashCommandMenu
+            }
+        }
+    }
+
+    private var slashCommandMenu: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(slashSuggestions.enumerated()), id: \.element.id) { index, suggestion in
+                if index > 0 {
+                    Divider()
+                        .padding(.leading, 34)
+                }
+
+                Button {
+                    viewModel.messageText = suggestion.insertion
+                    isFocused = true
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: suggestion.icon)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16)
+
+                        Text(suggestion.command)
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(AppTypography.chatForeground)
+
+                        Text(suggestion.description)
+                            .font(AppTypography.metadata)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 9)
+                    .frame(height: 30)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(.separator, lineWidth: 0.5)
+        }
+    }
+
+    private var slashSuggestions: [SlashCommandSuggestion] {
+        let input = viewModel.messageText
+        guard input.hasPrefix("/"), !input.contains("\n") else { return [] }
+
+        if input.hasPrefix("/skill ") {
+            let query = String(input.dropFirst("/skill ".count)).lowercased()
+            return chatStore.availableSkills
+                .filter { query.isEmpty || $0.name.contains(query) }
+                .prefix(6)
+                .map {
+                    SlashCommandSuggestion(
+                        command: "/skill \($0.name)",
+                        insertion: "/skill \($0.name) ",
+                        description: $0.description,
+                        icon: "bolt"
+                    )
+                }
+        }
+
+        guard !input.contains(" ") else { return [] }
+        let query = input.lowercased()
+        let commands = [
+            SlashCommandSuggestion(
+                command: "/skills",
+                insertion: "/skills",
+                description: "List available skills",
+                icon: "square.stack.3d.up"
+            ),
+            SlashCommandSuggestion(
+                command: "/skill",
+                insertion: "/skill ",
+                description: "Choose a skill for this request",
+                icon: "bolt"
+            )
+        ] + chatStore.availableSkills.map {
+            SlashCommandSuggestion(
+                command: "/\($0.name)",
+                insertion: "/\($0.name) ",
+                description: $0.description,
+                icon: "bolt"
+            )
+        }
+
+        return Array(commands.filter {
+            query == "/" || $0.command.lowercased().hasPrefix(query)
+        }.prefix(6))
     }
 
     // MARK: - Attach Button
@@ -263,4 +361,13 @@ struct InputFieldView: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
     }
+}
+
+private struct SlashCommandSuggestion: Identifiable {
+    let command: String
+    let insertion: String
+    let description: String
+    let icon: String
+
+    var id: String { command }
 }
