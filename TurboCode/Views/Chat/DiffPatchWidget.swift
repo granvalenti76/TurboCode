@@ -17,6 +17,14 @@ struct DiffPatchWidget: View {
         max(0, patch.files.count - displayedFiles.count)
     }
 
+    private var canReviewInGitInspector: Bool {
+        FileManager.default.fileExists(
+            atPath: URL(fileURLWithPath: patch.workspaceRoot)
+                .appendingPathComponent(".git")
+                .path
+        )
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -91,7 +99,8 @@ struct DiffPatchWidget: View {
                 .controlSize(.small)
             }
 
-            if patch.status == .applied || patch.status == .undone {
+            if (patch.status == .applied || patch.status == .undone),
+               canReviewInGitInspector {
                 Button("Review") {
                     chatStore.reviewDiffPatch(blockID)
                 }

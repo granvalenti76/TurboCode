@@ -37,7 +37,7 @@ struct FileSystemArguments {
     var destination: String?
     /// File name pattern (for find operation only, e.g. "*.swift").
     var pattern: String?
-    /// Content to write (required for write and append operations only).
+    /// UTF-8 content for write/append. Preserve newlines; separate prose paragraphs with a blank line.
     var content: String?
 }
 
@@ -68,6 +68,9 @@ struct FileSystemTool: Tool {
 
         write and append require the 'content' argument and automatically produce the
         same Review/Undo change widget as the structured editing tools.
+        For articles, biographies, documentation, and other long-form prose, preserve
+        readable paragraphs separated by blank lines. Never write the whole document
+        as one long line.
         Prefer read_file for numbered source ranges and the active structured editor
         for existing source and text files in Git workspaces. Use bash for builds, tests,
         Git queries, and commands that are not covered by these structured operations.

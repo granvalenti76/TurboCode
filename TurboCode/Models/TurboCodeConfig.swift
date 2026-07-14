@@ -15,6 +15,7 @@ public final class TurboCodeConfig {
     private var modelsURL: URL { rootURL.appendingPathComponent("models.json") }
     private var sessionsDir: URL { rootURL.appendingPathComponent("sessions") }
     public var skillsDirectoryURL: URL { rootURL.appendingPathComponent("SKILLS", isDirectory: true) }
+    public var diagnosticsDirectoryURL: URL { rootURL.appendingPathComponent("diagnostics", isDirectory: true) }
 
     private var encoder: JSONEncoder {
         let e = JSONEncoder()
@@ -119,9 +120,9 @@ public final class TurboCodeConfig {
     - `grep` searches workspace text.
     - `file_system` lists and manages files inside the workspace.
     - `bash` runs bounded commands with read-only workspace access in a macOS process sandbox.
-    - Apple PCC uses multi-file `apply_edits`; smaller local models use the flatter
-      single-change `edit_file` schema. Both create an internal Git patch and present
-      the same review widget with additions, deletions, Review, and Undo.
+    - Every model uses the flat single-change `edit_file` schema. TurboCode handles
+      transaction assembly internally and presents the review widget with additions,
+      deletions, Review, and Undo.
     - Text creation and editing run automatically. Only file or directory deletion
       asks for approval.
 

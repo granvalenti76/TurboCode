@@ -11,20 +11,17 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let activations: SkillActivations
     let diskSkills: [TurboCodeSkillDefinition]
     let workspaceRoot: String
-    let usesAdvancedEditing: Bool
     let model: any LanguageModel
     let reasoningLevel: ContextOptions.ReasoningLevel?
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
-    let onToolEnd: (@Sendable (Transcript.ToolCall) async -> Void)?
+    let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
 
     var body: some LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
             Instructions(instructions)
             if !workspaceRoot.isEmpty {
                 Instructions {
-                    usesAdvancedEditing
-                        ? "read_file, bash, and apply_edits are active directly in this session. Use read_file with small line ranges and its Revision for focused context. Use bash only for Git queries, builds, tests, and read-only workspace inspection. Use apply_edits for every text-file creation or modification."
-                        : "read_file, bash, and edit_file are active directly in this session. Use read_file with small line ranges and its Revision for focused context. Use bash only for Git queries, builds, tests, and read-only workspace inspection. Use edit_file for every text-file creation or modification, one contiguous change per call."
+                    "read_file, bash, and edit_file are active directly in this session. Use read_file with small line ranges and its Revision for focused context. Use bash only for Git queries, builds, tests, and read-only workspace inspection. Use edit_file for every text-file creation or modification, one contiguous change per call. When writing articles, biographies, documentation, or other long prose, include real newline characters and separate paragraphs with a blank line; never collapse the document into one long line."
                 }
                 ReadFileTool(workspaceRoot: workspaceRoot)
                 BashTool(workspaceRoot: workspaceRoot)
@@ -32,11 +29,7 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                 Instructions {
                     "TurboCode generates and validates changes internally. Provide line operations against a fresh revision and never write unified diff syntax yourself."
                 }
-                if usesAdvancedEditing {
-                    ApplyEditsTool(workspaceRoot: workspaceRoot)
-                } else {
-                    EditFileTool(workspaceRoot: workspaceRoot)
-                }
+                EditFileTool(workspaceRoot: workspaceRoot)
             }
             if !diskSkills.isEmpty {
                 LoadSkillTool(skills: diskSkills)
@@ -49,9 +42,9 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                 await action(call)
             }
         }
-        .onToolOutput { call, _ in
+        .onToolOutput { call, output in
             if let action = onToolEnd {
-                await action(call)
+                await action(call, output)
             }
         }
     }

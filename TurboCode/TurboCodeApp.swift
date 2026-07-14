@@ -107,6 +107,25 @@ struct TurboCodeApp: App {
                     .keyboardShortcut("4", modifiers: [.command])
             }
 
+#if DEBUG
+            CommandMenu("Developer") {
+                Button("Run 5 Editing Benchmarks") {
+                    Task { await chatStore.runActiveEditingBenchmark() }
+                }
+                .disabled(chatStore.busy || chatStore.benchmarkRunning)
+
+                Button("Print Tool Failure Summary") {
+                    Task { await chatStore.printToolFailureSummary() }
+                }
+
+                if let benchmarkStatus = chatStore.benchmarkStatus {
+                    Divider()
+                    Button(benchmarkStatus) {}
+                        .disabled(true)
+                }
+            }
+#endif
+
             // Settings — handled by the native Settings scene below
         }
 

@@ -54,7 +54,7 @@ struct CallPowerfulModelTool: Tool {
     /// System instructions for the delegate session (workspace context, rules, etc.).
     private let delegateInstructions: String
     private let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
-    private let onToolEnd: (@Sendable (Transcript.ToolCall) async -> Void)?
+    private let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
 
     /// Creates a tool that delegates to a remote model via `ChatCompletionsLanguageModel`.
     /// - Parameters:
@@ -70,7 +70,7 @@ struct CallPowerfulModelTool: Tool {
         delegateTools: [any Tool],
         delegateInstructions: String,
         onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)? = nil,
-        onToolEnd: (@Sendable (Transcript.ToolCall) async -> Void)? = nil
+        onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)? = nil
     ) {
         self.modelName = modelName
         self.baseURL = baseURL

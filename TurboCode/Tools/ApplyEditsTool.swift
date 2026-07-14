@@ -49,7 +49,7 @@ struct EditFileArguments {
     var startLine: Int
     /// Last inclusive one-based line. Use startLine for insert operations and 0 for create or replace_file.
     var endLine: Int
-    /// New text. Use an empty string for delete_lines.
+    /// New UTF-8 text. Preserve intentional newlines. For prose with multiple paragraphs, separate paragraphs with a blank line (two newline characters). Use an empty string only for delete_lines.
     var content: String
 }
 
@@ -58,13 +58,19 @@ struct ApplyEditsTool: Tool {
     typealias Output = String
 
     let workspaceRoot: String
+    let reportsChanges: Bool
     private let editService = ApplyEditsService()
     private let patchService = DiffPatchService()
+
+    init(workspaceRoot: String, reportsChanges: Bool = true) {
+        self.workspaceRoot = workspaceRoot
+        self.reportsChanges = reportsChanges
+    }
 
     var name: String { "apply_edits" }
     var description: String {
         """
-        Atomically create or edit UTF-8 text files in a Git workspace. First use read_file
+        Atomically create or edit UTF-8 text files in the active workspace. First use read_file
         to obtain current line numbers and the file revision. For existing files, provide
         that revision and use replace_lines, insert_before, insert_after, or delete_lines.
         All line numbers refer to the same original revision; TurboCode handles ordering,
@@ -87,28 +93,34 @@ struct ApplyEditsTool: Tool {
             return "Edit transaction rejected: \(error.localizedDescription) Re-read the affected ranges and retry using the new revision."
         }
 
-        await MainActor.run {
-            ChatStore.shared?.beginDiffPatchBlock(
-                id: transactionID,
-                patch: prepared.patch,
-                files: prepared.files,
-                status: .running
-            )
+        if reportsChanges {
+            await MainActor.run {
+                ChatStore.shared?.beginDiffPatchBlock(
+                    id: transactionID,
+                    patch: prepared.patch,
+                    files: prepared.files,
+                    status: .running
+                )
+            }
         }
 
         do {
             try await patchService.apply(patch: prepared.patch, workspaceRoot: workspaceRoot)
-            await MainActor.run {
-                ChatStore.shared?.updateDiffPatchBlock(id: transactionID, status: .applied)
+            if reportsChanges {
+                await MainActor.run {
+                    ChatStore.shared?.updateDiffPatchBlock(id: transactionID, status: .applied)
+                }
             }
             return "Applied \(prepared.files.count) file change(s): +\(prepared.additions) -\(prepared.deletions)."
         } catch {
-            await MainActor.run {
-                ChatStore.shared?.updateDiffPatchBlock(
-                    id: transactionID,
-                    status: .failed,
-                    errorMessage: error.localizedDescription
-                )
+            if reportsChanges {
+                await MainActor.run {
+                    ChatStore.shared?.updateDiffPatchBlock(
+                        id: transactionID,
+                        status: .failed,
+                        errorMessage: error.localizedDescription
+                    )
+                }
             }
             return "Edit transaction failed: \(error.localizedDescription)"
         }
@@ -122,6 +134,12 @@ struct EditFileTool: Tool {
     typealias Output = String
 
     let workspaceRoot: String
+    let reportsChanges: Bool
+
+    init(workspaceRoot: String, reportsChanges: Bool = true) {
+        self.workspaceRoot = workspaceRoot
+        self.reportsChanges = reportsChanges
+    }
 
     var name: String { "edit_file" }
     var description: String {
@@ -133,7 +151,10 @@ struct EditFileTool: Tool {
         values to the anchor line. For create, use revision "", line values 0, and the
         complete new-file content. For replace_file, use a current revision, line values
         0, and complete replacement content. Use content "" only for delete_lines.
-        TurboCode generates and validates the Git patch and updates the change widget.
+        TurboCode generates and validates the internal patch and updates the change widget.
+        Preserve the requested document layout in content. Long-form prose, articles,
+        biographies, and documentation must use readable paragraphs separated by a
+        blank line; never collapse an entire document into one long line.
         """
     }
     var includesSchemaInInstructions: Bool { true }
@@ -151,7 +172,10 @@ struct EditFileTool: Tool {
             revision: arguments.revision.isEmpty ? nil : arguments.revision,
             operations: [operation]
         )
-        return try await ApplyEditsTool(workspaceRoot: workspaceRoot).call(
+        return try await ApplyEditsTool(
+            workspaceRoot: workspaceRoot,
+            reportsChanges: reportsChanges
+        ).call(
             arguments: ApplyEditsArguments(files: [request])
         )
     }
@@ -187,6 +211,11 @@ actor ApplyEditsService {
             guard !request.operations.isEmpty else {
                 throw DiffPatchError.invalidEdit("No operations were provided for '\(relativePath)'.")
             }
+            for operation in request.operations {
+                if let content = operation.content {
+                    try validateContentLayout(content, path: relativePath, operation: operation)
+                }
+            }
 
             let exists = FileManager.default.fileExists(atPath: url.path)
             if !exists {
@@ -219,6 +248,59 @@ actor ApplyEditsService {
         let patch = try makePatch(changes: changes)
         let files = try DiffPatchParser.parse(patch, workspaceRoot: workspaceRoot)
         return PreparedChangeTransaction(patch: patch, files: files)
+    }
+
+    private func validateContentLayout(
+        _ content: String,
+        path: String,
+        operation: LineEditOperation
+    ) throws {
+        try validateProseLayout(content, path: path)
+        try validateSourceLayout(content, path: path, operation: operation)
+    }
+
+    private func validateProseLayout(_ content: String, path: String) throws {
+        let proseExtensions = Set(["txt", "md", "markdown", "rst"])
+        let fileExtension = URL(fileURLWithPath: path).pathExtension.lowercased()
+        guard proseExtensions.contains(fileExtension),
+              content.count >= 180,
+              !content.contains("\n") else { return }
+
+        let sentenceMarks = content.reduce(into: 0) { count, character in
+            if character == "." || character == "!" || character == "?" {
+                count += 1
+            }
+        }
+        guard sentenceMarks >= 2 else { return }
+        throw DiffPatchError.invalidEdit(
+            "Long-form prose for '\(path)' was collapsed into one line. Retry with readable paragraphs separated by a blank line (two newline characters)."
+        )
+    }
+
+    private func validateSourceLayout(
+        _ content: String,
+        path: String,
+        operation: LineEditOperation
+    ) throws {
+        let sourceExtensions = Set([
+            "swift", "c", "cc", "cpp", "cxx", "h", "hpp", "m", "mm",
+            "java", "kt", "kts", "js", "jsx", "ts", "tsx", "py", "rs", "go"
+        ])
+        let fileExtension = URL(fileURLWithPath: path).pathExtension.lowercased()
+        guard sourceExtensions.contains(fileExtension),
+              content.count >= 120,
+              !content.contains("\n") else { return }
+
+        let rewritesWholeFile = operation.operation == "create"
+            || operation.operation == "replace_file"
+        let replacesMultipleLines = operation.operation == "replace_lines"
+            && (operation.endLine ?? operation.startLine ?? 0)
+                > (operation.startLine ?? 0)
+        guard rewritesWholeFile || replacesMultipleLines else { return }
+
+        throw DiffPatchError.invalidEdit(
+            "Source code for '\(path)' was collapsed into one line. Retry with the original code structure and real newline characters."
+        )
     }
 
     private func apply(_ operations: [LineEditOperation], to original: String, path: String) throws -> String {

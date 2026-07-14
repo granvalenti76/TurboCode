@@ -249,6 +249,11 @@ enum DiffPatchParser {
 // MARK: - Git Executor
 
 actor DiffPatchService {
+    private struct NativeFileSnapshot {
+        let url: URL
+        let contents: Data?
+    }
+
     func makePatch(edits: [AtomicTextEdit], workspaceRoot: String) throws -> String {
         guard !edits.isEmpty else {
             throw DiffPatchError.invalidEdit("No edits were provided.")
@@ -339,16 +344,31 @@ actor DiffPatchService {
         reverse: Bool = false,
         tolerateInaccurateEOF: Bool = false
     ) throws {
-        try ensureGitRepository(workspaceRoot)
-        let result = runGitApply(
-            patch: patch,
-            workspaceRoot: workspaceRoot,
-            reverse: reverse,
-            checkOnly: true,
-            tolerateInaccurateEOF: tolerateInaccurateEOF
-        )
+        let result: (exitCode: Int32, error: String)
+        if usesGitApply(workspaceRoot) {
+            result = runGitApply(
+                patch: patch,
+                workspaceRoot: workspaceRoot,
+                reverse: reverse,
+                checkOnly: true,
+                tolerateInaccurateEOF: tolerateInaccurateEOF
+            )
+        } else {
+            let files = try DiffPatchParser.parse(patch, workspaceRoot: workspaceRoot)
+            let createdDirectories = try prepareParentDirectories(
+                for: files,
+                workspaceRoot: workspaceRoot
+            )
+            defer { removeEmptyDirectories(createdDirectories) }
+            result = runNativePatch(
+                patch: patch,
+                workspaceRoot: workspaceRoot,
+                reverse: reverse,
+                checkOnly: true
+            )
+        }
         guard result.exitCode == 0 else {
-            throw DiffPatchError.gitApplyFailed(result.error)
+            throw DiffPatchError.patchApplyFailed(result.error)
         }
     }
 
@@ -416,25 +436,30 @@ actor DiffPatchService {
         reverse: Bool = false,
         tolerateInaccurateEOF: Bool = false
     ) throws {
-        try check(
-            patch: patch,
-            workspaceRoot: workspaceRoot,
-            reverse: reverse,
-            tolerateInaccurateEOF: tolerateInaccurateEOF
-        )
-        let result = runGitApply(
-            patch: patch,
-            workspaceRoot: workspaceRoot,
-            reverse: reverse,
-            checkOnly: false,
-            tolerateInaccurateEOF: tolerateInaccurateEOF
-        )
-        guard result.exitCode == 0 else {
-            throw DiffPatchError.gitApplyFailed(result.error)
+        if usesGitApply(workspaceRoot) {
+            try check(
+                patch: patch,
+                workspaceRoot: workspaceRoot,
+                reverse: reverse,
+                tolerateInaccurateEOF: tolerateInaccurateEOF
+            )
+            let result = runGitApply(
+                patch: patch,
+                workspaceRoot: workspaceRoot,
+                reverse: reverse,
+                checkOnly: false,
+                tolerateInaccurateEOF: tolerateInaccurateEOF
+            )
+            guard result.exitCode == 0 else {
+                throw DiffPatchError.patchApplyFailed(result.error)
+            }
+            return
         }
+
+        try applyNativePatch(patch, workspaceRoot: workspaceRoot, reverse: reverse)
     }
 
-    private func ensureGitRepository(_ workspaceRoot: String) throws {
+    private func usesGitApply(_ workspaceRoot: String) -> Bool {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["rev-parse", "--show-toplevel"]
@@ -446,11 +471,9 @@ actor DiffPatchService {
             try process.run()
             process.waitUntilExit()
         } catch {
-            throw DiffPatchError.gitUnavailable(error.localizedDescription)
+            return false
         }
-        guard process.terminationStatus == 0 else {
-            throw DiffPatchError.notGitRepository
-        }
+        guard process.terminationStatus == 0 else { return false }
         let rootData = output.fileHandleForReading.readDataToEndOfFile()
         let gitRoot = String(data: rootData, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -461,9 +484,125 @@ actor DiffPatchService {
         let resolvedGitRoot = gitRoot.map {
             URL(fileURLWithPath: $0).standardizedFileURL.resolvingSymlinksInPath().path
         }
-        guard resolvedGitRoot == expectedRoot else {
-            throw DiffPatchError.workspaceIsNotGitRoot
+        return resolvedGitRoot == expectedRoot
+    }
+
+    private func applyNativePatch(
+        _ patch: String,
+        workspaceRoot: String,
+        reverse: Bool
+    ) throws {
+        let files = try DiffPatchParser.parse(patch, workspaceRoot: workspaceRoot)
+        let snapshots = try files.map { file in
+            let url = try WorkspacePathResolver.resolve(file.path, within: workspaceRoot)
+            let contents = FileManager.default.fileExists(atPath: url.path)
+                ? try Data(contentsOf: url)
+                : nil
+            return NativeFileSnapshot(url: url, contents: contents)
         }
+        let createdDirectories = try prepareParentDirectories(
+            for: files,
+            workspaceRoot: workspaceRoot
+        )
+
+        let checkResult = runNativePatch(
+            patch: patch,
+            workspaceRoot: workspaceRoot,
+            reverse: reverse,
+            checkOnly: true
+        )
+        guard checkResult.exitCode == 0 else {
+            removeEmptyDirectories(createdDirectories)
+            throw DiffPatchError.patchApplyFailed(checkResult.error)
+        }
+
+        let applyResult = runNativePatch(
+            patch: patch,
+            workspaceRoot: workspaceRoot,
+            reverse: reverse,
+            checkOnly: false
+        )
+        guard applyResult.exitCode == 0 else {
+            restore(snapshots)
+            removeEmptyDirectories(createdDirectories)
+            throw DiffPatchError.patchApplyFailed(applyResult.error)
+        }
+    }
+
+    private func prepareParentDirectories(
+        for files: [DiffPatchFileChange],
+        workspaceRoot: String
+    ) throws -> [URL] {
+        var missing = Set<URL>()
+        let root = URL(fileURLWithPath: workspaceRoot).standardizedFileURL
+        for file in files {
+            let url = try WorkspacePathResolver.resolve(file.path, within: workspaceRoot)
+            var directory = url.deletingLastPathComponent()
+            while directory.path != root.path,
+                  !FileManager.default.fileExists(atPath: directory.path) {
+                missing.insert(directory)
+                directory.deleteLastPathComponent()
+            }
+        }
+        let ordered = missing.sorted {
+            $0.pathComponents.count < $1.pathComponents.count
+        }
+        for directory in ordered {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        }
+        return ordered
+    }
+
+    private func removeEmptyDirectories(_ directories: [URL]) {
+        for directory in directories.reversed() {
+            try? FileManager.default.removeItem(at: directory)
+        }
+    }
+
+    private func restore(_ snapshots: [NativeFileSnapshot]) {
+        for snapshot in snapshots {
+            if let contents = snapshot.contents {
+                try? contents.write(to: snapshot.url, options: .atomic)
+            } else if FileManager.default.fileExists(atPath: snapshot.url.path) {
+                try? FileManager.default.removeItem(at: snapshot.url)
+            }
+        }
+    }
+
+    private func runNativePatch(
+        patch: String,
+        workspaceRoot: String,
+        reverse: Bool,
+        checkOnly: Bool
+    ) -> (exitCode: Int32, error: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/patch")
+        var arguments = ["-p1", "-f", "-s", "-E"]
+        if checkOnly { arguments.append("-C") }
+        if reverse { arguments.append("-R") }
+        process.arguments = arguments
+        process.currentDirectoryURL = URL(fileURLWithPath: workspaceRoot)
+
+        let input = Pipe()
+        let output = Pipe()
+        let error = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = error
+        do {
+            try process.run()
+            try input.fileHandleForWriting.write(contentsOf: Data(patch.utf8))
+            try input.fileHandleForWriting.close()
+            process.waitUntilExit()
+        } catch {
+            return (-1, error.localizedDescription)
+        }
+        let stdout = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let stderr = String(decoding: error.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let detail = [stdout, stderr]
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (process.terminationStatus, detail)
     }
 
     private func runGitApply(
@@ -512,6 +651,7 @@ enum DiffPatchError: LocalizedError {
     case notGitRepository
     case workspaceIsNotGitRoot
     case gitApplyFailed(String)
+    case patchApplyFailed(String)
     case diffGenerationFailed(String)
 
     var errorDescription: String? {
@@ -523,6 +663,7 @@ enum DiffPatchError: LocalizedError {
         case .notGitRepository: return "diff_patch requires a Git workspace."
         case .workspaceIsNotGitRoot: return "diff_patch requires the workspace folder to be the Git repository root."
         case .gitApplyFailed(let reason): return reason.isEmpty ? "git apply rejected the patch." : reason
+        case .patchApplyFailed(let reason): return reason.isEmpty ? "The patch could not be applied." : reason
         case .diffGenerationFailed(let reason): return "Could not generate a unified diff: \(reason)"
         }
     }

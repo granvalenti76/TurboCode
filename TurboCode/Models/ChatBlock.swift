@@ -46,6 +46,7 @@ public enum ChatBlockKind: String, Sendable, Hashable, CaseIterable {
 public struct DiffPatchBlock: Sendable, Hashable, Codable {
     public var workspaceRoot: String
     public var patch: String
+    public var patches: [String]?
     public var files: [DiffPatchFileChange]
     public var status: DiffPatchStatus
     public var errorMessage: String?

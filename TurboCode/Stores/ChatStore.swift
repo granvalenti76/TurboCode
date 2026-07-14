@@ -55,6 +55,10 @@ public final class ChatStore {
     public var runtimeConnection: RuntimeConnectionState = .ready
     public var busy: Bool = false
     public var error: String?
+#if DEBUG
+    public var benchmarkRunning: Bool = false
+    public var benchmarkStatus: String?
+#endif
 
     // Navigation
     public var route: AppRoute = .chat
@@ -201,6 +205,9 @@ public final class ChatStore {
     // The currently running response task. Keeping the handle makes the Stop
     // button cancel the actual model stream rather than only changing the UI.
     private var responseTask: Task<Void, Never>?
+    private var activeDiagnosticsRunID: String?
+    private var activeEditGroupID: String?
+    private var editTransactionGroups: [String: String] = [:]
 
     // MARK: - Onboarding
 
@@ -286,8 +293,8 @@ public final class ChatStore {
             text += "\nNEVER access files outside the workspace."
             text += "\nUse read_file with startLine and endLine to inspect only the relevant numbered source range and preserve context."
             text += "\nUse bash for Git queries, builds, tests, and precise inspection. Bash can read the workspace but cannot write to it."
-            let editingTool = activeBackend == .foundationServe ? "apply_edits" : "edit_file"
-            text += "\nUse \(editingTool) for every source or text-file creation and modification. Read the relevant range immediately before editing, copy its Revision, and describe line operations against that revision. Never generate unified diff hunks."
+            text += "\nUse edit_file for every source or text-file creation and modification. Read the relevant range immediately before editing, copy its Revision, and request one contiguous change per call. Never generate unified diff hunks."
+            text += "\nWhen writing articles, biographies, documentation, or other long-form prose, preserve readable paragraphs with a blank line between them. The tool content must contain real newline characters; never collapse the whole document into one long line."
             text += "\nFile and directory deletion is the only operation that requires approval. If a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
         }
         return text
@@ -327,10 +334,10 @@ public final class ChatStore {
                 delegateTools: workspaceTools,
                 delegateInstructions: baseInstructions,
                 onToolStart: { [weak self] call in
-                    await MainActor.run { self?.beginToolActivity(call) }
+                    await self?.beginToolActivity(call, backend: .llamaServer)
                 },
-                onToolEnd: { [weak self] call in
-                    await MainActor.run { self?.endToolActivity(call) }
+                onToolEnd: { [weak self] call, output in
+                    await self?.endToolActivity(call, output: output, backend: .llamaServer)
                 }
             )
             var t: [any Tool] = [powerfulTool]
@@ -382,6 +389,7 @@ public final class ChatStore {
         case .llamaServer:
             activeModel = ChatCompletionsLanguageModel(name: llamaModelName, url: llamaBaseURL)
         }
+        let sessionBackend = activeBackend
 
         if isOrchestrating {
             // Orchestrator profile: Apple + lifecycle callbacks for delegation detection
@@ -391,10 +399,10 @@ public final class ChatStore {
                     tools: tools,
                     model: activeModel,
                     onToolStart: { [weak self] call in
-                        await MainActor.run { self?.beginToolActivity(call) }
+                        await self?.beginToolActivity(call, backend: .foundationApple)
                     },
-                    onToolEnd: { [weak self] call in
-                        await MainActor.run { self?.endToolActivity(call) }
+                    onToolEnd: { [weak self] call, output in
+                        await self?.endToolActivity(call, output: output, backend: .foundationApple)
                     },
                     onDelegationStart: { [weak self] in
                         await MainActor.run { self?.isDelegating = true }
@@ -414,14 +422,13 @@ public final class ChatStore {
                     activations: skillActivations,
                     diskSkills: availableSkills,
                     workspaceRoot: workspaceRoot,
-                    usesAdvancedEditing: activeBackend == .foundationServe,
                     model: activeModel,
                     reasoningLevel: reasoningLevel,
                     onToolStart: { [weak self] call in
-                        await MainActor.run { self?.beginToolActivity(call) }
+                        await self?.beginToolActivity(call, backend: sessionBackend)
                     },
-                    onToolEnd: { [weak self] call in
-                        await MainActor.run { self?.endToolActivity(call) }
+                    onToolEnd: { [weak self] call, output in
+                        await self?.endToolActivity(call, output: output, backend: sessionBackend)
                     }
                 ),
                 history: history
@@ -793,6 +800,21 @@ public final class ChatStore {
         visibleInTimeline: Bool
     ) async {
 
+        let diagnosticsRunID = await AgentDiagnosticsRecorder.shared.startRun(
+            backend: activeBackend,
+            mode: orchestratorMode,
+            profileVersion: AgentProfileVersion.value(for: activeBackend, mode: orchestratorMode),
+            workspaceKind: diagnosticsWorkspaceKind,
+            promptCharacters: promptText.count
+        )
+        activeDiagnosticsRunID = diagnosticsRunID
+        let editGroupID = UUID().uuidString
+        activeEditGroupID = editGroupID
+        var diagnosticsOutcome: AgentRunOutcome = .success
+        var diagnosticsError: Error?
+        var didRecordFirstToken = false
+        var diagnosticsGeneratedCharacters = 0
+
         isFirstMessage = false
         // Generate the title concurrently with the response, but retain the
         // task so persistence can wait for the final title.
@@ -822,7 +844,15 @@ public final class ChatStore {
 
                 // Fast path: update liveAssistant for quick UI feedback
                 if !snapshot.content.isEmpty {
+                    if !didRecordFirstToken, let diagnosticsRunID {
+                        didRecordFirstToken = true
+                        await AgentDiagnosticsRecorder.shared.markFirstToken(runID: diagnosticsRunID)
+                    }
                     accumulatedText = snapshot.content
+                    diagnosticsGeneratedCharacters = max(
+                        diagnosticsGeneratedCharacters,
+                        snapshot.content.count
+                    )
                     liveAssistant = userVisibleAssistantText(accumulatedText)
                 }
 
@@ -831,7 +861,17 @@ public final class ChatStore {
                     if case .reasoning(let reasoning) = entry {
                         for segment in reasoning.segments {
                             if case .text(let t) = segment {
+                                if !didRecordFirstToken, !t.content.isEmpty, let diagnosticsRunID {
+                                    didRecordFirstToken = true
+                                    await AgentDiagnosticsRecorder.shared.markFirstToken(
+                                        runID: diagnosticsRunID
+                                    )
+                                }
                                 liveReasoning = t.content
+                                diagnosticsGeneratedCharacters = max(
+                                    diagnosticsGeneratedCharacters,
+                                    t.content.count
+                                )
                             }
                         }
                     }
@@ -885,6 +925,7 @@ public final class ChatStore {
                 threads[i].updatedAt = .now
             }
         } catch where error is CancellationError || Task.isCancelled {
+            diagnosticsOutcome = .cancelled
             // Keep whatever the model had already produced and mark an empty
             // response clearly, without presenting cancellation as an error.
             let partialText = accumulatedText.isEmpty ? liveReasoning : accumulatedText
@@ -902,6 +943,8 @@ public final class ChatStore {
             toolActivities.removeAll()
             self.error = nil
         } catch {
+            diagnosticsOutcome = .failed
+            diagnosticsError = error
             toolActivities.removeAll()
             self.error = error.localizedDescription
             if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
@@ -913,6 +956,21 @@ public final class ChatStore {
                 )
             }
         }
+        if let diagnosticsRunID {
+            await AgentDiagnosticsRecorder.shared.finishRun(
+                runID: diagnosticsRunID,
+                outcome: diagnosticsOutcome,
+                generatedCharacters: diagnosticsGeneratedCharacters,
+                error: diagnosticsError
+            )
+            if activeDiagnosticsRunID == diagnosticsRunID {
+                activeDiagnosticsRunID = nil
+            }
+        }
+        if activeEditGroupID == editGroupID {
+            activeEditGroupID = nil
+        }
+        editTransactionGroups = editTransactionGroups.filter { $0.value != editGroupID }
         // Persist after the title task finishes so the JSON never races with
         // the Apple on-device title generator and stores a stale "New Chat".
         if let titleTask {
@@ -926,6 +984,43 @@ public final class ChatStore {
 
     public func interrupt() {
         responseTask?.cancel()
+    }
+
+#if DEBUG
+    public func runActiveEditingBenchmark() async {
+        guard !benchmarkRunning, !busy else { return }
+        benchmarkRunning = true
+        benchmarkStatus = "Running \(activeBackend.rawValue) editing benchmark..."
+        defer { benchmarkRunning = false }
+
+        let model: any LanguageModel
+        switch activeBackend {
+        case .foundationApple:
+            model = SystemLanguageModel.default
+        case .foundationServe:
+            model = ChatCompletionsLanguageModel(name: "pcc", url: fmServeBaseURL)
+        case .llamaServer:
+            model = ChatCompletionsLanguageModel(name: llamaModelName, url: llamaBaseURL)
+        }
+        let result = await AgentBenchmarkRunner.runSuite(
+            backend: activeBackend,
+            model: model,
+            reasoningLevel: reasoningLevel
+        )
+        benchmarkStatus = result.summary
+        print("[Benchmark] \(result.summary)")
+    }
+
+    public func printToolFailureSummary() async {
+        let summary = await AgentDiagnosticsRecorder.shared.failureSummary()
+        print("[Diagnostics] \(summary)")
+    }
+#endif
+
+    private var diagnosticsWorkspaceKind: String {
+        guard !workspaceRoot.isEmpty else { return "none" }
+        let marker = URL(fileURLWithPath: workspaceRoot).appendingPathComponent(".git")
+        return FileManager.default.fileExists(atPath: marker.path) ? "git" : "nonGit"
     }
 
     /// Approve a pending tool operation, execute the exact registered action,
@@ -983,7 +1078,14 @@ public final class ChatStore {
         await sendMessage(text, visibleInTimeline: false)
     }
 
-    private func beginToolActivity(_ call: Transcript.ToolCall) {
+    private func beginToolActivity(_ call: Transcript.ToolCall, backend: ModelBackend) async {
+        if let activeDiagnosticsRunID {
+            await AgentDiagnosticsRecorder.shared.toolStarted(
+                runID: activeDiagnosticsRunID,
+                call: call,
+                backend: backend
+            )
+        }
         guard call.toolName != "diff_patch",
               call.toolName != "apply_edits",
               call.toolName != "edit_file" else { return }
@@ -991,7 +1093,19 @@ public final class ChatStore {
         toolActivities.append(ToolActivity(id: call.id, summary: toolSummary(for: call)))
     }
 
-    private func endToolActivity(_ call: Transcript.ToolCall) {
+    private func endToolActivity(
+        _ call: Transcript.ToolCall,
+        output: Transcript.ToolOutput,
+        backend: ModelBackend
+    ) async {
+        if let activeDiagnosticsRunID {
+            await AgentDiagnosticsRecorder.shared.toolFinished(
+                runID: activeDiagnosticsRunID,
+                call: call,
+                output: output,
+                backend: backend
+            )
+        }
         toolActivities.removeAll { $0.id == call.id }
     }
 
@@ -1001,15 +1115,30 @@ public final class ChatStore {
         files: [DiffPatchFileChange],
         status: DiffPatchStatus
     ) {
-        guard !blocks.contains(where: { $0.id == id }) else { return }
+        let blockID = activeEditGroupID ?? id
+        editTransactionGroups[id] = blockID
+
+        if let index = blocks.firstIndex(where: { $0.id == blockID }),
+           var payload = blocks[index].diffPatch {
+            var patches = payload.patches ?? [payload.patch]
+            patches.append(patch)
+            payload.patches = patches
+            payload.patch = patches.joined(separator: "\n")
+            payload.files = mergedFileChanges(payload.files + files)
+            payload.status = status
+            payload.errorMessage = nil
+            blocks[index].diffPatch = payload
+            return
+        }
         let payload = DiffPatchBlock(
             workspaceRoot: workspaceRoot,
             patch: patch,
+            patches: [patch],
             files: files,
             status: status,
             errorMessage: nil
         )
-        let block = ChatBlock(id: id, kind: .diffPatch, text: "", diffPatch: payload)
+        let block = ChatBlock(id: blockID, kind: .diffPatch, text: "", diffPatch: payload)
         if let placeholderIndex = blocks.lastIndex(where: { $0.kind == .assistant && $0.text.isEmpty }) {
             blocks.insert(block, at: placeholderIndex)
         } else {
@@ -1022,7 +1151,8 @@ public final class ChatStore {
         status: DiffPatchStatus,
         errorMessage: String? = nil
     ) {
-        guard let index = blocks.firstIndex(where: { $0.id == id }),
+        let blockID = editTransactionGroups[id] ?? id
+        guard let index = blocks.firstIndex(where: { $0.id == blockID }),
               var payload = blocks[index].diffPatch else { return }
         payload.status = status
         payload.errorMessage = errorMessage
@@ -1046,14 +1176,24 @@ public final class ChatStore {
 
         updateDiffPatchBlock(id: id, status: .undoing)
         Task {
+            var revertedPatches: [String] = []
             do {
-                try await diffPatchService.apply(
-                    patch: payload.patch,
-                    workspaceRoot: payload.workspaceRoot,
-                    reverse: true
-                )
+                for patch in (payload.patches ?? [payload.patch]).reversed() {
+                    try await diffPatchService.apply(
+                        patch: patch,
+                        workspaceRoot: payload.workspaceRoot,
+                        reverse: true
+                    )
+                    revertedPatches.append(patch)
+                }
                 updateDiffPatchBlock(id: id, status: .undone)
             } catch {
+                for patch in revertedPatches.reversed() {
+                    try? await diffPatchService.apply(
+                        patch: patch,
+                        workspaceRoot: payload.workspaceRoot
+                    )
+                }
                 updateDiffPatchBlock(
                     id: id,
                     status: .applied,
@@ -1063,6 +1203,26 @@ public final class ChatStore {
             if let threadID = activeThreadId {
                 await persistSession(for: threadID)
             }
+        }
+    }
+
+    private func mergedFileChanges(
+        _ changes: [DiffPatchFileChange]
+    ) -> [DiffPatchFileChange] {
+        var order: [String] = []
+        var totals: [String: (additions: Int, deletions: Int)] = [:]
+        for change in changes {
+            if totals[change.path] == nil { order.append(change.path) }
+            totals[change.path, default: (0, 0)].additions += change.additions
+            totals[change.path, default: (0, 0)].deletions += change.deletions
+        }
+        return order.compactMap { path in
+            guard let total = totals[path] else { return nil }
+            return DiffPatchFileChange(
+                path: path,
+                additions: total.additions,
+                deletions: total.deletions
+            )
         }
     }
 

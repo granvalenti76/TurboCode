@@ -15,7 +15,7 @@ struct TurboCodeDynamicProfile: LanguageModelSession.DynamicProfile {
     let tools: [any Tool]
     let model: any LanguageModel
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
-    let onToolEnd: (@Sendable (Transcript.ToolCall) async -> Void)?
+    let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
     let onDelegationStart: (@Sendable () async -> Void)?
     let onDelegationEnd: (@Sendable () async -> Void)?
     let reasoningLevel: ContextOptions.ReasoningLevel?
@@ -36,9 +36,9 @@ struct TurboCodeDynamicProfile: LanguageModelSession.DynamicProfile {
                 await action()
             }
         }
-        .onToolOutput { call, _ in
+        .onToolOutput { call, output in
             if let action = onToolEnd {
-                await action(call)
+                await action(call, output)
             }
             if call.toolName == "call_powerful_model",
                let action = onDelegationEnd {
