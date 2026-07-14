@@ -86,8 +86,11 @@ actor GitDiffService {
     func fetchChangedFiles(at url: URL) throws -> [GitFileStatus] {
         let unstaged = try parseNumstat(shell("git", args: ["diff", "--numstat"], cwd: url))
         let staged = try parseNumstat(shell("git", args: ["diff", "--cached", "--numstat"], cwd: url))
+        let untracked = untrackedFiles(at: url).map { path in
+            GitFileStatus(path: path, added: lineCount(at: url.appendingPathComponent(path)), removed: 0)
+        }
         var merged: [String: GitFileStatus] = [:]
-        for status in unstaged + staged {
+        for status in unstaged + staged + untracked {
             if let existing = merged[status.path] {
                 merged[status.path] = GitFileStatus(
                     path: status.path,
@@ -102,6 +105,16 @@ actor GitDiffService {
     }
 
     func fetchDiff(for filePath: String, at url: URL) throws -> [DiffLine] {
+        if untrackedFiles(at: url).contains(filePath) {
+            let fileURL = url.appendingPathComponent(filePath)
+            let content = try String(contentsOf: fileURL, encoding: .utf8)
+            var lines = content.components(separatedBy: .newlines)
+            if content.hasSuffix("\n") { lines.removeLast() }
+            return lines.enumerated().map { index, content in
+                DiffLine(oldLineNumber: nil, newLineNumber: index + 1, content: content, type: .added)
+            }
+        }
+
         let result = shell("git", args: ["diff", "--unified=9999", "--", filePath], cwd: url)
         guard result.exitCode == 0 else { throw GitError.commandFailed(result.stderr) }
         let stagedResult = shell("git", args: ["diff", "--cached", "--unified=9999", "--", filePath], cwd: url)
@@ -128,7 +141,7 @@ actor GitDiffService {
         let rawLines = output.components(separatedBy: .newlines)
         var oldLine: Int?; var newLine: Int?
         for raw in rawLines {
-            guard !raw.hasPrefix("---") && !raw.hasPrefix("+++") && !raw.hasPrefix("diff --git") && !raw.hasPrefix("index ") else { continue }
+            guard !raw.hasPrefix("--- ") && !raw.hasPrefix("+++ ") && !raw.hasPrefix("diff --git") && !raw.hasPrefix("index ") else { continue }
             if raw.hasPrefix("@@") {
                 if let match = raw.firstMatch(of: /@@[^@]*-(\d+)[^@]*\+(\d+)/) { oldLine = Int(match.1); newLine = Int(match.2) }
                 continue
@@ -145,6 +158,20 @@ actor GitDiffService {
             }
         }
         return lines
+    }
+
+    private func untrackedFiles(at url: URL) -> [String] {
+        let result = shell("git", args: ["ls-files", "--others", "--exclude-standard"], cwd: url)
+        guard result.exitCode == 0 else { return [] }
+        return result.stdout.components(separatedBy: .newlines).filter { !$0.isEmpty }
+    }
+
+    private func lineCount(at url: URL) -> Int {
+        guard let content = try? String(contentsOf: url, encoding: .utf8), !content.isEmpty else { return 0 }
+        let separators = content.reduce(into: 0) { count, character in
+            if character == "\n" { count += 1 }
+        }
+        return content.hasSuffix("\n") ? separators : separators + 1
     }
 
     @discardableResult

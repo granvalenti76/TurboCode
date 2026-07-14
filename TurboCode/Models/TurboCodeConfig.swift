@@ -153,10 +153,13 @@ public struct StoredBlock: Codable, Hashable, Sendable, Identifiable {
     public let createdAt: Date
     public var model: String?
     public var providerId: String?
+    public var diffPatch: DiffPatchBlock?
 
     public init(id: String = UUID().uuidString, kind: String, text: String,
-                createdAt: Date = .now, model: String? = nil, providerId: String? = nil) {
+                createdAt: Date = .now, model: String? = nil, providerId: String? = nil,
+                diffPatch: DiffPatchBlock? = nil) {
         self.id = id; self.kind = kind; self.text = text
         self.createdAt = createdAt; self.model = model; self.providerId = providerId
+        self.diffPatch = diffPatch
     }
 }

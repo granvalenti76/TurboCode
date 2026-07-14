@@ -9,6 +9,7 @@ public struct ChatBlock: Identifiable, Sendable, Hashable {
     public let createdAt: Date
     public var model: String?
     public var providerId: String?
+    public var diffPatch: DiffPatchBlock?
 
     public init(
         id: String = UUID().uuidString,
@@ -16,7 +17,8 @@ public struct ChatBlock: Identifiable, Sendable, Hashable {
         text: String,
         createdAt: Date = .now,
         model: String? = nil,
-        providerId: String? = nil
+        providerId: String? = nil,
+        diffPatch: DiffPatchBlock? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -24,6 +26,7 @@ public struct ChatBlock: Identifiable, Sendable, Hashable {
         self.createdAt = createdAt
         self.model = model
         self.providerId = providerId
+        self.diffPatch = diffPatch
     }
 }
 
@@ -35,6 +38,38 @@ public enum ChatBlockKind: String, Sendable, Hashable, CaseIterable {
     case approval
     case review
     case compaction
+    case diffPatch = "diff_patch"
+}
+
+// MARK: - Diff Patch Block
+
+public struct DiffPatchBlock: Sendable, Hashable, Codable {
+    public var workspaceRoot: String
+    public var patch: String
+    public var files: [DiffPatchFileChange]
+    public var status: DiffPatchStatus
+    public var errorMessage: String?
+
+    public var additions: Int { files.reduce(0) { $0 + $1.additions } }
+    public var deletions: Int { files.reduce(0) { $0 + $1.deletions } }
+}
+
+public struct DiffPatchFileChange: Identifiable, Sendable, Hashable, Codable {
+    public let path: String
+    public let additions: Int
+    public let deletions: Int
+
+    public var id: String { path }
+}
+
+public enum DiffPatchStatus: String, Sendable, Hashable, Codable {
+    case awaitingApproval
+    case running
+    case applied
+    case undoing
+    case undone
+    case failed
+    case rejected
 }
 
 // MARK: - ToolBlock — tool call / execution result

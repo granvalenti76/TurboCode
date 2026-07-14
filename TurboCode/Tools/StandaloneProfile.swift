@@ -20,6 +20,10 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
             Instructions(instructions)
             if !workspaceRoot.isEmpty {
                 StandaloneSkills(activations: activations, workspaceRoot: workspaceRoot)
+                Instructions {
+                    "diff_patch is active and available directly in this session. Use it for code edits in Git workspaces; do not claim that an editing skill must be activated first."
+                }
+                DiffPatchTool(workspaceRoot: workspaceRoot)
             }
         }
         .model(model)

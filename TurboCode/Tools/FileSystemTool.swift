@@ -435,7 +435,7 @@ public struct PendingToolApproval: Sendable {
     public let path: String
     public let destination: String?
     public let summary: String
-    let action: @Sendable () -> String
+    let action: @Sendable () async -> String
 }
 
 public actor ToolApprovalRegistry {
@@ -447,11 +447,11 @@ public actor ToolApprovalRegistry {
         requests[request.id] = request
     }
 
-    public func approve(id: String) -> String {
+    public func approve(id: String) async -> String {
         guard let request = requests.removeValue(forKey: id) else {
             return "Error: Approval request expired or was already handled."
         }
-        return request.action()
+        return await request.action()
     }
 
     public func reject(id: String) {

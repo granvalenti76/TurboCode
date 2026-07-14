@@ -137,6 +137,7 @@ public final class ChatStore {
     var availableBranches: [String] = []
 
     private let gitService = GitDiffService()
+    private let diffPatchService = DiffPatchService()
 
     public func reloadDiffs() async {
         guard !workspaceRoot.isEmpty else {
@@ -268,6 +269,7 @@ public final class ChatStore {
             text += "\nActivate the appropriate skill below to access file and code tools."
             text += "\nAll file operations are restricted to the workspace directory."
             text += "\nNEVER access files outside the workspace."
+            text += "\nPrefer diff_patch for precise edits to existing text or source files in Git workspaces."
             text += "\nIf a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
         }
         return text
@@ -286,7 +288,8 @@ public final class ChatStore {
             workspaceTools += [
                 ReadFileTool(workspaceRoot: workspaceRoot),
                 GrepTool(workspaceRoot: workspaceRoot),
-                FileSystemTool(workspaceRoot: workspaceRoot)
+                FileSystemTool(workspaceRoot: workspaceRoot),
+                DiffPatchTool(workspaceRoot: workspaceRoot)
             ]
         }
 
@@ -497,7 +500,8 @@ public final class ChatStore {
             modelBackend: activeBackend.rawValue,
             blocks: blocks.map {
                 StoredBlock(id: $0.id, kind: $0.kind.rawValue, text: $0.text,
-                    createdAt: $0.createdAt, model: $0.model, providerId: $0.providerId)
+                    createdAt: $0.createdAt, model: $0.model, providerId: $0.providerId,
+                    diffPatch: $0.diffPatch)
             }
         )
         do {
@@ -531,7 +535,8 @@ public final class ChatStore {
         activeThreadId = id
         blocks = stored.blocks.map {
             ChatBlock(id: $0.id, kind: ChatBlockKind(rawValue: $0.kind) ?? .assistant,
-                text: $0.text, createdAt: $0.createdAt, model: $0.model, providerId: $0.providerId)
+                text: $0.text, createdAt: $0.createdAt, model: $0.model,
+                providerId: $0.providerId, diffPatch: $0.diffPatch)
         }
         liveReasoning = ""; liveAssistant = ""
         isFirstMessage = blocks.isEmpty
@@ -798,6 +803,9 @@ public final class ChatStore {
     public func rejectAction() {
         guard let request = pendingApproval else { return }
         pendingApproval = nil
+        if request.operation == "diffPatch" {
+            updateDiffPatchBlock(id: request.id, status: .rejected)
+        }
         Task {
             await ToolApprovalRegistry.shared.reject(id: request.id)
             await sendInternalMessageWhenIdle("[User rejected tool action: \(request.summary). Do NOT perform this action.]")
@@ -812,12 +820,84 @@ public final class ChatStore {
     }
 
     private func beginToolActivity(_ call: Transcript.ToolCall) {
+        guard call.toolName != "diff_patch" else { return }
         toolActivities.removeAll { $0.id == call.id }
         toolActivities.append(ToolActivity(id: call.id, summary: toolSummary(for: call)))
     }
 
     private func endToolActivity(_ call: Transcript.ToolCall) {
         toolActivities.removeAll { $0.id == call.id }
+    }
+
+    public func beginDiffPatchBlock(
+        id: String,
+        patch: String,
+        files: [DiffPatchFileChange],
+        status: DiffPatchStatus
+    ) {
+        guard !blocks.contains(where: { $0.id == id }) else { return }
+        let payload = DiffPatchBlock(
+            workspaceRoot: workspaceRoot,
+            patch: patch,
+            files: files,
+            status: status,
+            errorMessage: nil
+        )
+        let block = ChatBlock(id: id, kind: .diffPatch, text: "", diffPatch: payload)
+        if let placeholderIndex = blocks.lastIndex(where: { $0.kind == .assistant && $0.text.isEmpty }) {
+            blocks.insert(block, at: placeholderIndex)
+        } else {
+            blocks.append(block)
+        }
+    }
+
+    public func updateDiffPatchBlock(
+        id: String,
+        status: DiffPatchStatus,
+        errorMessage: String? = nil
+    ) {
+        guard let index = blocks.firstIndex(where: { $0.id == id }),
+              var payload = blocks[index].diffPatch else { return }
+        payload.status = status
+        payload.errorMessage = errorMessage
+        blocks[index].diffPatch = payload
+
+        if status == .applied || status == .undone {
+            Task { await reloadDiffs() }
+        }
+    }
+
+    public func reviewDiffPatch(_ id: String) {
+        guard blocks.contains(where: { $0.id == id && $0.diffPatch != nil }) else { return }
+        rightPanelMode = .changes
+        Task { await reloadDiffs() }
+    }
+
+    public func undoDiffPatch(_ id: String) {
+        guard let index = blocks.firstIndex(where: { $0.id == id }),
+              let payload = blocks[index].diffPatch,
+              payload.status == .applied else { return }
+
+        updateDiffPatchBlock(id: id, status: .undoing)
+        Task {
+            do {
+                try await diffPatchService.apply(
+                    patch: payload.patch,
+                    workspaceRoot: payload.workspaceRoot,
+                    reverse: true
+                )
+                updateDiffPatchBlock(id: id, status: .undone)
+            } catch {
+                updateDiffPatchBlock(
+                    id: id,
+                    status: .applied,
+                    errorMessage: "Undo failed: \(error.localizedDescription)"
+                )
+            }
+            if let threadID = activeThreadId {
+                await persistSession(for: threadID)
+            }
+        }
     }
 
     private func toolSummary(for call: Transcript.ToolCall) -> String {

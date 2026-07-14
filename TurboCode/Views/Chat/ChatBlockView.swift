@@ -31,6 +31,10 @@ struct ChatBlockView: View {
             reviewBanner
         case .compaction:
             compactionNotice
+        case .diffPatch:
+            if let patch = block.diffPatch {
+                DiffPatchWidget(blockID: block.id, patch: patch)
+            }
         }
     }
 
