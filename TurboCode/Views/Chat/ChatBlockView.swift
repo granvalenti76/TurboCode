@@ -11,6 +11,7 @@ struct ChatBlockView: View {
     @State private var isEditing = false
     @State private var editText: String = ""
     @State private var didCopyAssistantResponse = false
+    @State private var isHoveringAssistantResponse = false
 
     var body: some View {
         switch block.kind {
@@ -121,24 +122,28 @@ struct ChatBlockView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     
                 if !visibleAssistantText.isEmpty {
-                    HStack(spacing: 6) {
-                        if let model = block.model {
-                            ModelBadgeView(model: model, providerId: block.providerId)
-                        }
-
+                    HStack(spacing: 12) {
                         Button {
                             copyAssistantResponse()
                         } label: {
-                            Image(systemName: didCopyAssistantResponse ? "checkmark" : "doc.on.doc")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(didCopyAssistantResponse ? Color.green : Color.secondary)
-                                .frame(width: 24, height: 24)
+                            Image(systemName: didCopyAssistantResponse ? "checkmark" : "square.on.square")
+                                .font(.system(size: 15, weight: .regular))
+                                .foregroundStyle(didCopyAssistantResponse ? Color.green : Color.secondary.opacity(0.72))
+                                .frame(width: 22, height: 22)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .opacity(isHoveringAssistantResponse || didCopyAssistantResponse ? 1 : 0)
+                        .allowsHitTesting(isHoveringAssistantResponse)
+                        .animation(.easeOut(duration: 0.16), value: isHoveringAssistantResponse)
                         .help(didCopyAssistantResponse ? "Copied" : "Copy response")
                         .accessibilityLabel(didCopyAssistantResponse ? "Response copied" : "Copy response")
+
+                        Text(block.createdAt, format: .dateTime.hour().minute())
+                            .font(.system(size: 13))
+                            .foregroundStyle(.tertiary)
                     }
+                    .padding(.top, 2)
                 }
             }
 
@@ -146,6 +151,10 @@ struct ChatBlockView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .onHover { isHovering in
+            isHoveringAssistantResponse = isHovering
+        }
     }
     
     // MARK: - Reasoning Block
