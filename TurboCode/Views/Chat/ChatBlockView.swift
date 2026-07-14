@@ -10,6 +10,7 @@ struct ChatBlockView: View {
     @Environment(\.chatFontSize) private var chatFontSize
     @State private var isEditing = false
     @State private var editText: String = ""
+    @State private var didCopyAssistantResponse = false
 
     var body: some View {
         switch block.kind {
@@ -119,8 +120,25 @@ struct ChatBlockView: View {
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     
-                if let model = block.model {
-                    ModelBadgeView(model: model, providerId: block.providerId)
+                if !visibleAssistantText.isEmpty {
+                    HStack(spacing: 6) {
+                        if let model = block.model {
+                            ModelBadgeView(model: model, providerId: block.providerId)
+                        }
+
+                        Button {
+                            copyAssistantResponse()
+                        } label: {
+                            Image(systemName: didCopyAssistantResponse ? "checkmark" : "doc.on.doc")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(didCopyAssistantResponse ? Color.green : Color.secondary)
+                                .frame(width: 24, height: 24)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(didCopyAssistantResponse ? "Copied" : "Copy response")
+                        .accessibilityLabel(didCopyAssistantResponse ? "Response copied" : "Copy response")
+                    }
                 }
             }
 
@@ -249,6 +267,17 @@ struct ChatBlockView: View {
 
         return visibleLines.joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func copyAssistantResponse() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(visibleAssistantText, forType: .string)
+        didCopyAssistantResponse = true
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.5))
+            didCopyAssistantResponse = false
+        }
     }
 
     private var approvalBanner: some View {
