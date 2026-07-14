@@ -7,7 +7,10 @@ struct InspectorPanelView: View {
 
     var body: some View {
         Group {
-            if chatStore.isLoadingDiffs {
+            if chatStore.rightPanelMode == .commit,
+               let receipt = chatStore.inspectedGitCommit {
+                GitCommitInspectorView(receipt: receipt)
+            } else if chatStore.isLoadingDiffs {
                 stateView(icon: nil, title: "Loading changes", subtitle: nil, showsProgress: true)
             } else if let error = chatStore.diffLoadError {
                 stateView(
@@ -58,6 +61,108 @@ struct InspectorPanelView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
+    }
+}
+
+// MARK: - Commit Inspector
+
+private struct GitCommitInspectorView: View {
+    let receipt: GitCommitBlock
+
+    @Environment(ChatStore.self) private var chatStore
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+
+            if receipt.files.isEmpty {
+                ContentUnavailableView(
+                    "No file statistics",
+                    systemImage: "doc.questionmark",
+                    description: Text("Git did not return numstat data for this commit.")
+                )
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(receipt.files) { file in
+                            HStack(spacing: 9) {
+                                Image(systemName: "doc.text")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 16)
+
+                                Text(file.path)
+                                    .font(.system(size: 12, design: .monospaced))
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+
+                                Spacer(minLength: 8)
+
+                                Text("+\(file.additions)")
+                                    .foregroundStyle(.green)
+                                Text("-\(file.deletions)")
+                                    .foregroundStyle(.red)
+                            }
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: 38)
+
+                            if file.id != receipt.files.last?.id {
+                                Divider().padding(.leading, 37)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: receipt.status == .committed
+                  ? "checkmark.circle.fill"
+                  : "arrow.uturn.backward.circle.fill")
+                .foregroundStyle(receipt.status == .committed ? Color.green : Color.blue)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(receipt.message)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+
+                HStack(spacing: 7) {
+                    Text(receipt.shortHash).fontDesign(.monospaced)
+                    Text(receipt.branch)
+                    Text("+\(receipt.additions)").foregroundStyle(.green)
+                    Text("-\(receipt.deletions)").foregroundStyle(.red)
+                }
+                .font(AppTypography.metadata)
+                .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(receipt.hash, forType: .string)
+            } label: {
+                Image(systemName: "doc.on.doc")
+            }
+            .buttonStyle(.borderless)
+            .help("Copy commit hash")
+
+            Button {
+                chatStore.rightPanelMode = nil
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .help("Close inspector")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(minHeight: 52)
     }
 }
 

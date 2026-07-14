@@ -73,6 +73,7 @@ public final class ChatStore {
     public var rightPanelMode: RightPanelMode?
     public var rightPanelVisible: Bool { rightPanelMode != nil }
     public var rightSidebarWidth: CGFloat = 360
+    public var inspectedGitCommit: GitCommitBlock?
 
     // Terminal
     public var terminalOpen: Bool = false
@@ -690,7 +691,7 @@ public final class ChatStore {
             blocks: blocks.map {
                 StoredBlock(id: $0.id, kind: $0.kind.rawValue, text: $0.text,
                     createdAt: $0.createdAt, model: $0.model, providerId: $0.providerId,
-                    diffPatch: $0.diffPatch)
+                    diffPatch: $0.diffPatch, gitCommit: $0.gitCommit)
             }
         )
         do {
@@ -725,7 +726,8 @@ public final class ChatStore {
         blocks = stored.blocks.map {
             ChatBlock(id: $0.id, kind: ChatBlockKind(rawValue: $0.kind) ?? .assistant,
                 text: $0.text, createdAt: $0.createdAt, model: $0.model,
-                providerId: $0.providerId, diffPatch: $0.diffPatch)
+                providerId: $0.providerId, diffPatch: $0.diffPatch,
+                gitCommit: $0.gitCommit)
         }
         liveReasoning = ""; liveAssistant = ""
         isFirstMessage = blocks.isEmpty
@@ -1361,6 +1363,54 @@ public final class ChatStore {
         guard blocks.contains(where: { $0.id == id && $0.diffPatch != nil }) else { return }
         rightPanelMode = .changes
         Task { await reloadDiffs() }
+    }
+
+    public func presentGitCommit(_ receipt: GitCommitBlock) {
+        let block = ChatBlock(kind: .gitCommit, text: "", gitCommit: receipt)
+        if let placeholderIndex = blocks.lastIndex(where: { $0.kind == .assistant && $0.text.isEmpty }) {
+            blocks.insert(block, at: placeholderIndex)
+        } else {
+            blocks.append(block)
+        }
+    }
+
+    public func reviewGitCommit(_ id: String) {
+        guard let receipt = blocks.first(where: { $0.id == id })?.gitCommit else { return }
+        inspectedGitCommit = receipt
+        rightPanelMode = .commit
+    }
+
+    public func undoGitCommit(_ id: String) {
+        guard let index = blocks.firstIndex(where: { $0.id == id }),
+              var receipt = blocks[index].gitCommit,
+              receipt.status == .committed else { return }
+
+        receipt.status = .undoing
+        receipt.errorMessage = nil
+        blocks[index].gitCommit = receipt
+
+        Task {
+            if let failure = await gitService.undoCommit(
+                expectedHash: receipt.hash,
+                at: URL(fileURLWithPath: receipt.workspaceRoot)
+            ) {
+                receipt.status = .failed
+                receipt.errorMessage = failure
+            } else {
+                receipt.status = .undone
+                receipt.errorMessage = nil
+            }
+            if let currentIndex = blocks.firstIndex(where: { $0.id == id }) {
+                blocks[currentIndex].gitCommit = receipt
+            }
+            if inspectedGitCommit?.hash == receipt.hash {
+                inspectedGitCommit = receipt
+            }
+            await refreshGitAfterToolMutation()
+            if let threadID = activeThreadId {
+                await persistSession(for: threadID)
+            }
+        }
     }
 
     public func undoDiffPatch(_ id: String) {

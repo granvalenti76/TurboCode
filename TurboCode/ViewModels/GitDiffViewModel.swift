@@ -82,6 +82,47 @@ actor GitDiffService {
             .filter { !$0.isEmpty }
     }
 
+    /// Removes the expected HEAD commit while preserving its changes in the index.
+    /// Returns an error message when HEAD moved or Git cannot complete the operation.
+    func undoCommit(expectedHash: String, at directory: URL) -> String? {
+        let head = shell("git", args: ["rev-parse", "HEAD"], cwd: directory)
+        guard head.exitCode == 0 else { return head.stderr.nilIfBlank ?? "Unable to read Git HEAD." }
+        let currentHash = head.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard currentHash == expectedHash else {
+            return "Undo is unavailable because HEAD has moved to another commit."
+        }
+
+        let upstream = shell(
+            "git",
+            args: ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+            cwd: directory
+        )
+        if upstream.exitCode == 0 {
+            let published = shell(
+                "git",
+                args: ["merge-base", "--is-ancestor", expectedHash, "@{upstream}"],
+                cwd: directory
+            )
+            if published.exitCode == 0 {
+                return "Undo is unavailable because this commit is already published upstream."
+            }
+        }
+
+        let parent = shell("git", args: ["rev-parse", "HEAD^"], cwd: directory)
+        let result: ShellResult
+        if parent.exitCode == 0 {
+            result = shell("git", args: ["reset", "--soft", "HEAD^"], cwd: directory)
+        } else {
+            // A root commit has no parent. Removing the branch ref recreates the
+            // unborn branch while leaving the index and working tree untouched.
+            result = shell("git", args: ["update-ref", "-d", "HEAD"], cwd: directory)
+        }
+        guard result.exitCode == 0 else {
+            return result.stderr.nilIfBlank ?? "Git could not undo the commit."
+        }
+        return nil
+    }
+
     /// Switch to the given branch. Returns true on success.
     @discardableResult
     func checkout(branch: String, at directory: URL) -> Bool {
@@ -201,6 +242,13 @@ actor GitDiffService {
 }
 
 private struct ShellResult { let exitCode: Int; let stdout: String; let stderr: String }
+
+private extension String {
+    nonisolated var nilIfBlank: String? {
+        let value = trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+}
 
 // MARK: - Factory helper (come Codechat)
 

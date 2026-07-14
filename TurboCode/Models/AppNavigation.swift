@@ -17,6 +17,7 @@ public enum AppRoute: String, Sendable, Hashable, CaseIterable {
 public enum RightPanelMode: String, Sendable, Hashable {
     case todo
     case changes
+    case commit
     case browser
     case file
     case plan

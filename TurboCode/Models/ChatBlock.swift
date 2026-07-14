@@ -10,6 +10,7 @@ public struct ChatBlock: Identifiable, Sendable, Hashable {
     public var model: String?
     public var providerId: String?
     public var diffPatch: DiffPatchBlock?
+    public var gitCommit: GitCommitBlock?
 
     public init(
         id: String = UUID().uuidString,
@@ -18,7 +19,8 @@ public struct ChatBlock: Identifiable, Sendable, Hashable {
         createdAt: Date = .now,
         model: String? = nil,
         providerId: String? = nil,
-        diffPatch: DiffPatchBlock? = nil
+        diffPatch: DiffPatchBlock? = nil,
+        gitCommit: GitCommitBlock? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -27,6 +29,7 @@ public struct ChatBlock: Identifiable, Sendable, Hashable {
         self.model = model
         self.providerId = providerId
         self.diffPatch = diffPatch
+        self.gitCommit = gitCommit
     }
 }
 
@@ -39,6 +42,38 @@ public enum ChatBlockKind: String, Sendable, Hashable, CaseIterable {
     case review
     case compaction
     case diffPatch = "diff_patch"
+    case gitCommit = "git_commit"
+}
+
+// MARK: - Git Commit Block
+
+nonisolated public struct GitCommitBlock: Sendable, Hashable, Codable {
+    public let workspaceRoot: String
+    public let hash: String
+    public let shortHash: String
+    public let message: String
+    public let branch: String
+    public let files: [GitCommitFileChange]
+    public var status: GitCommitStatus
+    public var errorMessage: String?
+
+    public var additions: Int { files.reduce(0) { $0 + $1.additions } }
+    public var deletions: Int { files.reduce(0) { $0 + $1.deletions } }
+}
+
+nonisolated public struct GitCommitFileChange: Identifiable, Sendable, Hashable, Codable {
+    public let path: String
+    public let additions: Int
+    public let deletions: Int
+
+    public var id: String { path }
+}
+
+nonisolated public enum GitCommitStatus: String, Sendable, Hashable, Codable {
+    case committed
+    case undoing
+    case undone
+    case failed
 }
 
 // MARK: - Diff Patch Block

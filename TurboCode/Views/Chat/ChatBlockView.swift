@@ -37,6 +37,10 @@ struct ChatBlockView: View {
             if let patch = block.diffPatch {
                 DiffPatchWidget(blockID: block.id, patch: patch)
             }
+        case .gitCommit:
+            if let receipt = block.gitCommit {
+                GitCommitWidget(blockID: block.id, receipt: receipt)
+            }
         }
     }
 

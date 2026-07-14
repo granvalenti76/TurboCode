@@ -88,6 +88,11 @@ struct GitTool: Tool {
             timeoutSeconds: command.timeoutSeconds(executionPolicy),
             outputLimit: executionPolicy.maximumToolOutputCharacters
         )
+        if operation == .commit,
+           result.succeeded,
+           let receipt = await service.latestCommitReceipt(workspaceRoot: workspaceRoot) {
+            await ChatStore.shared?.presentGitCommit(receipt)
+        }
         await refreshGitUIIfNeeded(result: result, mutatesRepository: command.mutatesRepository)
         return result.rendered
     }
@@ -337,6 +342,52 @@ private struct GitCommandResult: Sendable {
 }
 
 private actor StructuredGitService {
+    func latestCommitReceipt(workspaceRoot: String) -> GitCommitBlock? {
+        let metadata = runSynchronously(
+            ["show", "--quiet", "--format=%H%x00%h%x00%s", "HEAD"],
+            workspaceRoot: workspaceRoot,
+            timeoutSeconds: 10,
+            outputLimit: 8_000
+        )
+        guard metadata.succeeded else { return nil }
+        let fields = metadata.stdout.split(separator: "\0", omittingEmptySubsequences: false)
+        guard fields.count >= 3 else { return nil }
+
+        let hash = String(fields[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let shortHash = String(fields[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let message = String(fields[2]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !hash.isEmpty, !shortHash.isEmpty else { return nil }
+
+        let branchResult = runSynchronously(
+            ["symbolic-ref", "--quiet", "--short", "HEAD"],
+            workspaceRoot: workspaceRoot,
+            timeoutSeconds: 10,
+            outputLimit: 1_000
+        )
+        let symbolicBranch = branchResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let branch = branchResult.succeeded && !symbolicBranch.isEmpty
+            ? symbolicBranch
+            : "detached@\(shortHash)"
+
+        let stats = runSynchronously(
+            ["diff-tree", "--root", "--no-commit-id", "--numstat", "-r", "HEAD"],
+            workspaceRoot: workspaceRoot,
+            timeoutSeconds: 10,
+            outputLimit: 30_000
+        )
+        let files = stats.succeeded ? parseNumstat(stats.stdout) : []
+        return GitCommitBlock(
+            workspaceRoot: workspaceRoot,
+            hash: hash,
+            shortHash: shortHash,
+            message: message,
+            branch: branch,
+            files: files,
+            status: .committed,
+            errorMessage: nil
+        )
+    }
+
     func isRepository(workspaceRoot: String) -> Bool {
         let result = runSynchronously(
             ["rev-parse", "--is-inside-work-tree"],
@@ -445,6 +496,18 @@ private actor StructuredGitService {
         let value = String(decoding: data.prefix(limit), as: UTF8.self)
             .trimmingCharacters(in: .newlines)
         return truncated ? value + "\n... (truncated)" : value
+    }
+
+    private func parseNumstat(_ output: String) -> [GitCommitFileChange] {
+        output.components(separatedBy: .newlines).compactMap { line in
+            let fields = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
+            guard fields.count == 3 else { return nil }
+            return GitCommitFileChange(
+                path: String(fields[2]),
+                additions: Int(fields[0]) ?? 0,
+                deletions: Int(fields[1]) ?? 0
+            )
+        }
     }
 }
 

@@ -544,12 +544,14 @@ public struct StoredBlock: Codable, Hashable, Sendable, Identifiable {
     public var model: String?
     public var providerId: String?
     public var diffPatch: DiffPatchBlock?
+    public var gitCommit: GitCommitBlock?
 
     public init(id: String = UUID().uuidString, kind: String, text: String,
                 createdAt: Date = .now, model: String? = nil, providerId: String? = nil,
-                diffPatch: DiffPatchBlock? = nil) {
+                diffPatch: DiffPatchBlock? = nil, gitCommit: GitCommitBlock? = nil) {
         self.id = id; self.kind = kind; self.text = text
         self.createdAt = createdAt; self.model = model; self.providerId = providerId
         self.diffPatch = diffPatch
+        self.gitCommit = gitCommit
     }
 }
