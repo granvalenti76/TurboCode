@@ -1,6 +1,5 @@
 import Foundation
 import FoundationModels
-import FoundationModelsUtilities
 
 // MARK: - Call Powerful Model Tool
 
@@ -45,10 +44,9 @@ struct CallPowerfulModelTool: Tool {
     }
     var includesSchemaInInstructions: Bool { true }
 
-    /// Configuration for the remote OpenAI-compatible model server.
-    private let modelName: String
-    private let baseURL: URL
-    private let temperature: Double
+    private let model: any LanguageModel
+    private let temperature: Double?
+    private let reasoningLevel: ContextOptions.ReasoningLevel?
     /// Tools registered with the delegate session (e.g. read_file, grep, file_system).
     private let delegateTools: [any Tool]
     /// System instructions for the delegate session (workspace context, rules, etc.).
@@ -56,25 +54,18 @@ struct CallPowerfulModelTool: Tool {
     private let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     private let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
 
-    /// Creates a tool that delegates to a remote model via `ChatCompletionsLanguageModel`.
-    /// - Parameters:
-    ///   - modelName: The model identifier sent in API requests.
-    ///   - baseURL: The server's base URL (e.g. `http://127.0.0.1:8080/v1`).
-    ///   - temperature: Default sampling temperature.
-    ///   - delegateTools: Tools to register with the delegate session.
-    ///   - delegateInstructions: System instructions for the delegate session.
     init(
-        modelName: String,
-        baseURL: URL,
-        temperature: Double,
+        model: any LanguageModel,
+        temperature: Double?,
+        reasoningLevel: ContextOptions.ReasoningLevel?,
         delegateTools: [any Tool],
         delegateInstructions: String,
         onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)? = nil,
         onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)? = nil
     ) {
-        self.modelName = modelName
-        self.baseURL = baseURL
+        self.model = model
         self.temperature = temperature
+        self.reasoningLevel = reasoningLevel
         self.delegateTools = delegateTools
         self.delegateInstructions = delegateInstructions
         self.onToolStart = onToolStart
@@ -85,19 +76,20 @@ struct CallPowerfulModelTool: Tool {
         let task = arguments.task
         let tools = delegateTools
         let instructions = delegateInstructions
-        let name = modelName
-        let url = baseURL
+        let model = model
+        let temperature = temperature
+        let reasoningLevel = reasoningLevel
         let toolStart = onToolStart
         let toolEnd = onToolEnd
 
         return try await Task { @MainActor in
-            let model = ChatCompletionsLanguageModel(name: name, url: url)
-
             let heavySession = LanguageModelSession(
                 profile: DelegateProfile(
                     instructions: instructions,
                     tools: tools,
                     model: model,
+                    temperature: temperature,
+                    reasoningLevel: reasoningLevel,
                     onToolStart: toolStart,
                     onToolEnd: toolEnd
                 ),

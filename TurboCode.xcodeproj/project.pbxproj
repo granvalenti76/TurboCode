@@ -7,7 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		5E178C3C2FFE5D920057187A /* LlamaModelExecutor in Frameworks */ = {isa = PBXBuildFile; productRef = 5E178C3B2FFE5D920057187A /* LlamaModelExecutor */; };
 		5E5203BF3004E70900C554D4 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203BE3004E70900C554D4 /* MarkdownUI */; };
 		5E5203CD30053A3A00C554D4 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 /* End PBXBuildFile section */
@@ -28,7 +27,6 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
-				5E178C3C2FFE5D920057187A /* LlamaModelExecutor in Frameworks */,
 				5E5203BF3004E70900C554D4 /* MarkdownUI in Frameworks */,
 				5E5203CD30053A3A00C554D4 /* FoundationModelsUtilities in Frameworks */,
 			);
@@ -70,7 +68,6 @@
 			);
 			name = TurboCode;
 			packageProductDependencies = (
-				5E178C3B2FFE5D920057187A /* LlamaModelExecutor */,
 				5E5203BE3004E70900C554D4 /* MarkdownUI */,
 				5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */,
 			);
@@ -103,9 +100,8 @@
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				5E178C3A2FFE5D920057187A /* XCLocalSwiftPackageReference "../../git/LlamaModelExecutor" */,
-				5E5203BD3004E70900C554D4 /* XCLocalSwiftPackageReference "../../git/swift-markdown-ui" */,
-				5E5203CB30053A3A00C554D4 /* XCLocalSwiftPackageReference "../../git/foundation-models-utilities" */,
+				5E5203BD3004E70900C554D4 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
+				5E5203CB30053A3A00C554D4 /* XCRemoteSwiftPackageReference "foundation-models-utilities" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -365,32 +361,34 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCLocalSwiftPackageReference section */
-		5E178C3A2FFE5D920057187A /* XCLocalSwiftPackageReference "../../git/LlamaModelExecutor" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../git/LlamaModelExecutor;
+/* Begin XCRemoteSwiftPackageReference section */
+		5E5203BD3004E70900C554D4 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/swift-markdown-ui";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.4.1;
+			};
 		};
-		5E5203BD3004E70900C554D4 /* XCLocalSwiftPackageReference "../../git/swift-markdown-ui" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = "../../git/swift-markdown-ui";
+		5E5203CB30053A3A00C554D4 /* XCRemoteSwiftPackageReference "foundation-models-utilities" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/foundation-models-utilities.git";
+			requirement = {
+				kind = revision;
+				revision = 376ca60e61985369d5067bd3c575bdb6a13f0e1b;
+			};
 		};
-		5E5203CB30053A3A00C554D4 /* XCLocalSwiftPackageReference "../../git/foundation-models-utilities" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = "../../git/foundation-models-utilities";
-		};
-/* End XCLocalSwiftPackageReference section */
+/* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		5E178C3B2FFE5D920057187A /* LlamaModelExecutor */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = LlamaModelExecutor;
-		};
 		5E5203BE3004E70900C554D4 /* MarkdownUI */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = 5E5203BD3004E70900C554D4 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */;
 			productName = MarkdownUI;
 		};
 		5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */ = {
 			isa = XCSwiftPackageProductDependency;
+			package = 5E5203CB30053A3A00C554D4 /* XCRemoteSwiftPackageReference "foundation-models-utilities" */;
 			productName = FoundationModelsUtilities;
 		};
 /* End XCSwiftPackageProductDependency section */

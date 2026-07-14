@@ -197,32 +197,53 @@ struct InputFieldView: View {
             } else {
                 Menu {
                     Section("Backend") {
-                        Button("Llama-server") {
-                            chatStore.switchBackend(to: .llamaServer)
-                        }
-                        Button("Foundation Apple") {
+                        Button {
                             chatStore.switchBackend(to: .foundationApple)
+                        } label: {
+                            if chatStore.activeBackend == .foundationApple {
+                                Label("Foundation Apple", systemImage: "checkmark")
+                            } else {
+                                Text("Foundation Apple")
+                            }
                         }
-                        Button("Apple PCC") {
-                            chatStore.switchBackend(to: .foundationServe)
+
+                        ForEach(chatStore.enabledRemoteModels) { model in
+                            Button {
+                                chatStore.switchRemoteModel(to: model.id)
+                            } label: {
+                                if chatStore.activeRemoteModelID == model.id,
+                                   chatStore.activeBackend != .foundationApple {
+                                    Label(model.name, systemImage: "checkmark")
+                                } else {
+                                    Text(model.name)
+                                }
+                            }
+                            .disabled(!chatStore.isConfigured(model))
                         }
                     }
 
-                    if chatStore.activeBackend == .llamaServer {
+                    if chatStore.activeModelSupportsReasoning {
                         Divider()
                         Section("Reasoning") {
                             ForEach(ReasoningEffort.allCases, id: \.self) { effort in
-                                Button(effort.rawValue) { reasoningEffort = effort }
+                                Button {
+                                    reasoningEffort = effort
+                                    chatStore.setReasoningEffort(effort)
+                                } label: {
+                                    if reasoningEffort == effort {
+                                        Label(effort.rawValue, systemImage: "checkmark")
+                                    } else {
+                                        Text(effort.rawValue)
+                                    }
+                                }
                             }
                         }
                     }
                 } label: {
-                    if chatStore.activeBackend == .llamaServer {
-                        Text("Llama-server \(reasoningEffort.rawValue)")
-                    } else if chatStore.activeBackend == .foundationServe {
-                        Text("Apple PCC")
+                    if chatStore.activeModelSupportsReasoning {
+                        Text("\(chatStore.composerModel) \(reasoningEffort.rawValue)")
                     } else {
-                        Text("Foundation Apple")
+                        Text(chatStore.composerModel)
                     }
                 }
                 .menuStyle(.borderlessButton)

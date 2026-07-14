@@ -13,6 +13,7 @@ public final class TurboCodeConfig {
     }
 
     private var modelsURL: URL { rootURL.appendingPathComponent("models.json") }
+    private var agentTuningURL: URL { rootURL.appendingPathComponent("config.json") }
     private var sessionsDir: URL { rootURL.appendingPathComponent("sessions") }
     public var skillsDirectoryURL: URL { rootURL.appendingPathComponent("SKILLS", isDirectory: true) }
     public var diagnosticsDirectoryURL: URL { rootURL.appendingPathComponent("diagnostics", isDirectory: true) }
@@ -30,6 +31,7 @@ public final class TurboCodeConfig {
             && FileManager.default.fileExists(atPath: sessionsDir.path)
             && FileManager.default.fileExists(atPath: skillsDirectoryURL.path)
             && FileManager.default.fileExists(atPath: modelsURL.path)
+            && FileManager.default.fileExists(atPath: agentTuningURL.path)
     }
 
     public func performOnboarding() throws {
@@ -37,20 +39,11 @@ public final class TurboCodeConfig {
         try FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: skillsDirectoryURL, withIntermediateDirectories: true)
 
-        if !FileManager.default.fileExists(atPath: modelsURL.path) {
-            let defaultModels: [RemoteModelConfig] = [
-                RemoteModelConfig(id: "llama", name: "Llama-server",
-                    url: "http://127.0.0.1:8080/v1",
-                    modelName: "/Users/granvalenti/.modelli/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
-                    temperature: 0.6),
-                RemoteModelConfig(id: "apple-pcc", name: "Apple PCC",
-                    url: "http://127.0.0.1:1976/v1",
-                    modelName: "pcc", temperature: 0.6),
-            ]
-            try encoder.encode(defaultModels).write(to: modelsURL, options: .atomic)
-        }
+        try migrateRemoteModels()
+        try migrateAgentTuning()
 
         try installBuiltInSkill(name: "turbocode", contents: Self.turboCodeSkill)
+        try migrateTurboCodeSkill()
         try installBuiltInSkill(name: "skill-creator", contents: Self.skillCreatorSkill)
     }
 
@@ -97,10 +90,125 @@ public final class TurboCodeConfig {
         try contents.write(to: url, atomically: true, encoding: .utf8)
     }
 
+    private func migrateTurboCodeSkill() throws {
+        let url = skillsDirectoryURL
+            .appendingPathComponent("turbocode", isDirectory: true)
+            .appendingPathComponent("SKILL.md")
+        var contents = try String(contentsOf: url, encoding: .utf8)
+        var changed = false
+
+        if !contents.contains(Self.providerCredentialsSkillMarker) {
+            let previousDescription = "description: Explain TurboCode, its model modes, workspace tools, approvals, skills, and interface behavior"
+            if contents.contains(previousDescription) {
+                contents = contents.replacingOccurrences(
+                    of: previousDescription,
+                    with: Self.turboCodeSkillDescription
+                )
+            }
+            contents += "\n\n" + Self.providerCredentialsSkillSection + "\n"
+            changed = true
+        }
+        if !contents.contains(Self.contextPolicySkillMarker) {
+            contents += "\n\n" + Self.contextPolicySkillSection + "\n"
+            changed = true
+        }
+        if !contents.contains(Self.productScopeSkillMarker) {
+            contents += "\n\n" + Self.productScopeSkillSection + "\n"
+            changed = true
+        }
+        if !contents.contains(Self.agentTuningSkillMarker) {
+            contents += "\n\n" + Self.agentTuningSkillSection + "\n"
+            changed = true
+        }
+        if changed {
+            try contents.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
+    private static let turboCodeSkillDescription =
+        "description: Explain TurboCode, model and provider setup, credentials, workspace tools, approvals, skills, and interface behavior"
+
+    private static let providerCredentialsSkillMarker =
+        "<!-- turbocode-managed:provider-credentials-v1 -->"
+
+    private static let providerCredentialsSkillSection = """
+    <!-- turbocode-managed:provider-credentials-v1 -->
+    ## Premium providers and API keys
+
+    - The built-in premium option is currently `deepseek-v4-flash`.
+    - To configure it, open **TurboCode > Settings > Providers > DeepSeek** and
+      enter the API key in **API Key**.
+    - TurboCode stores the secret in the macOS Keychain. Never tell the user to
+      place an API key in `~/.turbocode/models.json`, source files, or chat.
+    - `~/.turbocode/models.json` contains non-secret provider configuration such
+      as the model name, endpoint, capabilities, and the Keychain credential
+      reference `"credential": "deepseek"`.
+    - If DeepSeek is disabled in the model menu, ask the user to verify that the
+      key has been entered in Provider Settings.
+    """
+
+    private static let contextPolicySkillMarker =
+        "<!-- turbocode-managed:tool-context-policy-v1 -->"
+
+    private static let contextPolicySkillSection = """
+    <!-- turbocode-managed:tool-context-policy-v1 -->
+    ## Tool context policy
+
+    Preserving the useful context window is a core TurboCode product principle.
+    Foundation Apple, Apple PCC, Llama, and the orchestrator discard completed
+    tool-call exchanges before later generations. Keep this behavior when adding
+    profiles or providers: tool results should accomplish the operation without
+    permanently consuming the prompt budget.
+
+    DeepSeek thinking is a transport-level exception because its API requires
+    complete reasoning and tool-call turns to be sent back in later requests.
+    TurboCode preserves and normalizes those wire messages only for DeepSeek; this
+    exception must not weaken completed-tool-call dropping for other models.
+    """
+
+    private static let productScopeSkillMarker =
+        "<!-- turbocode-managed:product-scope-v1 -->"
+
+    private static let productScopeSkillSection = """
+    <!-- turbocode-managed:product-scope-v1 -->
+    ## Product scope
+
+    TurboCode is a native macOS agentic development environment dedicated to
+    Swift and SwiftUI. Its supported workflow is to inspect, modify, build, test,
+    run, and manage Git-backed Xcode projects and Swift packages inside the active
+    workspace.
+
+    TurboCode is not a general desktop agent, broad multi-language IDE, terminal
+    replacement, or generic web assistant. It may edit documentation, resources,
+    and configuration when they directly belong to a Swift project task. For a
+    request outside this boundary, explain the limitation concisely and state what
+    related Swift-project work TurboCode can perform.
+
+    The underlying model changes capacity, not the product contract. Prefer flat
+    tools for small models and advanced atomic tools for capable models while
+    preserving the same workspace, review, Git, and recovery guarantees.
+    """
+
+    private static let agentTuningSkillMarker =
+        "<!-- turbocode-managed:agent-tuning-v1 -->"
+
+    private static let agentTuningSkillSection = """
+    <!-- turbocode-managed:agent-tuning-v1 -->
+    ## Agent Tuning
+
+    Common response, execution, network, and skill-discovery options are in
+    **TurboCode > Settings > Agents**. Advanced configuration is stored in the
+    versioned `~/.turbocode/config.json` file and can be reloaded from that pane.
+
+    Never put API keys in `config.json`. Secrets belong in the macOS Keychain.
+    If configuration validation fails, explain the reported field or range and
+    preserve the user's file instead of suggesting that it be reset blindly.
+    """
+
     private static let turboCodeSkill = """
     ---
     name: turbocode
-    description: Explain TurboCode, its model modes, workspace tools, approvals, skills, and interface behavior
+    \(turboCodeSkillDescription)
     ---
     # TurboCode
 
@@ -113,6 +221,14 @@ public final class TurboCodeConfig {
     - Orchestrator uses the Apple on-device model to coordinate work and delegates
       complex coding tasks to the configured powerful model.
     - Available backends can include Foundation Apple, Apple PCC, and Llama-server.
+
+    \(providerCredentialsSkillSection)
+
+    \(contextPolicySkillSection)
+
+    \(productScopeSkillSection)
+
+    \(agentTuningSkillSection)
 
     ## Workspace tools
 
@@ -164,11 +280,56 @@ public final class TurboCodeConfig {
     TurboCode discovers valid files automatically before the next submitted prompt.
     """
 
+    // MARK: - Agent Tuning
+
+    public func loadAgentTuning() throws -> AgentTuningConfig {
+        guard FileManager.default.fileExists(atPath: agentTuningURL.path) else {
+            return .default
+        }
+        let value = try JSONDecoder().decode(
+            AgentTuningConfig.self,
+            from: Data(contentsOf: agentTuningURL)
+        )
+        return try value.validated()
+    }
+
+    public func saveAgentTuning(_ value: AgentTuningConfig) throws {
+        let validated = try value.validated()
+        try encoder.encode(validated).write(to: agentTuningURL, options: .atomic)
+    }
+
+    private func migrateAgentTuning() throws {
+        if FileManager.default.fileExists(atPath: agentTuningURL.path) {
+            _ = try loadAgentTuning()
+        } else {
+            try saveAgentTuning(.default)
+        }
+    }
+
     // MARK: - Remote Models
 
     public func loadRemoteModels() throws -> [RemoteModelConfig] {
         guard FileManager.default.fileExists(atPath: modelsURL.path) else { return [] }
         return try JSONDecoder().decode([RemoteModelConfig].self, from: Data(contentsOf: modelsURL))
+    }
+
+    private func migrateRemoteModels() throws {
+        var models: [RemoteModelConfig]
+        if FileManager.default.fileExists(atPath: modelsURL.path) {
+            models = try loadRemoteModels()
+        } else {
+            models = []
+        }
+        if let index = models.firstIndex(where: {
+            $0.id == "deepseek" && $0.modelName == "deepseek-v4-pro"
+        }) {
+            models[index].name = "DeepSeek V4 Flash"
+            models[index].modelName = "deepseek-v4-flash"
+        }
+        for model in RemoteModelConfig.defaults where !models.contains(where: { $0.id == model.id }) {
+            models.append(model)
+        }
+        try encoder.encode(models).write(to: modelsURL, options: .atomic)
     }
 
     // MARK: - Per-Session Persistence
@@ -226,16 +387,121 @@ public final class TurboCodeConfig {
 
 // MARK: - Remote Model Configuration
 
-public struct RemoteModelConfig: Codable, Hashable, Sendable {
+nonisolated public enum RemoteModelProvider: String, Codable, Hashable, Sendable {
+    case openAICompatible
+    case deepseek
+}
+
+nonisolated public enum RemoteModelRole: String, Codable, Hashable, Sendable {
+    case local
+    case pcc
+    case premium
+}
+
+nonisolated public enum RemoteReasoningTransport: String, Codable, Hashable, Sendable {
+    case contextOptions
+    case deepseekThinking
+    case none
+}
+
+nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identifiable {
     public let id: String
     public var name: String
     public var url: String
     public var modelName: String
     public var temperature: Double
+    public var provider: RemoteModelProvider
+    public var role: RemoteModelRole
+    public var reasoningTransport: RemoteReasoningTransport
+    public var supportsReasoning: Bool
+    public var supportsGuidedGeneration: Bool
+    public var credential: String?
+    public var enabled: Bool
 
-    public init(id: String, name: String, url: String, modelName: String, temperature: Double) {
+    public init(
+        id: String,
+        name: String,
+        url: String,
+        modelName: String,
+        temperature: Double,
+        provider: RemoteModelProvider = .openAICompatible,
+        role: RemoteModelRole = .local,
+        reasoningTransport: RemoteReasoningTransport = .contextOptions,
+        supportsReasoning: Bool = true,
+        supportsGuidedGeneration: Bool = true,
+        credential: String? = nil,
+        enabled: Bool = true
+    ) {
         self.id = id; self.name = name; self.url = url
         self.modelName = modelName; self.temperature = temperature
+        self.provider = provider; self.role = role
+        self.reasoningTransport = reasoningTransport
+        self.supportsReasoning = supportsReasoning
+        self.supportsGuidedGeneration = supportsGuidedGeneration
+        self.credential = credential; self.enabled = enabled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, url, modelName, temperature, provider, role
+        case reasoningTransport, supportsReasoning, supportsGuidedGeneration
+        case credential, enabled
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        url = try values.decode(String.self, forKey: .url)
+        modelName = try values.decode(String.self, forKey: .modelName)
+        temperature = try values.decodeIfPresent(Double.self, forKey: .temperature) ?? 0.6
+        provider = try values.decodeIfPresent(RemoteModelProvider.self, forKey: .provider)
+            ?? (id == "deepseek" ? .deepseek : .openAICompatible)
+        role = try values.decodeIfPresent(RemoteModelRole.self, forKey: .role)
+            ?? (id == "apple-pcc" ? .pcc : (provider == .deepseek ? .premium : .local))
+        reasoningTransport = try values.decodeIfPresent(RemoteReasoningTransport.self, forKey: .reasoningTransport)
+            ?? (provider == .deepseek ? .deepseekThinking : (role == .pcc ? .none : .contextOptions))
+        supportsReasoning = try values.decodeIfPresent(Bool.self, forKey: .supportsReasoning)
+            ?? (role != .pcc)
+        supportsGuidedGeneration = try values.decodeIfPresent(Bool.self, forKey: .supportsGuidedGeneration)
+            ?? (provider != .deepseek)
+        credential = try values.decodeIfPresent(String.self, forKey: .credential)
+        enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+    }
+
+    public static let defaults: [RemoteModelConfig] = [
+        RemoteModelConfig(
+            id: "llama",
+            name: "Llama-server",
+            url: "http://127.0.0.1:8080/v1",
+            modelName: "local-model",
+            temperature: 0.6
+        ),
+        RemoteModelConfig(
+            id: "apple-pcc",
+            name: "Apple PCC",
+            url: "http://127.0.0.1:1976/v1",
+            modelName: "pcc",
+            temperature: 0.6,
+            role: .pcc,
+            reasoningTransport: .none,
+            supportsReasoning: false
+        ),
+        RemoteModelConfig(
+            id: "deepseek",
+            name: "DeepSeek V4 Flash",
+            url: "https://api.deepseek.com",
+            modelName: "deepseek-v4-flash",
+            temperature: 0.6,
+            provider: .deepseek,
+            role: .premium,
+            reasoningTransport: .deepseekThinking,
+            supportsGuidedGeneration: false,
+            credential: "deepseek"
+        )
+    ]
+
+    public static var fallbackLlama: RemoteModelConfig {
+        defaults.first(where: { $0.id == "llama" })!
     }
 }
 

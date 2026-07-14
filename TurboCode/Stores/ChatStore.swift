@@ -11,6 +11,7 @@ public enum ModelBackend: String, CaseIterable, Sendable {
     case llamaServer = "Llama-server"
     case foundationApple = "Foundation Apple"
     case foundationServe = "Apple PCC"
+    case premium = "Premium"
 }
 
 // MARK: - Central ChatStore
@@ -92,6 +93,21 @@ public final class ChatStore {
 
     // Backend
     public var activeBackend: ModelBackend = .llamaServer
+    public private(set) var agentTuning: AgentTuningConfig = .default
+    public private(set) var remoteModels: [RemoteModelConfig] = RemoteModelConfig.defaults
+    public private(set) var activeRemoteModelID: String = "llama"
+
+    public var activeRemoteModel: RemoteModelConfig? {
+        remoteModels.first(where: { $0.id == activeRemoteModelID })
+    }
+
+    public var enabledRemoteModels: [RemoteModelConfig] {
+        remoteModels.filter(\.enabled)
+    }
+
+    public var activeModelSupportsReasoning: Bool {
+        activeBackend != .foundationApple && (activeRemoteModel?.supportsReasoning ?? false)
+    }
 
     // Shared activation state for the current session profile.
     public let skillActivations = SkillActivations()
@@ -100,7 +116,11 @@ public final class ChatStore {
     /// Maps the persisted ReasoningEffort to FoundationModels' ReasoningLevel.
     /// Returns `nil` for Apple models (on-device and PCC) which don't support it.
     public var reasoningLevel: ContextOptions.ReasoningLevel? {
-        guard activeBackend != .foundationApple, activeBackend != .foundationServe else { return nil }
+        reasoningLevel(for: activeRemoteModel)
+    }
+
+    private func reasoningLevel(for model: RemoteModelConfig?) -> ContextOptions.ReasoningLevel? {
+        guard let model, model.supportsReasoning else { return nil }
         let raw = UserDefaults.standard.string(forKey: "reasoningEffort") ?? ReasoningEffort.medium.rawValue
         switch ReasoningEffort(rawValue: raw) ?? .medium {
         case .low:    return .light
@@ -215,40 +235,40 @@ public final class ChatStore {
     public func ensureOnboarding() async {
         do {
             try TurboCodeConfig.shared.performOnboarding()
-            availableSkills = TurboCodeConfig.shared.loadSkills()
-            rebuildSession()
+            agentTuning = try TurboCodeConfig.shared.loadAgentTuning()
+            availableSkills = configuredSkills()
+            reloadRemoteModels()
         } catch {
             print("[TurboCode] Onboarding failed: \(error.localizedDescription)")
         }
     }
-    /// Configuration for the remote Llama server (OpenAI-compatible endpoint).
-    private let llamaModelName: String
-    private let llamaBaseURL: URL
-    private let llamaTemperature: Double
-    /// Configuration for fm serve (Apple Foundation Models local server).
-    private let fmServeBaseURL: URL
-
     public init() {
-        self.llamaModelName = "/Users/granvalenti/.modelli/gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf"
-        self.llamaBaseURL = URL(string: "http://127.0.0.1:8080/v1")!
-        self.llamaTemperature = 0.6
-        self.fmServeBaseURL = URL(string: "http://127.0.0.1:1976/v1")!
-
         // Restore orchestrator mode from UserDefaults
         let saved = UserDefaults.standard.string(forKey: "orchestratorMode")
             ?? OrchestratorMode.standalone.rawValue
         let mode = OrchestratorMode(rawValue: saved) ?? .standalone
+        let selectedID = UserDefaults.standard.string(forKey: "activeRemoteModelID") ?? "llama"
+        let initialRemote = RemoteModelConfig.defaults.first(where: {
+            $0.id == selectedID && Self.hasCredential(for: $0)
+        })
+            ?? RemoteModelConfig.fallbackLlama
+        self.activeRemoteModelID = initialRemote.id
 
         // Initialise ALL stored properties BEFORE any didSet observers fire.
         // We set orchestratorMode last so that session is already valid.
-        self.activeBackend = mode == .orchestrator ? .foundationApple : .llamaServer
+        self.activeBackend = mode == .orchestrator
+            ? .foundationApple
+            : Self.backend(for: initialRemote.role)
         let initialModel: any LanguageModel = mode == .orchestrator
             ? SystemLanguageModel.default
-            : ChatCompletionsLanguageModel(name: llamaModelName, url: llamaBaseURL)
+            : ProviderLanguageModel(
+                configuration: initialRemote,
+                apiKey: initialRemote.credential.flatMap(CredentialStore.value(for:))
+            )
         self.session = LanguageModelSession(model: initialModel)
         self.composerModel = mode == .orchestrator
             ? "Apple \u{00B7} Orchestrator"
-            : ModelBackend.llamaServer.rawValue
+            : initialRemote.name
 
         // Now safe — didSet fires and calls rebuildSession() as needed.
         self.orchestratorMode = mode
@@ -260,9 +280,104 @@ public final class ChatStore {
     /// calling this method has no effect.
     public func switchBackend(to backend: ModelBackend) {
         guard orchestratorMode == .standalone else { return }
-        activeBackend = backend
-        composerModel = backend.rawValue
+        if backend == .foundationApple {
+            activeBackend = .foundationApple
+            composerModel = backend.rawValue
+        } else if let model = remoteModels.first(where: {
+            $0.enabled && isConfigured($0) && Self.backend(for: $0.role) == backend
+        }) {
+            selectRemoteModel(model)
+        } else {
+            return
+        }
         rebuildSession()
+    }
+
+    public func switchRemoteModel(to id: String) {
+        guard orchestratorMode == .standalone,
+              let model = remoteModels.first(where: { $0.id == id && $0.enabled }),
+              isConfigured(model) else { return }
+        selectRemoteModel(model)
+        rebuildSession()
+    }
+
+    public func reloadRemoteModels() {
+        guard let loaded = try? TurboCodeConfig.shared.loadRemoteModels(), !loaded.isEmpty else { return }
+        remoteModels = loaded
+        let selected = loaded.first(where: {
+            $0.id == activeRemoteModelID && $0.enabled && isConfigured($0)
+        }) ?? loaded.first(where: {
+            $0.enabled && $0.role == .local && isConfigured($0)
+        }) ?? loaded.first(where: {
+            $0.enabled && isConfigured($0)
+        })
+        if let selected {
+            activeRemoteModelID = selected.id
+            if orchestratorMode == .standalone, activeBackend != .foundationApple {
+                selectRemoteModel(selected)
+            }
+        }
+        rebuildSession()
+    }
+
+    public func isConfigured(_ model: RemoteModelConfig) -> Bool {
+        Self.hasCredential(for: model)
+    }
+
+    private static func hasCredential(for model: RemoteModelConfig) -> Bool {
+        guard let credential = model.credential else { return true }
+        return !(CredentialStore.value(for: credential) ?? "").isEmpty
+    }
+
+    func setReasoningEffort(_ effort: ReasoningEffort) {
+        UserDefaults.standard.set(effort.rawValue, forKey: "reasoningEffort")
+        rebuildSession()
+    }
+
+    private func selectRemoteModel(_ model: RemoteModelConfig) {
+        activeRemoteModelID = model.id
+        UserDefaults.standard.set(model.id, forKey: "activeRemoteModelID")
+        activeBackend = Self.backend(for: model.role)
+        composerModel = model.name
+    }
+
+    private static func backend(for role: RemoteModelRole) -> ModelBackend {
+        switch role {
+        case .local: .llamaServer
+        case .pcc: .foundationServe
+        case .premium: .premium
+        }
+    }
+
+    private func languageModel(for model: RemoteModelConfig) -> ProviderLanguageModel {
+        ProviderLanguageModel(
+            configuration: model,
+            apiKey: model.credential.flatMap(CredentialStore.value(for:))
+        )
+    }
+
+    private var delegateRemoteModel: RemoteModelConfig {
+        remoteModels.first(where: { $0.enabled && $0.role == .local })
+            ?? activeRemoteModel
+            ?? RemoteModelConfig.fallbackLlama
+    }
+
+    private func temperature(for model: RemoteModelConfig?) -> Double? {
+        guard let model else { return nil }
+        if model.reasoningTransport == .deepseekThinking,
+           reasoningLevel(for: model) != nil {
+            return nil
+        }
+        return model.temperature
+    }
+
+    private var shouldDropCompletedToolCalls: Bool {
+        guard activeBackend != .foundationApple else { return true }
+        return activeRemoteModel?.reasoningTransport != .deepseekThinking
+    }
+
+    private var persistedModelIdentifier: String {
+        activeBackend == .foundationApple ? activeBackend.rawValue : activeRemoteModelID
     }
 
     /// Build the instructions text from current workspace.
@@ -273,6 +388,17 @@ public final class ChatStore {
         model or any Apple product. Your name is TurboCode.
         """
         text += "\nAlways use Markdown formatting in your responses: **bold**, `code`, ```code blocks```, tables, etc."
+        switch agentTuning.agent.responseStyle {
+        case .concise:
+            text += "\nKeep responses concise and lead with the result. Include only details needed to act or verify."
+        case .balanced:
+            text += "\nKeep responses focused, with enough implementation and verification detail to be useful."
+        case .detailed:
+            text += "\nExplain decisions and verification in detail while avoiding repetition."
+        }
+        if agentTuning.agent.verifiesChanges {
+            text += "\nAfter changing source code, run the most focused available build or test that verifies the change."
+        }
         if !availableSkills.isEmpty {
             let catalog = availableSkills
                 .map { "- \($0.name): \($0.description)" }
@@ -314,7 +440,10 @@ public final class ChatStore {
                 ReadFileTool(workspaceRoot: workspaceRoot),
                 GrepTool(workspaceRoot: workspaceRoot),
                 FileSystemTool(workspaceRoot: workspaceRoot),
-                BashTool(workspaceRoot: workspaceRoot),
+                BashTool(
+                    workspaceRoot: workspaceRoot,
+                    executionPolicy: agentTuning.execution
+                ),
                 EditFileTool(workspaceRoot: workspaceRoot)
             ]
         }
@@ -327,17 +456,19 @@ public final class ChatStore {
         let effectiveInstructions: String
 
         if isOrchestrating {
+            let delegateModel = delegateRemoteModel
+            let delegateBackend = Self.backend(for: delegateModel.role)
             let powerfulTool = CallPowerfulModelTool(
-                modelName: llamaModelName,
-                baseURL: llamaBaseURL,
-                temperature: llamaTemperature,
+                model: languageModel(for: delegateModel),
+                temperature: temperature(for: delegateModel),
+                reasoningLevel: reasoningLevel(for: delegateModel),
                 delegateTools: workspaceTools,
                 delegateInstructions: baseInstructions,
                 onToolStart: { [weak self] call in
-                    await self?.beginToolActivity(call, backend: .llamaServer)
+                    await self?.beginToolActivity(call, backend: delegateBackend)
                 },
                 onToolEnd: { [weak self] call, output in
-                    await self?.endToolActivity(call, output: output, backend: .llamaServer)
+                    await self?.endToolActivity(call, output: output, backend: delegateBackend)
                 }
             )
             var t: [any Tool] = [powerfulTool]
@@ -384,10 +515,8 @@ public final class ChatStore {
         switch activeBackend {
         case .foundationApple:
             activeModel = SystemLanguageModel.default
-        case .foundationServe:
-            activeModel = ChatCompletionsLanguageModel(name: "pcc", url: fmServeBaseURL)
-        case .llamaServer:
-            activeModel = ChatCompletionsLanguageModel(name: llamaModelName, url: llamaBaseURL)
+        case .foundationServe, .llamaServer, .premium:
+            activeModel = languageModel(for: activeRemoteModel ?? RemoteModelConfig.fallbackLlama)
         }
         let sessionBackend = activeBackend
 
@@ -423,7 +552,10 @@ public final class ChatStore {
                     diskSkills: availableSkills,
                     workspaceRoot: workspaceRoot,
                     model: activeModel,
+                    temperature: temperature(for: activeRemoteModel),
                     reasoningLevel: reasoningLevel,
+                    dropsCompletedToolCalls: shouldDropCompletedToolCalls,
+                    executionPolicy: agentTuning.execution,
                     onToolStart: { [weak self] call in
                         await self?.beginToolActivity(call, backend: sessionBackend)
                     },
@@ -531,7 +663,7 @@ public final class ChatStore {
             workspacePath: thread.workspace,
             createdAt: thread.createdAt,
             updatedAt: thread.updatedAt,
-            modelBackend: activeBackend.rawValue,
+            modelBackend: persistedModelIdentifier,
             blocks: blocks.map {
                 StoredBlock(id: $0.id, kind: $0.kind.rawValue, text: $0.text,
                     createdAt: $0.createdAt, model: $0.model, providerId: $0.providerId,
@@ -577,7 +709,29 @@ public final class ChatStore {
         if let wp = stored.workspacePath, workspaceRoot != wp {
             workspaceRoot = wp
         }
+        restoreModelSelection(stored.modelBackend)
         rebuildSession(keepingHistory: false)
+    }
+
+    private func restoreModelSelection(_ identifier: String) {
+        guard orchestratorMode == .standalone else { return }
+        if identifier == ModelBackend.foundationApple.rawValue {
+            activeBackend = .foundationApple
+            composerModel = ModelBackend.foundationApple.rawValue
+            return
+        }
+
+        let legacyRole: RemoteModelRole? = switch identifier {
+        case ModelBackend.llamaServer.rawValue: .local
+        case ModelBackend.foundationServe.rawValue: .pcc
+        default: nil
+        }
+        let model = remoteModels.first(where: {
+            $0.enabled && ($0.id == identifier || $0.role == legacyRole)
+        })
+        if let model, isConfigured(model) {
+            selectRemoteModel(model)
+        }
     }
 
     public func renameThread(id: String, title: String) async {
@@ -726,8 +880,22 @@ public final class ChatStore {
         refreshSkillsIfNeeded(forceRebuild: true)
     }
 
-    private func refreshSkillsIfNeeded(forceRebuild: Bool = false) {
+    func applyAgentTuning(_ value: AgentTuningConfig) {
+        guard let validated = try? value.validated() else { return }
+        agentTuning = validated
+        availableSkills = configuredSkills()
+        rebuildSession()
+    }
+
+    private func configuredSkills() -> [TurboCodeSkillDefinition] {
         let discovered = TurboCodeConfig.shared.loadSkills()
+        guard !agentTuning.skills.discoversUserSkills else { return discovered }
+        let builtInNames: Set<String> = ["turbocode", "skill-creator"]
+        return discovered.filter { builtInNames.contains($0.name) }
+    }
+
+    private func refreshSkillsIfNeeded(forceRebuild: Bool = false) {
+        let discovered = configuredSkills()
         guard forceRebuild || discovered != availableSkills else { return }
         availableSkills = discovered
         rebuildSession()
@@ -997,10 +1165,8 @@ public final class ChatStore {
         switch activeBackend {
         case .foundationApple:
             model = SystemLanguageModel.default
-        case .foundationServe:
-            model = ChatCompletionsLanguageModel(name: "pcc", url: fmServeBaseURL)
-        case .llamaServer:
-            model = ChatCompletionsLanguageModel(name: llamaModelName, url: llamaBaseURL)
+        case .foundationServe, .llamaServer, .premium:
+            model = languageModel(for: activeRemoteModel ?? RemoteModelConfig.fallbackLlama)
         }
         let result = await AgentBenchmarkRunner.runSuite(
             backend: activeBackend,

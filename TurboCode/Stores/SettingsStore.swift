@@ -19,12 +19,38 @@ public final class SettingsStore {
     }
     public var workspacePaths: [String] = []
 
+    public var agentTuning: AgentTuningConfig = .default {
+        didSet {
+            guard !isLoadingAgentTuning else { return }
+            do {
+                let validated = try agentTuning.validated()
+                try TurboCodeConfig.shared.saveAgentTuning(validated)
+                agentTuningError = nil
+                ChatStore.shared?.applyAgentTuning(validated)
+            } catch {
+                agentTuningError = error.localizedDescription
+            }
+        }
+    }
+    public private(set) var agentTuningError: String?
+
     public var openaiAPIKey: String = ""
     public var openaiBaseURL: String = ""
     public var anthropicAPIKey: String = ""
     public var anthropicBaseURL: String = ""
-    public var deepseekAPIKey: String = ""
-    public var deepseekBaseURL: String = ""
+    public var deepseekAPIKey: String = "" {
+        didSet {
+            guard !isLoadingCredentials else { return }
+            do {
+                try CredentialStore.set(deepseekAPIKey, for: "deepseek")
+                credentialError = nil
+                ChatStore.shared?.reloadRemoteModels()
+            } catch {
+                credentialError = error.localizedDescription
+            }
+        }
+    }
+    public private(set) var credentialError: String?
 
     // Write settings
     public var writeWorkspaceRoot: String = ""
@@ -32,6 +58,9 @@ public final class SettingsStore {
 
     // Shortcuts (stored as dictionary of command → key equivalent)
     public var keyboardShortcuts: [String: String] = [:]
+
+    private var isLoadingCredentials = false
+    private var isLoadingAgentTuning = false
 
     public init() {}
 
@@ -50,9 +79,30 @@ public final class SettingsStore {
         }
         let savedMaxWidth = defaults.double(forKey: "maxChatWidth")
         maxChatWidth = savedMaxWidth == 0 ? 820.0 : savedMaxWidth
-        deepseekAPIKey = defaults.string(forKey: "deepseekAPIKey") ?? ""
-        deepseekBaseURL = defaults.string(forKey: "deepseekBaseURL") ?? ""
-        // TODO: load from Keychain for API keys
+        reloadAgentTuning()
+        isLoadingCredentials = true
+        if let stored = CredentialStore.value(for: "deepseek") {
+            deepseekAPIKey = stored
+        } else if let legacy = defaults.string(forKey: "deepseekAPIKey"), !legacy.isEmpty {
+            deepseekAPIKey = legacy
+            try? CredentialStore.set(legacy, for: "deepseek")
+            defaults.removeObject(forKey: "deepseekAPIKey")
+        }
+        isLoadingCredentials = false
+        ChatStore.shared?.reloadRemoteModels()
+    }
+
+    public func reloadAgentTuning() {
+        isLoadingAgentTuning = true
+        defer { isLoadingAgentTuning = false }
+        do {
+            let loaded = try TurboCodeConfig.shared.loadAgentTuning()
+            agentTuning = loaded
+            agentTuningError = nil
+            ChatStore.shared?.applyAgentTuning(loaded)
+        } catch {
+            agentTuningError = error.localizedDescription
+        }
     }
 
     public func saveToUserDefaults() {
@@ -61,7 +111,6 @@ public final class SettingsStore {
         defaults.set(language, forKey: "language")
         defaults.set(fontSize, forKey: "fontSize")
         defaults.set(maxChatWidth, forKey: "maxChatWidth")
-        defaults.set(deepseekBaseURL, forKey: "deepseekBaseURL")
     }
 }
 

@@ -19,7 +19,13 @@ struct BashTool: Tool {
     typealias Output = String
 
     let workspaceRoot: String
+    let executionPolicy: ExecutionPolicy
     private let service = BashService()
+
+    init(workspaceRoot: String, executionPolicy: ExecutionPolicy = ExecutionPolicy()) {
+        self.workspaceRoot = workspaceRoot
+        self.executionPolicy = executionPolicy
+    }
 
     var name: String { "bash" }
     var description: String {
@@ -39,14 +45,21 @@ struct BashTool: Tool {
             return "Error: command cannot be empty."
         }
 
-        let timeout = min(max(arguments.timeoutSeconds ?? 30, 1), 120)
-        let outputLimit = min(max(arguments.maxOutputCharacters ?? 12_000, 1_000), 30_000)
+        let timeout = min(
+            max(arguments.timeoutSeconds ?? executionPolicy.defaultCommandTimeoutSeconds, 1),
+            executionPolicy.maximumCommandTimeoutSeconds
+        )
+        let outputLimit = min(
+            max(arguments.maxOutputCharacters ?? executionPolicy.maximumToolOutputCharacters, 1_000),
+            executionPolicy.maximumToolOutputCharacters
+        )
 
         return await service.run(
             command: command,
             workspaceRoot: workspaceRoot,
             timeoutSeconds: timeout,
-            outputLimit: outputLimit
+            outputLimit: outputLimit,
+            allowNetworkAccess: executionPolicy.allowNetworkAccess
         )
     }
 }
@@ -58,7 +71,8 @@ private actor BashService {
         command: String,
         workspaceRoot: String,
         timeoutSeconds: Int,
-        outputLimit: Int
+        outputLimit: Int,
+        allowNetworkAccess: Bool
     ) -> String {
         let workspaceURL: URL
         do {
@@ -100,7 +114,11 @@ private actor BashService {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
         process.arguments = [
             "-p",
-            sandboxProfile(workspacePath: workspaceURL.path, outputPath: outputDirectory.path),
+            sandboxProfile(
+                workspacePath: workspaceURL.path,
+                outputPath: outputDirectory.path,
+                allowNetworkAccess: allowNetworkAccess
+            ),
             "/bin/zsh",
             "-fc",
             command
@@ -169,12 +187,18 @@ private actor BashService {
         return sections.joined(separator: "\n\n")
     }
 
-    private func sandboxProfile(workspacePath: String, outputPath: String) -> String {
+    private func sandboxProfile(
+        workspacePath: String,
+        outputPath: String,
+        allowNetworkAccess: Bool
+    ) -> String {
         let workspace = profileEscaped(workspacePath)
         let output = profileEscaped(outputPath)
+        let networkPolicy = allowNetworkAccess ? "" : "(deny network*)"
         return """
         (version 1)
         (allow default)
+        \(networkPolicy)
         (deny file-read*
             (subpath "/Users")
             (subpath "/Volumes")

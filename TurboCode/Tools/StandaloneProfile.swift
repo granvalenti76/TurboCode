@@ -12,11 +12,22 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let diskSkills: [TurboCodeSkillDefinition]
     let workspaceRoot: String
     let model: any LanguageModel
+    let temperature: Double?
     let reasoningLevel: ContextOptions.ReasoningLevel?
+    let dropsCompletedToolCalls: Bool
+    let executionPolicy: ExecutionPolicy
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
 
     var body: some LanguageModelSession.DynamicProfile {
+        if dropsCompletedToolCalls {
+            configuredProfile.droppingCompletedToolCalls()
+        } else {
+            configuredProfile
+        }
+    }
+
+    private var configuredProfile: some LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
             Instructions(instructions)
             if !workspaceRoot.isEmpty {
@@ -24,7 +35,7 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                     "read_file, bash, and edit_file are active directly in this session. Use read_file with small line ranges and its Revision for focused context. Use bash only for Git queries, builds, tests, and read-only workspace inspection. Use edit_file for every text-file creation or modification, one contiguous change per call. When writing articles, biographies, documentation, or other long prose, include real newline characters and separate paragraphs with a blank line; never collapse the document into one long line."
                 }
                 ReadFileTool(workspaceRoot: workspaceRoot)
-                BashTool(workspaceRoot: workspaceRoot)
+                BashTool(workspaceRoot: workspaceRoot, executionPolicy: executionPolicy)
                 StandaloneSkills(activations: activations, workspaceRoot: workspaceRoot)
                 Instructions {
                     "TurboCode generates and validates changes internally. Provide line operations against a fresh revision and never write unified diff syntax yourself."
@@ -36,6 +47,7 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
             }
         }
         .model(model)
+        .temperature(temperature)
         .reasoningLevel(reasoningLevel)
         .onToolCall { call in
             if let action = onToolStart {

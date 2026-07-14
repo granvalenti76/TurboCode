@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModels
+import FoundationModelsUtilities
 
 // MARK: - Orchestrator Profile
 
@@ -45,5 +46,6 @@ struct TurboCodeDynamicProfile: LanguageModelSession.DynamicProfile {
                 await action()
             }
         }
+        .droppingCompletedToolCalls()
     }
 }

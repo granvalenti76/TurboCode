@@ -1,0 +1,196 @@
+import Foundation
+
+nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
+    public static let currentSchemaVersion = 1
+
+    public var schemaVersion: Int
+    public var agent: AgentPolicy
+    public var execution: ExecutionPolicy
+    public var skills: SkillsPolicy
+    public var git: GitPolicy
+
+    public init(
+        schemaVersion: Int = currentSchemaVersion,
+        agent: AgentPolicy = AgentPolicy(),
+        execution: ExecutionPolicy = ExecutionPolicy(),
+        skills: SkillsPolicy = SkillsPolicy(),
+        git: GitPolicy = GitPolicy()
+    ) {
+        self.schemaVersion = schemaVersion
+        self.agent = agent
+        self.execution = execution
+        self.skills = skills
+        self.git = git
+    }
+
+    public static var `default`: AgentTuningConfig { AgentTuningConfig() }
+
+    public func validated() throws -> AgentTuningConfig {
+        guard schemaVersion == Self.currentSchemaVersion else {
+            throw AgentTuningError.unsupportedSchemaVersion(schemaVersion)
+        }
+        guard (5...600).contains(execution.defaultCommandTimeoutSeconds) else {
+            throw AgentTuningError.invalidValue(
+                "execution.defaultCommandTimeoutSeconds must be between 5 and 600"
+            )
+        }
+        guard (5...600).contains(execution.maximumCommandTimeoutSeconds),
+              execution.maximumCommandTimeoutSeconds >= execution.defaultCommandTimeoutSeconds else {
+            throw AgentTuningError.invalidValue(
+                "execution.maximumCommandTimeoutSeconds must be between the default timeout and 600"
+            )
+        }
+        guard (1_000...30_000).contains(execution.maximumToolOutputCharacters) else {
+            throw AgentTuningError.invalidValue(
+                "execution.maximumToolOutputCharacters must be between 1000 and 30000"
+            )
+        }
+        return self
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, agent, execution, skills, git
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decodeIfPresent(Int.self, forKey: .schemaVersion)
+            ?? Self.currentSchemaVersion
+        agent = try values.decodeIfPresent(AgentPolicy.self, forKey: .agent) ?? AgentPolicy()
+        execution = try values.decodeIfPresent(ExecutionPolicy.self, forKey: .execution)
+            ?? ExecutionPolicy()
+        skills = try values.decodeIfPresent(SkillsPolicy.self, forKey: .skills) ?? SkillsPolicy()
+        git = try values.decodeIfPresent(GitPolicy.self, forKey: .git) ?? GitPolicy()
+    }
+}
+
+nonisolated public struct AgentPolicy: Codable, Hashable, Sendable {
+    public var responseStyle: AgentResponseStyle
+    public var verifiesChanges: Bool
+
+    public init(
+        responseStyle: AgentResponseStyle = .balanced,
+        verifiesChanges: Bool = true
+    ) {
+        self.responseStyle = responseStyle
+        self.verifiesChanges = verifiesChanges
+    }
+
+    private enum CodingKeys: String, CodingKey { case responseStyle, verifiesChanges }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        responseStyle = try values.decodeIfPresent(AgentResponseStyle.self, forKey: .responseStyle)
+            ?? .balanced
+        verifiesChanges = try values.decodeIfPresent(Bool.self, forKey: .verifiesChanges) ?? true
+    }
+}
+
+nonisolated public enum AgentResponseStyle: String, Codable, Hashable, Sendable, CaseIterable {
+    case concise
+    case balanced
+    case detailed
+}
+
+nonisolated public struct ExecutionPolicy: Codable, Hashable, Sendable {
+    public var defaultCommandTimeoutSeconds: Int
+    public var maximumCommandTimeoutSeconds: Int
+    public var maximumToolOutputCharacters: Int
+    public var allowNetworkAccess: Bool
+
+    public init(
+        defaultCommandTimeoutSeconds: Int = 30,
+        maximumCommandTimeoutSeconds: Int = 120,
+        maximumToolOutputCharacters: Int = 12_000,
+        allowNetworkAccess: Bool = true
+    ) {
+        self.defaultCommandTimeoutSeconds = defaultCommandTimeoutSeconds
+        self.maximumCommandTimeoutSeconds = maximumCommandTimeoutSeconds
+        self.maximumToolOutputCharacters = maximumToolOutputCharacters
+        self.allowNetworkAccess = allowNetworkAccess
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case defaultCommandTimeoutSeconds, maximumCommandTimeoutSeconds
+        case maximumToolOutputCharacters, allowNetworkAccess
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        defaultCommandTimeoutSeconds = try values.decodeIfPresent(
+            Int.self,
+            forKey: .defaultCommandTimeoutSeconds
+        ) ?? 30
+        maximumCommandTimeoutSeconds = try values.decodeIfPresent(
+            Int.self,
+            forKey: .maximumCommandTimeoutSeconds
+        ) ?? 120
+        maximumToolOutputCharacters = try values.decodeIfPresent(
+            Int.self,
+            forKey: .maximumToolOutputCharacters
+        ) ?? 12_000
+        allowNetworkAccess = try values.decodeIfPresent(Bool.self, forKey: .allowNetworkAccess)
+            ?? true
+    }
+}
+
+nonisolated public struct SkillsPolicy: Codable, Hashable, Sendable {
+    public var discoversUserSkills: Bool
+
+    public init(discoversUserSkills: Bool = true) {
+        self.discoversUserSkills = discoversUserSkills
+    }
+
+    private enum CodingKeys: String, CodingKey { case discoversUserSkills }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        discoversUserSkills = try values.decodeIfPresent(Bool.self, forKey: .discoversUserSkills)
+            ?? true
+    }
+}
+
+nonisolated public struct GitPolicy: Codable, Hashable, Sendable {
+    public var allowsCommits: Bool
+    public var allowsRemoteWrites: Bool
+    public var confirmsDestructiveOperations: Bool
+
+    public init(
+        allowsCommits: Bool = true,
+        allowsRemoteWrites: Bool = true,
+        confirmsDestructiveOperations: Bool = true
+    ) {
+        self.allowsCommits = allowsCommits
+        self.allowsRemoteWrites = allowsRemoteWrites
+        self.confirmsDestructiveOperations = confirmsDestructiveOperations
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case allowsCommits, allowsRemoteWrites, confirmsDestructiveOperations
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        allowsCommits = try values.decodeIfPresent(Bool.self, forKey: .allowsCommits) ?? true
+        allowsRemoteWrites = try values.decodeIfPresent(Bool.self, forKey: .allowsRemoteWrites)
+            ?? true
+        confirmsDestructiveOperations = try values.decodeIfPresent(
+            Bool.self,
+            forKey: .confirmsDestructiveOperations
+        ) ?? true
+    }
+}
+
+nonisolated public enum AgentTuningError: LocalizedError, Sendable {
+    case unsupportedSchemaVersion(Int)
+    case invalidValue(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .unsupportedSchemaVersion(let version):
+            "Unsupported Agent Tuning schema version: \(version)"
+        case .invalidValue(let message):
+            "Invalid Agent Tuning value: \(message)"
+        }
+    }
+}

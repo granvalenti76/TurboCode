@@ -118,17 +118,16 @@ struct ProviderSettingsView: View {
                 SecureField("API Key", text: s.deepseekAPIKey)
                     .textFieldStyle(.roundedBorder)
 
-                HStack {
-                    TextField("Base URL", text: s.deepseekBaseURL)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 11, design: .monospaced))
-                    Button("Reset") { settings.deepseekBaseURL = "" }
-                        .buttonStyle(.borderless)
-                }
+                Label(
+                    settings.deepseekAPIKey.isEmpty ? "Not configured" : "Configured",
+                    systemImage: settings.deepseekAPIKey.isEmpty ? "key.slash" : "checkmark.circle"
+                )
+                .foregroundStyle(settings.deepseekAPIKey.isEmpty ? Color.secondary : Color.green)
 
-                Text("Default: https://api.deepseek.com")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                if let error = settings.credentialError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.red)
+                }
             }
 
             Section("OpenAI") {
@@ -195,31 +194,61 @@ struct WriteSettingsView: View {
 // MARK: - Agent Settings
 
 struct AgentSettingsView: View {
-    @State private var approvalPolicy: String = "always-ask"
-    @State private var sandboxMode: String = "none"
+    @Environment(SettingsStore.self) private var settings
 
     var body: some View {
-        Form {
-            Section("Approval") {
-                Picker("Approval policy", selection: $approvalPolicy) {
-                    Text("Always ask").tag("always-ask")
-                    Text("Read only").tag("read-only")
-                    Text("Sensitive ask").tag("sensitive-ask")
-                    Text("Bypass").tag("bypass")
+        let s = Bindable(settings)
+        return Form {
+            Section("Responses") {
+                Picker("Detail", selection: s.agentTuning.agent.responseStyle) {
+                    Text("Concise").tag(AgentResponseStyle.concise)
+                    Text("Balanced").tag(AgentResponseStyle.balanced)
+                    Text("Detailed").tag(AgentResponseStyle.detailed)
                 }
+                Toggle("Verify source changes", isOn: s.agentTuning.agent.verifiesChanges)
             }
 
-            Section("Sandbox") {
-                Picker("Sandbox mode", selection: $sandboxMode) {
-                    Text("None").tag("none")
-                    Text("Enabled").tag("sandbox")
+            Section("Execution") {
+                Stepper(
+                    value: s.agentTuning.execution.defaultCommandTimeoutSeconds,
+                    in: 5...settings.agentTuning.execution.maximumCommandTimeoutSeconds,
+                    step: 5
+                ) {
+                    LabeledContent("Command timeout") {
+                        Text("\(settings.agentTuning.execution.defaultCommandTimeoutSeconds)s")
+                            .monospacedDigit()
+                    }
                 }
+
+                Stepper(
+                    value: s.agentTuning.execution.maximumToolOutputCharacters,
+                    in: 1_000...30_000,
+                    step: 1_000
+                ) {
+                    LabeledContent("Maximum tool output") {
+                        Text("\(settings.agentTuning.execution.maximumToolOutputCharacters)")
+                            .monospacedDigit()
+                    }
+                }
+
+                Toggle("Allow command network access", isOn: s.agentTuning.execution.allowNetworkAccess)
             }
 
-            Section("Tool Permissions") {
-                Text("Fine-grained tool permissions coming soon")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+            Section("Skills") {
+                Toggle("Discover user skills", isOn: s.agentTuning.skills.discoversUserSkills)
+            }
+
+            Section {
+                Button {
+                    settings.reloadAgentTuning()
+                } label: {
+                    Label("Reload Configuration", systemImage: "arrow.clockwise")
+                }
+
+                if let error = settings.agentTuningError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.red)
+                }
             }
         }
         .formStyle(.grouped)

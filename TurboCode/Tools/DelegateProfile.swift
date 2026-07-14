@@ -8,7 +8,9 @@ import FoundationModelsUtilities
 struct DelegateProfile: LanguageModelSession.DynamicProfile {
     let instructions: String
     let tools: [any Tool]
-    let model: ChatCompletionsLanguageModel
+    let model: any LanguageModel
+    let temperature: Double?
+    let reasoningLevel: ContextOptions.ReasoningLevel?
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
 
@@ -18,6 +20,8 @@ struct DelegateProfile: LanguageModelSession.DynamicProfile {
             tools
         }
         .model(model)
+        .temperature(temperature)
+        .reasoningLevel(reasoningLevel)
         .onToolCall { call in
             if let action = onToolStart {
                 await action(call)
