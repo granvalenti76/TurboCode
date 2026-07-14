@@ -36,6 +36,23 @@ struct ApplyEditsArguments {
     var files: [FileEditRequest]
 }
 
+@Generable
+struct EditFileArguments {
+    /// Absolute or workspace-relative path of one UTF-8 text file.
+    var filePath: String
+    /// Revision from read_file, or an empty string only when creating a new file.
+    var revision: String
+    /// Exactly one operation: replace_lines, insert_before, insert_after, delete_lines, replace_file, or create.
+    @Guide(.anyOf(["replace_lines", "insert_before", "insert_after", "delete_lines", "replace_file", "create"]))
+    var operation: String
+    /// First one-based line. Use 0 for create or replace_file.
+    var startLine: Int
+    /// Last inclusive one-based line. Use startLine for insert operations and 0 for create or replace_file.
+    var endLine: Int
+    /// New text. Use an empty string for delete_lines.
+    var content: String
+}
+
 struct ApplyEditsTool: Tool {
     typealias Arguments = ApplyEditsArguments
     typealias Output = String
@@ -95,6 +112,48 @@ struct ApplyEditsTool: Tool {
             }
             return "Edit transaction failed: \(error.localizedDescription)"
         }
+    }
+}
+
+/// A deliberately flat editing schema for smaller models. Execution still
+/// converges on the same revision checks, patch validation, widget, and Undo.
+struct EditFileTool: Tool {
+    typealias Arguments = EditFileArguments
+    typealias Output = String
+
+    let workspaceRoot: String
+
+    var name: String { "edit_file" }
+    var description: String {
+        """
+        Apply one atomic change to one UTF-8 text file. Read the relevant range with
+        read_file immediately before editing and copy its Revision exactly. Choose one
+        operation. For replace_lines and delete_lines, startLine and endLine are the
+        inclusive one-based range. For insert_before or insert_after, set both line
+        values to the anchor line. For create, use revision "", line values 0, and the
+        complete new-file content. For replace_file, use a current revision, line values
+        0, and complete replacement content. Use content "" only for delete_lines.
+        TurboCode generates and validates the Git patch and updates the change widget.
+        """
+    }
+    var includesSchemaInInstructions: Bool { true }
+
+    func call(arguments: EditFileArguments) async throws -> String {
+        let usesLineRange = !["create", "replace_file"].contains(arguments.operation)
+        let operation = LineEditOperation(
+            operation: arguments.operation,
+            startLine: usesLineRange ? arguments.startLine : nil,
+            endLine: usesLineRange ? arguments.endLine : nil,
+            content: arguments.operation == "delete_lines" ? nil : arguments.content
+        )
+        let request = FileEditRequest(
+            filePath: arguments.filePath,
+            revision: arguments.revision.isEmpty ? nil : arguments.revision,
+            operations: [operation]
+        )
+        return try await ApplyEditsTool(workspaceRoot: workspaceRoot).call(
+            arguments: ApplyEditsArguments(files: [request])
+        )
     }
 }
 

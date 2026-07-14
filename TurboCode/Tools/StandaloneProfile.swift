@@ -11,6 +11,7 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let activations: SkillActivations
     let diskSkills: [TurboCodeSkillDefinition]
     let workspaceRoot: String
+    let usesAdvancedEditing: Bool
     let model: any LanguageModel
     let reasoningLevel: ContextOptions.ReasoningLevel?
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
@@ -21,15 +22,21 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
             Instructions(instructions)
             if !workspaceRoot.isEmpty {
                 Instructions {
-                    "read_file, bash, and apply_edits are active directly in this session. Use read_file with small line ranges and its Revision for focused context. Use bash only for Git queries, builds, tests, and read-only workspace inspection. Use apply_edits for every text-file creation or modification."
+                    usesAdvancedEditing
+                        ? "read_file, bash, and apply_edits are active directly in this session. Use read_file with small line ranges and its Revision for focused context. Use bash only for Git queries, builds, tests, and read-only workspace inspection. Use apply_edits for every text-file creation or modification."
+                        : "read_file, bash, and edit_file are active directly in this session. Use read_file with small line ranges and its Revision for focused context. Use bash only for Git queries, builds, tests, and read-only workspace inspection. Use edit_file for every text-file creation or modification, one contiguous change per call."
                 }
                 ReadFileTool(workspaceRoot: workspaceRoot)
                 BashTool(workspaceRoot: workspaceRoot)
                 StandaloneSkills(activations: activations, workspaceRoot: workspaceRoot)
                 Instructions {
-                    "apply_edits generates and validates changes internally. Provide line operations against a fresh revision and never write unified diff syntax yourself."
+                    "TurboCode generates and validates changes internally. Provide line operations against a fresh revision and never write unified diff syntax yourself."
                 }
-                ApplyEditsTool(workspaceRoot: workspaceRoot)
+                if usesAdvancedEditing {
+                    ApplyEditsTool(workspaceRoot: workspaceRoot)
+                } else {
+                    EditFileTool(workspaceRoot: workspaceRoot)
+                }
             }
             if !diskSkills.isEmpty {
                 LoadSkillTool(skills: diskSkills)

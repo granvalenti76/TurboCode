@@ -119,8 +119,9 @@ public final class TurboCodeConfig {
     - `grep` searches workspace text.
     - `file_system` lists and manages files inside the workspace.
     - `bash` runs bounded commands with read-only workspace access in a macOS process sandbox.
-    - `apply_edits` accepts revision-bound line operations, creates an internal Git
-      patch, and presents a review widget with additions, deletions, Review, and Undo.
+    - Apple PCC uses multi-file `apply_edits`; smaller local models use the flatter
+      single-change `edit_file` schema. Both create an internal Git patch and present
+      the same review widget with additions, deletions, Review, and Undo.
     - Text creation and editing run automatically. Only file or directory deletion
       asks for approval.
 

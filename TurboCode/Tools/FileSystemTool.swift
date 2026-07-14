@@ -67,8 +67,8 @@ struct FileSystemTool: Tool {
         - delete: Permanently delete a file or directory (the only operation requiring approval)
 
         write and append require the 'content' argument and automatically produce the
-        same Review/Undo change widget as apply_edits.
-        Prefer read_file for numbered source ranges and apply_edits
+        same Review/Undo change widget as the structured editing tools.
+        Prefer read_file for numbered source ranges and the active structured editor
         for existing source and text files in Git workspaces. Use bash for builds, tests,
         Git queries, and commands that are not covered by these structured operations.
         All paths must be within the workspace root.

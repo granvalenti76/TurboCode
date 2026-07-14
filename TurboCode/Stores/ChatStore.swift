@@ -286,7 +286,8 @@ public final class ChatStore {
             text += "\nNEVER access files outside the workspace."
             text += "\nUse read_file with startLine and endLine to inspect only the relevant numbered source range and preserve context."
             text += "\nUse bash for Git queries, builds, tests, and precise inspection. Bash can read the workspace but cannot write to it."
-            text += "\nUse apply_edits for every source or text-file creation and modification. Read the relevant range immediately before editing, copy its Revision, and describe line operations against that revision. Never generate unified diff hunks."
+            let editingTool = activeBackend == .foundationServe ? "apply_edits" : "edit_file"
+            text += "\nUse \(editingTool) for every source or text-file creation and modification. Read the relevant range immediately before editing, copy its Revision, and describe line operations against that revision. Never generate unified diff hunks."
             text += "\nFile and directory deletion is the only operation that requires approval. If a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
         }
         return text
@@ -307,7 +308,7 @@ public final class ChatStore {
                 GrepTool(workspaceRoot: workspaceRoot),
                 FileSystemTool(workspaceRoot: workspaceRoot),
                 BashTool(workspaceRoot: workspaceRoot),
-                ApplyEditsTool(workspaceRoot: workspaceRoot)
+                EditFileTool(workspaceRoot: workspaceRoot)
             ]
         }
         if !availableSkills.isEmpty {
@@ -348,7 +349,7 @@ public final class ChatStore {
             === ORCHESTRATOR MODE ===
             You are TurboCode Orchestrator. You are NOT an Apple model — you are part of the TurboCode app. Your name is TurboCode, and you delegate complex tasks to the powerful coding model via `call_powerful_model`. You have the `file_system` tool to list directories, get file info, and find files — use it for navigation and discovery.
 
-            For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, bash, file_system, and apply_edits).
+            For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, bash, file_system, and edit_file).
 
             CRITICAL — Never trust your own knowledge:
             - If you need to answer with file contents, always delegate reading to `call_powerful_model`.
@@ -413,6 +414,7 @@ public final class ChatStore {
                     activations: skillActivations,
                     diskSkills: availableSkills,
                     workspaceRoot: workspaceRoot,
+                    usesAdvancedEditing: activeBackend == .foundationServe,
                     model: activeModel,
                     reasoningLevel: reasoningLevel,
                     onToolStart: { [weak self] call in
@@ -982,7 +984,9 @@ public final class ChatStore {
     }
 
     private func beginToolActivity(_ call: Transcript.ToolCall) {
-        guard call.toolName != "diff_patch", call.toolName != "apply_edits" else { return }
+        guard call.toolName != "diff_patch",
+              call.toolName != "apply_edits",
+              call.toolName != "edit_file" else { return }
         toolActivities.removeAll { $0.id == call.id }
         toolActivities.append(ToolActivity(id: call.id, summary: toolSummary(for: call)))
     }
@@ -1074,7 +1078,7 @@ public final class ChatStore {
             return item.map { "Searching in \($0)" } ?? "Searching workspace"
         case "bash":
             return "Running command"
-        case "apply_edits":
+        case "apply_edits", "edit_file":
             return "Preparing file changes"
         case "file_system":
             let operation = try? call.arguments.value(String.self, forProperty: "operation")

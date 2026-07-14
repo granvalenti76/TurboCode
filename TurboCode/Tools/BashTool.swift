@@ -26,7 +26,7 @@ struct BashTool: Tool {
         """
         Run a zsh command from the workspace root. Use this for precise inspection,
         Git queries, builds, and tests. Prefer read_file for source ranges and
-        apply_edits for text changes. The macOS process sandbox makes the workspace
+        the available structured editing tool for text changes. The macOS process sandbox makes the workspace
         read-only; commands may write only to the private temporary directory exposed
         as TMPDIR. Output and execution time are bounded to keep model context small.
         """
