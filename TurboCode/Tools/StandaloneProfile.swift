@@ -19,9 +19,14 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
             Instructions(instructions)
             if !workspaceRoot.isEmpty {
+                Instructions {
+                    "read_file and bash are active directly in this session. Use read_file with small line ranges for focused context. Use bash for Git queries, builds, tests, and precise workspace inspection; every Bash command requires approval unless Auto-run is selected. For existing source and text files, use diff_patch structured edits with exact oldText/newText copied from a fresh read_file result."
+                }
+                ReadFileTool(workspaceRoot: workspaceRoot)
+                BashTool(workspaceRoot: workspaceRoot)
                 StandaloneSkills(activations: activations, workspaceRoot: workspaceRoot)
                 Instructions {
-                    "diff_patch is active and available directly in this session. Use it for code edits in Git workspaces; do not claim that an editing skill must be activated first."
+                    "diff_patch is active directly in this session. Prefer structured edits for existing files and raw unified patches for new files; do not claim that an editing skill must be activated first."
                 }
                 DiffPatchTool(workspaceRoot: workspaceRoot)
             }
@@ -63,13 +68,12 @@ struct StandaloneSkills: DynamicInstructions {
 
             Skill(
                 name: "code-reader",
-                description: "Read file contents and search for text patterns in the workspace",
+                description: "Search for text patterns in the workspace",
                 allowsDeactivation: true
             ) {
                 Instructions {
-                    "Use this skill when you need to read file contents or search for code patterns with grep."
+                    "Use this skill when you need to search for code patterns with grep. The read_file tool is already active directly."
                 }
-                ReadFileTool(workspaceRoot: workspaceRoot)
                 GrepTool(workspaceRoot: workspaceRoot)
             }
         }

@@ -50,6 +50,7 @@ struct ChatBlockView: View {
                 } else {
                     Text(block.text)
                         .font(AppTypography.chatBody(size: chatFontSize))
+                        .foregroundStyle(AppTypography.chatForeground)
                         .textSelection(.enabled)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
@@ -113,11 +114,7 @@ struct ChatBlockView: View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Markdown(visibleAssistantText)
-                    .markdownTheme(.basic)
-                    .markdownTextStyle {
-                        FontSize(chatFontSize)
-                        ForegroundColor(.primary)
-                    }
+                    .markdownTheme(AppTypography.chatMarkdownTheme(size: chatFontSize))
                     .textSelection(.enabled)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -129,7 +126,8 @@ struct ChatBlockView: View {
 
             Spacer()
         }
-        .padding(8)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 10)
     }
     
     // MARK: - Reasoning Block

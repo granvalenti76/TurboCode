@@ -11,7 +11,7 @@ public final class SettingsStore {
         didSet { UserDefaults.standard.set(theme.rawValue, forKey: "theme") }
     }
     public var language: String = "en"
-    public var fontSize: Double = 15.0 {
+    public var fontSize: Double = 17.0 {
         didSet { UserDefaults.standard.set(fontSize, forKey: "fontSize") }
     }
     public var maxChatWidth: Double = 820.0 {
@@ -40,7 +40,14 @@ public final class SettingsStore {
         theme = ThemePreference(rawValue: defaults.string(forKey: "theme") ?? "system") ?? .system
         language = defaults.string(forKey: "language") ?? "en"
         let savedFontSize = defaults.double(forKey: "fontSize")
-        fontSize = savedFontSize == 0 ? 15.0 : savedFontSize
+        let typographyVersion = defaults.integer(forKey: "chatTypographyVersion")
+        if typographyVersion < 1 {
+            fontSize = savedFontSize == 0 || savedFontSize == 15 ? 17 : savedFontSize
+            defaults.set(fontSize, forKey: "fontSize")
+            defaults.set(1, forKey: "chatTypographyVersion")
+        } else {
+            fontSize = savedFontSize == 0 ? 17 : savedFontSize
+        }
         let savedMaxWidth = defaults.double(forKey: "maxChatWidth")
         maxChatWidth = savedMaxWidth == 0 ? 820.0 : savedMaxWidth
         deepseekAPIKey = defaults.string(forKey: "deepseekAPIKey") ?? ""

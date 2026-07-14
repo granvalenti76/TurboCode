@@ -220,11 +220,7 @@ struct LiveAssistantBlock: View {
 
     var body: some View {
         Markdown(text)
-            .markdownTheme(.basic)
-            .markdownTextStyle {
-                FontSize(chatFontSize)
-                ForegroundColor(.primary)
-            }
+            .markdownTheme(AppTypography.chatMarkdownTheme(size: chatFontSize))
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)

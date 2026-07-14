@@ -4,9 +4,21 @@ import FoundationModels
 // MARK: - Diff Patch Tool
 
 @Generable
+struct AtomicTextEdit {
+    /// Absolute or workspace-relative path of an existing UTF-8 text file.
+    var filePath: String
+    /// Exact, unique text currently present in the file, including whitespace.
+    var oldText: String
+    /// Replacement text. Use an empty string to delete oldText.
+    var newText: String
+}
+
+@Generable
 struct DiffPatchArguments {
-    /// A complete unified diff in git format. It may modify multiple text files.
-    var patch: String
+    /// Preferred for existing files: exact text replacements converted into a Git patch by TurboCode.
+    var edits: [AtomicTextEdit]?
+    /// A complete unified diff. Use primarily for creating new files or when a patch is already available.
+    var patch: String?
 }
 
 struct DiffPatchTool: Tool {
@@ -19,17 +31,42 @@ struct DiffPatchTool: Tool {
     var name: String { "diff_patch" }
     var description: String {
         """
-        Apply a unified git diff to one or more text files in the current workspace.
-        Prefer this tool over file_system write/append when editing existing code.
-        The patch must include standard ---/+++ file headers and @@ hunks. Paths must
-        be relative to the workspace and use the a/ and b/ git prefixes. The complete
-        patch is validated with git apply --check before any file is changed.
+        Atomically create or edit text files in a Git workspace and show the changes in a review widget.
+        For existing files, prefer edits with exact oldText/newText replacements after using read_file.
+        Keep oldText small but unique and copy whitespace exactly. TurboCode converts all replacements
+        into one valid unified diff, then validates the complete change before touching any file.
+        Use patch for new files or an already-available unified diff. Raw patches must contain standard
+        ---/+++ headers and @@ hunks with a/ and b/ paths. New files use --- /dev/null.
+        Provide either edits or patch, never both.
         """
     }
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: DiffPatchArguments) async throws -> String {
-        let patch = arguments.patch.trimmingCharacters(in: .newlines) + "\n"
+        let patch: String
+        let edits = arguments.edits ?? []
+        let usesStructuredEdits = !edits.isEmpty
+        let rawPatch = arguments.patch?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard edits.isEmpty || rawPatch.isEmpty else {
+            return "Error: Provide either structured edits or a unified patch, not both."
+        }
+
+        if !edits.isEmpty {
+            do {
+                patch = try await service.makePatch(
+                    edits: edits,
+                    workspaceRoot: workspaceRoot
+                )
+            } catch {
+                return "Error preparing edits: \(error.localizedDescription) Re-read the affected range and retry with exact current text."
+            }
+        } else if !rawPatch.isEmpty {
+            patch = normalizedRawPatch(rawPatch)
+        } else {
+            return "Error: At least one structured edit or a unified patch is required."
+        }
 
         let files: [DiffPatchFileChange]
         do {
@@ -40,7 +77,11 @@ struct DiffPatchTool: Tool {
 
         let id = UUID().uuidString
         do {
-            try await service.check(patch: patch, workspaceRoot: workspaceRoot)
+            try await service.check(
+                patch: patch,
+                workspaceRoot: workspaceRoot,
+                tolerateInaccurateEOF: !usesStructuredEdits
+            )
         } catch {
             await MainActor.run {
                 ChatStore.shared?.beginDiffPatchBlock(
@@ -70,7 +111,12 @@ struct DiffPatchTool: Tool {
         }
 
         if autoRun {
-            return await apply(patch: patch, files: files, id: id)
+            return await apply(
+                patch: patch,
+                files: files,
+                id: id,
+                tolerateInaccurateEOF: !usesStructuredEdits
+            )
         }
 
         let additions = files.reduce(0) { $0 + $1.additions }
@@ -83,7 +129,12 @@ struct DiffPatchTool: Tool {
             destination: nil,
             summary: summary,
             action: { [patch, files, id] in
-                await apply(patch: patch, files: files, id: id)
+                await apply(
+                    patch: patch,
+                    files: files,
+                    id: id,
+                    tolerateInaccurateEOF: !usesStructuredEdits
+                )
             }
         ))
 
@@ -96,17 +147,33 @@ struct DiffPatchTool: Tool {
         """
     }
 
+    private func normalizedRawPatch(_ value: String) -> String {
+        var lines = value.components(separatedBy: .newlines)
+        if lines.first?.hasPrefix("```") == true {
+            lines.removeFirst()
+        }
+        if lines.last?.trimmingCharacters(in: .whitespaces) == "```" {
+            lines.removeLast()
+        }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .newlines) + "\n"
+    }
+
     private func apply(
         patch: String,
         files: [DiffPatchFileChange],
-        id: String
+        id: String,
+        tolerateInaccurateEOF: Bool
     ) async -> String {
         await MainActor.run {
             ChatStore.shared?.updateDiffPatchBlock(id: id, status: .running)
         }
 
         do {
-            try await service.apply(patch: patch, workspaceRoot: workspaceRoot)
+            try await service.apply(
+                patch: patch,
+                workspaceRoot: workspaceRoot,
+                tolerateInaccurateEOF: tolerateInaccurateEOF
+            )
             await MainActor.run {
                 ChatStore.shared?.updateDiffPatchBlock(id: id, status: .applied)
             }
@@ -213,17 +280,186 @@ enum DiffPatchParser {
 // MARK: - Git Executor
 
 actor DiffPatchService {
-    func check(patch: String, workspaceRoot: String, reverse: Bool = false) throws {
+    func makePatch(edits: [AtomicTextEdit], workspaceRoot: String) throws -> String {
+        guard !edits.isEmpty else {
+            throw DiffPatchError.invalidEdit("No edits were provided.")
+        }
+
+        let rootURL = URL(fileURLWithPath: workspaceRoot)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        var orderedPaths: [String] = []
+        var originalContents: [String: String] = [:]
+        var updatedContents: [String: String] = [:]
+
+        for (index, edit) in edits.enumerated() {
+            let fileURL = try WorkspacePathResolver.resolve(edit.filePath, within: workspaceRoot)
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else {
+                throw DiffPatchError.invalidEdit(
+                    "Edit \(index + 1) targets a missing file. Use a raw new-file patch for '\(edit.filePath)'."
+                )
+            }
+            guard !edit.oldText.isEmpty else {
+                throw DiffPatchError.invalidEdit(
+                    "Edit \(index + 1) has empty oldText. Include a unique existing anchor."
+                )
+            }
+
+            let relativePath = String(fileURL.path.dropFirst(rootURL.path.count + 1))
+            if originalContents[relativePath] == nil {
+                let content: String
+                do {
+                    content = try String(contentsOf: fileURL, encoding: .utf8)
+                } catch {
+                    throw DiffPatchError.invalidEdit("'\(relativePath)' is not readable UTF-8 text.")
+                }
+                orderedPaths.append(relativePath)
+                originalContents[relativePath] = content
+                updatedContents[relativePath] = content
+            }
+
+            guard var current = updatedContents[relativePath] else { continue }
+            let matches = exactRanges(of: edit.oldText, in: current)
+            guard matches.count == 1, let range = matches.first else {
+                let reason = matches.isEmpty
+                    ? "oldText was not found"
+                    : "oldText matched \(matches.count) locations"
+                throw DiffPatchError.invalidEdit(
+                    "Edit \(index + 1) for '\(relativePath)' is stale or ambiguous: \(reason)."
+                )
+            }
+            current.replaceSubrange(range, with: edit.newText)
+            updatedContents[relativePath] = current
+        }
+
+        let temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCode-Diff-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+        var generatedPatches: [String] = []
+        for (index, path) in orderedPaths.enumerated() {
+            guard let original = originalContents[path],
+                  let updated = updatedContents[path],
+                  original != updated else { continue }
+
+            let oldURL = temporaryDirectory.appendingPathComponent("\(index)-old")
+            let newURL = temporaryDirectory.appendingPathComponent("\(index)-new")
+            try original.write(to: oldURL, atomically: true, encoding: .utf8)
+            try updated.write(to: newURL, atomically: true, encoding: .utf8)
+            generatedPatches.append(try unifiedDiff(
+                oldURL: oldURL,
+                newURL: newURL,
+                relativePath: path,
+                temporaryDirectory: temporaryDirectory,
+                index: index
+            ))
+        }
+
+        guard !generatedPatches.isEmpty else {
+            throw DiffPatchError.invalidEdit("The replacements would not change any file.")
+        }
+        return generatedPatches.joined(separator: "").trimmingCharacters(in: .newlines) + "\n"
+    }
+
+    func check(
+        patch: String,
+        workspaceRoot: String,
+        reverse: Bool = false,
+        tolerateInaccurateEOF: Bool = false
+    ) throws {
         try ensureGitRepository(workspaceRoot)
-        let result = runGitApply(patch: patch, workspaceRoot: workspaceRoot, reverse: reverse, checkOnly: true)
+        let result = runGitApply(
+            patch: patch,
+            workspaceRoot: workspaceRoot,
+            reverse: reverse,
+            checkOnly: true,
+            tolerateInaccurateEOF: tolerateInaccurateEOF
+        )
         guard result.exitCode == 0 else {
             throw DiffPatchError.gitApplyFailed(result.error)
         }
     }
 
-    func apply(patch: String, workspaceRoot: String, reverse: Bool = false) throws {
-        try check(patch: patch, workspaceRoot: workspaceRoot, reverse: reverse)
-        let result = runGitApply(patch: patch, workspaceRoot: workspaceRoot, reverse: reverse, checkOnly: false)
+    private func exactRanges(of needle: String, in text: String) -> [Range<String.Index>] {
+        var ranges: [Range<String.Index>] = []
+        var searchStart = text.startIndex
+        while searchStart < text.endIndex,
+              let range = text.range(of: needle, range: searchStart..<text.endIndex) {
+            ranges.append(range)
+            searchStart = range.upperBound
+        }
+        return ranges
+    }
+
+    private func unifiedDiff(
+        oldURL: URL,
+        newURL: URL,
+        relativePath: String,
+        temporaryDirectory: URL,
+        index: Int
+    ) throws -> String {
+        let outputURL = temporaryDirectory.appendingPathComponent("\(index)-patch")
+        let errorURL = temporaryDirectory.appendingPathComponent("\(index)-error")
+        FileManager.default.createFile(atPath: outputURL.path, contents: nil)
+        FileManager.default.createFile(atPath: errorURL.path, contents: nil)
+
+        let outputHandle = try FileHandle(forWritingTo: outputURL)
+        let errorHandle = try FileHandle(forWritingTo: errorURL)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/diff")
+        process.arguments = [
+            "-u",
+            "--label", "a/\(relativePath)",
+            "--label", "b/\(relativePath)",
+            oldURL.path,
+            newURL.path
+        ]
+        process.standardOutput = outputHandle
+        process.standardError = errorHandle
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            try? outputHandle.close()
+            try? errorHandle.close()
+            throw DiffPatchError.diffGenerationFailed(error.localizedDescription)
+        }
+        try? outputHandle.close()
+        try? errorHandle.close()
+
+        guard process.terminationStatus == 1 else {
+            let message = (try? String(contentsOf: errorURL, encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            throw DiffPatchError.diffGenerationFailed(
+                message.isEmpty ? "diff exited with status \(process.terminationStatus)." : message
+            )
+        }
+        return try String(contentsOf: outputURL, encoding: .utf8)
+    }
+
+    func apply(
+        patch: String,
+        workspaceRoot: String,
+        reverse: Bool = false,
+        tolerateInaccurateEOF: Bool = false
+    ) throws {
+        try check(
+            patch: patch,
+            workspaceRoot: workspaceRoot,
+            reverse: reverse,
+            tolerateInaccurateEOF: tolerateInaccurateEOF
+        )
+        let result = runGitApply(
+            patch: patch,
+            workspaceRoot: workspaceRoot,
+            reverse: reverse,
+            checkOnly: false,
+            tolerateInaccurateEOF: tolerateInaccurateEOF
+        )
         guard result.exitCode == 0 else {
             throw DiffPatchError.gitApplyFailed(result.error)
         }
@@ -265,11 +501,13 @@ actor DiffPatchService {
         patch: String,
         workspaceRoot: String,
         reverse: Bool,
-        checkOnly: Bool
+        checkOnly: Bool,
+        tolerateInaccurateEOF: Bool
     ) -> (exitCode: Int32, error: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        var arguments = ["apply", "--recount", "--inaccurate-eof", "--whitespace=nowarn"]
+        var arguments = ["apply", "--recount", "--whitespace=nowarn"]
+        if tolerateInaccurateEOF && !reverse { arguments.append("--inaccurate-eof") }
         if checkOnly { arguments.append("--check") }
         if reverse { arguments.append("--reverse") }
         arguments.append("-")
@@ -299,20 +537,24 @@ actor DiffPatchService {
 
 enum DiffPatchError: LocalizedError {
     case invalidPatch(String)
+    case invalidEdit(String)
     case unsafePath(String)
     case gitUnavailable(String)
     case notGitRepository
     case workspaceIsNotGitRoot
     case gitApplyFailed(String)
+    case diffGenerationFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .invalidPatch(let reason): return reason
+        case .invalidEdit(let reason): return reason
         case .unsafePath(let path): return "Patch path '\(path)' is outside the workspace."
         case .gitUnavailable(let reason): return "Git is unavailable: \(reason)"
         case .notGitRepository: return "diff_patch requires a Git workspace."
         case .workspaceIsNotGitRoot: return "diff_patch requires the workspace folder to be the Git repository root."
         case .gitApplyFailed(let reason): return reason.isEmpty ? "git apply rejected the patch." : reason
+        case .diffGenerationFailed(let reason): return "Could not generate a unified diff: \(reason)"
         }
     }
 }

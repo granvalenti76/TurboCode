@@ -67,6 +67,9 @@ struct FileSystemTool: Tool {
         - delete: Permanently delete a file or directory (requires approval)
 
         write and append require the 'content' argument.
+        Prefer read_file for numbered source ranges and diff_patch structured edits
+        for existing source and text files in Git workspaces. Use bash for builds, tests,
+        Git queries, and commands that are not covered by these structured operations.
         All paths must be within the workspace root.
         """
     }
@@ -443,8 +446,18 @@ public actor ToolApprovalRegistry {
 
     private var requests: [String: PendingToolApproval] = [:]
 
-    public func register(_ request: PendingToolApproval) {
+    public func register(_ request: PendingToolApproval) async {
         requests[request.id] = request
+        await MainActor.run {
+            let presentation = ApprovalRequest(
+                id: request.id,
+                operation: request.operation,
+                path: request.path,
+                destination: request.destination,
+                summary: request.summary
+            )
+            ChatStore.shared?.presentApproval(presentation)
+        }
     }
 
     public func approve(id: String) async -> String {

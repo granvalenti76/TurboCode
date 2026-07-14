@@ -41,6 +41,7 @@ public final class ChatStore {
 
     // Pending user approval for a destructive tool operation
     public var pendingApproval: ApprovalRequest? = nil
+    private var queuedApprovals: [ApprovalRequest] = []
 
     // Composer
     public var composerModel: String = "auto"
@@ -269,7 +270,9 @@ public final class ChatStore {
             text += "\nActivate the appropriate skill below to access file and code tools."
             text += "\nAll file operations are restricted to the workspace directory."
             text += "\nNEVER access files outside the workspace."
-            text += "\nPrefer diff_patch for precise edits to existing text or source files in Git workspaces."
+            text += "\nUse read_file with startLine and endLine to inspect only the relevant numbered source range and preserve context."
+            text += "\nUse bash for Git queries, builds, tests, and precise inspection. Bash starts in the workspace and its writes are sandboxed to the workspace."
+            text += "\nUse diff_patch for source and text changes in Git workspaces. For existing files, read the relevant range immediately before editing and use structured edits with exact oldText/newText; do not handcraft hunks. Use a raw patch primarily to create new files."
             text += "\nIf a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
         }
         return text
@@ -289,6 +292,7 @@ public final class ChatStore {
                 ReadFileTool(workspaceRoot: workspaceRoot),
                 GrepTool(workspaceRoot: workspaceRoot),
                 FileSystemTool(workspaceRoot: workspaceRoot),
+                BashTool(workspaceRoot: workspaceRoot),
                 DiffPatchTool(workspaceRoot: workspaceRoot)
             ]
         }
@@ -324,7 +328,7 @@ public final class ChatStore {
             === ORCHESTRATOR MODE ===
             You are TurboCode Orchestrator. You are NOT an Apple model — you are part of the TurboCode app. Your name is TurboCode, and you delegate complex tasks to the powerful coding model via `call_powerful_model`. You have the `file_system` tool to list directories, get file info, and find files — use it for navigation and discovery.
 
-            For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, file_system for write/delete/copy/move).
+            For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, bash, file_system, and diff_patch).
 
             CRITICAL — Never trust your own knowledge:
             - If you need to answer with file contents, always delegate reading to `call_powerful_model`.
@@ -569,6 +573,60 @@ public final class ChatStore {
         if activeThreadId == id { activeThreadId = threads.first?.id }
     }
 
+    /// Removes a workspace from TurboCode and deletes only its persisted chats.
+    /// The workspace directory and all project files are left untouched.
+    public func removeWorkspace(_ path: String) async {
+        var sessionIDs = Set(
+            threads
+                .filter { $0.workspace == path }
+                .map(\.id)
+        )
+        if let storedSessions = try? TurboCodeConfig.shared.listSessions() {
+            sessionIDs.formUnion(
+                storedSessions
+                    .filter { $0.workspacePath == path }
+                    .map(\.id)
+            )
+        }
+
+        var deletionErrors: [String] = []
+        for id in sessionIDs {
+            do {
+                try TurboCodeConfig.shared.deleteSession(id: id)
+            } catch {
+                deletionErrors.append(error.localizedDescription)
+            }
+        }
+
+        let removedActiveThread = activeThreadId.map(sessionIDs.contains) ?? false
+        threads.removeAll { $0.workspace == path }
+        recentWorkspaces = recentWorkspaces.filter { $0 != path }
+
+        if removedActiveThread {
+            activeThreadId = nil
+            blocks = []
+            liveReasoning = ""
+            liveAssistant = ""
+            isFirstMessage = true
+        }
+
+        if workspaceRoot == path {
+            responseTask?.cancel()
+            workspaceRoot = ""
+            selectedProject = nil
+            currentBranch = ""
+            availableBranches = []
+            diffSections = []
+            isLoadingDiffs = false
+            rightPanelMode = nil
+            rebuildSession(keepingHistory: false)
+        }
+
+        if !deletionErrors.isEmpty {
+            error = "Some workspace chats could not be removed: \(deletionErrors.joined(separator: "; "))"
+        }
+    }
+
     public func restoreThread(id: String) async {
         guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
         threads[i].isArchived = false
@@ -695,7 +753,7 @@ public final class ChatStore {
                             return nil
                         }.joined()
                         if let request = ApprovalRequest(toolOutput: text) {
-                            pendingApproval = request
+                            presentApproval(request)
                         }
                     }
                 }
@@ -785,7 +843,7 @@ public final class ChatStore {
     /// then inform the model that the action completed.
     public func approveAction() {
         guard let request = pendingApproval else { return }
-        pendingApproval = nil
+        advanceApprovalQueue()
 
         Task {
             let result = await ToolApprovalRegistry.shared.approve(id: request.id)
@@ -802,7 +860,7 @@ public final class ChatStore {
     /// Reject a pending tool operation.
     public func rejectAction() {
         guard let request = pendingApproval else { return }
-        pendingApproval = nil
+        advanceApprovalQueue()
         if request.operation == "diffPatch" {
             updateDiffPatchBlock(id: request.id, status: .rejected)
         }
@@ -810,6 +868,23 @@ public final class ChatStore {
             await ToolApprovalRegistry.shared.reject(id: request.id)
             await sendInternalMessageWhenIdle("[User rejected tool action: \(request.summary). Do NOT perform this action.]")
         }
+    }
+
+    /// Receives approval requests directly from ToolApprovalRegistry. Transcript
+    /// parsing remains a compatibility fallback for external model adapters.
+    public func presentApproval(_ request: ApprovalRequest) {
+        guard pendingApproval?.id != request.id,
+              !queuedApprovals.contains(where: { $0.id == request.id }) else { return }
+
+        if pendingApproval == nil {
+            pendingApproval = request
+        } else {
+            queuedApprovals.append(request)
+        }
+    }
+
+    private func advanceApprovalQueue() {
+        pendingApproval = queuedApprovals.isEmpty ? nil : queuedApprovals.removeFirst()
     }
 
     private func sendInternalMessageWhenIdle(_ text: String) async {
@@ -910,6 +985,8 @@ public final class ChatStore {
             return item.map { "Reading \($0)" } ?? "Reading file"
         case "grep":
             return item.map { "Searching in \($0)" } ?? "Searching workspace"
+        case "bash":
+            return "Running command"
         case "file_system":
             let operation = try? call.arguments.value(String.self, forProperty: "operation")
             switch operation {

@@ -6,6 +6,8 @@ struct DiffPatchWidget: View {
 
     @Environment(ChatStore.self) private var chatStore
     @State private var showsAllFiles = false
+    @State private var displayedAdditions = 0
+    @State private var displayedDeletions = 0
 
     private var displayedFiles: ArraySlice<DiffPatchFileChange> {
         showsAllFiles ? patch.files[...] : patch.files.prefix(3)
@@ -40,6 +42,9 @@ struct DiffPatchWidget: View {
                 .stroke(.separator.opacity(0.7), lineWidth: 1)
         }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .task(id: patch.status) {
+            await animateCountsIfNeeded()
+        }
     }
 
     private var header: some View {
@@ -64,10 +69,12 @@ struct DiffPatchWidget: View {
                     .lineLimit(1)
 
                 HStack(spacing: 8) {
-                    Text("+\(patch.additions)")
+                    Text("+\(displayedAdditions)")
                         .foregroundStyle(.green)
-                    Text("-\(patch.deletions)")
+                        .contentTransition(.numericText())
+                    Text("-\(displayedDeletions)")
                         .foregroundStyle(.red)
+                        .contentTransition(.numericText())
                 }
                 .font(.system(size: 12, design: .monospaced))
             }
@@ -176,5 +183,33 @@ struct DiffPatchWidget: View {
         case .rejected: return "xmark.circle"
         case .running, .undoing: return "doc.badge.plus"
         }
+    }
+
+    @MainActor
+    private func animateCountsIfNeeded() async {
+        guard patch.status == .running || patch.status == .applied else {
+            displayedAdditions = patch.additions
+            displayedDeletions = patch.deletions
+            return
+        }
+
+        let startAdditions = displayedAdditions
+        let startDeletions = displayedDeletions
+        let steps = 12
+
+        for step in 1...steps {
+            guard !Task.isCancelled else { return }
+            let progress = Double(step) / Double(steps)
+            withAnimation(.linear(duration: 0.03)) {
+                displayedAdditions = startAdditions
+                    + Int(Double(patch.additions - startAdditions) * progress)
+                displayedDeletions = startDeletions
+                    + Int(Double(patch.deletions - startDeletions) * progress)
+            }
+            try? await Task.sleep(nanoseconds: 30_000_000)
+        }
+
+        displayedAdditions = patch.additions
+        displayedDeletions = patch.deletions
     }
 }

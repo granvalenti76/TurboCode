@@ -7,20 +7,18 @@ struct SidebarView: View {
     @State private var searchText: String = ""
     @State private var selectedNav: String = "chat"
     @State private var expandedWorkspaces: Set<String> = []
+    @State private var workspacePendingRemoval: String?
 
     var body: some View {
         VStack(spacing: 0) {
             headerView
             navItemsView
-            ScrollView(.vertical) {
-                VStack(spacing: 0) {
-                    projectsSection
-                    chatsSection
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.bottom, 12)
+            List {
+                projectsSection
+                chatsSection
             }
-            .scrollIndicators(.automatic)
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
             .frame(maxHeight: .infinity)
         }
         .background(Color.clear)
@@ -32,6 +30,19 @@ struct SidebarView: View {
         .onChange(of: chatStore.workspaceRoot) { _, workspace in
             guard !workspace.isEmpty else { return }
             expandedWorkspaces.insert(workspace)
+        }
+        .alert("Remove Workspace?", isPresented: workspaceRemovalPresented) {
+            Button("Cancel", role: .cancel) {
+                workspacePendingRemoval = nil
+            }
+            Button("Remove", role: .destructive) {
+                guard let path = workspacePendingRemoval else { return }
+                workspacePendingRemoval = nil
+                expandedWorkspaces.remove(path)
+                Task { await chatStore.removeWorkspace(path) }
+            }
+        } message: {
+            Text(workspaceRemovalMessage)
         }
     }
 
@@ -121,17 +132,16 @@ struct SidebarView: View {
                 .foregroundStyle(.tertiary)
             Spacer()
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 18)
-        .padding(.bottom, 8)
+        .padding(.leading, 6)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+        .textCase(nil)
     }
 
     // MARK: - Projects Section
 
     private var projectsSection: some View {
-        VStack(spacing: 0) {
-            sectionHeader("Projects")
-
+        Section {
             // All threads
             Button {
                 chatStore.selectedProject = nil
@@ -154,45 +164,15 @@ struct SidebarView: View {
                 .sidebarSelectionBackground(chatStore.selectedProject == nil)
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 10)
+            .listRowInsets(sidebarRowInsets)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
 
             // Recent workspace projects with expandable sessions
             ForEach(chatStore.recentWorkspaces, id: \.self) { path in
-                let name = URL(fileURLWithPath: path).lastPathComponent
-                let isSelected = chatStore.workspaceRoot == path && chatStore.selectedProject != nil
                 let isExpanded = expandedWorkspaces.contains(path)
 
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        if isExpanded {
-                            expandedWorkspaces.remove(path)
-                        } else {
-                            expandedWorkspaces.insert(path)
-                            if chatStore.workspaceRoot != path || !isSelected {
-                                chatStore.switchToWorkspace(path)
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: isSelected ? "folder.fill" : "folder")
-                            .font(.system(size: 14))
-                            .foregroundColor(isSelected ? .blue : .secondary)
-                            .frame(width: 20)
-                        Text(name)
-                            .font(AppTypography.sidebarLabel)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.tertiary)
-                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 7)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 10)
+                workspaceRow(path: path, isExpanded: isExpanded)
 
                 // Keep each workspace's conversations visually attached to its
                 // folder and let the user expand more than one project.
@@ -203,13 +183,16 @@ struct SidebarView: View {
                             .font(AppTypography.sidebarMetadata)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.leading, 52)
                             .padding(.vertical, 8)
+                            .listRowInsets(EdgeInsets(top: 0, leading: 52, bottom: 0, trailing: 10))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     } else {
                         ForEach(workspaceThreads.prefix(10)) { thread in
                             threadRow(for: thread)
-                                .padding(.leading, 38)
-                                .padding(.trailing, 10)
+                                .listRowInsets(EdgeInsets(top: 0, leading: 38, bottom: 0, trailing: 10))
+                                .listRowBackground(Color.clear)
+                                .listRowSeparator(.hidden)
                         }
                     }
                 }
@@ -234,22 +217,81 @@ struct SidebarView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 10)
+            .listRowInsets(sidebarRowInsets)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+        } header: {
+            sectionHeader("Projects")
+        }
+    }
+
+    private func workspaceRow(path: String, isExpanded: Bool) -> some View {
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        let isSelected = chatStore.workspaceRoot == path && chatStore.selectedProject != nil
+
+        return Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                if isExpanded {
+                    expandedWorkspaces.remove(path)
+                } else {
+                    expandedWorkspaces.insert(path)
+                    if chatStore.workspaceRoot != path || !isSelected {
+                        chatStore.switchToWorkspace(path)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isSelected ? "folder.fill" : "folder")
+                    .font(.system(size: 14))
+                    .foregroundColor(isSelected ? .blue : .secondary)
+                    .frame(width: 20)
+                Text(name)
+                    .font(AppTypography.sidebarLabel)
+                    .lineLimit(1)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(sidebarRowInsets)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                workspacePendingRemoval = path
+            } label: {
+                Label("Remove", systemImage: "trash")
+            }
+            .tint(.red)
+        }
+        .contextMenu {
+            Button("Remove Workspace…", role: .destructive) {
+                workspacePendingRemoval = path
+            }
         }
     }
 
     // MARK: - Chats Section
 
     private var chatsSection: some View {
-        VStack(spacing: 0) {
+        Section {
             if chatStore.selectedProject == nil {
-                sectionHeader("Chats")
-
                 if chatStore.threads.isEmpty {
                     emptyChatsView
                 } else {
                     chatsList
                 }
+            }
+        } header: {
+            if chatStore.selectedProject == nil {
+                sectionHeader("Chats")
             }
         }
     }
@@ -261,15 +303,40 @@ struct SidebarView: View {
                 .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal, 12)
         .padding(.vertical, 20)
+        .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
 
     private var chatsList: some View {
         ForEach(chatStore.sortedThreads.prefix(10)) { thread in
             threadRow(for: thread)
-                .padding(.horizontal, 10)
+                .listRowInsets(sidebarRowInsets)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
         }
+    }
+
+    private var sidebarRowInsets: EdgeInsets {
+        EdgeInsets(top: 0, leading: 10, bottom: 0, trailing: 10)
+    }
+
+    private var workspaceRemovalPresented: Binding<Bool> {
+        Binding(
+            get: { workspacePendingRemoval != nil },
+            set: { isPresented in
+                if !isPresented { workspacePendingRemoval = nil }
+            }
+        )
+    }
+
+    private var workspaceRemovalMessage: String {
+        guard let path = workspacePendingRemoval else { return "" }
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        let chatCount = chatStore.threads.filter { $0.workspace == path }.count
+        let chats = chatCount == 1 ? "1 associated chat" : "\(chatCount) associated chats"
+        return "This removes \(name) and \(chats) from TurboCode. Files in the workspace will not be deleted."
     }
 
     private func threads(forWorkspace path: String) -> [Conversation] {
