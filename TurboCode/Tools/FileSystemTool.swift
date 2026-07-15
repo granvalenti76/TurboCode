@@ -55,8 +55,11 @@ struct FileSystemTool: Tool {
     var description: String {
         """
         Perform file system operations on the workspace.
+        For directory listings always use the dedicated list_workspace tool,
+        which returns structured metadata for TurboCode's native timeline UI.
+        The list operation below remains available for compatibility only.
         Supported operations:
-        - list: List contents of a directory
+        - list: Compatibility directory listing; prefer list_workspace
         - info: Get file metadata (size, dates, type)
         - find: Search for files matching a pattern
         - createDirectory: Create a new directory (parent directories are created automatically)

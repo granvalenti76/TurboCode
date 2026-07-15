@@ -43,6 +43,10 @@ struct ChatBlockView: View {
             }
         case .productGuide:
             ProductGuideWidget(block: block)
+        case .workspaceListing:
+            if let listing = block.workspaceListing {
+                WorkspaceListingWidget(listing: listing)
+            }
         }
     }
 

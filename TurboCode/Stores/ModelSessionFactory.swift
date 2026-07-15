@@ -124,7 +124,10 @@ enum ModelSessionFactory {
                 dropsCompletedToolCalls: configuration.dropsCompletedToolCalls,
                 executionPolicy: configuration.agentTuning.execution,
                 gitPolicy: configuration.agentTuning.git,
-                supplementalTools: tools(for: activeCapabilities.toolAccess),
+                supplementalTools: tools(
+                    for: activeCapabilities.toolAccess,
+                    workspaceRoot: configuration.workspaceRoot
+                ),
                 onToolStart: { call in
                     await events.toolStarted(call, configuration.backend)
                 },
@@ -156,7 +159,7 @@ enum ModelSessionFactory {
             temperature: configuration.delegateTemperature,
             reasoningLevel: delegateCapabilities.reasoningLevel,
             delegateTools: delegateCapabilities.toolAccess == .standard
-                ? workspaceTools + tools(for: .standard)
+                ? workspaceTools + tools(for: .standard, workspaceRoot: configuration.workspaceRoot)
                 : [],
             delegateInstructions: instructions,
             onToolStart: { call in
@@ -168,7 +171,10 @@ enum ModelSessionFactory {
         )
 
         var orchestratorTools: [any Tool] = [powerfulTool]
-        orchestratorTools += tools(for: activeCapabilities.toolAccess)
+        orchestratorTools += tools(
+            for: activeCapabilities.toolAccess,
+            workspaceRoot: configuration.workspaceRoot
+        )
         if !configuration.workspaceRoot.isEmpty {
             orchestratorTools.append(FileSystemTool(workspaceRoot: configuration.workspaceRoot))
         }
@@ -247,12 +253,19 @@ enum ModelSessionFactory {
         return tools
     }
 
-    private static func tools(for access: ModelToolAccess) -> [any Tool] {
+    private static func tools(
+        for access: ModelToolAccess,
+        workspaceRoot: String
+    ) -> [any Tool] {
         switch access {
         case .none:
-            []
+            return []
         case .onDevice, .standard:
-            [TurboCodeGuideTool(store: .live)]
+            var tools: [any Tool] = [TurboCodeGuideTool(store: .live)]
+            if !workspaceRoot.isEmpty {
+                tools.append(ListWorkspaceTool(workspaceRoot: workspaceRoot))
+            }
+            return tools
         }
     }
 
@@ -322,6 +335,7 @@ enum ModelSessionFactory {
             text += "\nAll file operations are restricted to the workspace directory."
             text += "\nNEVER access files outside the workspace."
             text += "\nUse read_file with startLine and endLine to inspect only the relevant numbered source range and preserve context."
+            text += "\nUse list_workspace whenever you need to list or visually inspect the files and folders in one workspace directory. Pass a workspace-relative path and use . for the root."
             text += "\nUse git for every Git operation, including the init operation when the workspace is not yet a repository. Git mutations are supported directly; never claim they are blocked by the bash sandbox. Use bash for builds, tests, and precise non-Git inspection. Bash can read the workspace but cannot write to it."
             text += "\nUse edit_file for every source or text-file creation and modification. Read the relevant range immediately before editing, copy its Revision, and request one contiguous change per call. Never generate unified diff hunks."
             text += "\nWhen writing articles, biographies, documentation, or other long-form prose, preserve readable paragraphs with a blank line between them. The tool content must contain real newline characters; never collapse the whole document into one long line."
@@ -335,7 +349,7 @@ enum ModelSessionFactory {
 
 
         === ORCHESTRATOR MODE ===
-        You are TurboCode Orchestrator. You are NOT an Apple model — you are part of the TurboCode app. Your name is TurboCode, and you delegate complex tasks to the powerful coding model via `call_powerful_model`. You have the `file_system` tool to list directories, get file info, and find files — use it for navigation and discovery.
+        You are TurboCode Orchestrator. You are NOT an Apple model — you are part of the TurboCode app. Your name is TurboCode, and you delegate complex tasks to the powerful coding model via `call_powerful_model`. Use `list_workspace` to list directories for the user. Use `file_system` only for metadata, file discovery, and supported filesystem operations.
 
         For explicit questions about the TurboCode product itself, use `turbocode_guide` directly and answer from the returned official documentation. Never use it for greetings or ordinary coding questions. For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, git, bash, file_system, and edit_file).
 
@@ -343,12 +357,12 @@ enum ModelSessionFactory {
         - If you need to answer with file contents, always delegate reading to `call_powerful_model`.
         - If you need to modify code, always delegate to `call_powerful_model`.
         - Never rely on your training data for what a file contains or what code looks like in this project.
-        - Always use the tools — `file_system` for listing, `call_powerful_model` for actual file work.
+        - Always use the tools — `list_workspace` for directory listings, `call_powerful_model` for actual file work.
 
         Your role is:
         1. Understand what the user wants.
         2. For TurboCode product guidance: use `turbocode_guide` directly.
-        3. For file listing/info: use `file_system` directly.
+        3. For directory listings: use `list_workspace` directly. For metadata or file discovery: use `file_system` directly.
         4. For everything else: first output a brief acknowledgment to the user, then call `call_powerful_model` with a complete, self-contained task description that includes all relevant context (file paths, code snippets, error messages, requirements). Include full paths so the powerful model can navigate the workspace at: \(workspaceRoot).
         5. Synthesise the powerful model's response into a clear, well-formatted answer for the user.
 

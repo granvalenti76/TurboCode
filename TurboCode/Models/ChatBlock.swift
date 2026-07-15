@@ -12,6 +12,7 @@ public struct ChatBlock: Identifiable, Sendable, Hashable {
     public var diffPatch: DiffPatchBlock?
     public var gitCommit: GitCommitBlock?
     public var productGuide: ProductGuideBlock?
+    public var workspaceListing: WorkspaceListingBlock?
 
     public init(
         id: String = UUID().uuidString,
@@ -22,7 +23,8 @@ public struct ChatBlock: Identifiable, Sendable, Hashable {
         providerId: String? = nil,
         diffPatch: DiffPatchBlock? = nil,
         gitCommit: GitCommitBlock? = nil,
-        productGuide: ProductGuideBlock? = nil
+        productGuide: ProductGuideBlock? = nil,
+        workspaceListing: WorkspaceListingBlock? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -33,6 +35,7 @@ public struct ChatBlock: Identifiable, Sendable, Hashable {
         self.diffPatch = diffPatch
         self.gitCommit = gitCommit
         self.productGuide = productGuide
+        self.workspaceListing = workspaceListing
     }
 }
 
@@ -47,6 +50,7 @@ public enum ChatBlockKind: String, Sendable, Hashable, CaseIterable {
     case diffPatch = "diff_patch"
     case gitCommit = "git_commit"
     case productGuide = "product_guide"
+    case workspaceListing = "workspace_listing"
 }
 
 // MARK: - Git Commit Block

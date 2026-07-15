@@ -274,8 +274,14 @@ actor AgentDiagnosticsRecorder {
 
     nonisolated static func textContent(_ output: Transcript.ToolOutput) -> String {
         output.segments.compactMap { segment -> String? in
-            if case .text(let text) = segment { return text.content }
-            return nil
+            switch segment {
+            case .text(let text):
+                return text.content
+            case .structure(let structure):
+                return structure.content.jsonString
+            default:
+                return nil
+            }
         }.joined()
     }
 
@@ -291,6 +297,8 @@ actor AgentDiagnosticsRecorder {
         let explicitFailure = lower.hasPrefix("error")
             || lower.hasPrefix("edit transaction rejected:")
             || lower.hasPrefix("edit transaction failed:")
+            || (lower.contains("\"errormessage\":")
+                && !lower.contains("\"errormessage\":null"))
             || (toolName == "bash" && !lower.contains("exit code: 0"))
         guard explicitFailure else { return (.success, nil) }
         return (.failed, classifyFailure(text))

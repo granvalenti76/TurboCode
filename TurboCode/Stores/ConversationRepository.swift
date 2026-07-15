@@ -75,7 +75,8 @@ private extension ChatBlock {
             providerId: stored.providerId,
             diffPatch: stored.diffPatch,
             gitCommit: stored.gitCommit,
-            productGuide: stored.productGuide
+            productGuide: stored.productGuide,
+            workspaceListing: stored.workspaceListing
         )
     }
 }
@@ -91,7 +92,8 @@ private extension StoredBlock {
             providerId: block.providerId,
             diffPatch: block.diffPatch,
             gitCommit: block.gitCommit,
-            productGuide: block.productGuide
+            productGuide: block.productGuide,
+            workspaceListing: block.workspaceListing
         )
     }
 }

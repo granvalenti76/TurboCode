@@ -81,11 +81,11 @@ struct StandaloneSkills: DynamicInstructions {
         Skills(activations: activations) {
             Skill(
                 name: "file-browser",
-                description: "List files, get file metadata, find files by name, and perform file operations in the workspace",
+                description: "Get file metadata, find files by name, and perform file operations in the workspace",
                 allowsDeactivation: true
             ) {
                 Instructions {
-                    "Use this skill when you need to explore the workspace, list directory contents, get file info, find files, or perform file write/delete/copy/move operations."
+                    "Use list_workspace for every directory listing. Use this skill when you need file metadata, file discovery, or file write/delete/copy/move operations."
                 }
                 FileSystemTool(workspaceRoot: workspaceRoot)
             }

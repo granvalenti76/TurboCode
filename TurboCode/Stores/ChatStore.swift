@@ -250,6 +250,7 @@ public final class ChatStore {
     private var activeDiagnosticsRunID: String?
     private var activeEditGroupID: String?
     private var activeProductGuidePresentation: ProductGuideBlock?
+    private var activeAssistantPlaceholderID: String?
     private var editTransactionGroups: [String: String] = [:]
 
     // MARK: - Onboarding
@@ -867,6 +868,7 @@ public final class ChatStore {
 
         let placeholderId = UUID().uuidString
         blocks.append(ChatBlock(id: placeholderId, kind: .assistant, text: "", model: composerModel))
+        activeAssistantPlaceholderID = placeholderId
 
         runtimeStatus = .ready
         error = nil
@@ -1011,6 +1013,9 @@ public final class ChatStore {
         if activeEditGroupID == editGroupID {
             activeEditGroupID = nil
         }
+        if activeAssistantPlaceholderID == placeholderId {
+            activeAssistantPlaceholderID = nil
+        }
         editTransactionGroups = editTransactionGroups.filter { $0.value != editGroupID }
         // Persist after the title task finishes so the JSON never races with
         // the Apple on-device title generator and stores a stale "New Chat".
@@ -1152,7 +1157,30 @@ public final class ChatStore {
             }.joined()
             activeProductGuidePresentation = ProductGuideBlock(toolOutput: text)
         }
+        if let presentation = ToolPresentationRouter.presentation(for: call, output: output) {
+            presentToolPresentation(presentation)
+        }
         toolActivities.removeAll { $0.id == call.id }
+    }
+
+    private func presentToolPresentation(_ presentation: ToolPresentation) {
+        let block: ChatBlock
+        switch presentation {
+        case .workspaceListing(let listing):
+            block = ChatBlock(
+                id: "workspace-listing-\(listing.toolCallID)",
+                kind: .workspaceListing,
+                text: listing.path,
+                workspaceListing: listing
+            )
+        }
+        guard !blocks.contains(where: { $0.id == block.id }) else { return }
+        if let placeholderID = activeAssistantPlaceholderID,
+           let index = blocks.firstIndex(where: { $0.id == placeholderID }) {
+            blocks.insert(block, at: index)
+        } else {
+            blocks.append(block)
+        }
     }
 
     public func beginDiffPatchBlock(
@@ -1355,6 +1383,9 @@ public final class ChatStore {
             return "Working with coding model"
         case "turbocode_guide":
             return "Consulting TurboCode Guide"
+        case "list_workspace":
+            let path = try? call.arguments.value(String.self, forProperty: "path")
+            return path == "." ? "Browsing workspace" : "Browsing \(path ?? "workspace")"
         case "activate_skill", "toggle_skill", "load_skill":
             let skill = try? call.arguments.value(String.self, forProperty: "skill")
             return skill.map { "Loading \($0)" } ?? "Loading skill"

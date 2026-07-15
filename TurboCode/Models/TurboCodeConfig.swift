@@ -563,15 +563,18 @@ public struct StoredBlock: Codable, Hashable, Sendable, Identifiable {
     public var diffPatch: DiffPatchBlock?
     public var gitCommit: GitCommitBlock?
     public var productGuide: ProductGuideBlock?
+    public var workspaceListing: WorkspaceListingBlock?
 
     public init(id: String = UUID().uuidString, kind: String, text: String,
                 createdAt: Date = .now, model: String? = nil, providerId: String? = nil,
                 diffPatch: DiffPatchBlock? = nil, gitCommit: GitCommitBlock? = nil,
-                productGuide: ProductGuideBlock? = nil) {
+                productGuide: ProductGuideBlock? = nil,
+                workspaceListing: WorkspaceListingBlock? = nil) {
         self.id = id; self.kind = kind; self.text = text
         self.createdAt = createdAt; self.model = model; self.providerId = providerId
         self.diffPatch = diffPatch
         self.gitCommit = gitCommit
         self.productGuide = productGuide
+        self.workspaceListing = workspaceListing
     }
 }
