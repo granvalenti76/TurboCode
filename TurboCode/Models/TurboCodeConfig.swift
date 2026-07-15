@@ -17,6 +17,15 @@ public final class TurboCodeConfig {
     private var sessionsDir: URL { rootURL.appendingPathComponent("sessions") }
     public var skillsDirectoryURL: URL { rootURL.appendingPathComponent("SKILLS", isDirectory: true) }
     public var diagnosticsDirectoryURL: URL { rootURL.appendingPathComponent("diagnostics", isDirectory: true) }
+    public var documentationDirectoryURL: URL {
+        rootURL.appendingPathComponent("documentation", isDirectory: true)
+    }
+    public var officialDocumentationDirectoryURL: URL {
+        documentationDirectoryURL.appendingPathComponent("official", isDirectory: true)
+    }
+    public var userDocumentationDirectoryURL: URL {
+        documentationDirectoryURL.appendingPathComponent("user", isDirectory: true)
+    }
 
     private var encoder: JSONEncoder {
         let e = JSONEncoder()
@@ -38,6 +47,14 @@ public final class TurboCodeConfig {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: skillsDirectoryURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: officialDocumentationDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: userDocumentationDirectoryURL,
+            withIntermediateDirectories: true
+        )
 
         try migrateRemoteModels()
         try migrateAgentTuning()
@@ -545,13 +562,16 @@ public struct StoredBlock: Codable, Hashable, Sendable, Identifiable {
     public var providerId: String?
     public var diffPatch: DiffPatchBlock?
     public var gitCommit: GitCommitBlock?
+    public var productGuide: ProductGuideBlock?
 
     public init(id: String = UUID().uuidString, kind: String, text: String,
                 createdAt: Date = .now, model: String? = nil, providerId: String? = nil,
-                diffPatch: DiffPatchBlock? = nil, gitCommit: GitCommitBlock? = nil) {
+                diffPatch: DiffPatchBlock? = nil, gitCommit: GitCommitBlock? = nil,
+                productGuide: ProductGuideBlock? = nil) {
         self.id = id; self.kind = kind; self.text = text
         self.createdAt = createdAt; self.model = model; self.providerId = providerId
         self.diffPatch = diffPatch
         self.gitCommit = gitCommit
+        self.productGuide = productGuide
     }
 }

@@ -1,0 +1,33 @@
+{
+  "version": "1.0.0",
+  "documents": [
+    {
+      "id": "capabilities",
+      "title": "What TurboCode Can Do",
+      "summary": "A practical overview of TurboCode's Swift development capabilities and best use cases.",
+      "file": "turbocode-capabilities.md",
+      "keywords": ["what can you do", "cosa sai fare", "capabilities", "features", "use cases", "Swift", "SwiftUI", "Xcode"]
+    },
+    {
+      "id": "workflow",
+      "title": "The TurboCode Workflow",
+      "summary": "How to move from a request to inspected, edited, built, tested, and reviewable code.",
+      "file": "turbocode-workflow.md",
+      "keywords": ["workflow", "workspace", "edit", "build", "test", "review", "Git", "best practices"]
+    },
+    {
+      "id": "models",
+      "title": "Models and Orchestrator Mode",
+      "summary": "When to use Apple on-device, standalone mode, or delegation to a powerful model.",
+      "file": "turbocode-models.md",
+      "keywords": ["model", "Apple", "on-device", "orchestrator", "Llama", "PCC", "DeepSeek", "delegate"]
+    },
+    {
+      "id": "safety",
+      "title": "Safety, Review, and Control",
+      "summary": "Workspace boundaries, approvals, deterministic edits, review, and undo.",
+      "file": "turbocode-safety.md",
+      "keywords": ["safety", "approval", "workspace", "review", "undo", "privacy", "Git"]
+    }
+  ]
+}

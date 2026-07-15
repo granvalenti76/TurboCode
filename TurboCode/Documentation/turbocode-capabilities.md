@@ -1,0 +1,27 @@
+# What TurboCode Can Do
+
+TurboCode is a native macOS development workbench specialized in Swift, SwiftUI, Xcode projects, and Swift packages. It combines a conversational agent with deterministic project services so that a request can become a reviewable and verified engineering result.
+
+## Understand an existing project
+
+TurboCode can inspect the active workspace, read focused source ranges, search for symbols and patterns, explain unfamiliar Swift code, and connect implementation details across files. Every file operation remains bounded to the selected workspace.
+
+## Make precise changes
+
+The agent can create and update source files through revision-bound editing operations. TurboCode validates paths and revisions, generates patches internally, groups related edits into a visible change widget, and provides Review and Undo actions.
+
+## Complete the engineering loop
+
+TurboCode can run focused builds and tests with the selected Xcode toolchain, interpret compiler diagnostics, inspect Git changes, work with branches and commits, and summarize what changed. The goal is to complete a workflow without forcing the user to move between a chatbot, Terminal, Finder, and a browser-based IDE.
+
+## Good use cases
+
+- Understand the architecture of an unfamiliar Swift project.
+- Implement or refine a SwiftUI feature.
+- Diagnose a compiler or test failure.
+- Refactor code while keeping changes reviewable.
+- Create tests for existing behavior.
+- Inspect a working tree and prepare a Git commit.
+- Learn Swift through explanations grounded in the current project.
+
+TurboCode is intentionally focused on Apple development. It is not a general desktop automation agent or an unrestricted shell.

@@ -41,6 +41,8 @@ struct ChatBlockView: View {
             if let receipt = block.gitCommit {
                 GitCommitWidget(blockID: block.id, receipt: receipt)
             }
+        case .productGuide:
+            ProductGuideWidget(block: block)
         }
     }
 

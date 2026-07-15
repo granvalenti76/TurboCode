@@ -17,6 +17,7 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let dropsCompletedToolCalls: Bool
     let executionPolicy: ExecutionPolicy
     let gitPolicy: GitPolicy
+    let supplementalTools: [any Tool]
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
 
@@ -51,6 +52,7 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
             if !diskSkills.isEmpty {
                 LoadSkillTool(skills: diskSkills)
             }
+            supplementalTools
         }
         .model(model)
         .temperature(temperature)

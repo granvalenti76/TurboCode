@@ -263,6 +263,11 @@ public final class ChatStore {
         } catch {
             print("[TurboCode] Onboarding failed: \(error.localizedDescription)")
         }
+        do {
+            try ProductDocumentationStore.live.installBundledDocumentation()
+        } catch {
+            print("[TurboCode] Documentation installation failed: \(error.localizedDescription)")
+        }
     }
     public convenience init() {
         self.init(conversationRepository: DiskConversationRepository())
@@ -865,6 +870,7 @@ public final class ChatStore {
         runtimeStatus = .ready
         error = nil
         var accumulatedText = ""
+        var productGuidePresentation: ProductGuideBlock?
 
         do {
             let stream = session.streamResponse(to: promptText)
@@ -916,6 +922,9 @@ public final class ChatStore {
                         if let request = ApprovalRequest(toolOutput: text) {
                             presentApproval(request)
                         }
+                        if let guide = ProductGuideBlock(toolOutput: text) {
+                            productGuidePresentation = guide
+                        }
                     }
                 }
             }
@@ -934,9 +943,10 @@ public final class ChatStore {
                 } else {
                     blocks[i] = ChatBlock(
                         id: placeholderId,
-                        kind: .assistant,
+                        kind: productGuidePresentation == nil ? .assistant : .productGuide,
                         text: finalText,
-                        model: composerModel
+                        model: composerModel,
+                        productGuide: productGuidePresentation
                     )
                 }
             }
@@ -1337,6 +1347,8 @@ public final class ChatStore {
             }
         case "call_powerful_model":
             return "Working with coding model"
+        case "turbocode_guide":
+            return "Consulting TurboCode Guide"
         case "activate_skill", "toggle_skill", "load_skill":
             let skill = try? call.arguments.value(String.self, forProperty: "skill")
             return skill.map { "Loading \($0)" } ?? "Loading skill"

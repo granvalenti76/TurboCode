@@ -26,6 +26,7 @@ struct ModelSessionEvents {
 
 enum ModelToolAccess: Equatable {
     case none
+    case onDevice
     case standard
 }
 
@@ -57,14 +58,15 @@ private struct ToollessProfile: LanguageModelSession.DynamicProfile {
 enum ModelCapabilityPolicy {
     static func resolve(
         for model: any LanguageModel,
-        requestedReasoningLevel: ContextOptions.ReasoningLevel?
+        requestedReasoningLevel: ContextOptions.ReasoningLevel?,
+        preferredToolAccess: ModelToolAccess = .standard
     ) -> ResolvedModelCapabilities {
         let capabilities = model.capabilities
         return ResolvedModelCapabilities(
             reasoningLevel: capabilities.contains(.reasoning)
                 ? requestedReasoningLevel
                 : nil,
-            toolAccess: capabilities.contains(.toolCalling) ? .standard : .none
+            toolAccess: capabilities.contains(.toolCalling) ? preferredToolAccess : .none
         )
     }
 }
@@ -83,11 +85,12 @@ enum ModelSessionFactory {
         let activeModel = activeModel(for: configuration)
         let activeCapabilities = ModelCapabilityPolicy.resolve(
             for: activeModel,
-            requestedReasoningLevel: configuration.reasoningLevel
+            requestedReasoningLevel: configuration.reasoningLevel,
+            preferredToolAccess: configuration.backend == .foundationApple ? .onDevice : .standard
         )
 
         if configuration.orchestratorMode == .orchestrator,
-           activeCapabilities.toolAccess == .standard {
+           activeCapabilities.toolAccess != .none {
             return makeOrchestratorSession(
                 configuration: configuration,
                 instructions: instructions,
@@ -99,7 +102,7 @@ enum ModelSessionFactory {
             )
         }
 
-        guard activeCapabilities.toolAccess == .standard else {
+        guard activeCapabilities.toolAccess != .none else {
             return makeToollessSession(
                 instructions: instructions,
                 model: activeModel,
@@ -121,6 +124,7 @@ enum ModelSessionFactory {
                 dropsCompletedToolCalls: configuration.dropsCompletedToolCalls,
                 executionPolicy: configuration.agentTuning.execution,
                 gitPolicy: configuration.agentTuning.git,
+                supplementalTools: tools(for: activeCapabilities.toolAccess),
                 onToolStart: { call in
                     await events.toolStarted(call, configuration.backend)
                 },
@@ -162,6 +166,7 @@ enum ModelSessionFactory {
         )
 
         var orchestratorTools: [any Tool] = [powerfulTool]
+        orchestratorTools += tools(for: activeCapabilities.toolAccess)
         if !configuration.workspaceRoot.isEmpty {
             orchestratorTools.append(FileSystemTool(workspaceRoot: configuration.workspaceRoot))
         }
@@ -240,6 +245,15 @@ enum ModelSessionFactory {
         return tools
     }
 
+    private static func tools(for access: ModelToolAccess) -> [any Tool] {
+        switch access {
+        case .none, .standard:
+            []
+        case .onDevice:
+            [TurboCodeGuideTool(store: .live)]
+        }
+    }
+
     private static func activeModel(
         for configuration: ModelSessionConfiguration
     ) -> any LanguageModel {
@@ -275,6 +289,9 @@ enum ModelSessionFactory {
         model or any Apple product. Your name is TurboCode.
         """
         text += "\nAlways use Markdown formatting in your responses: **bold**, `code`, ```code blocks```, tables, etc."
+        if configuration.backend == .foundationApple {
+            text += "\nBefore answering any question about TurboCode itself—its capabilities, workflows, models, tools, safety, settings, or best use—call turbocode_guide with the user's original question. Base product facts on the returned official documentation and answer in the user's language."
+        }
         switch configuration.agentTuning.agent.responseStyle {
         case .concise:
             text += "\nKeep responses concise and lead with the result. Include only details needed to act or verify."
@@ -320,7 +337,7 @@ enum ModelSessionFactory {
         === ORCHESTRATOR MODE ===
         You are TurboCode Orchestrator. You are NOT an Apple model — you are part of the TurboCode app. Your name is TurboCode, and you delegate complex tasks to the powerful coding model via `call_powerful_model`. You have the `file_system` tool to list directories, get file info, and find files — use it for navigation and discovery.
 
-        For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, git, bash, file_system, and edit_file).
+        For questions about TurboCode itself, use `turbocode_guide` directly and answer from the returned official documentation. For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, git, bash, file_system, and edit_file).
 
         CRITICAL — Never trust your own knowledge:
         - If you need to answer with file contents, always delegate reading to `call_powerful_model`.
@@ -330,9 +347,10 @@ enum ModelSessionFactory {
 
         Your role is:
         1. Understand what the user wants.
-        2. For file listing/info: use `file_system` directly.
-        3. For everything else: first output a brief acknowledgment to the user, then call `call_powerful_model` with a complete, self-contained task description that includes all relevant context (file paths, code snippets, error messages, requirements). Include full paths so the powerful model can navigate the workspace at: \(workspaceRoot).
-        4. Synthesise the powerful model's response into a clear, well-formatted answer for the user.
+        2. For TurboCode product guidance: use `turbocode_guide` directly.
+        3. For file listing/info: use `file_system` directly.
+        4. For everything else: first output a brief acknowledgment to the user, then call `call_powerful_model` with a complete, self-contained task description that includes all relevant context (file paths, code snippets, error messages, requirements). Include full paths so the powerful model can navigate the workspace at: \(workspaceRoot).
+        5. Synthesise the powerful model's response into a clear, well-formatted answer for the user.
 
         === APPROVAL REQUESTS ===
         If the powerful model's response contains "TURBOCODE_APPROVAL_REQUIRED", stop and wait for the user. The app presents the approval UI; never expose the technical approval block in your response.
