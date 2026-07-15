@@ -12,7 +12,7 @@ The agent can create and update source files through revision-bound editing oper
 
 ## Complete the engineering loop
 
-TurboCode can run focused builds and tests with the selected Xcode toolchain, interpret compiler diagnostics, inspect Git changes, work with branches and commits, and summarize what changed. The goal is to complete a workflow without forcing the user to move between a chatbot, Terminal, Finder, and a browser-based IDE.
+TurboCode can inspect Xcode containers and schemes, run focused builds and tests with the selected Xcode toolchain, and reduce verbose result bundles to actionable file, line, error, warning, and test-failure summaries. It shares Xcode's normal incremental build state instead of creating a separate cold-build cache. TurboCode can also inspect Git changes, work with branches and commits, and summarize what changed. The goal is to complete a workflow without forcing the user to move between a chatbot, Terminal, Finder, and a browser-based IDE.
 
 ## Good use cases
 

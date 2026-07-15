@@ -57,9 +57,14 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                 }
                 if toolPlan.contains(.bash) {
                     Instructions {
-                        "Use bash only for builds, tests, and precise read-only inspection not covered by a structured tool."
+                        "Use bash only for Swift Package commands, non-Xcode builds and tests, and precise read-only inspection not covered by a structured tool."
                     }
                     BashTool(workspaceRoot: workspaceRoot, executionPolicy: executionPolicy)
+                }
+                if toolPlan.contains(.xcodeProject) {
+                    Instructions {
+                        "Use xcode_project instead of bash to inspect, build, or test an Xcode project. Start with inspect when the container or scheme is unknown, and act on the first reported source error before rebuilding."
+                    }
                 }
                 StandaloneSkills(
                     activations: activations,

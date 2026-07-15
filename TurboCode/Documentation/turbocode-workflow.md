@@ -2,7 +2,7 @@
 
 Start by choosing the workspace that contains the Xcode project, workspace, or Swift package. Describe the result you want and include relevant constraints, expected behavior, or an error message. TurboCode will inspect the smallest useful portion of the project before proposing or applying changes.
 
-For implementation work, a strong request explains the desired user-visible result instead of prescribing every code edit. TurboCode can then read the relevant files, make revision-bound changes, run the most focused available build or test, and report both the outcome and any remaining uncertainty.
+For implementation work, a strong request explains the desired user-visible result instead of prescribing every code edit. TurboCode can then read the relevant files, make revision-bound changes, inspect the Xcode schemes, run the most focused available build or test, and report compact source diagnostics rather than a complete compiler log.
 
 Changes appear as persistent widgets in the conversation. Use Review to inspect the real working tree in the Git inspector and Undo when a generated edit should be reverted. Git operations are performed through a structured service rather than opaque shell interpolation.
 

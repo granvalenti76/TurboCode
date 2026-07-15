@@ -33,6 +33,20 @@ DeepSeek uses `enhanced`, which adds imports and type relationships to focused
 map queries. Apple on-device never receives the repository-map tool, including
 when it is acting as orchestrator; the configured delegate maps the workspace.
 
+## Xcode build and test execution
+
+Capable standalone and delegated models receive the flat `xcode_project` tool.
+It supports project inspection, builds, and tests; Apple on-device does not
+receive it. Xcode command arguments are passed directly to `xcrun` without shell
+interpolation. Structured results are read with `xcresulttool` and compacted
+before they reach the model.
+
+TurboCode leaves DerivedData under Xcode's normal management, so tool calls reuse
+the same incremental build state as builds started in the Xcode application.
+Individual result bundles are created in temporary storage and removed after
+TurboCode extracts diagnostics. Xcode operations use
+`execution.maximumCommandTimeoutSeconds`, up to the supported 600-second limit.
+
 ## Schema Version 1
 
 ```json

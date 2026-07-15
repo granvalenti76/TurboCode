@@ -135,7 +135,12 @@ enum ModelSessionFactory {
                 supplementalTools: toolInstances(
                     for: standalonePlan,
                     configuration: configuration,
-                    including: [.turboCodeGuide, .listWorkspace, .swiftWorkspaceMap],
+                    including: [
+                        .turboCodeGuide,
+                        .listWorkspace,
+                        .swiftWorkspaceMap,
+                        .xcodeProject
+                    ],
                     repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
                         ?? 32_768
                 ),
@@ -288,6 +293,12 @@ enum ModelSessionFactory {
                     workspaceRoot: configuration.workspaceRoot,
                     executionPolicy: configuration.agentTuning.execution
                 )
+            case .xcodeProject:
+                return XcodeProjectTool(
+                    workspaceRoot: configuration.workspaceRoot,
+                    executionPolicy: configuration.agentTuning.execution,
+                    enhancedOutput: plan.tier == .enhanced
+                )
             case .editFile:
                 return EditFileTool(workspaceRoot: configuration.workspaceRoot)
             case .loadSkill:
@@ -386,7 +397,7 @@ enum ModelSessionFactory {
             text += "\nNEVER access files outside the workspace."
             text += "\nUse read_file with startLine and endLine to inspect only the relevant numbered source range and preserve context."
             text += "\nUse list_workspace whenever you need to list or visually inspect the files and folders in one workspace directory. Pass a workspace-relative path and use . for the root."
-            text += "\nUse git for every Git operation, including the init operation when the workspace is not yet a repository. Git mutations are supported directly; never claim they are blocked by the bash sandbox. Use bash for builds, tests, and precise non-Git inspection. Bash can read the workspace but cannot write to it."
+            text += "\nUse git for every Git operation, including the init operation when the workspace is not yet a repository. Git mutations are supported directly; never claim they are blocked by the bash sandbox. Use xcode_project for Xcode discovery, builds, and tests whenever it is available. Use bash for Swift Package commands, other builds and tests, and precise non-Git inspection. Bash can read the workspace but cannot write to it."
             text += "\nUse edit_file for every source or text-file creation and modification. Read the relevant range immediately before editing, copy its Revision, and request one contiguous change per call. Never generate unified diff hunks."
             text += "\nWhen writing articles, biographies, documentation, or other long-form prose, preserve readable paragraphs with a blank line between them. The tool content must contain real newline characters; never collapse the whole document into one long line."
             text += "\nFile and directory deletion and destructive Git operations require approval. If a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."

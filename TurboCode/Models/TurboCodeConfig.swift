@@ -59,7 +59,6 @@ public final class TurboCodeConfig {
             at: userDocumentationDirectoryURL,
             withIntermediateDirectories: true
         )
-
         try migrateRemoteModels()
         try migrateAgentTuning()
 
@@ -145,6 +144,10 @@ public final class TurboCodeConfig {
             contents += "\n\n" + Self.repositoryMapSkillSection + "\n"
             changed = true
         }
+        if !contents.contains(Self.xcodeProjectSkillMarker) {
+            contents += "\n\n" + Self.xcodeProjectSkillSection + "\n"
+            changed = true
+        }
         if changed {
             try contents.write(to: url, atomically: true, encoding: .utf8)
         }
@@ -220,6 +223,9 @@ public final class TurboCodeConfig {
     private static let repositoryMapSkillMarker =
         "<!-- turbocode-managed:repository-map-v1 -->"
 
+    private static let xcodeProjectSkillMarker =
+        "<!-- turbocode-managed:xcode-project-v1 -->"
+
     private static let agentTuningSkillSection = """
     <!-- turbocode-managed:agent-tuning-v1 -->
     ## Agent Tuning
@@ -243,6 +249,19 @@ public final class TurboCodeConfig {
     files. Then use `read_file` only for the focused line ranges needed by the
     task. Apple on-device does not receive this tool; in orchestrator mode the
     configured delegate maps the project.
+    """
+
+    private static let xcodeProjectSkillSection = """
+    <!-- turbocode-managed:xcode-project-v1 -->
+    ## Xcode project validation
+
+    Capable standalone and delegated models receive `xcode_project` with flat
+    `inspect`, `build`, and `test` actions. Prefer it over `bash` for Xcode work:
+    it discovers schemes, reuses Xcode's incremental build state, parses
+    `.xcresult`, and
+    returns bounded source diagnostics instead of raw compiler logs. Apple
+    on-device does not receive this tool and delegates Xcode work in Orchestrator
+    mode. Build duration remains bounded by the maximum timeout in Agent Settings.
     """
 
     private static let turboCodeSkill = """
@@ -279,6 +298,8 @@ public final class TurboCodeConfig {
       remote Git workflows. Git writes are independent from the read-only bash
       sandbox. Destructive operations are presented for approval before execution.
     - `bash` runs bounded commands with read-only workspace access in a macOS process sandbox.
+    - `xcode_project` inspects, builds, and tests Xcode containers with compact
+      structured diagnostics for capable models.
     - Every model uses the flat single-change `edit_file` schema. TurboCode handles
       transaction assembly internally and presents the review widget with additions,
       deletions, Review, and Undo.
@@ -289,6 +310,8 @@ public final class TurboCodeConfig {
     sidebar. It removes only the workspace reference and associated chat sessions.
 
     \(repositoryMapSkillSection)
+
+    \(xcodeProjectSkillSection)
 
     ## Skills
 

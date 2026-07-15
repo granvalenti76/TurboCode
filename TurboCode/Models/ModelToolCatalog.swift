@@ -22,6 +22,7 @@ nonisolated enum ToolCapabilityID: String, CaseIterable, Sendable, Hashable, Ide
     case fileSystem = "file_system"
     case git
     case bash
+    case xcodeProject = "xcode_project"
     case editFile = "edit_file"
     case loadSkill = "load_skill"
     case callPowerfulModel = "call_powerful_model"
@@ -52,6 +53,7 @@ nonisolated enum ToolAvailabilityRequirement: Sendable, Hashable {
     case skills
     case delegateModel
     case repositoryMap
+    case capableWorkspace
 }
 
 nonisolated struct ToolAccessContext: Sendable, Hashable {
@@ -149,9 +151,17 @@ nonisolated enum ModelToolCatalog {
         .init(
             id: .bash,
             name: "Run Command",
-            summary: "Run bounded builds, tests, and read-only inspection commands.",
+            summary: "Run bounded non-Xcode commands and read-only inspections.",
             category: .execution,
             systemImage: "terminal",
+            hasNativePresentation: false
+        ),
+        .init(
+            id: .xcodeProject,
+            name: "Xcode Project",
+            summary: "Inspect, build, and test Xcode projects with compact diagnostics.",
+            category: .execution,
+            systemImage: "hammer",
             hasNativePresentation: false
         ),
         .init(
@@ -195,6 +205,9 @@ nonisolated enum ModelToolCatalog {
                (tier == .onDevice || context.repositoryMapDetail == nil) {
                 return nil
             }
+            if requirement == .capableWorkspace, tier == .onDevice {
+                return nil
+            }
             return assignment(id: id, requirement: requirement, tier: tier, context: context)
         }
         return ModelToolPlan(profile: profile, tier: tier, assignments: assignments)
@@ -214,6 +227,7 @@ nonisolated enum ModelToolCatalog {
                 (.fileSystem, .workspace),
                 (.git, .workspace),
                 (.bash, .workspace),
+                (.xcodeProject, .capableWorkspace),
                 (.editFile, .workspace),
                 (.loadSkill, .skills)
             ]
@@ -235,6 +249,7 @@ nonisolated enum ModelToolCatalog {
                 (.fileSystem, .workspace),
                 (.git, .workspace),
                 (.bash, .workspace),
+                (.xcodeProject, .capableWorkspace),
                 (.editFile, .workspace),
                 (.loadSkill, .skills)
             ]
@@ -264,6 +279,10 @@ nonisolated enum ModelToolCatalog {
         case .delegateModel where !context.hasDelegateModel:
             return .init(id: id, isRegistered: false, unavailableReason: "Configure a delegate model")
         case .repositoryMap:
+            return context.hasWorkspace
+                ? .init(id: id, isRegistered: true, unavailableReason: nil)
+                : .init(id: id, isRegistered: false, unavailableReason: "Choose a workspace")
+        case .capableWorkspace:
             return context.hasWorkspace
                 ? .init(id: id, isRegistered: true, unavailableReason: nil)
                 : .init(id: id, isRegistered: false, unavailableReason: "Choose a workspace")

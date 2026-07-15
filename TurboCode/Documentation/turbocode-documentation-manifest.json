@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "documents": [
     {
       "id": "capabilities",
@@ -21,6 +21,13 @@
       "summary": "When to use Apple on-device, standalone mode, or delegation to a powerful model.",
       "file": "turbocode-models.md",
       "keywords": ["model", "Apple", "on-device", "orchestrator", "Llama", "PCC", "DeepSeek", "delegate"]
+    },
+    {
+      "id": "xcode-tools",
+      "title": "Building and Testing with Xcode",
+      "summary": "How TurboCode inspects Xcode projects and returns compact build and test diagnostics.",
+      "file": "turbocode-xcode-tools.md",
+      "keywords": ["Xcode", "build", "compile", "test", "scheme", "xcresult", "DerivedData", "diagnostics"]
     },
     {
       "id": "safety",
