@@ -115,9 +115,12 @@ public final class ChatStore {
     private(set) var availableSkills: [TurboCodeSkillDefinition] = []
 
     /// Maps the persisted ReasoningEffort to FoundationModels' ReasoningLevel.
-    /// Returns `nil` for Apple models (on-device and PCC) which don't support it.
+    /// The Apple on-device model doesn't support reasoning. Remote models are
+    /// resolved from their declared capabilities and validated again by the
+    /// session factory before the profile is built.
     public var reasoningLevel: ContextOptions.ReasoningLevel? {
-        reasoningLevel(for: activeRemoteModel)
+        guard activeBackend != .foundationApple else { return nil }
+        return reasoningLevel(for: activeRemoteModel)
     }
 
     private func reasoningLevel(for model: RemoteModelConfig?) -> ContextOptions.ReasoningLevel? {

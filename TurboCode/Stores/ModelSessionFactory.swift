@@ -24,6 +24,51 @@ struct ModelSessionEvents {
     let delegationChanged: @Sendable (Bool) async -> Void
 }
 
+enum ModelToolAccess: Equatable {
+    case none
+    case standard
+}
+
+struct ResolvedModelCapabilities {
+    let reasoningLevel: ContextOptions.ReasoningLevel?
+    let toolAccess: ModelToolAccess
+}
+
+private struct ToollessProfile: LanguageModelSession.DynamicProfile {
+    let instructions: String
+    let model: any LanguageModel
+    let temperature: Double?
+    let reasoningLevel: ContextOptions.ReasoningLevel?
+
+    var body: some LanguageModelSession.DynamicProfile {
+        LanguageModelSession.Profile {
+            Instructions(instructions)
+        }
+        .model(model)
+        .temperature(temperature)
+        .reasoningLevel(reasoningLevel)
+    }
+}
+
+/// Converts product intent into capabilities that a concrete model can accept.
+/// This is the extension point for future model classes and richer tool tiers:
+/// profiles consume this resolved policy instead of assuming every backend can
+/// use every option or tool.
+enum ModelCapabilityPolicy {
+    static func resolve(
+        for model: any LanguageModel,
+        requestedReasoningLevel: ContextOptions.ReasoningLevel?
+    ) -> ResolvedModelCapabilities {
+        let capabilities = model.capabilities
+        return ResolvedModelCapabilities(
+            reasoningLevel: capabilities.contains(.reasoning)
+                ? requestedReasoningLevel
+                : nil,
+            toolAccess: capabilities.contains(.toolCalling) ? .standard : .none
+        )
+    }
+}
+
 /// Owns the construction of Foundation Models sessions, profiles, tools and
 /// system instructions. ChatStore only supplies current application state and
 /// receives lifecycle events used to update its observable UI state.
@@ -36,15 +81,31 @@ enum ModelSessionFactory {
         let instructions = instructions(for: configuration)
         let workspaceTools = workspaceTools(for: configuration)
         let activeModel = activeModel(for: configuration)
+        let activeCapabilities = ModelCapabilityPolicy.resolve(
+            for: activeModel,
+            requestedReasoningLevel: configuration.reasoningLevel
+        )
 
-        if configuration.orchestratorMode == .orchestrator {
+        if configuration.orchestratorMode == .orchestrator,
+           activeCapabilities.toolAccess == .standard {
             return makeOrchestratorSession(
                 configuration: configuration,
                 instructions: instructions,
                 workspaceTools: workspaceTools,
                 activeModel: activeModel,
+                activeCapabilities: activeCapabilities,
                 history: history,
                 events: events
+            )
+        }
+
+        guard activeCapabilities.toolAccess == .standard else {
+            return makeToollessSession(
+                instructions: instructions,
+                model: activeModel,
+                temperature: configuration.activeTemperature,
+                reasoningLevel: activeCapabilities.reasoningLevel,
+                history: history
             )
         }
 
@@ -56,7 +117,7 @@ enum ModelSessionFactory {
                 workspaceRoot: configuration.workspaceRoot,
                 model: activeModel,
                 temperature: configuration.activeTemperature,
-                reasoningLevel: configuration.reasoningLevel,
+                reasoningLevel: activeCapabilities.reasoningLevel,
                 dropsCompletedToolCalls: configuration.dropsCompletedToolCalls,
                 executionPolicy: configuration.agentTuning.execution,
                 gitPolicy: configuration.agentTuning.git,
@@ -76,15 +137,21 @@ enum ModelSessionFactory {
         instructions: String,
         workspaceTools: [any Tool],
         activeModel: any LanguageModel,
+        activeCapabilities: ResolvedModelCapabilities,
         history: [Transcript.Entry],
         events: ModelSessionEvents
     ) -> LanguageModelSession {
         let delegateBackend = backend(for: configuration.delegateRemoteModel.role)
+        let delegateModel = providerModel(for: configuration.delegateRemoteModel)
+        let delegateCapabilities = ModelCapabilityPolicy.resolve(
+            for: delegateModel,
+            requestedReasoningLevel: configuration.delegateReasoningLevel
+        )
         let powerfulTool = CallPowerfulModelTool(
-            model: providerModel(for: configuration.delegateRemoteModel),
+            model: delegateModel,
             temperature: configuration.delegateTemperature,
-            reasoningLevel: configuration.delegateReasoningLevel,
-            delegateTools: workspaceTools,
+            reasoningLevel: delegateCapabilities.reasoningLevel,
+            delegateTools: delegateCapabilities.toolAccess == .standard ? workspaceTools : [],
             delegateInstructions: instructions,
             onToolStart: { call in
                 await events.toolStarted(call, delegateBackend)
@@ -122,7 +189,25 @@ enum ModelSessionFactory {
                 onDelegationEnd: {
                     await events.delegationChanged(false)
                 },
-                reasoningLevel: configuration.reasoningLevel
+                reasoningLevel: activeCapabilities.reasoningLevel
+            ),
+            history: history
+        )
+    }
+
+    private static func makeToollessSession(
+        instructions: String,
+        model: any LanguageModel,
+        temperature: Double?,
+        reasoningLevel: ContextOptions.ReasoningLevel?,
+        history: [Transcript.Entry]
+    ) -> LanguageModelSession {
+        LanguageModelSession(
+            profile: ToollessProfile(
+                instructions: instructions,
+                model: model,
+                temperature: temperature,
+                reasoningLevel: reasoningLevel
             ),
             history: history
         )
