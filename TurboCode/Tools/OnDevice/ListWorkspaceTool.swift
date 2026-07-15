@@ -40,6 +40,10 @@ struct ListWorkspaceTool: Tool {
         file_system when the user asks to browse, inspect, or show files and
         folders. Pass only a workspace-relative directory path; use "." for the
         root. This tool is read-only and returns structured file metadata.
+        After a successful call, do not repeat the directory entries as Markdown,
+        a table, or a numbered list. TurboCode presents the result natively in the
+        timeline. Add at most one short contextual sentence unless the user asks
+        you to analyze the listing.
         """
     }
     var includesSchemaInInstructions: Bool { true }
