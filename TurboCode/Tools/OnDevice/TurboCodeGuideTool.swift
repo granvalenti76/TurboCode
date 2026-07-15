@@ -21,12 +21,12 @@ struct TurboCodeGuideTool: Tool {
     var name: String { "turbocode_guide" }
     var description: String {
         """
-        Search TurboCode's official product guide. Use this before answering any
-        question about what TurboCode can do, supported workflows, models,
-        orchestrator mode, tools, safety, settings, or how to use the app well.
-        This includes equivalent questions in every language, such as “What can
-        you do?” or “Cosa sai fare?”. Answer in the user's language using only the
-        returned documentation for product facts.
+        Search TurboCode's official product guide. Call only for an explicit
+        question about the TurboCode product: what the app can do, how to use it,
+        supported workflows, models, orchestrator mode, tools, safety, or settings.
+        “What can you do?” and “Cosa sai fare?” qualify. Greetings, casual chat,
+        coding questions, and questions about the user's project do not qualify.
+        Pass the user's original question unchanged as query.
         """
     }
     var includesSchemaInInstructions: Bool { true }

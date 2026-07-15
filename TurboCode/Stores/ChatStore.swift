@@ -249,6 +249,7 @@ public final class ChatStore {
     private var responseTask: Task<Void, Never>?
     private var activeDiagnosticsRunID: String?
     private var activeEditGroupID: String?
+    private var activeProductGuidePresentation: ProductGuideBlock?
     private var editTransactionGroups: [String: String] = [:]
 
     // MARK: - Onboarding
@@ -870,7 +871,7 @@ public final class ChatStore {
         runtimeStatus = .ready
         error = nil
         var accumulatedText = ""
-        var productGuidePresentation: ProductGuideBlock?
+        activeProductGuidePresentation = nil
 
         do {
             let stream = session.streamResponse(to: promptText)
@@ -922,9 +923,6 @@ public final class ChatStore {
                         if let request = ApprovalRequest(toolOutput: text) {
                             presentApproval(request)
                         }
-                        if let guide = ProductGuideBlock(toolOutput: text) {
-                            productGuidePresentation = guide
-                        }
                     }
                 }
             }
@@ -937,6 +935,7 @@ public final class ChatStore {
             let finalText = accumulatedText.isEmpty
                 ? liveReasoning
                 : userVisibleAssistantText(accumulatedText)
+            let productGuidePresentation = activeProductGuidePresentation
             if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
                 if finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     blocks.remove(at: i)
@@ -1145,6 +1144,13 @@ public final class ChatStore {
                 output: output,
                 backend: backend
             )
+        }
+        if call.toolName == "turbocode_guide" {
+            let text = output.segments.compactMap { segment -> String? in
+                if case .text(let value) = segment { return value.content }
+                return nil
+            }.joined()
+            activeProductGuidePresentation = ProductGuideBlock(toolOutput: text)
         }
         toolActivities.removeAll { $0.id == call.id }
     }

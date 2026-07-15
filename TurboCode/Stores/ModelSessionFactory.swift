@@ -155,7 +155,9 @@ enum ModelSessionFactory {
             model: delegateModel,
             temperature: configuration.delegateTemperature,
             reasoningLevel: delegateCapabilities.reasoningLevel,
-            delegateTools: delegateCapabilities.toolAccess == .standard ? workspaceTools : [],
+            delegateTools: delegateCapabilities.toolAccess == .standard
+                ? workspaceTools + tools(for: .standard)
+                : [],
             delegateInstructions: instructions,
             onToolStart: { call in
                 await events.toolStarted(call, delegateBackend)
@@ -247,9 +249,9 @@ enum ModelSessionFactory {
 
     private static func tools(for access: ModelToolAccess) -> [any Tool] {
         switch access {
-        case .none, .standard:
+        case .none:
             []
-        case .onDevice:
+        case .onDevice, .standard:
             [TurboCodeGuideTool(store: .live)]
         }
     }
@@ -289,9 +291,7 @@ enum ModelSessionFactory {
         model or any Apple product. Your name is TurboCode.
         """
         text += "\nAlways use Markdown formatting in your responses: **bold**, `code`, ```code blocks```, tables, etc."
-        if configuration.backend == .foundationApple {
-            text += "\nBefore answering any question about TurboCode itself—its capabilities, workflows, models, tools, safety, settings, or best use—call turbocode_guide with the user's original question. Base product facts on the returned official documentation and answer in the user's language."
-        }
+        text += "\nCall turbocode_guide only when the user explicitly asks about the TurboCode product itself, asks what you or the app can do, or requests help with TurboCode capabilities, workflows, models, tools, safety, settings, or best use. Do not call it for greetings, casual conversation, ordinary coding questions, or questions about the user's project. A mere mention of TurboCode is not enough. Pass the user's original question as query, base product facts on the returned official documentation, and answer in the user's language."
         switch configuration.agentTuning.agent.responseStyle {
         case .concise:
             text += "\nKeep responses concise and lead with the result. Include only details needed to act or verify."
@@ -337,7 +337,7 @@ enum ModelSessionFactory {
         === ORCHESTRATOR MODE ===
         You are TurboCode Orchestrator. You are NOT an Apple model — you are part of the TurboCode app. Your name is TurboCode, and you delegate complex tasks to the powerful coding model via `call_powerful_model`. You have the `file_system` tool to list directories, get file info, and find files — use it for navigation and discovery.
 
-        For questions about TurboCode itself, use `turbocode_guide` directly and answer from the returned official documentation. For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, git, bash, file_system, and edit_file).
+        For explicit questions about the TurboCode product itself, use `turbocode_guide` directly and answer from the returned official documentation. Never use it for greetings or ordinary coding questions. For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, git, bash, file_system, and edit_file).
 
         CRITICAL — Never trust your own knowledge:
         - If you need to answer with file contents, always delegate reading to `call_powerful_model`.
