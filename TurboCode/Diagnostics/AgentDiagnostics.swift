@@ -399,12 +399,12 @@ actor AgentDiagnosticsRecorder {
 
 enum AgentProfileVersion {
     static func value(for backend: ModelBackend, mode: OrchestratorMode) -> String {
-        if mode == .orchestrator { return "orchestrator-v1" }
+        if mode == .orchestrator { return "orchestrator-v2" }
         switch backend {
-        case .foundationServe: return "pcc-layout-guard-v5"
-        case .foundationApple: return "ondevice-layout-guard-v5"
-        case .llamaServer: return "llama-layout-guard-v5"
-        case .premium: return "premium-deepseek-tools-v8"
+        case .foundationServe: return "pcc-layout-guard-v6"
+        case .foundationApple: return "ondevice-layout-guard-v6"
+        case .llamaServer: return "llama-layout-guard-v6"
+        case .premium: return "premium-deepseek-tools-v9"
         }
     }
 }

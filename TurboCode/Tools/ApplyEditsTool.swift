@@ -40,17 +40,17 @@ struct ApplyEditsArguments {
 struct EditFileArguments {
     /// Absolute or workspace-relative path of one UTF-8 text file.
     var filePath: String
-    /// Revision from read_file, or an empty string only when creating a new file.
-    var revision: String
+    /// Revision from read_file. Omit only when creating a new file.
+    var revision: String?
     /// Exactly one operation: replace_lines, insert_before, insert_after, delete_lines, replace_file, or create.
     @Guide(.anyOf(["replace_lines", "insert_before", "insert_after", "delete_lines", "replace_file", "create"]))
     var operation: String
-    /// First one-based line. Use 0 for create or replace_file.
-    var startLine: Int
-    /// Last inclusive one-based line. Use startLine for insert operations and 0 for create or replace_file.
-    var endLine: Int
-    /// New UTF-8 text. Preserve intentional newlines. For prose with multiple paragraphs, separate paragraphs with a blank line (two newline characters). Use an empty string only for delete_lines.
-    var content: String
+    /// First one-based line for line operations. Omit for create or replace_file.
+    var startLine: Int?
+    /// Last inclusive one-based line. Defaults to startLine. Omit for create or replace_file.
+    var endLine: Int?
+    /// New UTF-8 text. Required except for delete_lines. Preserve intentional newlines. For prose with multiple paragraphs, separate paragraphs with a blank line (two newline characters).
+    var content: String?
 }
 
 struct ApplyEditsTool: Tool {
@@ -148,9 +148,9 @@ struct EditFileTool: Tool {
         read_file immediately before editing and copy its Revision exactly. Choose one
         operation. For replace_lines and delete_lines, startLine and endLine are the
         inclusive one-based range. For insert_before or insert_after, set both line
-        values to the anchor line. For create, use revision "", line values 0, and the
-        complete new-file content. For replace_file, use a current revision, line values
-        0, and complete replacement content. Use content "" only for delete_lines.
+        values to the anchor line. For create, omit revision and line values and provide
+        the complete new-file content. For replace_file, use a current revision, omit line
+        values, and provide complete replacement content. Omit content for delete_lines.
         TurboCode generates and validates the internal patch and updates the change widget.
         Preserve the requested document layout in content. Long-form prose, articles,
         biographies, and documentation must use readable paragraphs separated by a
@@ -169,7 +169,7 @@ struct EditFileTool: Tool {
         )
         let request = FileEditRequest(
             filePath: arguments.filePath,
-            revision: arguments.revision.isEmpty ? nil : arguments.revision,
+            revision: arguments.revision?.isEmpty == true ? nil : arguments.revision,
             operations: [operation]
         )
         return try await ApplyEditsTool(
