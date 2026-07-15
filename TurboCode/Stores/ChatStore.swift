@@ -165,6 +165,7 @@ public final class ChatStore {
 
     private let gitService = GitDiffService()
     private let diffPatchService = DiffPatchService()
+    private let conversationRepository: any ConversationRepository
 
     public func reloadDiffs() async {
         guard !workspaceRoot.isEmpty else {
@@ -260,7 +261,12 @@ public final class ChatStore {
             print("[TurboCode] Onboarding failed: \(error.localizedDescription)")
         }
     }
-    public init() {
+    public convenience init() {
+        self.init(conversationRepository: DiskConversationRepository())
+    }
+
+    init(conversationRepository: any ConversationRepository) {
+        self.conversationRepository = conversationRepository
         // Restore orchestrator mode from UserDefaults
         let saved = UserDefaults.standard.string(forKey: "orchestratorMode")
             ?? OrchestratorMode.standalone.rawValue
@@ -398,198 +404,40 @@ public final class ChatStore {
         activeBackend == .foundationApple ? activeBackend.rawValue : activeRemoteModelID
     }
 
-    /// Build the instructions text from current workspace.
-    private var baseInstructions: String {
-        var text = """
-        You are TurboCode, an AI coding assistant developed by the TurboCode team.
-        You are NOT Apple's built-in assistant. Never refer to yourself as an Apple
-        model or any Apple product. Your name is TurboCode.
-        """
-        text += "\nAlways use Markdown formatting in your responses: **bold**, `code`, ```code blocks```, tables, etc."
-        switch agentTuning.agent.responseStyle {
-        case .concise:
-            text += "\nKeep responses concise and lead with the result. Include only details needed to act or verify."
-        case .balanced:
-            text += "\nKeep responses focused, with enough implementation and verification detail to be useful."
-        case .detailed:
-            text += "\nExplain decisions and verification in detail while avoiding repetition."
-        }
-        if agentTuning.agent.verifiesChanges {
-            text += "\nAfter changing source code, run the most focused available build or test that verifies the change."
-        }
-        if !availableSkills.isEmpty {
-            let catalog = availableSkills
-                .map { "- \($0.name): \($0.description)" }
-                .joined(separator: "\n")
-            text += """
-
-            TurboCode discovers reusable skills automatically from ~/.turbocode/SKILLS/**/SKILL.md.
-            Available skills:
-            \(catalog)
-            Use load_skill when a matching description applies; do not ask permission or announce loading.
-            """
-        }
-        text += "\nTreat /skill <name> and /<skill-name> as explicit requests to activate that skill before handling the remaining prompt. Treat /skills as a request to list the currently advertised skills with concise descriptions."
-        if !workspaceRoot.isEmpty {
-            text += "\nThe current workspace is at: \(workspaceRoot)"
-            text += "\nActivate the appropriate skill below to access file and code tools."
-            text += "\nAll file operations are restricted to the workspace directory."
-            text += "\nNEVER access files outside the workspace."
-            text += "\nUse read_file with startLine and endLine to inspect only the relevant numbered source range and preserve context."
-            text += "\nUse git for every Git operation, including the init operation when the workspace is not yet a repository. Git mutations are supported directly; never claim they are blocked by the bash sandbox. Use bash for builds, tests, and precise non-Git inspection. Bash can read the workspace but cannot write to it."
-            text += "\nUse edit_file for every source or text-file creation and modification. Read the relevant range immediately before editing, copy its Revision, and request one contiguous change per call. Never generate unified diff hunks."
-            text += "\nWhen writing articles, biographies, documentation, or other long-form prose, preserve readable paragraphs with a blank line between them. The tool content must contain real newline characters; never collapse the whole document into one long line."
-            text += "\nFile and directory deletion and destructive Git operations require approval. If a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
-        }
-        return text
-    }
-
     /// Rebuild the session preserving conversation history.
     /// Pass `keepingHistory: false` to start a fresh session (new thread).
     private func rebuildSession(keepingHistory: Bool = true) {
         let history = keepingHistory ? Array(session.transcript) : []
-
-        let isOrchestrating = orchestratorMode == .orchestrator
-
-        // ── Workspace tools for the delegate model ──
-        var workspaceTools: [any Tool] = []
-        if !workspaceRoot.isEmpty {
-            workspaceTools += [
-                ReadFileTool(workspaceRoot: workspaceRoot),
-                GrepTool(workspaceRoot: workspaceRoot),
-                FileSystemTool(workspaceRoot: workspaceRoot),
-                GitTool(
-                    workspaceRoot: workspaceRoot,
-                    policy: agentTuning.git,
-                    executionPolicy: agentTuning.execution
-                ),
-                BashTool(
-                    workspaceRoot: workspaceRoot,
-                    executionPolicy: agentTuning.execution
-                ),
-                EditFileTool(workspaceRoot: workspaceRoot)
-            ]
-        }
-        if !availableSkills.isEmpty {
-            workspaceTools.append(LoadSkillTool(skills: availableSkills))
-        }
-
-        // ── Profile tools ──
-        let tools: [any Tool]
-        let effectiveInstructions: String
-
-        if isOrchestrating {
-            let delegateModel = delegateRemoteModel
-            let delegateBackend = Self.backend(for: delegateModel.role)
-            let powerfulTool = CallPowerfulModelTool(
-                model: languageModel(for: delegateModel),
-                temperature: temperature(for: delegateModel),
-                reasoningLevel: reasoningLevel(for: delegateModel),
-                delegateTools: workspaceTools,
-                delegateInstructions: baseInstructions,
-                onToolStart: { [weak self] call in
-                    await self?.beginToolActivity(call, backend: delegateBackend)
+        let delegateModel = delegateRemoteModel
+        session = ModelSessionFactory.makeSession(
+            configuration: ModelSessionConfiguration(
+                backend: activeBackend,
+                activeRemoteModel: activeRemoteModel,
+                delegateRemoteModel: delegateModel,
+                orchestratorMode: orchestratorMode,
+                workspaceRoot: workspaceRoot,
+                agentTuning: agentTuning,
+                availableSkills: availableSkills,
+                skillActivations: skillActivations,
+                reasoningLevel: reasoningLevel,
+                delegateReasoningLevel: reasoningLevel(for: delegateModel),
+                activeTemperature: temperature(for: activeRemoteModel),
+                delegateTemperature: temperature(for: delegateModel),
+                dropsCompletedToolCalls: shouldDropCompletedToolCalls
+            ),
+            history: history,
+            events: ModelSessionEvents(
+                toolStarted: { [weak self] call, backend in
+                    await self?.beginToolActivity(call, backend: backend)
                 },
-                onToolEnd: { [weak self] call, output in
-                    await self?.endToolActivity(call, output: output, backend: delegateBackend)
+                toolFinished: { [weak self] call, output, backend in
+                    await self?.endToolActivity(call, output: output, backend: backend)
+                },
+                delegationChanged: { [weak self] isDelegating in
+                    await MainActor.run { self?.isDelegating = isDelegating }
                 }
             )
-            var t: [any Tool] = [powerfulTool]
-            if !workspaceRoot.isEmpty {
-                t.append(FileSystemTool(workspaceRoot: workspaceRoot))
-            }
-            if !availableSkills.isEmpty {
-                t.append(LoadSkillTool(skills: availableSkills))
-            }
-            tools = t
-
-            var text = baseInstructions
-            text += """
-
-
-            === ORCHESTRATOR MODE ===
-            You are TurboCode Orchestrator. You are NOT an Apple model — you are part of the TurboCode app. Your name is TurboCode, and you delegate complex tasks to the powerful coding model via `call_powerful_model`. You have the `file_system` tool to list directories, get file info, and find files — use it for navigation and discovery.
-
-            For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, git, bash, file_system, and edit_file).
-
-            CRITICAL — Never trust your own knowledge:
-            - If you need to answer with file contents, always delegate reading to `call_powerful_model`.
-            - If you need to modify code, always delegate to `call_powerful_model`.
-            - Never rely on your training data for what a file contains or what code looks like in this project.
-            - Always use the tools — `file_system` for listing, `call_powerful_model` for actual file work.
-
-            Your role is:
-            1. Understand what the user wants.
-            2. For file listing/info: use `file_system` directly.
-            3. For everything else: first output a brief acknowledgment to the user, then call `call_powerful_model` with a complete, self-contained task description that includes all relevant context (file paths, code snippets, error messages, requirements). Include full paths so the powerful model can navigate the workspace at: \(workspaceRoot).
-            4. Synthesise the powerful model's response into a clear, well-formatted answer for the user.
-
-            === APPROVAL REQUESTS ===
-            If the powerful model's response contains "TURBOCODE_APPROVAL_REQUIRED", stop and wait for the user. The app presents the approval UI; never expose the technical approval block in your response.
-            """
-            effectiveInstructions = text
-        } else {
-            tools = workspaceTools
-            effectiveInstructions = baseInstructions
-        }
-
-        // ── Build the session via DynamicProfile ──
-        let activeModel: any LanguageModel
-        switch activeBackend {
-        case .foundationApple:
-            activeModel = SystemLanguageModel.default
-        case .foundationServe, .llamaServer, .premium:
-            activeModel = languageModel(for: activeRemoteModel ?? RemoteModelConfig.fallbackLlama)
-        }
-        let sessionBackend = activeBackend
-
-        if isOrchestrating {
-            // Orchestrator profile: Apple + lifecycle callbacks for delegation detection
-            session = LanguageModelSession(
-                profile: TurboCodeDynamicProfile(
-                    instructions: effectiveInstructions,
-                    tools: tools,
-                    model: activeModel,
-                    onToolStart: { [weak self] call in
-                        await self?.beginToolActivity(call, backend: .foundationApple)
-                    },
-                    onToolEnd: { [weak self] call, output in
-                        await self?.endToolActivity(call, output: output, backend: .foundationApple)
-                    },
-                    onDelegationStart: { [weak self] in
-                        await MainActor.run { self?.isDelegating = true }
-                    },
-                    onDelegationEnd: { [weak self] in
-                        await MainActor.run { self?.isDelegating = false }
-                    },
-                    reasoningLevel: reasoningLevel
-                ),
-                history: history
-            )
-        } else {
-            // Standalone: profile with Skills and reasoning level.
-            session = LanguageModelSession(
-                profile: StandaloneProfile(
-                    instructions: effectiveInstructions,
-                    activations: skillActivations,
-                    diskSkills: availableSkills,
-                    workspaceRoot: workspaceRoot,
-                    model: activeModel,
-                    temperature: temperature(for: activeRemoteModel),
-                    reasoningLevel: reasoningLevel,
-                    dropsCompletedToolCalls: shouldDropCompletedToolCalls,
-                    executionPolicy: agentTuning.execution,
-                    gitPolicy: agentTuning.git,
-                    onToolStart: { [weak self] call in
-                        await self?.beginToolActivity(call, backend: sessionBackend)
-                    },
-                    onToolEnd: { [weak self] call, output in
-                        await self?.endToolActivity(call, output: output, backend: sessionBackend)
-                    }
-                ),
-                history: history
-            )
-        }
+        )
     }
 
     // MARK: - Actions
@@ -678,24 +526,13 @@ public final class ChatStore {
     /// Saves the active thread and its blocks to `~/.turbocode/sessions/<id>.json`.
     public func persistSession(for threadId: String) async {
         guard let thread = threads.first(where: { $0.id == threadId }) else { return }
-        let stored = StoredSession(
-            id: thread.id,
-            title: thread.title,
-            projectName: thread.workspace
-                .flatMap { URL(fileURLWithPath: $0).lastPathComponent }
-                ?? "_general",
-            workspacePath: thread.workspace,
-            createdAt: thread.createdAt,
-            updatedAt: thread.updatedAt,
+        let snapshot = ConversationSnapshot(
+            conversation: thread,
             modelBackend: persistedModelIdentifier,
-            blocks: blocks.map {
-                StoredBlock(id: $0.id, kind: $0.kind.rawValue, text: $0.text,
-                    createdAt: $0.createdAt, model: $0.model, providerId: $0.providerId,
-                    diffPatch: $0.diffPatch, gitCommit: $0.gitCommit)
-            }
+            blocks: blocks
         )
         do {
-            try TurboCodeConfig.shared.saveSession(stored)
+            try conversationRepository.save(snapshot)
         } catch {
             print("[TurboCode] Failed to persist session: \(error.localizedDescription)")
         }
@@ -703,38 +540,26 @@ public final class ChatStore {
 
     /// Loads all session files and populates the thread list.
     public func restoreSessions() async {
-        guard let all = try? TurboCodeConfig.shared.listSessions(),
+        guard let all = try? conversationRepository.list(),
               !all.isEmpty else { return }
         let existingIDs = Set(threads.map(\.id))
-        for stored in all where !existingIDs.contains(stored.id) {
-            threads.append(Conversation(
-                id: stored.id,
-                title: stored.title,
-                createdAt: stored.createdAt,
-                updatedAt: stored.updatedAt,
-                workspace: stored.workspacePath,
-                mode: .agent
-            ))
+        for snapshot in all where !existingIDs.contains(snapshot.conversation.id) {
+            threads.append(snapshot.conversation)
         }
     }
 
     /// Fully restores a past session with its blocks.
     public func restoreSession(id: String) async {
-        guard let stored = try? TurboCodeConfig.shared.loadSession(id: id),
+        guard let snapshot = try? conversationRepository.load(id: id),
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
         activeThreadId = id
-        blocks = stored.blocks.map {
-            ChatBlock(id: $0.id, kind: ChatBlockKind(rawValue: $0.kind) ?? .assistant,
-                text: $0.text, createdAt: $0.createdAt, model: $0.model,
-                providerId: $0.providerId, diffPatch: $0.diffPatch,
-                gitCommit: $0.gitCommit)
-        }
+        blocks = snapshot.blocks
         liveReasoning = ""; liveAssistant = ""
         isFirstMessage = blocks.isEmpty
-        if let wp = stored.workspacePath, workspaceRoot != wp {
+        if let wp = snapshot.conversation.workspace, workspaceRoot != wp {
             workspaceRoot = wp
         }
-        restoreModelSelection(stored.modelBackend)
+        restoreModelSelection(snapshot.modelBackend)
         rebuildSession(keepingHistory: false)
     }
 
@@ -790,18 +615,18 @@ public final class ChatStore {
                 .filter { $0.workspace == path }
                 .map(\.id)
         )
-        if let storedSessions = try? TurboCodeConfig.shared.listSessions() {
+        if let storedSessions = try? conversationRepository.list() {
             sessionIDs.formUnion(
                 storedSessions
-                    .filter { $0.workspacePath == path }
-                    .map(\.id)
+                    .filter { $0.conversation.workspace == path }
+                    .map(\.conversation.id)
             )
         }
 
         var deletionErrors: [String] = []
         for id in sessionIDs {
             do {
-                try TurboCodeConfig.shared.deleteSession(id: id)
+                try conversationRepository.delete(id: id)
             } catch {
                 deletionErrors.append(error.localizedDescription)
             }
