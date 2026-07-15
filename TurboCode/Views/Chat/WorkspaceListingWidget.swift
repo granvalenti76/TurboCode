@@ -50,12 +50,16 @@ struct WorkspaceListingWidget: View {
                 .padding(.vertical, 9)
             }
         }
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .background(
+            Color(nsColor: .controlBackgroundColor).opacity(0.28),
+            in: RoundedRectangle(cornerRadius: 16)
+        )
         .overlay {
             RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.accentColor.opacity(0.16), lineWidth: 1)
+                .stroke(Color.accentColor.opacity(0.12), lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.04), radius: 10, y: 3)
+        .shadow(color: .black.opacity(0.025), radius: 8, y: 2)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Workspace directory \(displayPath), \(listing.totalCount) items")
     }
