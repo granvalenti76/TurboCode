@@ -148,6 +148,10 @@ public final class TurboCodeConfig {
             contents += "\n\n" + Self.xcodeProjectSkillSection + "\n"
             changed = true
         }
+        if !contents.contains(Self.pccSetupSkillMarker) {
+            contents += "\n\n" + Self.pccSetupSkillSection + "\n"
+            changed = true
+        }
         if changed {
             try contents.write(to: url, atomically: true, encoding: .utf8)
         }
@@ -226,6 +230,9 @@ public final class TurboCodeConfig {
     private static let xcodeProjectSkillMarker =
         "<!-- turbocode-managed:xcode-project-v1 -->"
 
+    private static let pccSetupSkillMarker =
+        "<!-- turbocode-managed:pcc-setup-v1 -->"
+
     private static let agentTuningSkillSection = """
     <!-- turbocode-managed:agent-tuning-v1 -->
     ## Agent Tuning
@@ -264,6 +271,26 @@ public final class TurboCodeConfig {
     mode. Build duration remains bounded by the maximum timeout in Agent Settings.
     """
 
+    private static let pccSetupSkillSection = """
+    <!-- turbocode-managed:pcc-setup-v1 -->
+    ## Apple PCC setup
+
+    Apple on-device is loaded directly by the Foundation Models framework and
+    needs no local server. Apple PCC uses the framework's local Chat Completions
+    bridge. When the user asks how to configure or start PCC, tell them to open
+    Terminal and run:
+
+    ```shell
+    fm serve --port 1976
+    ```
+
+    The process must remain running while PCC is in use. TurboCode already
+    configures `http://127.0.0.1:1976/v1` with model `pcc`, so no API key or manual
+    endpoint change is required. The local health endpoint is
+    `http://127.0.0.1:1976/health`. Then the user can select Apple PCC in Standalone
+    mode or as the delegate in **TurboCode > Settings > Agents > Orchestrator**.
+    """
+
     private static let turboCodeSkill = """
     ---
     name: turbocode
@@ -282,6 +309,8 @@ public final class TurboCodeConfig {
     - Available backends can include Foundation Apple, Apple PCC, and Llama-server.
 
     \(providerCredentialsSkillSection)
+
+    \(pccSetupSkillSection)
 
     \(contextPolicySkillSection)
 

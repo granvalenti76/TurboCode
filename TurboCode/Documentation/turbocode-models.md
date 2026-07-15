@@ -10,6 +10,20 @@ The delegated model can be selected under **TurboCode > Settings > Agents > Orch
 
 TurboCode validates reasoning and tool-calling capabilities before building a model profile. This prevents unsupported options from reaching a model and provides a foundation for giving advanced tools only to models that can use them reliably.
 
+## Configure Apple PCC
+
+Apple on-device and Apple Private Cloud Compute are two different backends. The on-device model is loaded directly by the Foundation Models framework and does not require a server. TurboCode reaches PCC through the local Chat Completions server supplied by Apple's `fm` command-line tool.
+
+Open Terminal and start the server on TurboCode's default port:
+
+```shell
+fm serve --port 1976
+```
+
+Keep that Terminal process running while using PCC. TurboCode's default PCC entry points to `http://127.0.0.1:1976/v1` and selects the `pcc` model, so no endpoint editing or API key is required. Then choose **Apple PCC** as the standalone model, or as the delegated model under **TurboCode > Settings > Agents > Orchestrator**.
+
+If PCC is unavailable, first check that `fm serve` is still running. The server also exposes `http://127.0.0.1:1976/health` for a local health check. Availability of the PCC model itself is determined by Apple's Foundation Models service and the current system environment.
+
 ## Repository mapping and context budgets
 
 For existing Swift, SwiftUI, Xcode, and Swift Package projects, capable models use `swift_workspace_map` before opening source files. The tool returns declaration signatures, line numbers, short documentation comments, project markers, and focused symbol queries without placing file bodies in the model context.
