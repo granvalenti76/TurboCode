@@ -70,8 +70,8 @@ struct GeneralSettingsView: View {
 
             Section("Chat") {
                 HStack {
-                    Text("Max chat width")
-                    Slider(value: s.maxChatWidth, in: 480...1080, step: 20)
+                    Text("Content width")
+                    Slider(value: s.maxChatWidth, in: 640...1600, step: 20)
                     Text("\(Int(settings.maxChatWidth))")
                         .font(.system(size: 11, design: .monospaced))
                         .frame(width: 40)

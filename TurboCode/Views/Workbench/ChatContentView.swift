@@ -64,7 +64,7 @@ struct ChatContentView: View {
             }
 
             InputFieldView()
-                .frame(maxWidth: CGFloat(settings.maxChatWidth) + 24)
+                .frame(maxWidth: CGFloat(settings.maxChatWidth))
                 .frame(maxWidth: .infinity)
         }
     }

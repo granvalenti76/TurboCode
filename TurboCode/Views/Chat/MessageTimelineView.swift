@@ -27,14 +27,14 @@ struct MessageTimelineView: View {
 
                     ForEach(turns) { turn in
                         TurnView(turn: turn)
-                            .padding(.horizontal, 16)
+                            .padding(.horizontal, 12)
                             .padding(.vertical, 4)
                     }
 
                     // Live reasoning block (streaming)
                     if !chatStore.liveReasoning.isEmpty {
                         LiveReasoningBlock(text: chatStore.liveReasoning)
-                            .padding(.horizontal, 16)
+                            .padding(.horizontal, 12)
                             .padding(.vertical, 4)
                             .id("live-reasoning")
                     }
@@ -42,14 +42,14 @@ struct MessageTimelineView: View {
                     // Live assistant block (streaming)
                     if !chatStore.liveAssistant.isEmpty {
                         LiveAssistantBlock(text: chatStore.liveAssistant)
-                            .padding(.horizontal, 16)
+                            .padding(.horizontal, 12)
                             .padding(.vertical, 4)
                             .id("live-assistant")
                     }
 
                     if let activity = chatStore.activeToolActivity {
                         ToolActivityIndicator(activity: activity)
-                            .padding(.horizontal, 16)
+                            .padding(.horizontal, 12)
                             .padding(.vertical, 4)
                             .id("tool-activity-\(activity.id)")
                     }

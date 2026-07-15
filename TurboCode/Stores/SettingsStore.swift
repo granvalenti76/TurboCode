@@ -14,7 +14,7 @@ public final class SettingsStore {
     public var fontSize: Double = 17.0 {
         didSet { UserDefaults.standard.set(fontSize, forKey: "fontSize") }
     }
-    public var maxChatWidth: Double = 820.0 {
+    public var maxChatWidth: Double = 1440.0 {
         didSet { UserDefaults.standard.set(maxChatWidth, forKey: "maxChatWidth") }
     }
     public var workspacePaths: [String] = []
@@ -88,7 +88,16 @@ public final class SettingsStore {
             fontSize = savedFontSize == 0 ? 17 : savedFontSize
         }
         let savedMaxWidth = defaults.double(forKey: "maxChatWidth")
-        maxChatWidth = savedMaxWidth == 0 ? 820.0 : savedMaxWidth
+        let layoutWidthVersion = defaults.integer(forKey: "chatLayoutWidthVersion")
+        if layoutWidthVersion < 1 {
+            // TurboCode is a workbench: migrate the old article-like column to
+            // a desktop width while keeping the preference adjustable.
+            maxChatWidth = max(savedMaxWidth, 1440.0)
+            defaults.set(maxChatWidth, forKey: "maxChatWidth")
+            defaults.set(1, forKey: "chatLayoutWidthVersion")
+        } else {
+            maxChatWidth = savedMaxWidth == 0 ? 1440.0 : savedMaxWidth
+        }
         reloadAgentTuning()
         reloadRemoteModels()
         isLoadingCredentials = true
