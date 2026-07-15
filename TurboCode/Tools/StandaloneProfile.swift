@@ -34,6 +34,11 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
             Instructions(instructions)
             if !workspaceRoot.isEmpty {
+                if toolPlan.contains(.swiftWorkspaceMap) {
+                    Instructions {
+                        "For broad work in an existing Swift project, call swift_workspace_map before reading files. Use its declaration line numbers to keep read_file calls focused."
+                    }
+                }
                 if toolPlan.contains(.readFile) {
                     Instructions {
                         "Use read_file with small line ranges and its Revision for focused context."

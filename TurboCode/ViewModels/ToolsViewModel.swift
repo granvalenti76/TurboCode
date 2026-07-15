@@ -37,11 +37,14 @@ final class ToolsViewModel {
             settings.reloadRemoteModels()
         }
 
-        let context = ToolAccessContext(
-            hasWorkspace: !chatStore.workspaceRoot.isEmpty,
-            hasSkills: !chatStore.availableSkills.isEmpty,
-            hasDelegateModel: settings.selectedOrchestratorModel?.enabled == true
-        )
+        func context(repositoryMap: RemoteRepositoryMapCapability?) -> ToolAccessContext {
+            ToolAccessContext(
+                hasWorkspace: !chatStore.workspaceRoot.isEmpty,
+                hasSkills: !chatStore.availableSkills.isEmpty,
+                hasDelegateModel: settings.selectedOrchestratorModel?.enabled == true,
+                repositoryMapDetail: repositoryMap?.detail
+            )
+        }
         workspaceLabel = chatStore.workspaceRoot.isEmpty
             ? "No workspace selected"
             : chatStore.workspaceLabel
@@ -50,6 +53,7 @@ final class ToolsViewModel {
 
         let onDeviceSupportsTools = SystemLanguageModel.default.capabilities.contains(.toolCalling)
         let onDeviceTier: ModelToolTier = onDeviceSupportsTools ? .onDevice : .none
+        let onDeviceContext = context(repositoryMap: nil)
         let isOrchestrating = chatStore.orchestratorMode == .orchestrator
         let delegateName = settings.selectedOrchestratorModel?.name ?? "No delegate configured"
 
@@ -67,7 +71,7 @@ final class ToolsViewModel {
                 plan: ModelToolCatalog.plan(
                     profile: .standalone,
                     tier: onDeviceTier,
-                    context: context
+                    context: onDeviceContext
                 )
             ),
             ToolModelProfileViewState(
@@ -77,18 +81,19 @@ final class ToolsViewModel {
                 modelIdentifier: settings.agentTuning.orchestrator.delegateModelID,
                 systemImage: "point.3.connected.trianglepath.dotted",
                 tierLabel: "Orchestrator",
-                statusLabel: context.hasDelegateModel ? "Available" : "Delegate required",
-                isUsable: onDeviceSupportsTools && context.hasDelegateModel,
+                statusLabel: onDeviceContext.hasDelegateModel ? "Available" : "Delegate required",
+                isUsable: onDeviceSupportsTools && onDeviceContext.hasDelegateModel,
                 isActive: isOrchestrating,
                 plan: ModelToolCatalog.plan(
                     profile: .orchestrator,
                     tier: onDeviceTier,
-                    context: context
+                    context: onDeviceContext
                 )
             )
         ]
 
         resolvedProfiles += settings.remoteModels.map { model in
+            let modelTier: ModelToolTier = model.repositoryMap == .enhanced ? .enhanced : .standard
             let configured = settings.isConfigured(model)
             let status: String
             if !model.enabled {
@@ -104,14 +109,14 @@ final class ToolsViewModel {
                 subtitle: "\(roleLabel(model.role)) · \(providerLabel(model.provider))",
                 modelIdentifier: model.modelName,
                 systemImage: modelIcon(model),
-                tierLabel: "Standard",
+                tierLabel: "\(modelTier == .enhanced ? "Enhanced" : "Standard") · \(contextLabel(model.contextWindowTokens)) ctx",
                 statusLabel: status,
                 isUsable: model.enabled && configured,
                 isActive: !isOrchestrating && chatStore.activeRemoteModelID == model.id,
                 plan: ModelToolCatalog.plan(
                     profile: .standalone,
-                    tier: .standard,
-                    context: context
+                    tier: modelTier,
+                    context: context(repositoryMap: model.repositoryMap)
                 )
             )
         }
@@ -140,6 +145,13 @@ final class ToolsViewModel {
         case .pcc: "cloud"
         case .premium: "sparkles"
         }
+    }
+
+    private func contextLabel(_ tokens: Int) -> String {
+        if tokens >= 1_000 {
+            return "\(tokens / 1_000)k"
+        }
+        return "\(tokens)"
     }
 
     private func abbreviatedPath(_ path: String) -> String {

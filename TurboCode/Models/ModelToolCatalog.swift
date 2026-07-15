@@ -4,6 +4,7 @@ nonisolated enum ModelToolTier: String, Sendable, Hashable {
     case none
     case onDevice
     case standard
+    case enhanced
 }
 
 nonisolated enum ModelRuntimeProfile: String, Sendable, Hashable {
@@ -15,6 +16,7 @@ nonisolated enum ModelRuntimeProfile: String, Sendable, Hashable {
 nonisolated enum ToolCapabilityID: String, CaseIterable, Sendable, Hashable, Identifiable {
     case turboCodeGuide = "turbocode_guide"
     case listWorkspace = "list_workspace"
+    case swiftWorkspaceMap = "swift_workspace_map"
     case readFile = "read_file"
     case searchWorkspace = "grep"
     case fileSystem = "file_system"
@@ -49,12 +51,14 @@ nonisolated enum ToolAvailabilityRequirement: Sendable, Hashable {
     case workspace
     case skills
     case delegateModel
+    case repositoryMap
 }
 
 nonisolated struct ToolAccessContext: Sendable, Hashable {
     let hasWorkspace: Bool
     let hasSkills: Bool
     let hasDelegateModel: Bool
+    let repositoryMapDetail: RepositoryMapDetail?
 }
 
 nonisolated struct ModelToolAssignment: Identifiable, Sendable, Hashable {
@@ -101,6 +105,14 @@ nonisolated enum ModelToolCatalog {
             category: .discovery,
             systemImage: "folder",
             hasNativePresentation: true
+        ),
+        .init(
+            id: .swiftWorkspaceMap,
+            name: "Swift Workspace Map",
+            summary: "Navigate Swift declarations and relationships without reading whole files.",
+            category: .discovery,
+            systemImage: "map",
+            hasNativePresentation: false
         ),
         .init(
             id: .readFile,
@@ -178,8 +190,12 @@ nonisolated enum ModelToolCatalog {
         context: ToolAccessContext
     ) -> ModelToolPlan {
         let memberships = membership(for: profile)
-        let assignments = memberships.map { id, requirement in
-            assignment(id: id, requirement: requirement, tier: tier, context: context)
+        let assignments = memberships.compactMap { id, requirement -> ModelToolAssignment? in
+            if requirement == .repositoryMap,
+               (tier == .onDevice || context.repositoryMapDetail == nil) {
+                return nil
+            }
+            return assignment(id: id, requirement: requirement, tier: tier, context: context)
         }
         return ModelToolPlan(profile: profile, tier: tier, assignments: assignments)
     }
@@ -192,6 +208,7 @@ nonisolated enum ModelToolCatalog {
             return [
                 (.turboCodeGuide, .always),
                 (.listWorkspace, .workspace),
+                (.swiftWorkspaceMap, .repositoryMap),
                 (.readFile, .workspace),
                 (.searchWorkspace, .workspace),
                 (.fileSystem, .workspace),
@@ -212,6 +229,7 @@ nonisolated enum ModelToolCatalog {
             return [
                 (.turboCodeGuide, .always),
                 (.listWorkspace, .workspace),
+                (.swiftWorkspaceMap, .repositoryMap),
                 (.readFile, .workspace),
                 (.searchWorkspace, .workspace),
                 (.fileSystem, .workspace),
@@ -245,6 +263,10 @@ nonisolated enum ModelToolCatalog {
             return .init(id: id, isRegistered: false, unavailableReason: "No skills installed")
         case .delegateModel where !context.hasDelegateModel:
             return .init(id: id, isRegistered: false, unavailableReason: "Configure a delegate model")
+        case .repositoryMap:
+            return context.hasWorkspace
+                ? .init(id: id, isRegistered: true, unavailableReason: nil)
+                : .init(id: id, isRegistered: false, unavailableReason: "Choose a workspace")
         default:
             return .init(id: id, isRegistered: true, unavailableReason: nil)
         }

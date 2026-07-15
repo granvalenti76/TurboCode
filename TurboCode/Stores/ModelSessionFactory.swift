@@ -76,10 +76,16 @@ enum ModelSessionFactory {
     ) -> LanguageModelSession {
         let instructions = instructions(for: configuration)
         let activeModel = activeModel(for: configuration)
+        let activeRemoteConfiguration = configuration.backend == .foundationApple
+            ? nil
+            : (configuration.activeRemoteModel ?? RemoteModelConfig.fallbackLlama)
         let activeCapabilities = ModelCapabilityPolicy.resolve(
             for: activeModel,
             requestedReasoningLevel: configuration.reasoningLevel,
-            preferredToolAccess: configuration.backend == .foundationApple ? .onDevice : .standard
+            preferredToolAccess: preferredToolTier(
+                backend: configuration.backend,
+                remoteModel: activeRemoteConfiguration
+            )
         )
 
         if configuration.orchestratorMode == .orchestrator,
@@ -107,7 +113,10 @@ enum ModelSessionFactory {
         let standalonePlan = ModelToolCatalog.plan(
             profile: .standalone,
             tier: activeCapabilities.toolAccess,
-            context: toolContext(for: configuration)
+            context: toolContext(
+                for: configuration,
+                repositoryMap: activeRemoteConfiguration?.repositoryMap
+            )
         )
 
         return LanguageModelSession(
@@ -126,7 +135,9 @@ enum ModelSessionFactory {
                 supplementalTools: toolInstances(
                     for: standalonePlan,
                     configuration: configuration,
-                    including: [.turboCodeGuide, .listWorkspace]
+                    including: [.turboCodeGuide, .listWorkspace, .swiftWorkspaceMap],
+                    repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
+                        ?? 32_768
                 ),
                 onToolStart: { call in
                     await events.toolStarted(call, configuration.backend)
@@ -151,18 +162,29 @@ enum ModelSessionFactory {
         let delegateModel = providerModel(for: configuration.delegateRemoteModel)
         let delegateCapabilities = ModelCapabilityPolicy.resolve(
             for: delegateModel,
-            requestedReasoningLevel: configuration.delegateReasoningLevel
+            requestedReasoningLevel: configuration.delegateReasoningLevel,
+            preferredToolAccess: preferredToolTier(
+                backend: backend(for: configuration.delegateRemoteModel.role),
+                remoteModel: configuration.delegateRemoteModel
+            )
         )
         let delegatePlan = ModelToolCatalog.plan(
             profile: .delegate,
             tier: delegateCapabilities.toolAccess,
-            context: toolContext(for: configuration)
+            context: toolContext(
+                for: configuration,
+                repositoryMap: configuration.delegateRemoteModel.repositoryMap
+            )
         )
         let powerfulTool = CallPowerfulModelTool(
             model: delegateModel,
             temperature: configuration.delegateTemperature,
             reasoningLevel: delegateCapabilities.reasoningLevel,
-            delegateTools: toolInstances(for: delegatePlan, configuration: configuration),
+            delegateTools: toolInstances(
+                for: delegatePlan,
+                configuration: configuration,
+                repositoryMapContextTokens: configuration.delegateRemoteModel.contextWindowTokens
+            ),
             delegateInstructions: instructions,
             onToolStart: { call in
                 await events.toolStarted(call, delegateBackend)
@@ -175,7 +197,7 @@ enum ModelSessionFactory {
         let orchestratorPlan = ModelToolCatalog.plan(
             profile: .orchestrator,
             tier: activeCapabilities.toolAccess,
-            context: toolContext(for: configuration)
+            context: toolContext(for: configuration, repositoryMap: nil)
         )
         var orchestratorTools = toolInstances(
             for: orchestratorPlan,
@@ -232,7 +254,8 @@ enum ModelSessionFactory {
     private static func toolInstances(
         for plan: ModelToolPlan,
         configuration: ModelSessionConfiguration,
-        including allowedIDs: Set<ToolCapabilityID>? = nil
+        including allowedIDs: Set<ToolCapabilityID>? = nil,
+        repositoryMapContextTokens: Int = 32_768
     ) -> [any Tool] {
         plan.assignments.compactMap { assignment -> (any Tool)? in
             guard assignment.isRegistered,
@@ -242,6 +265,12 @@ enum ModelSessionFactory {
                 return TurboCodeGuideTool(store: .live)
             case .listWorkspace:
                 return ListWorkspaceTool(workspaceRoot: configuration.workspaceRoot)
+            case .swiftWorkspaceMap:
+                return SwiftWorkspaceMapTool(
+                    workspaceRoot: configuration.workspaceRoot,
+                    detail: plan.tier == .enhanced ? .enhanced : .compact,
+                    contextWindowTokens: repositoryMapContextTokens
+                )
             case .readFile:
                 return ReadFileTool(workspaceRoot: configuration.workspaceRoot)
             case .searchWorkspace:
@@ -270,13 +299,23 @@ enum ModelSessionFactory {
     }
 
     private static func toolContext(
-        for configuration: ModelSessionConfiguration
+        for configuration: ModelSessionConfiguration,
+        repositoryMap: RemoteRepositoryMapCapability?
     ) -> ToolAccessContext {
         ToolAccessContext(
             hasWorkspace: !configuration.workspaceRoot.isEmpty,
             hasSkills: !configuration.availableSkills.isEmpty,
-            hasDelegateModel: configuration.delegateRemoteModel.enabled
+            hasDelegateModel: configuration.delegateRemoteModel.enabled,
+            repositoryMapDetail: repositoryMap?.detail
         )
+    }
+
+    private static func preferredToolTier(
+        backend: ModelBackend,
+        remoteModel: RemoteModelConfig?
+    ) -> ModelToolTier {
+        if backend == .foundationApple { return .onDevice }
+        return remoteModel?.repositoryMap == .enhanced ? .enhanced : .standard
     }
 
     private static func activeModel(

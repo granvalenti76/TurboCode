@@ -15,6 +15,24 @@ options are also available in **TurboCode > Settings > Agents**.
 
 Never place credentials in a TurboCode JSON file.
 
+## Repository map model capability
+
+Each entry in `models.json` may declare the context budget and repository-map
+level used by that backend:
+
+```json
+{
+  "contextWindowTokens": 32768,
+  "repositoryMap": "compact"
+}
+```
+
+`repositoryMap` accepts `none`, `compact`, or `enhanced`. The default Llama and
+Apple PCC profiles use `compact` with a conservative 32k context assumption.
+DeepSeek uses `enhanced`, which adds imports and type relationships to focused
+map queries. Apple on-device never receives the repository-map tool, including
+when it is acting as orchestrator; the configured delegate maps the workspace.
+
 ## Schema Version 1
 
 ```json

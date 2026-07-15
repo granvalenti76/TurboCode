@@ -18,6 +18,9 @@ public final class TurboCodeConfig {
     private var sessionsDir: URL { rootURL.appendingPathComponent("sessions") }
     public var skillsDirectoryURL: URL { rootURL.appendingPathComponent("SKILLS", isDirectory: true) }
     public var diagnosticsDirectoryURL: URL { rootURL.appendingPathComponent("diagnostics", isDirectory: true) }
+    public var repositoryMapCacheDirectoryURL: URL {
+        rootURL.appendingPathComponent("cache/repository-maps", isDirectory: true)
+    }
     public var documentationDirectoryURL: URL {
         rootURL.appendingPathComponent("documentation", isDirectory: true)
     }
@@ -138,6 +141,10 @@ public final class TurboCodeConfig {
             contents += "\n\n" + Self.agentTuningSkillSection + "\n"
             changed = true
         }
+        if !contents.contains(Self.repositoryMapSkillMarker) {
+            contents += "\n\n" + Self.repositoryMapSkillSection + "\n"
+            changed = true
+        }
         if changed {
             try contents.write(to: url, atomically: true, encoding: .utf8)
         }
@@ -210,6 +217,9 @@ public final class TurboCodeConfig {
     private static let agentTuningSkillMarker =
         "<!-- turbocode-managed:agent-tuning-v1 -->"
 
+    private static let repositoryMapSkillMarker =
+        "<!-- turbocode-managed:repository-map-v1 -->"
+
     private static let agentTuningSkillSection = """
     <!-- turbocode-managed:agent-tuning-v1 -->
     ## Agent Tuning
@@ -221,6 +231,18 @@ public final class TurboCodeConfig {
     Never put API keys in `config.json`. Secrets belong in the macOS Keychain.
     If configuration validation fails, explain the reported field or range and
     preserve the user's file instead of suggesting that it be reset blindly.
+    """
+
+    private static let repositoryMapSkillSection = """
+    <!-- turbocode-managed:repository-map-v1 -->
+    ## Swift workspace map
+
+    Capable standalone and delegated models receive `swift_workspace_map` for
+    existing Swift, SwiftUI, Xcode, and Swift Package workspaces. Use its compact
+    overview, symbol search, and related-declaration queries before reading large
+    files. Then use `read_file` only for the focused line ranges needed by the
+    task. Apple on-device does not receive this tool; in orchestrator mode the
+    configured delegate maps the project.
     """
 
     private static let turboCodeSkill = """
@@ -265,6 +287,8 @@ public final class TurboCodeConfig {
 
     TurboCode never removes project files when a workspace is removed from the
     sidebar. It removes only the workspace reference and associated chat sessions.
+
+    \(repositoryMapSkillSection)
 
     ## Skills
 
@@ -425,6 +449,22 @@ nonisolated public enum RemoteReasoningTransport: String, Codable, Hashable, Sen
     case none
 }
 
+nonisolated public enum RemoteRepositoryMapCapability: String, Codable, Hashable, Sendable {
+    case none
+    case compact
+    case enhanced
+}
+
+nonisolated extension RemoteRepositoryMapCapability {
+    var detail: RepositoryMapDetail? {
+        switch self {
+        case .none: nil
+        case .compact: .compact
+        case .enhanced: .enhanced
+        }
+    }
+}
+
 nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identifiable {
     public let id: String
     public var name: String
@@ -436,6 +476,8 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
     public var reasoningTransport: RemoteReasoningTransport
     public var supportsReasoning: Bool
     public var supportsGuidedGeneration: Bool
+    public var contextWindowTokens: Int
+    public var repositoryMap: RemoteRepositoryMapCapability
     public var credential: String?
     public var enabled: Bool
 
@@ -450,6 +492,8 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
         reasoningTransport: RemoteReasoningTransport = .contextOptions,
         supportsReasoning: Bool = true,
         supportsGuidedGeneration: Bool = true,
+        contextWindowTokens: Int = 32_768,
+        repositoryMap: RemoteRepositoryMapCapability = .compact,
         credential: String? = nil,
         enabled: Bool = true
     ) {
@@ -459,12 +503,15 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
         self.reasoningTransport = reasoningTransport
         self.supportsReasoning = supportsReasoning
         self.supportsGuidedGeneration = supportsGuidedGeneration
+        self.contextWindowTokens = contextWindowTokens
+        self.repositoryMap = repositoryMap
         self.credential = credential; self.enabled = enabled
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, url, modelName, temperature, provider, role
         case reasoningTransport, supportsReasoning, supportsGuidedGeneration
+        case contextWindowTokens, repositoryMap
         case credential, enabled
     }
 
@@ -485,6 +532,12 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
             ?? (role != .pcc)
         supportsGuidedGeneration = try values.decodeIfPresent(Bool.self, forKey: .supportsGuidedGeneration)
             ?? (provider != .deepseek)
+        contextWindowTokens = try values.decodeIfPresent(Int.self, forKey: .contextWindowTokens)
+            ?? (provider == .deepseek ? 128_000 : 32_768)
+        repositoryMap = try values.decodeIfPresent(
+            RemoteRepositoryMapCapability.self,
+            forKey: .repositoryMap
+        ) ?? (provider == .deepseek ? .enhanced : .compact)
         credential = try values.decodeIfPresent(String.self, forKey: .credential)
         enabled = try values.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
     }
@@ -517,6 +570,8 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
             role: .premium,
             reasoningTransport: .deepseekThinking,
             supportsGuidedGeneration: false,
+            contextWindowTokens: 128_000,
+            repositoryMap: .enhanced,
             credential: "deepseek"
         )
     ]

@@ -4,7 +4,7 @@ TurboCode is a native macOS development workbench specialized in Swift, SwiftUI,
 
 ## Understand an existing project
 
-TurboCode can inspect the active workspace, read focused source ranges, search for symbols and patterns, explain unfamiliar Swift code, and connect implementation details across files. Every file operation remains bounded to the selected workspace.
+TurboCode can build a compact map of Swift declarations, signatures, documentation comments, and line numbers before reading source code. It then reads focused ranges, searches for symbols and patterns, explains unfamiliar Swift code, and connects implementation details across files. Every file operation remains bounded to the selected workspace.
 
 ## Make precise changes
 

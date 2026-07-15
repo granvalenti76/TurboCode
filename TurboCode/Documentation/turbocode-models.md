@@ -9,3 +9,11 @@ In Orchestrator mode, Apple on-device interprets the request and coordinates the
 The delegated model can be selected under **TurboCode > Settings > Agents > Orchestrator**. Available choices come from `~/.turbocode/models.json`; secrets remain in the macOS Keychain.
 
 TurboCode validates reasoning and tool-calling capabilities before building a model profile. This prevents unsupported options from reaching a model and provides a foundation for giving advanced tools only to models that can use them reliably.
+
+## Repository mapping and context budgets
+
+For existing Swift, SwiftUI, Xcode, and Swift Package projects, capable models use `swift_workspace_map` before opening source files. The tool returns declaration signatures, line numbers, short documentation comments, project markers, and focused symbol queries without placing file bodies in the model context.
+
+Apple on-device does not receive the repository map, including while it acts as orchestrator. The configured delegate performs project discovery. Llama and Apple PCC use a compact map designed around a conservative 32k context window. DeepSeek uses the enhanced map, which can also expose imports and type relationships.
+
+The map is cached incrementally under `~/.turbocode/cache/repository-maps/`. TurboCode rescans only Swift files whose size or modification time changed. The cache contains declarations and workspace-relative paths, never source bodies.
