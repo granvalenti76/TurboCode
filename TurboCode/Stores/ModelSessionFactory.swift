@@ -24,15 +24,9 @@ struct ModelSessionEvents {
     let delegationChanged: @Sendable (Bool) async -> Void
 }
 
-enum ModelToolAccess: Equatable {
-    case none
-    case onDevice
-    case standard
-}
-
 struct ResolvedModelCapabilities {
     let reasoningLevel: ContextOptions.ReasoningLevel?
-    let toolAccess: ModelToolAccess
+    let toolAccess: ModelToolTier
 }
 
 private struct ToollessProfile: LanguageModelSession.DynamicProfile {
@@ -59,7 +53,7 @@ enum ModelCapabilityPolicy {
     static func resolve(
         for model: any LanguageModel,
         requestedReasoningLevel: ContextOptions.ReasoningLevel?,
-        preferredToolAccess: ModelToolAccess = .standard
+        preferredToolAccess: ModelToolTier = .standard
     ) -> ResolvedModelCapabilities {
         let capabilities = model.capabilities
         return ResolvedModelCapabilities(
@@ -81,7 +75,6 @@ enum ModelSessionFactory {
         events: ModelSessionEvents
     ) -> LanguageModelSession {
         let instructions = instructions(for: configuration)
-        let workspaceTools = workspaceTools(for: configuration)
         let activeModel = activeModel(for: configuration)
         let activeCapabilities = ModelCapabilityPolicy.resolve(
             for: activeModel,
@@ -94,7 +87,6 @@ enum ModelSessionFactory {
             return makeOrchestratorSession(
                 configuration: configuration,
                 instructions: instructions,
-                workspaceTools: workspaceTools,
                 activeModel: activeModel,
                 activeCapabilities: activeCapabilities,
                 history: history,
@@ -112,6 +104,12 @@ enum ModelSessionFactory {
             )
         }
 
+        let standalonePlan = ModelToolCatalog.plan(
+            profile: .standalone,
+            tier: activeCapabilities.toolAccess,
+            context: toolContext(for: configuration)
+        )
+
         return LanguageModelSession(
             profile: StandaloneProfile(
                 instructions: instructions,
@@ -124,9 +122,11 @@ enum ModelSessionFactory {
                 dropsCompletedToolCalls: configuration.dropsCompletedToolCalls,
                 executionPolicy: configuration.agentTuning.execution,
                 gitPolicy: configuration.agentTuning.git,
-                supplementalTools: tools(
-                    for: activeCapabilities.toolAccess,
-                    workspaceRoot: configuration.workspaceRoot
+                toolPlan: standalonePlan,
+                supplementalTools: toolInstances(
+                    for: standalonePlan,
+                    configuration: configuration,
+                    including: [.turboCodeGuide, .listWorkspace]
                 ),
                 onToolStart: { call in
                     await events.toolStarted(call, configuration.backend)
@@ -142,7 +142,6 @@ enum ModelSessionFactory {
     private static func makeOrchestratorSession(
         configuration: ModelSessionConfiguration,
         instructions: String,
-        workspaceTools: [any Tool],
         activeModel: any LanguageModel,
         activeCapabilities: ResolvedModelCapabilities,
         history: [Transcript.Entry],
@@ -154,13 +153,16 @@ enum ModelSessionFactory {
             for: delegateModel,
             requestedReasoningLevel: configuration.delegateReasoningLevel
         )
+        let delegatePlan = ModelToolCatalog.plan(
+            profile: .delegate,
+            tier: delegateCapabilities.toolAccess,
+            context: toolContext(for: configuration)
+        )
         let powerfulTool = CallPowerfulModelTool(
             model: delegateModel,
             temperature: configuration.delegateTemperature,
             reasoningLevel: delegateCapabilities.reasoningLevel,
-            delegateTools: delegateCapabilities.toolAccess == .standard
-                ? workspaceTools + tools(for: .standard, workspaceRoot: configuration.workspaceRoot)
-                : [],
+            delegateTools: toolInstances(for: delegatePlan, configuration: configuration),
             delegateInstructions: instructions,
             onToolStart: { call in
                 await events.toolStarted(call, delegateBackend)
@@ -170,16 +172,17 @@ enum ModelSessionFactory {
             }
         )
 
-        var orchestratorTools: [any Tool] = [powerfulTool]
-        orchestratorTools += tools(
-            for: activeCapabilities.toolAccess,
-            workspaceRoot: configuration.workspaceRoot
+        let orchestratorPlan = ModelToolCatalog.plan(
+            profile: .orchestrator,
+            tier: activeCapabilities.toolAccess,
+            context: toolContext(for: configuration)
         )
-        if !configuration.workspaceRoot.isEmpty {
-            orchestratorTools.append(FileSystemTool(workspaceRoot: configuration.workspaceRoot))
-        }
-        if !configuration.availableSkills.isEmpty {
-            orchestratorTools.append(LoadSkillTool(skills: configuration.availableSkills))
+        var orchestratorTools = toolInstances(
+            for: orchestratorPlan,
+            configuration: configuration
+        )
+        if orchestratorPlan.contains(.callPowerfulModel) {
+            orchestratorTools.append(powerfulTool)
         }
 
         return LanguageModelSession(
@@ -226,47 +229,54 @@ enum ModelSessionFactory {
         )
     }
 
-    private static func workspaceTools(
-        for configuration: ModelSessionConfiguration
+    private static func toolInstances(
+        for plan: ModelToolPlan,
+        configuration: ModelSessionConfiguration,
+        including allowedIDs: Set<ToolCapabilityID>? = nil
     ) -> [any Tool] {
-        var tools: [any Tool] = []
-        if !configuration.workspaceRoot.isEmpty {
-            tools += [
-                ReadFileTool(workspaceRoot: configuration.workspaceRoot),
-                GrepTool(workspaceRoot: configuration.workspaceRoot),
-                FileSystemTool(workspaceRoot: configuration.workspaceRoot),
-                GitTool(
+        plan.assignments.compactMap { assignment -> (any Tool)? in
+            guard assignment.isRegistered,
+                  allowedIDs?.contains(assignment.id) ?? true else { return nil }
+            switch assignment.id {
+            case .turboCodeGuide:
+                return TurboCodeGuideTool(store: .live)
+            case .listWorkspace:
+                return ListWorkspaceTool(workspaceRoot: configuration.workspaceRoot)
+            case .readFile:
+                return ReadFileTool(workspaceRoot: configuration.workspaceRoot)
+            case .searchWorkspace:
+                return GrepTool(workspaceRoot: configuration.workspaceRoot)
+            case .fileSystem:
+                return FileSystemTool(workspaceRoot: configuration.workspaceRoot)
+            case .git:
+                return GitTool(
                     workspaceRoot: configuration.workspaceRoot,
                     policy: configuration.agentTuning.git,
                     executionPolicy: configuration.agentTuning.execution
-                ),
-                BashTool(
+                )
+            case .bash:
+                return BashTool(
                     workspaceRoot: configuration.workspaceRoot,
                     executionPolicy: configuration.agentTuning.execution
-                ),
-                EditFileTool(workspaceRoot: configuration.workspaceRoot)
-            ]
+                )
+            case .editFile:
+                return EditFileTool(workspaceRoot: configuration.workspaceRoot)
+            case .loadSkill:
+                return LoadSkillTool(skills: configuration.availableSkills)
+            case .callPowerfulModel:
+                return nil
+            }
         }
-        if !configuration.availableSkills.isEmpty {
-            tools.append(LoadSkillTool(skills: configuration.availableSkills))
-        }
-        return tools
     }
 
-    private static func tools(
-        for access: ModelToolAccess,
-        workspaceRoot: String
-    ) -> [any Tool] {
-        switch access {
-        case .none:
-            return []
-        case .onDevice, .standard:
-            var tools: [any Tool] = [TurboCodeGuideTool(store: .live)]
-            if !workspaceRoot.isEmpty {
-                tools.append(ListWorkspaceTool(workspaceRoot: workspaceRoot))
-            }
-            return tools
-        }
+    private static func toolContext(
+        for configuration: ModelSessionConfiguration
+    ) -> ToolAccessContext {
+        ToolAccessContext(
+            hasWorkspace: !configuration.workspaceRoot.isEmpty,
+            hasSkills: !configuration.availableSkills.isEmpty,
+            hasDelegateModel: configuration.delegateRemoteModel.enabled
+        )
     }
 
     private static func activeModel(

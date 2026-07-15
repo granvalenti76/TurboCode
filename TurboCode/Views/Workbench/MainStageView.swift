@@ -14,6 +14,10 @@ struct MainStageView: View {
                 WritePlaceholderView()
             case .settings:
                 SettingsTabView()
+            case .tools:
+                ToolsView()
+            case .schedule:
+                PlaceholderIcon(icon: "clock", label: "Scheduled")
             default:
                 PlaceholderIcon(icon: "square.grid.2x2", label: "Workflow")
             }

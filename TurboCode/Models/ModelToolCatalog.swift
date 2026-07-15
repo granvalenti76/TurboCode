@@ -1,0 +1,252 @@
+import Foundation
+
+nonisolated enum ModelToolTier: String, Sendable, Hashable {
+    case none
+    case onDevice
+    case standard
+}
+
+nonisolated enum ModelRuntimeProfile: String, Sendable, Hashable {
+    case standalone
+    case orchestrator
+    case delegate
+}
+
+nonisolated enum ToolCapabilityID: String, CaseIterable, Sendable, Hashable, Identifiable {
+    case turboCodeGuide = "turbocode_guide"
+    case listWorkspace = "list_workspace"
+    case readFile = "read_file"
+    case searchWorkspace = "grep"
+    case fileSystem = "file_system"
+    case git
+    case bash
+    case editFile = "edit_file"
+    case loadSkill = "load_skill"
+    case callPowerfulModel = "call_powerful_model"
+
+    var id: String { rawValue }
+}
+
+nonisolated enum ToolCapabilityCategory: String, CaseIterable, Sendable, Hashable {
+    case product = "Product"
+    case discovery = "Discovery"
+    case code = "Code"
+    case execution = "Execution"
+    case orchestration = "Orchestration"
+}
+
+nonisolated struct ToolCapabilityDescriptor: Identifiable, Sendable, Hashable {
+    let id: ToolCapabilityID
+    let name: String
+    let summary: String
+    let category: ToolCapabilityCategory
+    let systemImage: String
+    let hasNativePresentation: Bool
+}
+
+nonisolated enum ToolAvailabilityRequirement: Sendable, Hashable {
+    case always
+    case workspace
+    case skills
+    case delegateModel
+}
+
+nonisolated struct ToolAccessContext: Sendable, Hashable {
+    let hasWorkspace: Bool
+    let hasSkills: Bool
+    let hasDelegateModel: Bool
+}
+
+nonisolated struct ModelToolAssignment: Identifiable, Sendable, Hashable {
+    let id: ToolCapabilityID
+    let isRegistered: Bool
+    let unavailableReason: String?
+}
+
+nonisolated struct ModelToolPlan: Sendable, Hashable {
+    let profile: ModelRuntimeProfile
+    let tier: ModelToolTier
+    let assignments: [ModelToolAssignment]
+
+    var registeredIDs: Set<ToolCapabilityID> {
+        Set(assignments.filter(\.isRegistered).map(\.id))
+    }
+
+    func contains(_ id: ToolCapabilityID) -> Bool {
+        registeredIDs.contains(id)
+    }
+
+    func assignment(for id: ToolCapabilityID) -> ModelToolAssignment? {
+        assignments.first(where: { $0.id == id })
+    }
+}
+
+/// Single source of truth for tool identity, presentation metadata, profile
+/// membership, and runtime requirements. Session construction and the Tools UI
+/// both consume this resolver.
+nonisolated enum ModelToolCatalog {
+    static let descriptors: [ToolCapabilityDescriptor] = [
+        .init(
+            id: .turboCodeGuide,
+            name: "TurboCode Guide",
+            summary: "Ground product answers in the official documentation.",
+            category: .product,
+            systemImage: "book.closed",
+            hasNativePresentation: true
+        ),
+        .init(
+            id: .listWorkspace,
+            name: "Browse Directory",
+            summary: "Show a structured listing for one workspace directory.",
+            category: .discovery,
+            systemImage: "folder",
+            hasNativePresentation: true
+        ),
+        .init(
+            id: .readFile,
+            name: "Read File",
+            summary: "Read focused, numbered source ranges with a revision token.",
+            category: .code,
+            systemImage: "doc.text.magnifyingglass",
+            hasNativePresentation: false
+        ),
+        .init(
+            id: .searchWorkspace,
+            name: "Search Workspace",
+            summary: "Search text and code patterns inside the workspace.",
+            category: .discovery,
+            systemImage: "text.magnifyingglass",
+            hasNativePresentation: false
+        ),
+        .init(
+            id: .fileSystem,
+            name: "File Operations",
+            summary: "Inspect metadata and perform bounded filesystem operations.",
+            category: .code,
+            systemImage: "folder.badge.gearshape",
+            hasNativePresentation: false
+        ),
+        .init(
+            id: .git,
+            name: "Git",
+            summary: "Inspect and manage the workspace repository.",
+            category: .execution,
+            systemImage: "arrow.triangle.branch",
+            hasNativePresentation: true
+        ),
+        .init(
+            id: .bash,
+            name: "Run Command",
+            summary: "Run bounded builds, tests, and read-only inspection commands.",
+            category: .execution,
+            systemImage: "terminal",
+            hasNativePresentation: false
+        ),
+        .init(
+            id: .editFile,
+            name: "Edit File",
+            summary: "Apply revision-bound source changes with Review and Undo.",
+            category: .code,
+            systemImage: "pencil.and.outline",
+            hasNativePresentation: true
+        ),
+        .init(
+            id: .loadSkill,
+            name: "Load Skill",
+            summary: "Load a matching skill from ~/.turbocode/SKILLS on demand.",
+            category: .orchestration,
+            systemImage: "puzzlepiece.extension",
+            hasNativePresentation: false
+        ),
+        .init(
+            id: .callPowerfulModel,
+            name: "Delegate Task",
+            summary: "Send complex work to the configured orchestrator model.",
+            category: .orchestration,
+            systemImage: "point.3.connected.trianglepath.dotted",
+            hasNativePresentation: false
+        )
+    ]
+
+    static func descriptor(for id: ToolCapabilityID) -> ToolCapabilityDescriptor {
+        descriptors.first(where: { $0.id == id })!
+    }
+
+    static func plan(
+        profile: ModelRuntimeProfile,
+        tier: ModelToolTier,
+        context: ToolAccessContext
+    ) -> ModelToolPlan {
+        let memberships = membership(for: profile)
+        let assignments = memberships.map { id, requirement in
+            assignment(id: id, requirement: requirement, tier: tier, context: context)
+        }
+        return ModelToolPlan(profile: profile, tier: tier, assignments: assignments)
+    }
+
+    private static func membership(
+        for profile: ModelRuntimeProfile
+    ) -> [(ToolCapabilityID, ToolAvailabilityRequirement)] {
+        switch profile {
+        case .standalone:
+            return [
+                (.turboCodeGuide, .always),
+                (.listWorkspace, .workspace),
+                (.readFile, .workspace),
+                (.searchWorkspace, .workspace),
+                (.fileSystem, .workspace),
+                (.git, .workspace),
+                (.bash, .workspace),
+                (.editFile, .workspace),
+                (.loadSkill, .skills)
+            ]
+        case .orchestrator:
+            return [
+                (.turboCodeGuide, .always),
+                (.listWorkspace, .workspace),
+                (.fileSystem, .workspace),
+                (.loadSkill, .skills),
+                (.callPowerfulModel, .delegateModel)
+            ]
+        case .delegate:
+            return [
+                (.turboCodeGuide, .always),
+                (.listWorkspace, .workspace),
+                (.readFile, .workspace),
+                (.searchWorkspace, .workspace),
+                (.fileSystem, .workspace),
+                (.git, .workspace),
+                (.bash, .workspace),
+                (.editFile, .workspace),
+                (.loadSkill, .skills)
+            ]
+        }
+    }
+
+    private static func assignment(
+        id: ToolCapabilityID,
+        requirement: ToolAvailabilityRequirement,
+        tier: ModelToolTier,
+        context: ToolAccessContext
+    ) -> ModelToolAssignment {
+        guard tier != .none else {
+            return .init(
+                id: id,
+                isRegistered: false,
+                unavailableReason: "Tool calling unavailable"
+            )
+        }
+        switch requirement {
+        case .always:
+            return .init(id: id, isRegistered: true, unavailableReason: nil)
+        case .workspace where !context.hasWorkspace:
+            return .init(id: id, isRegistered: false, unavailableReason: "Choose a workspace")
+        case .skills where !context.hasSkills:
+            return .init(id: id, isRegistered: false, unavailableReason: "No skills installed")
+        case .delegateModel where !context.hasDelegateModel:
+            return .init(id: id, isRegistered: false, unavailableReason: "Configure a delegate model")
+        default:
+            return .init(id: id, isRegistered: true, unavailableReason: nil)
+        }
+    }
+}

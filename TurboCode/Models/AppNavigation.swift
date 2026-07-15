@@ -6,7 +6,7 @@ public enum AppRoute: String, Sendable, Hashable, CaseIterable {
     case chat
     case write
     case settings
-    case plugins
+    case tools
     case claw
     case schedule
     case workflow

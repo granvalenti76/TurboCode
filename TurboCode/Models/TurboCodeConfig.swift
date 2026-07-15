@@ -13,6 +13,7 @@ public final class TurboCodeConfig {
     }
 
     private var modelsURL: URL { rootURL.appendingPathComponent("models.json") }
+    public var modelsConfigurationURL: URL { modelsURL }
     private var agentTuningURL: URL { rootURL.appendingPathComponent("config.json") }
     private var sessionsDir: URL { rootURL.appendingPathComponent("sessions") }
     public var skillsDirectoryURL: URL { rootURL.appendingPathComponent("SKILLS", isDirectory: true) }

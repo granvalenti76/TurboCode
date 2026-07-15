@@ -5,7 +5,6 @@ import SwiftUI
 struct SidebarView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var searchText: String = ""
-    @State private var selectedNav: String = "chat"
     @State private var expandedWorkspaces: Set<String> = []
     @State private var workspacePendingRemoval: String?
 
@@ -56,7 +55,7 @@ struct SidebarView: View {
             Spacer()
 
             Button {
-                selectedNav = "search"
+                chatStore.setRoute(.chat)
             } label: {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 15, weight: .medium))
@@ -76,6 +75,7 @@ struct SidebarView: View {
     private var navItemsView: some View {
         VStack(spacing: 2) {
             Button {
+                chatStore.setRoute(.chat)
                 Task { await chatStore.createThread() }
             } label: {
                 navigationLabel(icon: "square.and.pencil", title: "New chat")
@@ -84,9 +84,13 @@ struct SidebarView: View {
 
             ForEach(NavItem.allCases, id: \.self) { item in
                 Button {
-                    selectedNav = item.id
+                    chatStore.setRoute(item.route)
                 } label: {
-                    navigationLabel(icon: item.icon, title: item.label)
+                    navigationLabel(
+                        icon: item.icon,
+                        title: item.label,
+                        isSelected: chatStore.route == item.route
+                    )
                 }
                 .buttonStyle(.plain)
             }
@@ -95,7 +99,11 @@ struct SidebarView: View {
         .padding(.bottom, 8)
     }
 
-    private func navigationLabel(icon: String, title: String) -> some View {
+    private func navigationLabel(
+        icon: String,
+        title: String,
+        isSelected: Bool = false
+    ) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 15))
@@ -108,17 +116,28 @@ struct SidebarView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
         .contentShape(Rectangle())
+        .sidebarSelectionBackground(isSelected)
     }
 
-    private enum NavItem: String, CaseIterable {
-        case scheduled, plugins
+    private enum NavItem: CaseIterable {
+        case scheduled, tools
 
-        var id: String { rawValue }
-        var label: String { rawValue.capitalized }
+        var label: String {
+            switch self {
+            case .scheduled: "Scheduled"
+            case .tools: "Tools"
+            }
+        }
         var icon: String {
             switch self {
             case .scheduled: return "clock"
-            case .plugins: return "puzzlepiece.extension"
+            case .tools: return "wrench.and.screwdriver"
+            }
+        }
+        var route: AppRoute {
+            switch self {
+            case .scheduled: .schedule
+            case .tools: .tools
             }
         }
     }
@@ -144,6 +163,7 @@ struct SidebarView: View {
         Section {
             // All threads
             Button {
+                chatStore.setRoute(.chat)
                 chatStore.selectedProject = nil
                 withAnimation(.easeInOut(duration: 0.18)) {
                     expandedWorkspaces.removeAll()
@@ -230,6 +250,7 @@ struct SidebarView: View {
         let isSelected = chatStore.workspaceRoot == path && chatStore.selectedProject != nil
 
         return Button {
+            chatStore.setRoute(.chat)
             withAnimation(.easeInOut(duration: 0.18)) {
                 if isExpanded {
                     expandedWorkspaces.remove(path)
@@ -353,6 +374,7 @@ struct SidebarView: View {
             thread: thread,
             isSelected: thread.id == chatStore.activeThreadId,
             onSelect: {
+                chatStore.setRoute(.chat)
                 Task {
                     // If blocks are empty, it's a restored session — load full data.
                     if chatStore.blocks.isEmpty || chatStore.activeThreadId != thread.id {

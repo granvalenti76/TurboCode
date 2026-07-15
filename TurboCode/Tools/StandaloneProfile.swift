@@ -17,6 +17,7 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let dropsCompletedToolCalls: Bool
     let executionPolicy: ExecutionPolicy
     let gitPolicy: GitPolicy
+    let toolPlan: ModelToolPlan
     let supplementalTools: [any Tool]
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
@@ -33,23 +34,41 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
             Instructions(instructions)
             if !workspaceRoot.isEmpty {
-                Instructions {
-                    "read_file, git, bash, and edit_file are active directly in this session. Use read_file with small line ranges and its Revision for focused context. Use git for every Git operation, including init when the workspace is not yet a repository; Git writes are not blocked by the bash sandbox. Use bash only for builds, tests, and precise read-only inspection not covered by a structured tool. Use edit_file for every text-file creation or modification, one contiguous change per call. When writing articles, biographies, documentation, or other long prose, include real newline characters and separate paragraphs with a blank line; never collapse the document into one long line."
+                if toolPlan.contains(.readFile) {
+                    Instructions {
+                        "Use read_file with small line ranges and its Revision for focused context."
+                    }
+                    ReadFileTool(workspaceRoot: workspaceRoot)
                 }
-                ReadFileTool(workspaceRoot: workspaceRoot)
-                GitTool(
+                if toolPlan.contains(.git) {
+                    Instructions {
+                        "Use git for every Git operation, including init when the workspace is not yet a repository; Git writes are not blocked by the bash sandbox."
+                    }
+                    GitTool(
+                        workspaceRoot: workspaceRoot,
+                        policy: gitPolicy,
+                        executionPolicy: executionPolicy
+                    )
+                }
+                if toolPlan.contains(.bash) {
+                    Instructions {
+                        "Use bash only for builds, tests, and precise read-only inspection not covered by a structured tool."
+                    }
+                    BashTool(workspaceRoot: workspaceRoot, executionPolicy: executionPolicy)
+                }
+                StandaloneSkills(
+                    activations: activations,
                     workspaceRoot: workspaceRoot,
-                    policy: gitPolicy,
-                    executionPolicy: executionPolicy
+                    toolPlan: toolPlan
                 )
-                BashTool(workspaceRoot: workspaceRoot, executionPolicy: executionPolicy)
-                StandaloneSkills(activations: activations, workspaceRoot: workspaceRoot)
-                Instructions {
-                    "TurboCode generates and validates changes internally. Provide line operations against a fresh revision and never write unified diff syntax yourself."
+                if toolPlan.contains(.editFile) {
+                    Instructions {
+                        "Use edit_file for every text-file creation or modification, one contiguous change per call. TurboCode generates and validates changes internally. Provide line operations against a fresh revision and never write unified diff syntax yourself. When writing long prose, include real newline characters and separate paragraphs with a blank line."
+                    }
+                    EditFileTool(workspaceRoot: workspaceRoot)
                 }
-                EditFileTool(workspaceRoot: workspaceRoot)
             }
-            if !diskSkills.isEmpty {
+            if toolPlan.contains(.loadSkill) {
                 LoadSkillTool(skills: diskSkills)
             }
             supplementalTools
@@ -76,31 +95,43 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
 struct StandaloneSkills: DynamicInstructions {
     let activations: SkillActivations
     let workspaceRoot: String
+    let toolPlan: ModelToolPlan
 
     var body: some DynamicInstructions {
-        Skills(activations: activations) {
-            Skill(
-                name: "file-browser",
-                description: "Get file metadata, find files by name, and perform file operations in the workspace",
-                allowsDeactivation: true
-            ) {
-                Instructions {
-                    "Use list_workspace for every directory listing. Use this skill when you need file metadata, file discovery, or file write/delete/copy/move operations."
-                }
-                FileSystemTool(workspaceRoot: workspaceRoot)
-            }
+        Skills(activations: activations, skills: configuredSkills)
+    }
 
-            Skill(
-                name: "code-reader",
-                description: "Search for text patterns in the workspace",
-                allowsDeactivation: true
-            ) {
-                Instructions {
-                    "Use this skill when you need to search for code patterns with grep. The read_file tool is already active directly."
+    private var configuredSkills: [Skill] {
+        var skills: [Skill] = []
+        if toolPlan.contains(.fileSystem) {
+            skills.append(
+                Skill(
+                    name: "file-browser",
+                    description: "Get file metadata, find files by name, and perform file operations in the workspace",
+                    allowsDeactivation: true
+                ) {
+                    Instructions {
+                        "Use list_workspace for every directory listing. Use this skill when you need file metadata, file discovery, or file write/delete/copy/move operations."
+                    }
+                    FileSystemTool(workspaceRoot: workspaceRoot)
                 }
-                GrepTool(workspaceRoot: workspaceRoot)
-            }
-
+            )
         }
+
+        if toolPlan.contains(.searchWorkspace) {
+            skills.append(
+                Skill(
+                    name: "code-reader",
+                    description: "Search for text patterns in the workspace",
+                    allowsDeactivation: true
+                ) {
+                    Instructions {
+                        "Use this skill when you need to search for code patterns with grep. The read_file tool is already active directly."
+                    }
+                    GrepTool(workspaceRoot: workspaceRoot)
+                }
+            )
+        }
+        return skills
     }
 }
