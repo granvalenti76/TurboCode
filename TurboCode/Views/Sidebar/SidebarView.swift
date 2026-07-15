@@ -4,7 +4,7 @@ import SwiftUI
 
 struct SidebarView: View {
     @Environment(ChatStore.self) private var chatStore
-    @State private var searchText: String = ""
+    @State private var isSessionSearchPresented = false
     @State private var expandedWorkspaces: Set<String> = []
     @State private var workspacePendingRemoval: String?
 
@@ -55,7 +55,7 @@ struct SidebarView: View {
             Spacer()
 
             Button {
-                chatStore.setRoute(.chat)
+                isSessionSearchPresented.toggle()
             } label: {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 15, weight: .medium))
@@ -64,6 +64,12 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
             .help("Search")
+            .popover(isPresented: $isSessionSearchPresented, arrowEdge: .top) {
+                SessionSearchView(conversations: chatStore.threads) { thread in
+                    isSessionSearchPresented = false
+                    openThread(thread)
+                }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 16)
@@ -120,23 +126,20 @@ struct SidebarView: View {
     }
 
     private enum NavItem: CaseIterable {
-        case scheduled, tools
+        case tools
 
         var label: String {
             switch self {
-            case .scheduled: "Scheduled"
             case .tools: "Tools"
             }
         }
         var icon: String {
             switch self {
-            case .scheduled: return "clock"
             case .tools: return "wrench.and.screwdriver"
             }
         }
         var route: AppRoute {
             switch self {
-            case .scheduled: .schedule
             case .tools: .tools
             }
         }
@@ -374,15 +377,7 @@ struct SidebarView: View {
             thread: thread,
             isSelected: thread.id == chatStore.activeThreadId,
             onSelect: {
-                chatStore.setRoute(.chat)
-                Task {
-                    // If blocks are empty, it's a restored session — load full data.
-                    if chatStore.blocks.isEmpty || chatStore.activeThreadId != thread.id {
-                        await chatStore.restoreSession(id: thread.id)
-                    } else {
-                        await chatStore.selectThread(thread.id)
-                    }
-                }
+                openThread(thread)
             },
             onRename: { newTitle in Task { await chatStore.renameThread(id: thread.id, title: newTitle) } },
             onPin: { Task { await chatStore.pinThread(id: thread.id, pinned: !thread.isPinned) } },
@@ -390,6 +385,18 @@ struct SidebarView: View {
             onDelete: { Task { await chatStore.deleteThread(id: thread.id) } },
             onRestore: { Task { await chatStore.restoreThread(id: thread.id) } }
         )
+    }
+
+    private func openThread(_ thread: Conversation) {
+        chatStore.setRoute(.chat)
+        Task {
+            // If blocks are empty, it's a restored session — load full data.
+            if chatStore.blocks.isEmpty || chatStore.activeThreadId != thread.id {
+                await chatStore.restoreSession(id: thread.id)
+            } else {
+                await chatStore.selectThread(thread.id)
+            }
+        }
     }
 
 }
