@@ -8,7 +8,7 @@ options are also available in **TurboCode > Settings > Agents**.
 
 ## Configuration Boundaries
 
-- `config.json` controls agent, execution, skill, and Git policies.
+- `config.json` controls agent, orchestrator, execution, skill, and Git policies.
 - `models.json` defines model endpoints and capabilities.
 - API keys and other secrets belong in the macOS Keychain.
 - `SKILLS/**/SKILL.md` contains reusable on-demand instructions.
@@ -34,6 +34,9 @@ Never place credentials in a TurboCode JSON file.
     "allowsRemoteWrites": true,
     "confirmsDestructiveOperations": true
   },
+  "orchestrator": {
+    "delegateModelID": "llama"
+  },
   "schemaVersion": 1,
   "skills": {
     "discoversUserSkills": true
@@ -48,6 +51,18 @@ response guidance supplied to every model.
 
 `verifiesChanges` tells the agent to run the most focused available build or test
 after changing source code. It does not bypass execution permissions.
+
+## Orchestrator
+
+`delegateModelID` selects the model used by `call_powerful_model` while the Apple
+on-device model is running in orchestrator mode. The value must match an enabled
+model ID from `~/.turbocode/models.json`, such as `llama`, `apple-pcc`, or
+`deepseek`. Models that require credentials must also be configured in the macOS
+Keychain. The same option is available under **TurboCode > Settings > Agents**.
+
+If the selected model is missing, disabled, or lacks its required credential,
+TurboCode falls back to the first configured local model and then to another
+configured enabled model.
 
 ## Execution
 

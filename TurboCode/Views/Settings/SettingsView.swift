@@ -208,6 +208,42 @@ struct AgentSettingsView: View {
                 Toggle("Verify source changes", isOn: s.agentTuning.agent.verifiesChanges)
             }
 
+            Section("Orchestrator") {
+                Picker(
+                    "Powerful model",
+                    selection: s.agentTuning.orchestrator.delegateModelID
+                ) {
+                    if settings.selectedOrchestratorModel == nil {
+                        Text("Unavailable (\(settings.agentTuning.orchestrator.delegateModelID))")
+                            .tag(settings.agentTuning.orchestrator.delegateModelID)
+                    }
+                    ForEach(settings.orchestratorModelOptions) { model in
+                        Text(model.name)
+                            .tag(model.id)
+                            .disabled(!settings.isConfigured(model))
+                    }
+                }
+
+                Text("Used for delegated coding work while Apple on-device runs the orchestrator.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if let selected = settings.selectedOrchestratorModel,
+                   !settings.isConfigured(selected) {
+                    Label(
+                        "\(selected.name) requires its credential before it can be used.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .foregroundStyle(.orange)
+                } else if settings.selectedOrchestratorModel == nil {
+                    Label(
+                        "The selected model ID is not present in models.json.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .foregroundStyle(.orange)
+                }
+            }
+
             Section("Execution") {
                 Stepper(
                     value: s.agentTuning.execution.defaultCommandTimeoutSeconds,

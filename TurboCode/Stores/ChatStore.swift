@@ -384,8 +384,14 @@ public final class ChatStore {
     }
 
     private var delegateRemoteModel: RemoteModelConfig {
-        remoteModels.first(where: { $0.enabled && $0.role == .local })
-            ?? activeRemoteModel
+        remoteModels.first(where: {
+            $0.id == agentTuning.orchestrator.delegateModelID
+                && $0.enabled
+                && isConfigured($0)
+        })
+            ?? remoteModels.first(where: { $0.enabled && $0.role == .local && isConfigured($0) })
+            ?? activeRemoteModel.flatMap { $0.enabled && isConfigured($0) ? $0 : nil }
+            ?? remoteModels.first(where: { $0.enabled && isConfigured($0) })
             ?? RemoteModelConfig.fallbackLlama
     }
 

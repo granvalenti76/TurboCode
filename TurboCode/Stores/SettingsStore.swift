@@ -33,6 +33,15 @@ public final class SettingsStore {
         }
     }
     public private(set) var agentTuningError: String?
+    public private(set) var remoteModels: [RemoteModelConfig] = RemoteModelConfig.defaults
+
+    public var orchestratorModelOptions: [RemoteModelConfig] {
+        remoteModels.filter(\.enabled)
+    }
+
+    public var selectedOrchestratorModel: RemoteModelConfig? {
+        remoteModels.first(where: { $0.id == agentTuning.orchestrator.delegateModelID })
+    }
 
     public var openaiAPIKey: String = ""
     public var openaiBaseURL: String = ""
@@ -44,6 +53,7 @@ public final class SettingsStore {
             do {
                 try CredentialStore.set(deepseekAPIKey, for: "deepseek")
                 credentialError = nil
+                reloadRemoteModels()
                 ChatStore.shared?.reloadRemoteModels()
             } catch {
                 credentialError = error.localizedDescription
@@ -80,6 +90,7 @@ public final class SettingsStore {
         let savedMaxWidth = defaults.double(forKey: "maxChatWidth")
         maxChatWidth = savedMaxWidth == 0 ? 820.0 : savedMaxWidth
         reloadAgentTuning()
+        reloadRemoteModels()
         isLoadingCredentials = true
         if let stored = CredentialStore.value(for: "deepseek") {
             deepseekAPIKey = stored
@@ -90,6 +101,17 @@ public final class SettingsStore {
         }
         isLoadingCredentials = false
         ChatStore.shared?.reloadRemoteModels()
+    }
+
+    public func reloadRemoteModels() {
+        remoteModels = (try? TurboCodeConfig.shared.loadRemoteModels())
+            .flatMap { $0.isEmpty ? nil : $0 }
+            ?? RemoteModelConfig.defaults
+    }
+
+    public func isConfigured(_ model: RemoteModelConfig) -> Bool {
+        guard let credential = model.credential else { return true }
+        return !(CredentialStore.value(for: credential) ?? "").isEmpty
     }
 
     public func reloadAgentTuning() {

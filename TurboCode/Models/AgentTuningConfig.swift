@@ -8,19 +8,22 @@ nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
     public var execution: ExecutionPolicy
     public var skills: SkillsPolicy
     public var git: GitPolicy
+    public var orchestrator: OrchestratorPolicy
 
     public init(
         schemaVersion: Int = currentSchemaVersion,
         agent: AgentPolicy = AgentPolicy(),
         execution: ExecutionPolicy = ExecutionPolicy(),
         skills: SkillsPolicy = SkillsPolicy(),
-        git: GitPolicy = GitPolicy()
+        git: GitPolicy = GitPolicy(),
+        orchestrator: OrchestratorPolicy = OrchestratorPolicy()
     ) {
         self.schemaVersion = schemaVersion
         self.agent = agent
         self.execution = execution
         self.skills = skills
         self.git = git
+        self.orchestrator = orchestrator
     }
 
     public static var `default`: AgentTuningConfig { AgentTuningConfig() }
@@ -45,11 +48,16 @@ nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
                 "execution.maximumToolOutputCharacters must be between 1000 and 30000"
             )
         }
+        guard !orchestrator.delegateModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw AgentTuningError.invalidValue(
+                "orchestrator.delegateModelID must identify a model from models.json"
+            )
+        }
         return self
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, agent, execution, skills, git
+        case schemaVersion, agent, execution, skills, git, orchestrator
     }
 
     public init(from decoder: Decoder) throws {
@@ -61,6 +69,26 @@ nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
             ?? ExecutionPolicy()
         skills = try values.decodeIfPresent(SkillsPolicy.self, forKey: .skills) ?? SkillsPolicy()
         git = try values.decodeIfPresent(GitPolicy.self, forKey: .git) ?? GitPolicy()
+        orchestrator = try values.decodeIfPresent(OrchestratorPolicy.self, forKey: .orchestrator)
+            ?? OrchestratorPolicy()
+    }
+}
+
+nonisolated public struct OrchestratorPolicy: Codable, Hashable, Sendable {
+    /// ID of the remote model used by `call_powerful_model` in orchestrator mode.
+    /// The ID is resolved against `~/.turbocode/models.json` at session creation.
+    public var delegateModelID: String
+
+    public init(delegateModelID: String = "llama") {
+        self.delegateModelID = delegateModelID
+    }
+
+    private enum CodingKeys: String, CodingKey { case delegateModelID }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        delegateModelID = try values.decodeIfPresent(String.self, forKey: .delegateModelID)
+            ?? "llama"
     }
 }
 
