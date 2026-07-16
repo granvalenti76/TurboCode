@@ -14,7 +14,7 @@ struct WriteOnDeviceToolTests {
             arguments: WriteOnDeviceArguments(fileName: "NOTES.md", content: "First draft\n")
         )
 
-        #expect(result.contains("Applied 1 file change"))
+        #expect(result == "WRITE_COMPLETE: NOTES.md")
         #expect(try String(contentsOf: workspace.appendingPathComponent("NOTES.md"), encoding: .utf8) == "First draft\n")
     }
 
@@ -30,7 +30,7 @@ struct WriteOnDeviceToolTests {
             arguments: WriteOnDeviceArguments(fileName: "NOTES.md", content: "New\n")
         )
 
-        #expect(result.contains("Applied 1 file change"))
+        #expect(result == "WRITE_COMPLETE: NOTES.md")
         #expect(try String(contentsOf: file, encoding: .utf8) == "New\n")
     }
 
@@ -51,6 +51,16 @@ struct WriteOnDeviceToolTests {
 
         #expect(result.hasPrefix("Error: fileName must be one file name"))
         #expect(try FileManager.default.contentsOfDirectory(atPath: workspace.path).isEmpty)
+    }
+
+    @Test("Stops repetitive empty Markdown without rejecting useful code")
+    func detectsDegenerateStreamingOutput() {
+        let repeatedFences = String(repeating: "```swift\n```\n\n", count: 14)
+        let usefulCode = String(repeating: "```swift\nlet value = 42\n```\n", count: 6)
+
+        #expect(OnDeviceStreamingGuard.isPathological(repeatedFences))
+        #expect(!OnDeviceStreamingGuard.isPathological(usefulCode))
+        #expect(!OnDeviceStreamingGuard.isPathological("```swift\n```"))
     }
 
     private func makeWorkspace() throws -> URL {

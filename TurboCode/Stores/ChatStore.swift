@@ -263,6 +263,7 @@ public final class ChatStore {
     private var activeDiagnosticsRunID: String?
     private var activeEditGroupID: String?
     private var activeProductGuidePresentation: ProductGuideBlock?
+    private var activeCompletedRootWrite: String?
     private var activeAssistantPlaceholderID: String?
     private var editTransactionGroups: [String: String] = [:]
 
@@ -978,6 +979,7 @@ public final class ChatStore {
         error = nil
         var accumulatedText = ""
         activeProductGuidePresentation = nil
+        activeCompletedRootWrite = nil
 
         do {
             let stream = session.streamResponse(to: promptText)
@@ -994,6 +996,10 @@ public final class ChatStore {
                         await AgentDiagnosticsRecorder.shared.markFirstToken(runID: diagnosticsRunID)
                     }
                     accumulatedText = snapshot.content
+                    if activeBackend == .foundationApple,
+                       OnDeviceStreamingGuard.isPathological(snapshot.content) {
+                        throw OnDeviceStreamingGuard.Failure.repetitiveOutput
+                    }
                     diagnosticsGeneratedCharacters = max(
                         diagnosticsGeneratedCharacters,
                         snapshot.content.count
@@ -1071,6 +1077,23 @@ public final class ChatStore {
             if let i = threads.firstIndex(where: { $0.id == activeThreadId }) {
                 threads[i].updatedAt = .now
             }
+        } catch OnDeviceStreamingGuard.Failure.repetitiveOutput {
+            diagnosticsOutcome = .failed
+            let stoppedText = activeCompletedRootWrite.map { "Created `\($0)`." }
+                ?? "Response stopped because the on-device model began repeating output. Please retry."
+            if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
+                blocks[i] = ChatBlock(
+                    id: placeholderId,
+                    kind: .assistant,
+                    text: stoppedText,
+                    model: composerModel
+                )
+            }
+            liveReasoning = ""
+            liveAssistant = ""
+            isDelegating = false
+            toolActivities.removeAll()
+            self.error = nil
         } catch where error is CancellationError || Task.isCancelled {
             diagnosticsOutcome = .cancelled
             // Keep whatever the model had already produced and mark an empty
@@ -1260,6 +1283,15 @@ public final class ChatStore {
                 return nil
             }.joined()
             activeProductGuidePresentation = ProductGuideBlock(toolOutput: text)
+        }
+        if call.toolName == "write_ondevice" {
+            let text = output.segments.compactMap { segment -> String? in
+                if case .text(let value) = segment { return value.content }
+                return nil
+            }.joined()
+            if text.hasPrefix("WRITE_COMPLETE: ") {
+                activeCompletedRootWrite = String(text.dropFirst("WRITE_COMPLETE: ".count))
+            }
         }
         if let presentation = ToolPresentationRouter.presentation(for: call, output: output) {
             presentToolPresentation(presentation)
@@ -1558,6 +1590,27 @@ public final class ChatStore {
                 if a.isPinned != b.isPinned { return a.isPinned }
                 return a.updatedAt > b.updatedAt
             }
+    }
+}
+
+/// Stops a known Foundation Models degeneration before hundreds of empty
+/// Markdown fences are rendered and persisted. It deliberately requires both
+/// substantial output and extremely low information density.
+nonisolated enum OnDeviceStreamingGuard {
+    enum Failure: Error {
+        case repetitiveOutput
+    }
+
+    static func isPathological(_ text: String) -> Bool {
+        guard text.count >= 160 else { return false }
+        let lines = text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let fenceCount = lines.lazy.filter { $0.hasPrefix("```") }.count
+        guard fenceCount >= 12 else { return false }
+
+        let content = lines.filter { !$0.hasPrefix("```") }.joined()
+        return content.count * 5 < text.count
     }
 }
 

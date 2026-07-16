@@ -29,12 +29,11 @@ struct WriteOnDeviceTool: Tool {
     var name: String { "write_ondevice" }
     var description: String {
         """
-        Create or replace one UTF-8 text file directly in the workspace root.
-        Pass only a file name such as NOTES.md, never a path or directory.
-        TurboCode determines whether the file exists, protects replacement with
-        its current revision, applies the change atomically, and presents Review
-        and Undo. This tool cannot write inside subdirectories or outside the
-        active workspace.
+        Immediately create or replace one UTF-8 text file in the workspace root.
+        Use this tool once when the user asks to write a root-level file. Pass a
+        file name such as NOTES.md, never a path or directory, and pass the full
+        final file content. Do not ask for confirmation and do not print the file
+        content after a successful call.
         """
     }
     var includesSchemaInInstructions: Bool { true }
@@ -74,7 +73,7 @@ struct WriteOnDeviceTool: Tool {
             revision = nil
         }
 
-        return try await ApplyEditsTool(
+        let result = try await ApplyEditsTool(
             workspaceRoot: workspaceRoot,
             reportsChanges: reportsChanges
         ).call(
@@ -95,6 +94,8 @@ struct WriteOnDeviceTool: Tool {
                 ]
             )
         )
+        guard result.hasPrefix("Applied ") else { return result }
+        return "WRITE_COMPLETE: \(fileName)"
     }
 
     private func isValidRootFileName(_ value: String) -> Bool {

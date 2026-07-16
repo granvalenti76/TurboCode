@@ -364,12 +364,21 @@ enum ModelSessionFactory {
     }
 
     private static func instructions(for configuration: ModelSessionConfiguration) -> String {
+        let selectedToolIDs = configuration.activeDynamicProfile.map(\.resolvedToolIDs)
+        func hasTool(_ id: ToolCapabilityID) -> Bool {
+            selectedToolIDs?.contains(id) ?? true
+        }
+
         var text = """
         You are TurboCode, an AI coding assistant developed by the TurboCode team.
         You are NOT Apple's built-in assistant. Never refer to yourself as an Apple
         model or any Apple product. Your name is TurboCode.
         """
-        text += "\nAlways use Markdown formatting in your responses: **bold**, `code`, ```code blocks```, tables, etc."
+        if configuration.backend == .foundationApple {
+            text += "\nUse short plain-text responses. Use Markdown only when it materially improves readability; never emit empty code fences."
+        } else {
+            text += "\nAlways use Markdown formatting in your responses: **bold**, `code`, ```code blocks```, tables, etc."
+        }
         text += "\nStructured tool results with a native TurboCode presentation are already visible to the user. Do not repeat, enumerate, or tabulate their contents in the assistant response. Add only a brief contextual sentence when useful, unless the user explicitly requests analysis of the result."
         text += "\nCall turbocode_guide only when the user explicitly asks about the TurboCode product itself, asks what you or the app can do, or requests help with TurboCode capabilities, workflows, models, tools, safety, settings, or best use. Do not call it for greetings, casual conversation, ordinary coding questions, or questions about the user's project. A mere mention of TurboCode is not enough. Pass the user's original question as query, base product facts on the returned official documentation, and answer in the user's language."
         switch configuration.agentTuning.agent.responseStyle {
@@ -398,13 +407,32 @@ enum ModelSessionFactory {
         text += "\nTreat /skill <name> and /<skill-name> as explicit requests to activate that skill before handling the remaining prompt. Treat /skills as a request to list the currently advertised skills with concise descriptions."
         if !configuration.workspaceRoot.isEmpty {
             text += "\nThe current workspace is at: \(configuration.workspaceRoot)"
-            text += "\nActivate the appropriate skill below to access file and code tools."
             text += "\nAll file operations are restricted to the workspace directory."
             text += "\nNEVER access files outside the workspace."
-            text += "\nUse read_file with startLine and endLine to inspect only the relevant numbered source range and preserve context."
-            text += "\nUse list_workspace whenever you need to list or visually inspect the files and folders in one workspace directory. Pass a workspace-relative path and use . for the root."
-            text += "\nUse git for every Git operation, including the init operation when the workspace is not yet a repository. Git mutations are supported directly; never claim they are blocked by the bash sandbox. Use xcode_project for Xcode discovery, builds, and tests whenever it is available. Use bash for Swift Package commands, other builds and tests, and precise non-Git inspection. Bash can read the workspace but cannot write to it."
-            text += "\nUse edit_file for every source or text-file creation and modification. Read the relevant range immediately before editing, copy its Revision, and request one contiguous change per call. Never generate unified diff hunks."
+            if !configuration.availableSkills.isEmpty, hasTool(.loadSkill) {
+                text += "\nActivate the appropriate skill below to access file and code tools."
+            }
+            if hasTool(.readFile) {
+                text += "\nUse read_file with startLine and endLine to inspect only the relevant numbered source range and preserve context."
+            }
+            if hasTool(.listWorkspace) {
+                text += "\nUse list_workspace whenever you need to list or visually inspect the files and folders in one workspace directory. Pass a workspace-relative path and use . for the root."
+            }
+            if hasTool(.git) {
+                text += "\nUse git for every Git operation, including init when the workspace is not yet a repository."
+            }
+            if hasTool(.xcodeProject) {
+                text += "\nUse xcode_project for Xcode discovery, builds, and tests."
+            }
+            if hasTool(.bash) {
+                text += "\nUse bash for builds, tests, and precise non-Git inspection. Bash can read the workspace but cannot write to it."
+            }
+            if hasTool(.editFile) {
+                text += "\nUse edit_file for every source or text-file creation and modification. Read the relevant range immediately before editing, copy its Revision, and request one contiguous change per call. Never generate unified diff hunks."
+            }
+            if hasTool(.writeOnDevice) {
+                text += "\nWhen the user asks to create or replace a root-level text file, call write_ondevice immediately with the complete content. Call it exactly once, do not ask for confirmation, and after WRITE_COMPLETE respond with one short sentence without repeating the content."
+            }
             text += "\nWhen writing articles, biographies, documentation, or other long-form prose, preserve readable paragraphs with a blank line between them. The tool content must contain real newline characters; never collapse the whole document into one long line."
             text += "\nFile and directory deletion and destructive Git operations require approval. If a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
         }
