@@ -44,7 +44,7 @@ struct ToolsView: View {
             Button {
                 openSettings()
             } label: {
-                Label("Model Settings", systemImage: "gearshape")
+                Label("Model Settings", systemImage: "slider.horizontal.3")
             }
             .controlSize(.regular)
         }
@@ -53,7 +53,7 @@ struct ToolsView: View {
     private var environmentSummary: some View {
         HStack(spacing: 18) {
             summaryItem(
-                icon: "doc.badge.gearshape",
+                icon: "doc.text",
                 title: "Configuration",
                 value: viewModel.configurationPath
             )

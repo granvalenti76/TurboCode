@@ -202,7 +202,7 @@ struct ChatBlockView: View {
 
     private var toolBlockPlaceholder: some View {
         HStack(spacing: 6) {
-            Image(systemName: "gearshape.2")
+            Image(systemName: "wrench.and.screwdriver")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
             Text(block.text)

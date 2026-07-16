@@ -138,7 +138,7 @@ nonisolated enum ModelToolCatalog {
             name: "File Operations",
             summary: "Inspect metadata and perform bounded filesystem operations.",
             category: .code,
-            systemImage: "folder.badge.gearshape",
+            systemImage: "folder.badge.ellipsis",
             hasNativePresentation: false
         ),
         .init(

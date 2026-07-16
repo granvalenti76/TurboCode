@@ -16,8 +16,8 @@ struct MainStageView: View {
                 SettingsTabView()
             case .tools:
                 ToolsView()
-            case .schedule:
-                PlaceholderIcon(icon: "clock", label: "Scheduled")
+            case .skills:
+                SkillsView()
             default:
                 PlaceholderIcon(icon: "square.grid.2x2", label: "Workflow")
             }

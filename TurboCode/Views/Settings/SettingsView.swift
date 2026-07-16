@@ -9,7 +9,7 @@ struct SettingsTabView: View {
     var body: some View {
         TabView(selection: $selectedSection) {
             GeneralSettingsView()
-                .tabItem { Label("General", systemImage: "gearshape") }
+                .tabItem { Label("General", systemImage: "slider.horizontal.3") }
                 .tag(SettingsSection.general)
 
             ProviderSettingsView()

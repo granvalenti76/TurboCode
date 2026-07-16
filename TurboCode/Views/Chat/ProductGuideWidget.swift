@@ -120,7 +120,7 @@ struct ProductGuideWidget: View {
                     Button {
                         openSettings()
                     } label: {
-                        Label("Open Settings", systemImage: "gearshape")
+                        Label("Open Settings", systemImage: "slider.horizontal.3")
                     }
                 }
             }

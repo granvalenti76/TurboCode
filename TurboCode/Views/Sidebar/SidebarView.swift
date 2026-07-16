@@ -127,20 +127,24 @@ struct SidebarView: View {
 
     private enum NavItem: CaseIterable {
         case tools
+        case skills
 
         var label: String {
             switch self {
             case .tools: "Tools"
+            case .skills: "Skills"
             }
         }
         var icon: String {
             switch self {
             case .tools: return "wrench.and.screwdriver"
+            case .skills: return "doc.text"
             }
         }
         var route: AppRoute {
             switch self {
             case .tools: .tools
+            case .skills: .skills
             }
         }
     }
