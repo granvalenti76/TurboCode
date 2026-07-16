@@ -28,8 +28,8 @@ struct SkillsView: View {
             Divider()
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color(nsColor: .windowBackgroundColor))
         }
-        .background(Color(nsColor: .windowBackgroundColor))
         .task {
             settings.reloadRemoteModels()
             viewModel.reload()
@@ -160,7 +160,7 @@ struct SkillsView: View {
             }
             .padding(10)
         }
-        .glassEffect(.regular, in: Rectangle())
+        .glassEffect(.clear, in: Rectangle())
     }
 
     private func profileRow(

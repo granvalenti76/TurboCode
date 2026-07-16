@@ -114,10 +114,12 @@ private struct CustomProfilesSheet: View {
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
+            .background(Color(nsColor: .windowBackgroundColor))
 
             Divider()
             SkillsView()
         }
         .frame(minWidth: 960, idealWidth: 1080, minHeight: 580, idealHeight: 680)
+        .presentationBackground(.clear)
     }
 }
