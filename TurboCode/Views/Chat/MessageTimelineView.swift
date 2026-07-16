@@ -47,11 +47,11 @@ struct MessageTimelineView: View {
                             .id("live-assistant")
                     }
 
-                    if let activity = chatStore.activeToolActivity {
-                        ToolActivityIndicator(activity: activity)
+                    if chatStore.busy {
+                        ModelActivityIndicator(summary: modelActivitySummary)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 4)
-                            .id("tool-activity-\(activity.id)")
+                            .id("model-activity")
                     }
 
                     // Bottom anchor for auto-scroll
@@ -72,7 +72,23 @@ struct MessageTimelineView: View {
             .onChange(of: chatStore.activeToolActivity?.id) { _, _ in
                 if autoScroll { scrollToBottom(proxy) }
             }
+            .onChange(of: chatStore.busy) { _, _ in
+                if autoScroll { scrollToBottom(proxy) }
+            }
         }
+    }
+
+    private var modelActivitySummary: String {
+        if let activity = chatStore.activeToolActivity {
+            return activity.summary
+        }
+        if chatStore.isDelegating {
+            return "Waiting for the delegate model"
+        }
+        if !chatStore.liveAssistant.isEmpty {
+            return "Composing response"
+        }
+        return "Preparing response"
     }
 
     // MARK: - Empty State
@@ -105,17 +121,16 @@ struct MessageTimelineView: View {
     }
 }
 
-// MARK: - Tool Activity Indicator
+// MARK: - Model Activity Indicator
 
-struct ToolActivityIndicator: View {
-    let activity: ToolActivity
+struct ModelActivityIndicator: View {
+    let summary: String
 
     var body: some View {
         HStack(spacing: 7) {
-            ProgressView()
-                .controlSize(.mini)
+            ActivityPulse()
 
-            Text(activity.summary)
+            Text(summary)
                 .font(AppTypography.metadata)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -124,7 +139,24 @@ struct ToolActivityIndicator: View {
         }
         .padding(.vertical, 3)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityLabel("\(activity.summary), in progress")
+        .accessibilityLabel("\(summary), in progress")
+    }
+}
+
+private struct ActivityPulse: View {
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
+            let time = timeline.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 2.5) {
+                ForEach(0..<3, id: \.self) { index in
+                    let wave = (sin((time * 4.2) - (Double(index) * 0.9)) + 1) / 2
+                    Capsule()
+                        .fill(.secondary.opacity(0.42 + (wave * 0.4)))
+                        .frame(width: 2.5, height: 5 + (wave * 5))
+                }
+            }
+            .frame(width: 15, height: 12)
+        }
     }
 }
 
@@ -178,37 +210,61 @@ struct LiveReasoningBlock: View {
     let text: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 14))
-                .foregroundStyle(.orange)
-                .frame(width: 24, height: 24)
-                .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        ReasoningDisclosure(text: text, isLive: true, textSize: 12)
+    }
+}
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text("Reasoning")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.orange)
-                    ProgressView()
-                        .scaleEffect(0.5)
+// MARK: - Reasoning Disclosure
+
+struct ReasoningDisclosure: View {
+    let text: String
+    let isLive: Bool
+    let textSize: CGFloat
+
+    @State private var isExpanded = false
+    @State private var isPulsing = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.16)) {
+                    isExpanded.toggle()
                 }
-
-                Text(formattedText(text))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(nil)
-                    .textSelection(.enabled)
+            } label: {
+                Text("Reasoning")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.tertiary)
+                    .opacity(isLive && isPulsing ? 0.42 : 0.86)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isExpanded ? "Hide reasoning" : "Show reasoning")
 
-            Spacer()
+            if isExpanded {
+                Text(formattedText(text))
+                    .font(.system(size: textSize))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 9)
+                            .stroke(.separator.opacity(0.55), lineWidth: 0.5)
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
-        .padding(12)
-        .background(.orange.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(.orange.opacity(0.15), lineWidth: 1)
-        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .onAppear {
+            guard isLive else { return }
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                isPulsing = true
+            }
+        }
     }
 }
 

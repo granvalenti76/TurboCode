@@ -170,31 +170,10 @@ struct ChatBlockView: View {
     // MARK: - Reasoning Block
 
     private var reasoningBlock: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 14))
-                .foregroundStyle(.orange)
-                .frame(width: 28, height: 28)
-                .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Reasoning")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.orange)
-
-                Text(formattedText(block.text))
-                    .font(.system(size: max(12, chatFontSize - 2)))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-
-            Spacer()
-        }
-        .padding(10)
-        .background(.orange.opacity(0.03), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(.orange.opacity(0.12), lineWidth: 1)
+        ReasoningDisclosure(
+            text: block.text,
+            isLive: false,
+            textSize: max(12, chatFontSize - 2)
         )
     }
 
@@ -380,7 +359,6 @@ struct ModelBadgeView: View {
 /// Falls back to plain AttributedString if markdown parsing fails.
 /// The base font size is embedded in the AttributedString so that
 /// markdown-specific fonts (bold, italic, code) are preserved.
-///  DEAD CODE
 func formattedText(_ input: String) -> AttributedString {
     let cleaned = input
         .replacingOccurrences(of: "\\\\", with: "\u{1D}")
