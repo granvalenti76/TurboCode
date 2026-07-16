@@ -238,7 +238,7 @@ struct SkillsView: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 8)], spacing: 8) {
                         ForEach(defaultTools) { tool in
                             capabilityBadge(icon: tool.systemImage, title: tool.name, subtitle: tool.id.rawValue)
-                                .toolInformationPopover(
+                                .toolInformationHoverCard(
                                     tool,
                                     availability: "Included in the \(modelID.displayName) default profile",
                                     isAvailable: true
@@ -466,7 +466,7 @@ struct SkillsView: View {
         }
         .draggable(tool.id.rawValue)
         .opacity(compatible ? 1 : 0.55)
-        .toolInformationPopover(
+        .toolInformationHoverCard(
             tool,
             availability: compatible
                 ? "Available for \(option.id.displayName)"
@@ -487,7 +487,7 @@ struct SkillsView: View {
             viewModel.setTool(tool.id, included: false)
         }
         .draggable(tool.id.rawValue)
-        .toolInformationPopover(
+        .toolInformationHoverCard(
             tool,
             availability: compatible
                 ? "Included for \(option.id.displayName)"
@@ -700,13 +700,13 @@ struct SkillsView: View {
 }
 
 private extension View {
-    func toolInformationPopover(
+    func toolInformationHoverCard(
         _ tool: ToolCapabilityDescriptor,
         availability: String,
         isAvailable: Bool
     ) -> some View {
         modifier(
-            ToolInformationPopoverModifier(
+            ToolInformationHoverCardModifier(
                 tool: tool,
                 availability: availability,
                 isAvailable: isAvailable
@@ -715,7 +715,7 @@ private extension View {
     }
 }
 
-private struct ToolInformationPopoverModifier: ViewModifier {
+private struct ToolInformationHoverCardModifier: ViewModifier {
     let tool: ToolCapabilityDescriptor
     let availability: String
     let isAvailable: Bool
@@ -725,37 +725,54 @@ private struct ToolInformationPopoverModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onHover { isPresented = $0 }
-            .popover(isPresented: $isPresented, arrowEdge: .trailing) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Label(tool.name, systemImage: tool.systemImage)
-                        .font(.headline)
-
-                    Text(tool.summary)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Divider()
-
-                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 7) {
-                        metadataRow("Tool call", value: tool.id.rawValue, monospaced: true)
-                        metadataRow("Category", value: tool.category.rawValue)
-                        metadataRow(
-                            "Interface",
-                            value: tool.hasNativePresentation ? "Native result view" : "Text result"
-                        )
-                    }
-
-                    Label(
-                        availability,
-                        systemImage: isAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(isAvailable ? Color.green : Color.orange)
+            .overlay(alignment: .topTrailing) {
+                if isPresented {
+                    informationCard
+                        .offset(x: -8, y: 34)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topTrailing)))
+                        .allowsHitTesting(false)
                 }
-                .padding(16)
-                .frame(width: 300, alignment: .leading)
             }
+            .zIndex(isPresented ? 10 : 0)
+            .animation(.easeOut(duration: 0.12), value: isPresented)
+    }
+
+    private var informationCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(tool.name, systemImage: tool.systemImage)
+                .font(.headline)
+
+            Text(tool.summary)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 7) {
+                metadataRow("Tool call", value: tool.id.rawValue, monospaced: true)
+                metadataRow("Category", value: tool.category.rawValue)
+                metadataRow(
+                    "Interface",
+                    value: tool.hasNativePresentation ? "Native result view" : "Text result"
+                )
+            }
+
+            Label(
+                availability,
+                systemImage: isAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+            )
+            .font(.caption)
+            .foregroundStyle(isAvailable ? Color.green : Color.orange)
+        }
+        .padding(16)
+        .frame(width: 300, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
     }
 
     @ViewBuilder
