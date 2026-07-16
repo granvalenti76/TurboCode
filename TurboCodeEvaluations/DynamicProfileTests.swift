@@ -62,6 +62,25 @@ struct DynamicProfileTests {
         )
 
         #expect(plan.registeredIDs == [.writeOnDevice, .git])
+        #expect(!StandaloneSkills.isEnabled(for: plan))
+    }
+
+    @Test("Native skill activation is registered only for skill-backed tools")
+    func nativeSkillsRequireSkillBackedTool() {
+        let context = ToolAccessContext(
+            hasWorkspace: true,
+            hasSkills: false,
+            hasDelegateModel: false,
+            repositoryMapDetail: nil
+        )
+        let plan = ModelToolCatalog.plan(
+            profile: .standalone,
+            tier: .standard,
+            context: context,
+            selectedIDs: [.fileSystem]
+        )
+
+        #expect(StandaloneSkills.isEnabled(for: plan))
     }
 
     private func makeRoot() throws -> URL {

@@ -307,6 +307,7 @@ enum ModelSessionFactory {
             case .writeOnDevice:
                 return WriteOnDeviceTool(workspaceRoot: configuration.workspaceRoot)
             case .loadSkill:
+                guard !configuration.availableSkills.isEmpty else { return nil }
                 return LoadSkillTool(skills: configuration.availableSkills)
             case .callPowerfulModel:
                 return nil

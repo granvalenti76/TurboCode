@@ -66,11 +66,13 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                         "Use xcode_project instead of bash to inspect, build, or test an Xcode project. Start with inspect when the container or scheme is unknown, and act on the first reported source error before rebuilding."
                     }
                 }
-                StandaloneSkills(
-                    activations: activations,
-                    workspaceRoot: workspaceRoot,
-                    toolPlan: toolPlan
-                )
+                if StandaloneSkills.isEnabled(for: toolPlan) {
+                    StandaloneSkills(
+                        activations: activations,
+                        workspaceRoot: workspaceRoot,
+                        toolPlan: toolPlan
+                    )
+                }
                 if toolPlan.contains(.editFile) {
                     Instructions {
                         "Use edit_file for every text-file creation or modification, one contiguous change per call. TurboCode generates and validates changes internally. Provide line operations against a fresh revision and never write unified diff syntax yourself. When writing long prose, include real newline characters and separate paragraphs with a blank line."
@@ -106,6 +108,10 @@ struct StandaloneSkills: DynamicInstructions {
     let activations: SkillActivations
     let workspaceRoot: String
     let toolPlan: ModelToolPlan
+
+    static func isEnabled(for toolPlan: ModelToolPlan) -> Bool {
+        toolPlan.contains(.fileSystem) || toolPlan.contains(.searchWorkspace)
+    }
 
     var body: some DynamicInstructions {
         Skills(activations: activations, skills: configuredSkills)
