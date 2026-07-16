@@ -100,7 +100,7 @@ struct TurboCodeApp: App {
                 Button("Write") { chatStore.setRoute(.write) }
                     .keyboardShortcut("2", modifiers: [.command])
 
-                Button("Skills") { chatStore.setRoute(.skills) }
+                Button("Custom Profiles") { chatStore.setRoute(.skills) }
                     .keyboardShortcut("3", modifiers: [.command])
 
                 Button("Workflow") { chatStore.setRoute(.workflow) }

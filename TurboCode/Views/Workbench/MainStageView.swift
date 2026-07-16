@@ -17,7 +17,7 @@ struct MainStageView: View {
             case .tools:
                 ToolsView()
             case .skills:
-                SkillsView()
+                ChatContentView()
             default:
                 PlaceholderIcon(icon: "square.grid.2x2", label: "Workflow")
             }

@@ -5,6 +5,7 @@ import SwiftUI
 struct WorkbenchSplitView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var routeBeforeCustomProfiles: AppRoute = .chat
 
     private let sidebarWidth: Double = 280
     private let mainMinWidth: Double = 520
@@ -57,6 +58,13 @@ struct WorkbenchSplitView: View {
             .ignoresSafeArea(edges: .top)
         }
         .frame(minWidth: workbenchMinWidth)
+        .sheet(isPresented: customProfilesPresented) {
+            CustomProfilesSheet()
+        }
+        .onChange(of: chatStore.route) { previousRoute, route in
+            guard route == .skills, previousRoute != .skills else { return }
+            routeBeforeCustomProfiles = previousRoute
+        }
         .onChange(of: chatStore.leftSidebarCollapsed, initial: true) { _, collapsed in
             let target: NavigationSplitViewVisibility = collapsed ? .detailOnly : .all
             guard columnVisibility != target else { return }
@@ -79,5 +87,37 @@ struct WorkbenchSplitView: View {
                 .help(chatStore.rightPanelVisible ? "Hide changes" : "Show changes")
             }
         }
+    }
+
+    private var customProfilesPresented: Binding<Bool> {
+        Binding(
+            get: { chatStore.route == .skills },
+            set: { presented in
+                guard !presented, chatStore.route == .skills else { return }
+                chatStore.setRoute(routeBeforeCustomProfiles)
+            }
+        )
+    }
+}
+
+private struct CustomProfilesSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Label("Custom Profiles", systemImage: "person.crop.rectangle.stack")
+                    .font(.system(size: 20, weight: .semibold))
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+
+            Divider()
+            SkillsView()
+        }
+        .frame(minWidth: 960, idealWidth: 1080, minHeight: 580, idealHeight: 680)
     }
 }
