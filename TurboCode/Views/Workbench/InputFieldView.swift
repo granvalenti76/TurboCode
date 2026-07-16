@@ -269,6 +269,7 @@ struct InputFieldView: View {
                 .fixedSize()
             }
         }
+        .disabled(chatStore.busy)
     }
 
     // MARK: - Microphone Button

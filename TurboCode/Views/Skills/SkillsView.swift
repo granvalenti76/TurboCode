@@ -50,6 +50,7 @@ struct SkillsView: View {
         .alert("Delete Profile?", isPresented: $deleteConfirmationPresented) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) { viewModel.deleteSelected() }
+                .disabled(chatStore.busy)
         } message: {
             Text("This removes the custom profile. Models, tools, and installed skills are not deleted.")
         }
@@ -111,11 +112,13 @@ struct SkillsView: View {
                         .tag(ProfileLibrarySelection.custom(profile.id))
                         .contextMenu {
                             Button("Use Profile") { chatStore.selectDynamicProfile(profile.id) }
+                                .disabled(chatStore.busy)
                             Divider()
                             Button("Delete", role: .destructive) {
                                 viewModel.select(.custom(profile.id))
                                 deleteConfirmationPresented = true
                             }
+                            .disabled(chatStore.busy)
                         }
                     }
                     if viewModel.profiles.isEmpty {
@@ -219,7 +222,7 @@ struct SkillsView: View {
                         chatStore.selectBuiltInProfile(modelID)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(!option.isAvailable)
+                    .disabled(!option.isAvailable || chatStore.busy)
                 }
 
                 infoBanner(
@@ -269,18 +272,19 @@ struct SkillsView: View {
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
+                    .disabled(chatStore.busy)
                     Button("Revert") { viewModel.discardChanges() }
                         .disabled(!viewModel.isDirty)
                     Button("Save") { viewModel.save() }
                         .keyboardShortcut("s", modifiers: .command)
-                        .disabled(!viewModel.canSave)
+                        .disabled(!viewModel.canSave || chatStore.busy)
                     Button("Use Profile") {
                         if !viewModel.isDirty || viewModel.save() {
                             chatStore.selectDynamicProfile(draft.id)
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(!option.isAvailable)
+                    .disabled(!option.isAvailable || chatStore.busy)
                 }
 
                 if !option.isAvailable {

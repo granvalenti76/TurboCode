@@ -159,12 +159,12 @@ public final class ChatStore {
                 activeDynamicProfileID = nil
                 UserDefaults.standard.removeObject(forKey: "activeDynamicProfileID")
                 composerModel = "Apple · Orchestrator"
-                rebuildSession()
+                rebuildSession(discardingCapabilityContext: true)
             } else {
                 // Switching back to standalone: rebuild without the tool;
                 // keep whatever backend was active (Apple stays Apple, Llama stays Llama).
                 composerModel = activeBackend.rawValue
-                rebuildSession()
+                rebuildSession(discardingCapabilityContext: true)
             }
         }
     }
@@ -337,12 +337,12 @@ public final class ChatStore {
         self.orchestratorMode = mode
     }
 
-    /// Switch inference backend and rebuild the session,
-    /// preserving the full conversation transcript.
+    /// Switch inference backend and rebuild the session, preserving user and
+    /// assistant turns while removing model-specific transport entries.
     /// In orchestrator mode the backend is always Apple on-device;
     /// calling this method has no effect.
     public func switchBackend(to backend: ModelBackend) {
-        guard orchestratorMode == .standalone else { return }
+        guard !busy, orchestratorMode == .standalone else { return }
         clearDynamicProfileSelection()
         if backend == .foundationApple {
             activeBackend = .foundationApple
@@ -354,33 +354,33 @@ public final class ChatStore {
         } else {
             return
         }
-        rebuildSession()
+        rebuildSession(discardingCapabilityContext: true)
     }
 
     public func switchRemoteModel(to id: String) {
-        guard orchestratorMode == .standalone,
+        guard !busy, orchestratorMode == .standalone,
               let model = remoteModels.first(where: { $0.id == id && $0.enabled }),
               isConfigured(model) else { return }
         clearDynamicProfileSelection()
         selectRemoteModel(model)
-        rebuildSession()
+        rebuildSession(discardingCapabilityContext: true)
     }
 
     func selectBuiltInProfile(_ id: ProfileBaseModelID) {
-        guard orchestratorMode == .standalone else { return }
+        guard !busy, orchestratorMode == .standalone else { return }
         clearDynamicProfileSelection()
         guard applyBaseModel(id) else { return }
-        rebuildSession()
+        rebuildSession(discardingCapabilityContext: true)
     }
 
     func selectDynamicProfile(_ id: UUID) {
-        guard orchestratorMode == .standalone,
+        guard !busy, orchestratorMode == .standalone,
               let profile = dynamicProfiles.first(where: { $0.id == id }),
               applyBaseModel(profile.baseModelID) else { return }
         activeDynamicProfileID = profile.id
         UserDefaults.standard.set(profile.id.uuidString, forKey: "activeDynamicProfileID")
         composerModel = profile.name
-        rebuildSession()
+        rebuildSession(discardingCapabilityContext: true)
     }
 
     func reloadDynamicProfiles(selecting id: UUID? = nil) {
@@ -394,7 +394,7 @@ public final class ChatStore {
             } else if activeDynamicProfileID != nil {
                 clearDynamicProfileSelection()
                 composerModel = activeBaseModelID.displayName
-                rebuildSession()
+                rebuildSession(discardingCapabilityContext: true)
             }
         } catch {
             self.error = error.localizedDescription
@@ -420,7 +420,7 @@ public final class ChatStore {
         if let activeDynamicProfile {
             composerModel = activeDynamicProfile.name
         }
-        rebuildSession()
+        rebuildSession(discardingCapabilityContext: true)
     }
 
     public func isConfigured(_ model: RemoteModelConfig) -> Bool {
@@ -510,18 +510,28 @@ public final class ChatStore {
         return activeBackend == .foundationApple ? activeBackend.rawValue : activeRemoteModelID
     }
 
-    /// Rebuild the session preserving conversation history.
+    /// Rebuild the session preserving conversation history. Capability changes
+    /// keep visible turns but discard stale tool, reasoning, and skill state.
     /// Pass `keepingHistory: false` to start a fresh session (new thread).
-    private func rebuildSession(keepingHistory: Bool = true) {
-        let history = keepingHistory ? Array(session.transcript) : []
-        let delegateModel = delegateRemoteModel
-        let sessionSkills: [TurboCodeSkillDefinition]
-        if let activeDynamicProfile {
-            let allowed = Set(activeDynamicProfile.skillIDs)
-            sessionSkills = availableSkills.filter { allowed.contains($0.name) }
-        } else {
-            sessionSkills = availableSkills
+    private func rebuildSession(
+        keepingHistory: Bool = true,
+        discardingCapabilityContext: Bool = false
+    ) {
+        let history = SessionRebuildHistory.prepare(
+            session.transcript,
+            keepingHistory: keepingHistory,
+            discardingCapabilityContext: discardingCapabilityContext
+        )
+        if discardingCapabilityContext {
+            for name in skillActivations.activeSkillNames {
+                skillActivations.deactivate(name)
+            }
         }
+        let delegateModel = delegateRemoteModel
+        let sessionSkills = DynamicProfileRuntimeSelection.skills(
+            from: availableSkills,
+            profile: activeDynamicProfile
+        )
         session = ModelSessionFactory.makeSession(
             configuration: ModelSessionConfiguration(
                 backend: activeBackend,
@@ -823,7 +833,7 @@ public final class ChatStore {
         recentWorkspaces = Array(recent.prefix(10))
         selectedProject = URL(fileURLWithPath: path).lastPathComponent
 
-        rebuildSession()
+        rebuildSession(discardingCapabilityContext: true)
         // The inspector is opt-in: changing workspace must not open it.
         rightPanelMode = nil
         diffSections = []
@@ -838,7 +848,7 @@ public final class ChatStore {
         isGitRepository = false
         currentBranch = ""
         availableBranches = []
-        rebuildSession()
+        rebuildSession(discardingCapabilityContext: true)
         rightPanelMode = nil
     }
 
@@ -860,7 +870,7 @@ public final class ChatStore {
         guard let validated = try? value.validated() else { return }
         agentTuning = validated
         availableSkills = configuredSkills()
-        rebuildSession()
+        rebuildSession(discardingCapabilityContext: true)
     }
 
     private func configuredSkills() -> [TurboCodeSkillDefinition] {
@@ -874,7 +884,7 @@ public final class ChatStore {
         let discovered = configuredSkills()
         guard forceRebuild || discovered != availableSkills else { return }
         availableSkills = discovered
-        rebuildSession()
+        rebuildSession(discardingCapabilityContext: true)
     }
 
     private func resolvedPrompt(for displayText: String) -> String? {
@@ -1611,6 +1621,42 @@ nonisolated enum OnDeviceStreamingGuard {
 
         let content = lines.filter { !$0.hasPrefix("```") }.joined()
         return content.count * 5 < text.count
+    }
+}
+
+/// Prepares conversation history for a newly constructed model session. The
+/// destination profile always supplies fresh instructions and tool definitions.
+nonisolated enum SessionRebuildHistory {
+    static func prepare(
+        _ transcript: Transcript,
+        keepingHistory: Bool,
+        discardingCapabilityContext: Bool
+    ) -> [Transcript.Entry] {
+        guard keepingHistory else { return [] }
+        return transcript.filter { entry in
+            switch entry {
+            case .instructions:
+                return false
+            case .toolCalls, .toolOutput, .reasoning:
+                return !discardingCapabilityContext
+            case .prompt, .response:
+                return true
+            @unknown default:
+                return true
+            }
+        }
+    }
+}
+
+/// Resolves disk skills at the same capability boundary as dynamic tools.
+nonisolated enum DynamicProfileRuntimeSelection {
+    static func skills(
+        from available: [TurboCodeSkillDefinition],
+        profile: UserDynamicProfile?
+    ) -> [TurboCodeSkillDefinition] {
+        guard let profile else { return available }
+        let allowed = Set(profile.skillIDs)
+        return available.filter { allowed.contains($0.name) }
     }
 }
 
