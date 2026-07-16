@@ -24,6 +24,7 @@ nonisolated enum ToolCapabilityID: String, CaseIterable, Sendable, Hashable, Ide
     case bash
     case xcodeProject = "xcode_project"
     case editFile = "edit_file"
+    case writeOnDevice = "write_ondevice"
     case loadSkill = "load_skill"
     case callPowerfulModel = "call_powerful_model"
 
@@ -170,6 +171,14 @@ nonisolated enum ModelToolCatalog {
             summary: "Apply revision-bound source changes with Review and Undo.",
             category: .code,
             systemImage: "pencil.and.outline",
+            hasNativePresentation: true
+        ),
+        .init(
+            id: .writeOnDevice,
+            name: "Write Workspace Root",
+            summary: "Create or replace one root-level text file with a minimal on-device schema.",
+            category: .code,
+            systemImage: "doc.badge.plus",
             hasNativePresentation: true
         ),
         .init(

@@ -301,6 +301,8 @@ enum ModelSessionFactory {
                 )
             case .editFile:
                 return EditFileTool(workspaceRoot: configuration.workspaceRoot)
+            case .writeOnDevice:
+                return WriteOnDeviceTool(workspaceRoot: configuration.workspaceRoot)
             case .loadSkill:
                 return LoadSkillTool(skills: configuration.availableSkills)
             case .callPowerfulModel:
