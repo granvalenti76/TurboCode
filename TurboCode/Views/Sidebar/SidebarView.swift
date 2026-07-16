@@ -132,7 +132,7 @@ struct SidebarView: View {
         var label: String {
             switch self {
             case .tools: "Tools"
-            case .skills: "Skills"
+            case .skills: "Custom Profiles"
             }
         }
         var icon: String {

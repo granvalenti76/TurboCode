@@ -238,6 +238,11 @@ struct SkillsView: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 8)], spacing: 8) {
                         ForEach(defaultTools) { tool in
                             capabilityBadge(icon: tool.systemImage, title: tool.name, subtitle: tool.id.rawValue)
+                                .toolInformationPopover(
+                                    tool,
+                                    availability: "Included in the \(modelID.displayName) default profile",
+                                    isAvailable: true
+                                )
                         }
                     }
                     if !viewModel.installedSkills.isEmpty, option.defaultToolIDs.contains(.loadSkill) {
@@ -461,6 +466,13 @@ struct SkillsView: View {
         }
         .draggable(tool.id.rawValue)
         .opacity(compatible ? 1 : 0.55)
+        .toolInformationPopover(
+            tool,
+            availability: compatible
+                ? "Available for \(option.id.displayName)"
+                : "Unavailable for \(option.id.displayName)",
+            isAvailable: compatible
+        )
     }
 
     private func includedToolRow(_ tool: ToolCapabilityDescriptor, option: ProfileModelOption) -> some View {
@@ -475,6 +487,13 @@ struct SkillsView: View {
             viewModel.setTool(tool.id, included: false)
         }
         .draggable(tool.id.rawValue)
+        .toolInformationPopover(
+            tool,
+            availability: compatible
+                ? "Included for \(option.id.displayName)"
+                : "Not supported by \(option.id.displayName)",
+            isAvailable: compatible
+        )
     }
 
     private func availableSkillRow(_ skill: TurboCodeSkillDefinition) -> some View {
@@ -677,6 +696,78 @@ struct SkillsView: View {
 
     private func revealSkillsDirectory() {
         NSWorkspace.shared.open(TurboCodeConfig.shared.skillsDirectoryURL)
+    }
+}
+
+private extension View {
+    func toolInformationPopover(
+        _ tool: ToolCapabilityDescriptor,
+        availability: String,
+        isAvailable: Bool
+    ) -> some View {
+        modifier(
+            ToolInformationPopoverModifier(
+                tool: tool,
+                availability: availability,
+                isAvailable: isAvailable
+            )
+        )
+    }
+}
+
+private struct ToolInformationPopoverModifier: ViewModifier {
+    let tool: ToolCapabilityDescriptor
+    let availability: String
+    let isAvailable: Bool
+
+    @State private var isPresented = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { isPresented = $0 }
+            .popover(isPresented: $isPresented, arrowEdge: .trailing) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label(tool.name, systemImage: tool.systemImage)
+                        .font(.headline)
+
+                    Text(tool.summary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Divider()
+
+                    Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 7) {
+                        metadataRow("Tool call", value: tool.id.rawValue, monospaced: true)
+                        metadataRow("Category", value: tool.category.rawValue)
+                        metadataRow(
+                            "Interface",
+                            value: tool.hasNativePresentation ? "Native result view" : "Text result"
+                        )
+                    }
+
+                    Label(
+                        availability,
+                        systemImage: isAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(isAvailable ? Color.green : Color.orange)
+                }
+                .padding(16)
+                .frame(width: 300, alignment: .leading)
+            }
+    }
+
+    @ViewBuilder
+    private func metadataRow(_ title: String, value: String, monospaced: Bool = false) -> some View {
+        GridRow {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            Text(value)
+                .font(monospaced ? .system(.caption, design: .monospaced) : .caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
