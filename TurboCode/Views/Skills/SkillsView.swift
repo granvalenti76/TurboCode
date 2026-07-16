@@ -160,7 +160,7 @@ struct SkillsView: View {
             }
             .padding(10)
         }
-        .glassEffect(.clear, in: Rectangle())
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private func profileRow(

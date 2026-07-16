@@ -120,6 +120,5 @@ private struct CustomProfilesSheet: View {
             SkillsView()
         }
         .frame(minWidth: 960, idealWidth: 1080, minHeight: 580, idealHeight: 680)
-        .presentationBackground(.clear)
     }
 }
