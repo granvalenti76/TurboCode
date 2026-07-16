@@ -16,18 +16,27 @@ struct InputFieldView: View {
     @State private var viewModel = ComposerViewModel()
     @FocusState private var isFocused: Bool
 
+    let compact: Bool
+
     // Persisted preferences
     @AppStorage("reasoningEffort") private var reasoningEffort: ReasoningEffort = .medium
+
+    init(compact: Bool = false) {
+        self.compact = compact
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             composerCard
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(
+                    Color(nsColor: .textBackgroundColor),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                )
                 .overlay {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .strokeBorder(.separator, lineWidth: 0.5)
                 }
-                .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+                .shadow(color: .black.opacity(0.08), radius: 10, y: 3)
         }
         .background(Color(.windowBackgroundColor))
         .padding(.horizontal, 24)
@@ -40,7 +49,7 @@ struct InputFieldView: View {
     private var composerCard: some View {
         VStack(spacing: 0) {
             // ── Top section: text field + controls ──
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: compact ? 10 : 16) {
                 textField
 
                 HStack(spacing: 14) {
@@ -53,7 +62,7 @@ struct InputFieldView: View {
                     sendButton
                 }
             }
-            .padding(16)
+            .padding(compact ? 16 : 20)
 
             Divider()
 
@@ -72,6 +81,14 @@ struct InputFieldView: View {
                 .lineLimit(1...10)
                 .focused($isFocused)
                 .disabled(chatStore.busy)
+                .padding(.bottom, compact ? 12 : 28)
+                .contentShape(Rectangle())
+                .simultaneousGesture(
+                    TapGesture().onEnded {
+                        guard !chatStore.busy else { return }
+                        isFocused = true
+                    }
+                )
 
             if isFocused && !slashSuggestions.isEmpty {
                 slashCommandMenu
@@ -266,7 +283,7 @@ struct InputFieldView: View {
                     }
                 }
                 .menuStyle(.borderlessButton)
-                .font(AppTypography.control)
+                .font(.system(size: 15, weight: .medium))
                 .fixedSize()
             }
         }
@@ -323,10 +340,10 @@ struct InputFieldView: View {
 
             Spacer()
         }
-        .font(AppTypography.metadata)
+        .font(.system(size: 13, weight: .medium))
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, compact ? 16 : 20)
+        .padding(.vertical, compact ? 8 : 12)
     }
 
     private var orchestratorModeMenu: some View {

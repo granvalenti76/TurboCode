@@ -144,7 +144,8 @@ enum ModelSessionFactory {
                             .listWorkspace,
                             .swiftWorkspaceMap,
                             .xcodeProject,
-                            .writeOnDevice
+                            .writeOnDevice,
+                            .removeFile
                         ],
                     repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
                         ?? 32_768
@@ -308,6 +309,8 @@ enum ModelSessionFactory {
                 return EditFileTool(workspaceRoot: configuration.workspaceRoot)
             case .writeOnDevice:
                 return WriteOnDeviceTool(workspaceRoot: configuration.workspaceRoot)
+            case .removeFile:
+                return RemoveFileTool(workspaceRoot: configuration.workspaceRoot)
             case .loadSkill:
                 guard !configuration.availableSkills.isEmpty else { return nil }
                 return LoadSkillTool(skills: configuration.availableSkills)
@@ -439,11 +442,17 @@ enum ModelSessionFactory {
             if hasTool(.writeOnDevice) {
                 text += "\nWhen the user asks to create or replace a root-level text file, call write_ondevice immediately with the complete content. Call it exactly once, do not ask for confirmation, and after WRITE_COMPLETE respond with one short sentence without repeating the content."
             }
+            if hasTool(.removeFile) {
+                text += "\nUse remove_file directly whenever the user asks to remove one file. Supply only its workspace path."
+            }
             if hasTool(.editFile) || hasTool(.writeOnDevice) || hasTool(.fileSystem) {
                 text += "\nWhen writing articles, biographies, documentation, or other long-form prose, preserve readable paragraphs with a blank line between them. The tool content must contain real newline characters; never collapse the whole document into one long line."
             }
             if hasTool(.fileSystem) || hasTool(.git) {
-                text += "\nFile and directory deletion and destructive Git operations require approval. If a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
+                let legacyDeletionScope = hasTool(.removeFile)
+                    ? "Directory deletion and destructive Git operations"
+                    : "File and directory deletion and destructive Git operations"
+                text += "\n\(legacyDeletionScope) require approval. If a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
             }
         }
         return text

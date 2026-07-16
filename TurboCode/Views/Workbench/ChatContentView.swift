@@ -37,7 +37,7 @@ struct ChatContentView: View {
                     .foregroundStyle(.tertiary)
             }
 
-            InputFieldView()
+            InputFieldView(compact: true)
                 .frame(maxWidth: min(CGFloat(settings.maxChatWidth), 720))
 
             Spacer()
@@ -85,10 +85,10 @@ struct ChatContentView: View {
 
             Spacer()
 
-            Button {
+            Button(role: approval.operation == "removeFile" ? .destructive : nil) {
                 chatStore.approveAction()
             } label: {
-                Text("Allow")
+                Text(approval.operation == "removeFile" ? "Delete" : "Allow")
                     .font(.system(size: 11, weight: .medium))
             }
             .buttonStyle(.borderedProminent)
@@ -97,7 +97,7 @@ struct ChatContentView: View {
             Button {
                 chatStore.rejectAction()
             } label: {
-                Text("Deny")
+                Text(approval.operation == "removeFile" ? "Cancel" : "Deny")
                     .font(.system(size: 11, weight: .medium))
             }
             .buttonStyle(.bordered)

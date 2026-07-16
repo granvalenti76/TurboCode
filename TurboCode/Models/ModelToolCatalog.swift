@@ -25,6 +25,7 @@ nonisolated enum ToolCapabilityID: String, CaseIterable, Codable, Sendable, Hash
     case xcodeProject = "xcode_project"
     case editFile = "edit_file"
     case writeOnDevice = "write_ondevice"
+    case removeFile = "remove_file"
     case loadSkill = "load_skill"
     case callPowerfulModel = "call_powerful_model"
 
@@ -182,6 +183,14 @@ nonisolated enum ModelToolCatalog {
             hasNativePresentation: true
         ),
         .init(
+            id: .removeFile,
+            name: "Remove File",
+            summary: "Remove one workspace file after explicit user confirmation.",
+            category: .code,
+            systemImage: "trash",
+            hasNativePresentation: true
+        ),
+        .init(
             id: .loadSkill,
             name: "Load Skill",
             summary: "Load a matching skill from ~/.turbocode/SKILLS on demand.",
@@ -231,7 +240,7 @@ nonisolated enum ModelToolCatalog {
         switch id {
         case .turboCodeGuide: .always
         case .listWorkspace, .readFile, .searchWorkspace, .fileSystem, .git,
-             .bash, .editFile, .writeOnDevice: .workspace
+             .bash, .editFile, .writeOnDevice, .removeFile: .workspace
         case .swiftWorkspaceMap: .repositoryMap
         case .xcodeProject: .capableWorkspace
         case .loadSkill: .skills
@@ -255,6 +264,7 @@ nonisolated enum ModelToolCatalog {
                 (.bash, .workspace),
                 (.xcodeProject, .capableWorkspace),
                 (.editFile, .workspace),
+                (.removeFile, .workspace),
                 (.loadSkill, .skills)
             ]
         case .orchestrator:
@@ -277,6 +287,7 @@ nonisolated enum ModelToolCatalog {
                 (.bash, .workspace),
                 (.xcodeProject, .capableWorkspace),
                 (.editFile, .workspace),
+                (.removeFile, .workspace),
                 (.loadSkill, .skills)
             ]
         }

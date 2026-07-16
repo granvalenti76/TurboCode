@@ -417,10 +417,36 @@ public struct PendingToolApproval: Sendable {
 public actor ToolApprovalRegistry {
     public static let shared = ToolApprovalRegistry()
 
-    private var requests: [String: PendingToolApproval] = [:]
+    private struct RegisteredApproval {
+        let request: PendingToolApproval
+        let continuation: CheckedContinuation<String, Never>?
+    }
+
+    private var requests: [String: RegisteredApproval] = [:]
 
     public func register(_ request: PendingToolApproval) async {
-        requests[request.id] = request
+        requests[request.id] = RegisteredApproval(request: request, continuation: nil)
+        await present(request)
+    }
+
+    /// Suspends a tool call until the user explicitly approves or rejects it.
+    /// The model receives only the final result returned by this method.
+    public func request(_ request: PendingToolApproval) async -> String {
+        guard !Task.isCancelled else { return "Action cancelled." }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                requests[request.id] = RegisteredApproval(
+                    request: request,
+                    continuation: continuation
+                )
+                Task { await self.present(request) }
+            }
+        } onCancel: {
+            Task { await self.cancel(id: request.id) }
+        }
+    }
+
+    private func present(_ request: PendingToolApproval) async {
         await MainActor.run {
             let presentation = ApprovalRequest(
                 id: request.id,
@@ -433,16 +459,48 @@ public actor ToolApprovalRegistry {
         }
     }
 
-    public func approve(id: String) async -> String {
-        guard let request = requests.removeValue(forKey: id) else {
-            return "Error: Approval request expired or was already handled."
+    public func approve(id: String) async -> ToolApprovalResolution {
+        guard let registered = requests.removeValue(forKey: id) else {
+            return ToolApprovalResolution(
+                result: "Error: Approval request expired or was already handled.",
+                requiresModelFollowUp: false
+            )
         }
-        return await request.action()
+        let result = await registered.request.action()
+        registered.continuation?.resume(returning: result)
+        return ToolApprovalResolution(
+            result: result,
+            requiresModelFollowUp: registered.continuation == nil
+        )
     }
 
-    public func reject(id: String) {
-        requests.removeValue(forKey: id)
+    public func reject(id: String) -> ToolApprovalResolution {
+        guard let registered = requests.removeValue(forKey: id) else {
+            return ToolApprovalResolution(
+                result: "Action cancelled by the user.",
+                requiresModelFollowUp: false
+            )
+        }
+        let result = "Action cancelled by the user."
+        registered.continuation?.resume(returning: result)
+        return ToolApprovalResolution(
+            result: result,
+            requiresModelFollowUp: registered.continuation == nil
+        )
     }
+
+    private func cancel(id: String) async {
+        guard let registered = requests.removeValue(forKey: id) else { return }
+        registered.continuation?.resume(returning: "Action cancelled.")
+        await MainActor.run {
+            ChatStore.shared?.dismissApproval(id: id)
+        }
+    }
+}
+
+public struct ToolApprovalResolution: Sendable {
+    public let result: String
+    public let requiresModelFollowUp: Bool
 }
 
 // MARK: - Errors

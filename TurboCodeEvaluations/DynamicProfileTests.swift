@@ -94,6 +94,33 @@ struct DynamicProfileTests {
         #expect(tools.map(\.name) == ["write_ondevice"])
     }
 
+    @Test("A remove-only profile exposes exactly the flat removal tool")
+    func removeOnlyProfileCreatesOneInstance() {
+        let profile = UserDynamicProfile(
+            name: "Remover only",
+            baseModelID: .onDevice,
+            toolIDs: [ToolCapabilityID.removeFile.rawValue]
+        )
+        let plan = ModelToolCatalog.plan(
+            profile: .standalone,
+            tier: .onDevice,
+            context: ToolAccessContext(
+                hasWorkspace: true,
+                hasSkills: false,
+                hasDelegateModel: false,
+                repositoryMapDetail: nil
+            ),
+            selectedIDs: profile.resolvedToolIDs
+        )
+
+        let tools = ModelSessionFactory.toolInstances(
+            for: plan,
+            configuration: makeConfiguration(profile: profile)
+        )
+
+        #expect(tools.map(\.name) == ["remove_file"])
+    }
+
     @Test("File operations stay a direct tool in an exclusive profile")
     func fileOperationsDoNotAddSkillActivator() {
         let profile = UserDynamicProfile(

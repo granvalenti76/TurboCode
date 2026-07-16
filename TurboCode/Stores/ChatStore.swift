@@ -1211,14 +1211,16 @@ public final class ChatStore {
         advanceApprovalQueue()
 
         Task {
-            let result = await ToolApprovalRegistry.shared.approve(id: request.id)
-            await sendInternalMessageWhenIdle("""
-            [User approved tool action]
-            Operation: \(request.operation)
-            Path: \(request.path)
-            Result:
-            \(result)
-            """)
+            let resolution = await ToolApprovalRegistry.shared.approve(id: request.id)
+            if resolution.requiresModelFollowUp {
+                await sendInternalMessageWhenIdle("""
+                [User approved tool action]
+                Operation: \(request.operation)
+                Path: \(request.path)
+                Result:
+                \(resolution.result)
+                """)
+            }
         }
     }
 
@@ -1230,8 +1232,10 @@ public final class ChatStore {
             updateDiffPatchBlock(id: request.id, status: .rejected)
         }
         Task {
-            await ToolApprovalRegistry.shared.reject(id: request.id)
-            await sendInternalMessageWhenIdle("[User rejected tool action: \(request.summary). Do NOT perform this action.]")
+            let resolution = await ToolApprovalRegistry.shared.reject(id: request.id)
+            if resolution.requiresModelFollowUp {
+                await sendInternalMessageWhenIdle("[User rejected tool action: \(request.summary). Do NOT perform this action.]")
+            }
         }
     }
 
@@ -1250,6 +1254,14 @@ public final class ChatStore {
 
     private func advanceApprovalQueue() {
         pendingApproval = queuedApprovals.isEmpty ? nil : queuedApprovals.removeFirst()
+    }
+
+    public func dismissApproval(id: String) {
+        if pendingApproval?.id == id {
+            advanceApprovalQueue()
+        } else {
+            queuedApprovals.removeAll(where: { $0.id == id })
+        }
     }
 
     private func sendInternalMessageWhenIdle(_ text: String) async {
@@ -1506,6 +1518,8 @@ public final class ChatStore {
             return item.map { "Searching in \($0)" } ?? "Searching workspace"
         case "bash":
             return "Running command"
+        case "remove_file":
+            return "Preparing file removal"
         case "git":
             let operation = try? call.arguments.value(String.self, forProperty: "operation")
             return operation.map { "Git \($0)" } ?? "Working with Git"
@@ -1697,6 +1711,7 @@ public struct ApprovalRequest: Sendable {
         case "copy": return "Copy \(item)"
         case "move": return "Move \(item)"
         case "delete": return "Delete \(item)"
+        case "removeFile": return "Delete \(item)"
         default: return summary
         }
     }
