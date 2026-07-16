@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModelsUtilities
 import Testing
 @testable import TurboCode
 
@@ -65,6 +66,61 @@ struct DynamicProfileTests {
         #expect(!StandaloneSkills.isEnabled(for: plan))
     }
 
+    @Test("A one-tool dynamic profile creates exactly one runtime tool")
+    func oneToolProfileCreatesOneInstance() {
+        let profile = UserDynamicProfile(
+            name: "Writer only",
+            baseModelID: .onDevice,
+            toolIDs: [ToolCapabilityID.writeOnDevice.rawValue]
+        )
+        let plan = ModelToolCatalog.plan(
+            profile: .standalone,
+            tier: .onDevice,
+            context: ToolAccessContext(
+                hasWorkspace: true,
+                hasSkills: false,
+                hasDelegateModel: false,
+                repositoryMapDetail: nil
+            ),
+            selectedIDs: profile.resolvedToolIDs
+        )
+        let configuration = makeConfiguration(profile: profile)
+
+        let tools = ModelSessionFactory.toolInstances(
+            for: plan,
+            configuration: configuration
+        )
+
+        #expect(tools.map(\.name) == ["write_ondevice"])
+    }
+
+    @Test("File operations stay a direct tool in an exclusive profile")
+    func fileOperationsDoNotAddSkillActivator() {
+        let profile = UserDynamicProfile(
+            name: "Files only",
+            baseModelID: .llama,
+            toolIDs: [ToolCapabilityID.fileSystem.rawValue]
+        )
+        let plan = ModelToolCatalog.plan(
+            profile: .standalone,
+            tier: .standard,
+            context: ToolAccessContext(
+                hasWorkspace: true,
+                hasSkills: false,
+                hasDelegateModel: false,
+                repositoryMapDetail: nil
+            ),
+            selectedIDs: profile.resolvedToolIDs
+        )
+
+        let tools = ModelSessionFactory.toolInstances(
+            for: plan,
+            configuration: makeConfiguration(profile: profile)
+        )
+
+        #expect(tools.map(\.name) == ["file_system"])
+    }
+
     @Test("Native skill activation is registered only for skill-backed tools")
     func nativeSkillsRequireSkillBackedTool() {
         let context = ToolAccessContext(
@@ -88,5 +144,24 @@ struct DynamicProfileTests {
             .appendingPathComponent("TurboCode-DynamicProfileTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+
+    private func makeConfiguration(profile: UserDynamicProfile) -> ModelSessionConfiguration {
+        ModelSessionConfiguration(
+            backend: profile.baseModelID == .onDevice ? .foundationApple : .llamaServer,
+            activeRemoteModel: profile.baseModelID == .onDevice ? nil : .fallbackLlama,
+            delegateRemoteModel: .fallbackLlama,
+            orchestratorMode: .standalone,
+            workspaceRoot: "/tmp/workspace",
+            agentTuning: .default,
+            availableSkills: [],
+            activeDynamicProfile: profile,
+            skillActivations: SkillActivations(),
+            reasoningLevel: nil,
+            delegateReasoningLevel: nil,
+            activeTemperature: nil,
+            delegateTemperature: nil,
+            dropsCompletedToolCalls: true
+        )
     }
 }

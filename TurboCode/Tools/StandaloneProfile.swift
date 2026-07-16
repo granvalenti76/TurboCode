@@ -18,6 +18,7 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let executionPolicy: ExecutionPolicy
     let gitPolicy: GitPolicy
     let toolPlan: ModelToolPlan
+    let usesExclusiveToolSelection: Bool
     let supplementalTools: [any Tool]
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
@@ -33,57 +34,64 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     private var configuredProfile: some LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
             Instructions(instructions)
-            if !workspaceRoot.isEmpty {
-                if toolPlan.contains(.swiftWorkspaceMap) {
-                    Instructions {
-                        "For broad work in an existing Swift project, call swift_workspace_map before reading files. Use its declaration line numbers to keep read_file calls focused."
+            if usesExclusiveToolSelection {
+                // Dynamic profiles are capability boundaries. Register the
+                // resolved instances directly so FoundationModelsUtilities
+                // cannot add activation tools or other implicit capabilities.
+                supplementalTools
+            } else {
+                if !workspaceRoot.isEmpty {
+                    if toolPlan.contains(.swiftWorkspaceMap) {
+                        Instructions {
+                            "For broad work in an existing Swift project, call swift_workspace_map before reading files. Use its declaration line numbers to keep read_file calls focused."
+                        }
+                    }
+                    if toolPlan.contains(.readFile) {
+                        Instructions {
+                            "Use read_file with small line ranges and its Revision for focused context."
+                        }
+                        ReadFileTool(workspaceRoot: workspaceRoot)
+                    }
+                    if toolPlan.contains(.git) {
+                        Instructions {
+                            "Use git for every Git operation, including init when the workspace is not yet a repository; Git writes are not blocked by the bash sandbox."
+                        }
+                        GitTool(
+                            workspaceRoot: workspaceRoot,
+                            policy: gitPolicy,
+                            executionPolicy: executionPolicy
+                        )
+                    }
+                    if toolPlan.contains(.bash) {
+                        Instructions {
+                            "Use bash only for Swift Package commands, non-Xcode builds and tests, and precise read-only inspection not covered by a structured tool."
+                        }
+                        BashTool(workspaceRoot: workspaceRoot, executionPolicy: executionPolicy)
+                    }
+                    if toolPlan.contains(.xcodeProject) {
+                        Instructions {
+                            "Use xcode_project instead of bash to inspect, build, or test an Xcode project. Start with inspect when the container or scheme is unknown, and act on the first reported source error before rebuilding."
+                        }
+                    }
+                    if StandaloneSkills.isEnabled(for: toolPlan) {
+                        StandaloneSkills(
+                            activations: activations,
+                            workspaceRoot: workspaceRoot,
+                            toolPlan: toolPlan
+                        )
+                    }
+                    if toolPlan.contains(.editFile) {
+                        Instructions {
+                            "Use edit_file for every text-file creation or modification, one contiguous change per call. TurboCode generates and validates changes internally. Provide line operations against a fresh revision and never write unified diff syntax yourself. When writing long prose, include real newline characters and separate paragraphs with a blank line."
+                        }
+                        EditFileTool(workspaceRoot: workspaceRoot)
                     }
                 }
-                if toolPlan.contains(.readFile) {
-                    Instructions {
-                        "Use read_file with small line ranges and its Revision for focused context."
-                    }
-                    ReadFileTool(workspaceRoot: workspaceRoot)
+                if toolPlan.contains(.loadSkill) {
+                    LoadSkillTool(skills: diskSkills)
                 }
-                if toolPlan.contains(.git) {
-                    Instructions {
-                        "Use git for every Git operation, including init when the workspace is not yet a repository; Git writes are not blocked by the bash sandbox."
-                    }
-                    GitTool(
-                        workspaceRoot: workspaceRoot,
-                        policy: gitPolicy,
-                        executionPolicy: executionPolicy
-                    )
-                }
-                if toolPlan.contains(.bash) {
-                    Instructions {
-                        "Use bash only for Swift Package commands, non-Xcode builds and tests, and precise read-only inspection not covered by a structured tool."
-                    }
-                    BashTool(workspaceRoot: workspaceRoot, executionPolicy: executionPolicy)
-                }
-                if toolPlan.contains(.xcodeProject) {
-                    Instructions {
-                        "Use xcode_project instead of bash to inspect, build, or test an Xcode project. Start with inspect when the container or scheme is unknown, and act on the first reported source error before rebuilding."
-                    }
-                }
-                if StandaloneSkills.isEnabled(for: toolPlan) {
-                    StandaloneSkills(
-                        activations: activations,
-                        workspaceRoot: workspaceRoot,
-                        toolPlan: toolPlan
-                    )
-                }
-                if toolPlan.contains(.editFile) {
-                    Instructions {
-                        "Use edit_file for every text-file creation or modification, one contiguous change per call. TurboCode generates and validates changes internally. Provide line operations against a fresh revision and never write unified diff syntax yourself. When writing long prose, include real newline characters and separate paragraphs with a blank line."
-                    }
-                    EditFileTool(workspaceRoot: workspaceRoot)
-                }
+                supplementalTools
             }
-            if toolPlan.contains(.loadSkill) {
-                LoadSkillTool(skills: diskSkills)
-            }
-            supplementalTools
         }
         .model(model)
         .temperature(temperature)

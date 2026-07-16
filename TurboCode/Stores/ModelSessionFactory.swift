@@ -120,6 +120,7 @@ enum ModelSessionFactory {
             ),
             selectedIDs: configuration.activeDynamicProfile?.resolvedToolIDs
         )
+        let usesExclusiveToolSelection = configuration.activeDynamicProfile != nil
 
         return LanguageModelSession(
             profile: StandaloneProfile(
@@ -134,16 +135,17 @@ enum ModelSessionFactory {
                 executionPolicy: configuration.agentTuning.execution,
                 gitPolicy: configuration.agentTuning.git,
                 toolPlan: standalonePlan,
+                usesExclusiveToolSelection: usesExclusiveToolSelection,
                 supplementalTools: toolInstances(
                     for: standalonePlan,
                     configuration: configuration,
-                    including: [
-                        .turboCodeGuide,
-                        .listWorkspace,
-                        .swiftWorkspaceMap,
-                        .xcodeProject,
-                        .writeOnDevice
-                    ],
+                    including: usesExclusiveToolSelection ? nil : [
+                            .turboCodeGuide,
+                            .listWorkspace,
+                            .swiftWorkspaceMap,
+                            .xcodeProject,
+                            .writeOnDevice
+                        ],
                     repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
                         ?? 32_768
                 ),
@@ -259,7 +261,7 @@ enum ModelSessionFactory {
         )
     }
 
-    private static func toolInstances(
+    static func toolInstances(
         for plan: ModelToolPlan,
         configuration: ModelSessionConfiguration,
         including allowedIDs: Set<ToolCapabilityID>? = nil,
@@ -380,7 +382,9 @@ enum ModelSessionFactory {
             text += "\nAlways use Markdown formatting in your responses: **bold**, `code`, ```code blocks```, tables, etc."
         }
         text += "\nStructured tool results with a native TurboCode presentation are already visible to the user. Do not repeat, enumerate, or tabulate their contents in the assistant response. Add only a brief contextual sentence when useful, unless the user explicitly requests analysis of the result."
-        text += "\nCall turbocode_guide only when the user explicitly asks about the TurboCode product itself, asks what you or the app can do, or requests help with TurboCode capabilities, workflows, models, tools, safety, settings, or best use. Do not call it for greetings, casual conversation, ordinary coding questions, or questions about the user's project. A mere mention of TurboCode is not enough. Pass the user's original question as query, base product facts on the returned official documentation, and answer in the user's language."
+        if hasTool(.turboCodeGuide) {
+            text += "\nCall turbocode_guide only when the user explicitly asks about the TurboCode product itself, asks what you or the app can do, or requests help with TurboCode capabilities, workflows, models, tools, safety, settings, or best use. Do not call it for greetings, casual conversation, ordinary coding questions, or questions about the user's project. A mere mention of TurboCode is not enough. Pass the user's original question as query, base product facts on the returned official documentation, and answer in the user's language."
+        }
         switch configuration.agentTuning.agent.responseStyle {
         case .concise:
             text += "\nKeep responses concise and lead with the result. Include only details needed to act or verify."
@@ -392,7 +396,7 @@ enum ModelSessionFactory {
         if configuration.agentTuning.agent.verifiesChanges {
             text += "\nAfter changing source code, run the most focused available build or test that verifies the change."
         }
-        if !configuration.availableSkills.isEmpty {
+        if !configuration.availableSkills.isEmpty, hasTool(.loadSkill) {
             let catalog = configuration.availableSkills
                 .map { "- \($0.name): \($0.description)" }
                 .joined(separator: "\n")
@@ -404,7 +408,9 @@ enum ModelSessionFactory {
             Use load_skill when a matching description applies; do not ask permission or announce loading.
             """
         }
-        text += "\nTreat /skill <name> and /<skill-name> as explicit requests to activate that skill before handling the remaining prompt. Treat /skills as a request to list the currently advertised skills with concise descriptions."
+        if !configuration.availableSkills.isEmpty, hasTool(.loadSkill) {
+            text += "\nTreat /skill <name> and /<skill-name> as explicit requests to activate that skill before handling the remaining prompt. Treat /skills as a request to list the currently advertised skills with concise descriptions."
+        }
         if !configuration.workspaceRoot.isEmpty {
             text += "\nThe current workspace is at: \(configuration.workspaceRoot)"
             text += "\nAll file operations are restricted to the workspace directory."
@@ -433,8 +439,12 @@ enum ModelSessionFactory {
             if hasTool(.writeOnDevice) {
                 text += "\nWhen the user asks to create or replace a root-level text file, call write_ondevice immediately with the complete content. Call it exactly once, do not ask for confirmation, and after WRITE_COMPLETE respond with one short sentence without repeating the content."
             }
-            text += "\nWhen writing articles, biographies, documentation, or other long-form prose, preserve readable paragraphs with a blank line between them. The tool content must contain real newline characters; never collapse the whole document into one long line."
-            text += "\nFile and directory deletion and destructive Git operations require approval. If a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
+            if hasTool(.editFile) || hasTool(.writeOnDevice) || hasTool(.fileSystem) {
+                text += "\nWhen writing articles, biographies, documentation, or other long-form prose, preserve readable paragraphs with a blank line between them. The tool content must contain real newline characters; never collapse the whole document into one long line."
+            }
+            if hasTool(.fileSystem) || hasTool(.git) {
+                text += "\nFile and directory deletion and destructive Git operations require approval. If a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
+            }
         }
         return text
     }
