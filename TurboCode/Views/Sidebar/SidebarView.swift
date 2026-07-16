@@ -137,7 +137,7 @@ struct SidebarView: View {
         }
         var icon: String {
             switch self {
-            case .tools: return "wrench.and.screwdriver"
+            case .tools: return "hammer"
             case .skills: return "doc.text"
             }
         }
