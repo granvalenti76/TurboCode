@@ -133,6 +133,7 @@ struct SkillsView: View {
                 }
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
 
             Divider()
             HStack {
@@ -159,7 +160,7 @@ struct SkillsView: View {
             }
             .padding(10)
         }
-        .background(.quaternary.opacity(0.08))
+        .glassEffect(.regular, in: Rectangle())
     }
 
     private func profileRow(
