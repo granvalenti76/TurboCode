@@ -30,8 +30,9 @@ struct InputFieldView: View {
                 .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
         }
         .background(Color(.windowBackgroundColor))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 24)
+        .padding(.top, 6)
+        .padding(.bottom, 16)
     }
 
     // MARK: - Composer Card
