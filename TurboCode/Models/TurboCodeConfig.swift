@@ -7,9 +7,16 @@ import Foundation
 public final class TurboCodeConfig {
     public static let shared = TurboCodeConfig()
 
-    private var rootURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".turbocode")
+    private let rootURL: URL
+
+    private init() {
+        rootURL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".turbocode", isDirectory: true)
+    }
+
+    /// Injectable root used by first-launch and migration tests.
+    init(rootURL: URL) {
+        self.rootURL = rootURL
     }
 
     private var modelsURL: URL { rootURL.appendingPathComponent("models.json") }
@@ -46,12 +53,25 @@ public final class TurboCodeConfig {
             && FileManager.default.fileExists(atPath: skillsDirectoryURL.path)
             && FileManager.default.fileExists(atPath: modelsURL.path)
             && FileManager.default.fileExists(atPath: agentTuningURL.path)
+            && FileManager.default.fileExists(atPath: dynamicProfilesURL.path)
+            && FileManager.default.fileExists(atPath: diagnosticsDirectoryURL.path)
+            && FileManager.default.fileExists(atPath: repositoryMapCacheDirectoryURL.path)
+            && FileManager.default.fileExists(atPath: officialDocumentationDirectoryURL.path)
+            && FileManager.default.fileExists(atPath: userDocumentationDirectoryURL.path)
     }
 
     public func performOnboarding() throws {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: skillsDirectoryURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: diagnosticsDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: repositoryMapCacheDirectoryURL,
+            withIntermediateDirectories: true
+        )
         try FileManager.default.createDirectory(
             at: officialDocumentationDirectoryURL,
             withIntermediateDirectories: true
@@ -62,6 +82,9 @@ public final class TurboCodeConfig {
         )
         try migrateRemoteModels()
         try migrateAgentTuning()
+        if !FileManager.default.fileExists(atPath: dynamicProfilesURL.path) {
+            try DynamicProfileStore(fileURL: dynamicProfilesURL).save([])
+        }
 
         try installBuiltInSkill(name: "turbocode", contents: Self.turboCodeSkill)
         try migrateTurboCodeSkill()
