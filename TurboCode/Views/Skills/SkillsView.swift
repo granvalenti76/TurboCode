@@ -12,6 +12,8 @@ struct SkillsView: View {
     @State private var capabilityKind: CapabilityKind = .tools
     @State private var includedDropTargeted = false
     @State private var availableDropTargeted = false
+    @State private var hoveredTool: ToolHoverPresentation?
+    @State private var pendingToolHover: Task<Void, Never>?
 
     private enum CapabilityKind: String, CaseIterable, Identifiable {
         case tools = "Tools"
@@ -31,6 +33,9 @@ struct SkillsView: View {
         .task {
             settings.reloadRemoteModels()
             viewModel.reload()
+        }
+        .onDisappear {
+            pendingToolHover?.cancel()
         }
         .sheet(isPresented: $newProfilePresented) {
             NewDynamicProfileSheet(
@@ -410,6 +415,26 @@ struct SkillsView: View {
             } isTargeted: { includedDropTargeted = $0 }
         }
         .frame(height: 350)
+        .overlay {
+            if let hoveredTool {
+                ToolInformationCard(
+                    tool: hoveredTool.tool,
+                    availability: hoveredTool.availability,
+                    isAvailable: hoveredTool.isAvailable
+                )
+                .frame(
+                    maxWidth: .infinity,
+                    maxHeight: .infinity,
+                    alignment: hoveredTool.column == .available ? .topTrailing : .topLeading
+                )
+                .padding(.horizontal, 14)
+                .padding(.top, 42)
+                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+                .allowsHitTesting(false)
+                .zIndex(20)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: hoveredTool)
     }
 
     private func availableTools(option: ProfileModelOption, search: String) -> [ToolCapabilityDescriptor] {
@@ -466,13 +491,17 @@ struct SkillsView: View {
         }
         .draggable(tool.id.rawValue)
         .opacity(compatible ? 1 : 0.55)
-        .toolInformationHoverCard(
-            tool,
-            availability: compatible
-                ? "Available for \(option.id.displayName)"
-                : "Unavailable for \(option.id.displayName)",
-            isAvailable: compatible
-        )
+        .onHover { hovering in
+            updateToolHover(
+                tool,
+                availability: compatible
+                    ? "Available for \(option.id.displayName)"
+                    : "Unavailable for \(option.id.displayName)",
+                isAvailable: compatible,
+                column: .available,
+                hovering: hovering
+            )
+        }
     }
 
     private func includedToolRow(_ tool: ToolCapabilityDescriptor, option: ProfileModelOption) -> some View {
@@ -487,13 +516,17 @@ struct SkillsView: View {
             viewModel.setTool(tool.id, included: false)
         }
         .draggable(tool.id.rawValue)
-        .toolInformationHoverCard(
-            tool,
-            availability: compatible
-                ? "Included for \(option.id.displayName)"
-                : "Not supported by \(option.id.displayName)",
-            isAvailable: compatible
-        )
+        .onHover { hovering in
+            updateToolHover(
+                tool,
+                availability: compatible
+                    ? "Included for \(option.id.displayName)"
+                    : "Not supported by \(option.id.displayName)",
+                isAvailable: compatible,
+                column: .included,
+                hovering: hovering
+            )
+        }
     }
 
     private func availableSkillRow(_ skill: TurboCodeSkillDefinition) -> some View {
@@ -697,6 +730,47 @@ struct SkillsView: View {
     private func revealSkillsDirectory() {
         NSWorkspace.shared.open(TurboCodeConfig.shared.skillsDirectoryURL)
     }
+
+    private func updateToolHover(
+        _ tool: ToolCapabilityDescriptor,
+        availability: String,
+        isAvailable: Bool,
+        column: ToolHoverColumn,
+        hovering: Bool
+    ) {
+        pendingToolHover?.cancel()
+
+        guard hovering else {
+            if hoveredTool?.tool.id == tool.id {
+                hoveredTool = nil
+            }
+            return
+        }
+
+        let presentation = ToolHoverPresentation(
+            tool: tool,
+            availability: availability,
+            isAvailable: isAvailable,
+            column: column
+        )
+        pendingToolHover = Task {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            hoveredTool = presentation
+        }
+    }
+}
+
+private enum ToolHoverColumn: Equatable {
+    case available
+    case included
+}
+
+private struct ToolHoverPresentation: Equatable {
+    let tool: ToolCapabilityDescriptor
+    let availability: String
+    let isAvailable: Bool
+    let column: ToolHoverColumn
 }
 
 private extension View {
@@ -721,13 +795,30 @@ private struct ToolInformationHoverCardModifier: ViewModifier {
     let isAvailable: Bool
 
     @State private var isPresented = false
+    @State private var pendingPresentation: Task<Void, Never>?
 
     func body(content: Content) -> some View {
         content
-            .onHover { isPresented = $0 }
+            .onHover { hovering in
+                pendingPresentation?.cancel()
+                if hovering {
+                    pendingPresentation = Task {
+                        try? await Task.sleep(for: .milliseconds(250))
+                        guard !Task.isCancelled else { return }
+                        isPresented = true
+                    }
+                } else {
+                    isPresented = false
+                }
+            }
+            .onDisappear { pendingPresentation?.cancel() }
             .overlay(alignment: .topTrailing) {
                 if isPresented {
-                    informationCard
+                    ToolInformationCard(
+                        tool: tool,
+                        availability: availability,
+                        isAvailable: isAvailable
+                    )
                         .offset(x: -8, y: 34)
                         .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topTrailing)))
                         .allowsHitTesting(false)
@@ -736,8 +827,14 @@ private struct ToolInformationHoverCardModifier: ViewModifier {
             .zIndex(isPresented ? 10 : 0)
             .animation(.easeOut(duration: 0.12), value: isPresented)
     }
+}
 
-    private var informationCard: some View {
+private struct ToolInformationCard: View {
+    let tool: ToolCapabilityDescriptor
+    let availability: String
+    let isAvailable: Bool
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(tool.name, systemImage: tool.systemImage)
                 .font(.headline)
