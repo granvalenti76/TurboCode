@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		5E5203BF3004E70900C554D4 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203BE3004E70900C554D4 /* MarkdownUI */; };
 		5E5203CD30053A3A00C554D4 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
+		5E77E3E630075DF800C3E506 /* turbocode-logo-provisional.png in Resources */ = {isa = PBXBuildFile; fileRef = 5E77E3E530075DF800C3E506 /* turbocode-logo-provisional.png */; };
+		5E77E52930081E4000C3E506 /* Media.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5E77E52830081E4000C3E506 /* Media.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -24,6 +26,8 @@
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* TurboCode.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TurboCode.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		000000000000000000000220 /* TurboCodeEvaluations.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TurboCodeEvaluations.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		5E77E3E530075DF800C3E506 /* turbocode-logo-provisional.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "turbocode-logo-provisional.png"; sourceTree = "<group>"; };
+		5E77E52830081E4000C3E506 /* Media.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Media.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -58,8 +62,10 @@
 		000000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				5E77E52830081E4000C3E506 /* Media.xcassets */,
 				000000000000000000000010 /* TurboCode */,
 				000000000000000000000210 /* TurboCodeEvaluations */,
+				5E77E3E530075DF800C3E506 /* turbocode-logo-provisional.png */,
 				000000000000000000000020 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -166,6 +172,8 @@
 		000000000000000140000000 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
+				5E77E52930081E4000C3E506 /* Media.xcassets in Resources */,
+				5E77E3E630075DF800C3E506 /* turbocode-logo-provisional.png in Resources */,
 			);
 		};
 		000000000000000240000000 /* Resources */ = {
@@ -332,6 +340,9 @@
 		000000000000000111000000 /* Debug configuration for PBXNativeTarget "TurboCode" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = W8WM5JY5LX;
@@ -371,6 +382,9 @@
 		000000000000000112000000 /* Release configuration for PBXNativeTarget "TurboCode" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = W8WM5JY5LX;
