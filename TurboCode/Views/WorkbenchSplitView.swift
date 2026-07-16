@@ -50,7 +50,7 @@ struct WorkbenchSplitView: View {
         .background(alignment: .top) {
             HStack(spacing: 0) {
                 Color.clear
-                    .frame(width: sidebarWidth)
+                    .frame(width: chatStore.leftSidebarCollapsed ? 0 : sidebarWidth)
                 Color(nsColor: .windowBackgroundColor)
             }
             .frame(height: 52)
