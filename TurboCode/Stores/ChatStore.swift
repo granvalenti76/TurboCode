@@ -97,6 +97,17 @@ public final class ChatStore {
     public private(set) var agentTuning: AgentTuningConfig = .default
     public private(set) var remoteModels: [RemoteModelConfig] = RemoteModelConfig.defaults
     public private(set) var activeRemoteModelID: String = "llama"
+    private(set) var dynamicProfiles: [UserDynamicProfile] = []
+    private(set) var activeDynamicProfileID: UUID?
+
+    var activeDynamicProfile: UserDynamicProfile? {
+        activeDynamicProfileID.flatMap { id in dynamicProfiles.first(where: { $0.id == id }) }
+    }
+
+    var activeBaseModelID: ProfileBaseModelID {
+        if activeBackend == .foundationApple { return .onDevice }
+        return ProfileBaseModelID(rawValue: activeRemoteModelID) ?? .llama
+    }
 
     public var activeRemoteModel: RemoteModelConfig? {
         remoteModels.first(where: { $0.id == activeRemoteModelID })
@@ -145,6 +156,8 @@ public final class ChatStore {
                 // Switching to orchestrator: force Apple as the active model
                 // and rebuild so CallPowerfulModelTool is registered.
                 activeBackend = .foundationApple
+                activeDynamicProfileID = nil
+                UserDefaults.standard.removeObject(forKey: "activeDynamicProfileID")
                 composerModel = "Apple · Orchestrator"
                 rebuildSession()
             } else {
@@ -277,23 +290,35 @@ public final class ChatStore {
 
     init(conversationRepository: any ConversationRepository) {
         self.conversationRepository = conversationRepository
+        let loadedProfiles = (try? DynamicProfileStore.live.load()) ?? []
+        let savedProfileID = UserDefaults.standard.string(forKey: "activeDynamicProfileID")
+            .flatMap(UUID.init(uuidString:))
+        let savedProfile = loadedProfiles.first(where: { $0.id == savedProfileID })
         // Restore orchestrator mode from UserDefaults
         let saved = UserDefaults.standard.string(forKey: "orchestratorMode")
             ?? OrchestratorMode.standalone.rawValue
         let mode = OrchestratorMode(rawValue: saved) ?? .standalone
-        let selectedID = UserDefaults.standard.string(forKey: "activeRemoteModelID") ?? "llama"
+        let selectedID = savedProfile?.baseModelID.remoteModelID
+            ?? UserDefaults.standard.string(forKey: "activeRemoteModelID")
+            ?? "llama"
         let initialRemote = RemoteModelConfig.defaults.first(where: {
             $0.id == selectedID && Self.hasCredential(for: $0)
         })
             ?? RemoteModelConfig.fallbackLlama
+        let restoredProfile = savedProfile.flatMap { profile -> UserDynamicProfile? in
+            if profile.baseModelID == .onDevice { return profile }
+            return profile.baseModelID.remoteModelID == initialRemote.id ? profile : nil
+        }
         self.activeRemoteModelID = initialRemote.id
+        self.dynamicProfiles = loadedProfiles
+        self.activeDynamicProfileID = mode == .standalone ? restoredProfile?.id : nil
 
         // Initialise ALL stored properties BEFORE any didSet observers fire.
         // We set orchestratorMode last so that session is already valid.
-        self.activeBackend = mode == .orchestrator
+        self.activeBackend = mode == .orchestrator || restoredProfile?.baseModelID == .onDevice
             ? .foundationApple
             : Self.backend(for: initialRemote.role)
-        let initialModel: any LanguageModel = mode == .orchestrator
+        let initialModel: any LanguageModel = mode == .orchestrator || restoredProfile?.baseModelID == .onDevice
             ? SystemLanguageModel.default
             : ProviderLanguageModel(
                 configuration: initialRemote,
@@ -302,7 +327,10 @@ public final class ChatStore {
         self.session = LanguageModelSession(model: initialModel)
         self.composerModel = mode == .orchestrator
             ? "Apple \u{00B7} Orchestrator"
-            : initialRemote.name
+            : (restoredProfile?.name ?? initialRemote.name)
+        if savedProfile != nil, restoredProfile == nil {
+            UserDefaults.standard.removeObject(forKey: "activeDynamicProfileID")
+        }
 
         // Now safe — didSet fires and calls rebuildSession() as needed.
         self.orchestratorMode = mode
@@ -314,6 +342,7 @@ public final class ChatStore {
     /// calling this method has no effect.
     public func switchBackend(to backend: ModelBackend) {
         guard orchestratorMode == .standalone else { return }
+        clearDynamicProfileSelection()
         if backend == .foundationApple {
             activeBackend = .foundationApple
             composerModel = backend.rawValue
@@ -331,8 +360,44 @@ public final class ChatStore {
         guard orchestratorMode == .standalone,
               let model = remoteModels.first(where: { $0.id == id && $0.enabled }),
               isConfigured(model) else { return }
+        clearDynamicProfileSelection()
         selectRemoteModel(model)
         rebuildSession()
+    }
+
+    func selectBuiltInProfile(_ id: ProfileBaseModelID) {
+        guard orchestratorMode == .standalone else { return }
+        clearDynamicProfileSelection()
+        guard applyBaseModel(id) else { return }
+        rebuildSession()
+    }
+
+    func selectDynamicProfile(_ id: UUID) {
+        guard orchestratorMode == .standalone,
+              let profile = dynamicProfiles.first(where: { $0.id == id }),
+              applyBaseModel(profile.baseModelID) else { return }
+        activeDynamicProfileID = profile.id
+        UserDefaults.standard.set(profile.id.uuidString, forKey: "activeDynamicProfileID")
+        composerModel = profile.name
+        rebuildSession()
+    }
+
+    func reloadDynamicProfiles(selecting id: UUID? = nil) {
+        do {
+            dynamicProfiles = try DynamicProfileStore.live.load()
+            let requestedID = id ?? activeDynamicProfileID
+            if let requestedID, dynamicProfiles.contains(where: { $0.id == requestedID }) {
+                if id != nil || activeDynamicProfileID == requestedID {
+                    selectDynamicProfile(requestedID)
+                }
+            } else if activeDynamicProfileID != nil {
+                clearDynamicProfileSelection()
+                composerModel = activeBaseModelID.displayName
+                rebuildSession()
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     public func reloadRemoteModels() {
@@ -350,6 +415,9 @@ public final class ChatStore {
             if orchestratorMode == .standalone, activeBackend != .foundationApple {
                 selectRemoteModel(selected)
             }
+        }
+        if let activeDynamicProfile {
+            composerModel = activeDynamicProfile.name
         }
         rebuildSession()
     }
@@ -373,6 +441,24 @@ public final class ChatStore {
         UserDefaults.standard.set(model.id, forKey: "activeRemoteModelID")
         activeBackend = Self.backend(for: model.role)
         composerModel = model.name
+    }
+
+    private func applyBaseModel(_ id: ProfileBaseModelID) -> Bool {
+        if id == .onDevice {
+            activeBackend = .foundationApple
+            composerModel = id.displayName
+            return true
+        }
+        guard let remoteID = id.remoteModelID,
+              let model = remoteModels.first(where: { $0.id == remoteID && $0.enabled }),
+              isConfigured(model) else { return false }
+        selectRemoteModel(model)
+        return true
+    }
+
+    private func clearDynamicProfileSelection() {
+        activeDynamicProfileID = nil
+        UserDefaults.standard.removeObject(forKey: "activeDynamicProfileID")
     }
 
     private static func backend(for role: RemoteModelRole) -> ModelBackend {
@@ -417,7 +503,10 @@ public final class ChatStore {
     }
 
     private var persistedModelIdentifier: String {
-        activeBackend == .foundationApple ? activeBackend.rawValue : activeRemoteModelID
+        if let activeDynamicProfileID {
+            return "profile:\(activeDynamicProfileID.uuidString)"
+        }
+        return activeBackend == .foundationApple ? activeBackend.rawValue : activeRemoteModelID
     }
 
     /// Rebuild the session preserving conversation history.
@@ -425,6 +514,13 @@ public final class ChatStore {
     private func rebuildSession(keepingHistory: Bool = true) {
         let history = keepingHistory ? Array(session.transcript) : []
         let delegateModel = delegateRemoteModel
+        let sessionSkills: [TurboCodeSkillDefinition]
+        if let activeDynamicProfile {
+            let allowed = Set(activeDynamicProfile.skillIDs)
+            sessionSkills = availableSkills.filter { allowed.contains($0.name) }
+        } else {
+            sessionSkills = availableSkills
+        }
         session = ModelSessionFactory.makeSession(
             configuration: ModelSessionConfiguration(
                 backend: activeBackend,
@@ -433,7 +529,8 @@ public final class ChatStore {
                 orchestratorMode: orchestratorMode,
                 workspaceRoot: workspaceRoot,
                 agentTuning: agentTuning,
-                availableSkills: availableSkills,
+                availableSkills: sessionSkills,
+                activeDynamicProfile: activeDynamicProfile,
                 skillActivations: skillActivations,
                 reasoningLevel: reasoningLevel,
                 delegateReasoningLevel: reasoningLevel(for: delegateModel),
@@ -581,6 +678,13 @@ public final class ChatStore {
 
     private func restoreModelSelection(_ identifier: String) {
         guard orchestratorMode == .standalone else { return }
+        if identifier.hasPrefix("profile:"),
+           let id = UUID(uuidString: String(identifier.dropFirst("profile:".count))),
+           dynamicProfiles.contains(where: { $0.id == id }) {
+            selectDynamicProfile(id)
+            return
+        }
+        clearDynamicProfileSelection()
         if identifier == ModelBackend.foundationApple.rawValue {
             activeBackend = .foundationApple
             composerModel = ModelBackend.foundationApple.rawValue

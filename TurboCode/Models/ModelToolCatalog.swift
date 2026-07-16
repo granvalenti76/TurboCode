@@ -13,7 +13,7 @@ nonisolated enum ModelRuntimeProfile: String, Sendable, Hashable {
     case delegate
 }
 
-nonisolated enum ToolCapabilityID: String, CaseIterable, Sendable, Hashable, Identifiable {
+nonisolated enum ToolCapabilityID: String, CaseIterable, Codable, Sendable, Hashable, Identifiable {
     case turboCodeGuide = "turbocode_guide"
     case listWorkspace = "list_workspace"
     case swiftWorkspaceMap = "swift_workspace_map"
@@ -206,9 +206,14 @@ nonisolated enum ModelToolCatalog {
     static func plan(
         profile: ModelRuntimeProfile,
         tier: ModelToolTier,
-        context: ToolAccessContext
+        context: ToolAccessContext,
+        selectedIDs: Set<ToolCapabilityID>? = nil
     ) -> ModelToolPlan {
-        let memberships = membership(for: profile)
+        let memberships = selectedIDs.map { ids in
+            ToolCapabilityID.allCases
+                .filter(ids.contains)
+                .map { ($0, requirement(for: $0)) }
+        } ?? membership(for: profile)
         let assignments = memberships.compactMap { id, requirement -> ModelToolAssignment? in
             if requirement == .repositoryMap,
                (tier == .onDevice || context.repositoryMapDetail == nil) {
@@ -220,6 +225,18 @@ nonisolated enum ModelToolCatalog {
             return assignment(id: id, requirement: requirement, tier: tier, context: context)
         }
         return ModelToolPlan(profile: profile, tier: tier, assignments: assignments)
+    }
+
+    private static func requirement(for id: ToolCapabilityID) -> ToolAvailabilityRequirement {
+        switch id {
+        case .turboCodeGuide: .always
+        case .listWorkspace, .readFile, .searchWorkspace, .fileSystem, .git,
+             .bash, .editFile, .writeOnDevice: .workspace
+        case .swiftWorkspaceMap: .repositoryMap
+        case .xcodeProject: .capableWorkspace
+        case .loadSkill: .skills
+        case .callPowerfulModel: .delegateModel
+        }
     }
 
     private static func membership(

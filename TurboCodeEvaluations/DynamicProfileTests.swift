@@ -1,0 +1,73 @@
+import Foundation
+import Testing
+@testable import TurboCode
+
+@MainActor
+@Suite("Dynamic profiles")
+struct DynamicProfileTests {
+    @Test("Persists explicit tools and skills")
+    func roundTripsProfile() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = DynamicProfileStore(fileURL: root.appendingPathComponent("profiles.json"))
+        let profile = UserDynamicProfile(
+            name: "GitHub PR Assistant",
+            summary: "Handles pull requests",
+            baseModelID: .pcc,
+            toolIDs: ["git", "read_file", "git"],
+            skillIDs: ["pull-request-review"]
+        )
+
+        try store.save([profile])
+        let loaded = try #require(store.load().first)
+
+        #expect(loaded == profile)
+        #expect(loaded.toolIDs == ["git", "read_file"])
+        #expect(loaded.resolvedToolIDs.contains(.loadSkill))
+    }
+
+    @Test("An empty profile exposes no capabilities")
+    func emptyProfileIsExclusive() {
+        let profile = UserDynamicProfile(name: "Focused", baseModelID: .onDevice)
+
+        #expect(profile.resolvedToolIDs.isEmpty)
+        #expect(profile.skillIDs.isEmpty)
+    }
+
+    @Test("Selected skills implicitly expose only the skill loader")
+    func skillsEnableLoader() {
+        let profile = UserDynamicProfile(
+            name: "PR Review",
+            baseModelID: .pcc,
+            toolIDs: [ToolCapabilityID.git.rawValue],
+            skillIDs: ["pull-request-review"]
+        )
+
+        #expect(profile.resolvedToolIDs == [.git, .loadSkill])
+    }
+
+    @Test("A custom plan registers only explicitly selected compatible tools")
+    func customToolPlanIsExclusive() {
+        let context = ToolAccessContext(
+            hasWorkspace: true,
+            hasSkills: false,
+            hasDelegateModel: false,
+            repositoryMapDetail: nil
+        )
+        let plan = ModelToolCatalog.plan(
+            profile: .standalone,
+            tier: .onDevice,
+            context: context,
+            selectedIDs: [.writeOnDevice, .git, .swiftWorkspaceMap, .xcodeProject]
+        )
+
+        #expect(plan.registeredIDs == [.writeOnDevice, .git])
+    }
+
+    private func makeRoot() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCode-DynamicProfileTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+}

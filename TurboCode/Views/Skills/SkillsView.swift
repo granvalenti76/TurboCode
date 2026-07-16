@@ -2,18 +2,29 @@ import AppKit
 import SwiftUI
 
 struct SkillsView: View {
+    @Environment(ChatStore.self) private var chatStore
     @Environment(SettingsStore.self) private var settings
     @State private var viewModel = SkillsViewModel()
+    @State private var newProfilePresented = false
+    @State private var suggestedBaseModel: ProfileBaseModelID = .onDevice
+    @State private var suggestedCopyDefaults = false
     @State private var deleteConfirmationPresented = false
-    @State private var profileDropIsTargeted = false
-    @State private var availableDropIsTargeted = false
+    @State private var capabilityKind: CapabilityKind = .tools
+    @State private var includedDropTargeted = false
+    @State private var availableDropTargeted = false
+
+    private enum CapabilityKind: String, CaseIterable, Identifiable {
+        case tools = "Tools"
+        case skills = "Skills"
+        var id: String { rawValue }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
-            skillList
-                .frame(width: 260)
+            profileLibrary
+                .frame(width: 272)
             Divider()
-            editor
+            detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -21,521 +32,562 @@ struct SkillsView: View {
             settings.reloadRemoteModels()
             viewModel.reload()
         }
-        .alert("Unsaved Changes", isPresented: discardAlertPresented) {
-            Button("Cancel", role: .cancel) { viewModel.cancelDiscard() }
-            Button("Discard", role: .destructive) { viewModel.confirmDiscard() }
-        } message: {
-            Text(viewModel.confirmationMessage ?? "Discard unsaved changes?")
+        .sheet(isPresented: $newProfilePresented) {
+            NewDynamicProfileSheet(
+                initialBaseModel: suggestedBaseModel,
+                initialCopyDefaults: suggestedCopyDefaults,
+                modelOptions: viewModel.modelOptions(settings: settings)
+            ) { name, summary, model, copyDefaults in
+                viewModel.create(
+                    name: name,
+                    summary: summary,
+                    baseModelID: model,
+                    copyDefaults: copyDefaults,
+                    settings: settings
+                )
+            }
         }
-        .alert("Delete Skill?", isPresented: $deleteConfirmationPresented) {
+        .alert("Delete Profile?", isPresented: $deleteConfirmationPresented) {
             Button("Cancel", role: .cancel) {}
             Button("Delete", role: .destructive) { viewModel.deleteSelected() }
         } message: {
-            Text("This permanently removes the skill directory from ~/.turbocode/SKILLS.")
+            Text("This removes the custom profile. Models, tools, and installed skills are not deleted.")
         }
-        .alert("Skill Error", isPresented: errorAlertPresented) {
+        .alert("Profile Error", isPresented: errorPresented) {
             Button("OK", role: .cancel) { viewModel.errorMessage = nil }
         } message: {
-            Text(viewModel.errorMessage ?? "The skill could not be updated.")
+            Text(viewModel.errorMessage ?? "The profile could not be updated.")
         }
     }
 
-    private var skillList: some View {
+    private var profileLibrary: some View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Skills")
+                    Text("Profiles")
                         .font(.system(size: 19, weight: .semibold))
-                    Text("\(viewModel.records.count) installed")
+                    Text("\(viewModel.profiles.count) custom")
                         .font(AppTypography.metadata)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button {
-                    viewModel.requestNewSkill()
+                    suggestedBaseModel = .onDevice
+                    suggestedCopyDefaults = false
+                    newProfilePresented = true
                 } label: {
                     Image(systemName: "plus")
                         .frame(width: 26, height: 26)
                 }
                 .buttonStyle(.borderless)
-                .help("New Skill")
+                .help("New Profile")
+                .accessibilityLabel("New Profile")
             }
             .padding(.horizontal, 14)
             .padding(.top, 16)
             .padding(.bottom, 10)
 
-            List(selection: skillSelection) {
-                ForEach(viewModel.filteredRecords) { record in
-                    skillRow(record)
-                        .tag(record.id)
+            List(selection: selectionBinding) {
+                Section("Default Profiles") {
+                    ForEach(ProfileBaseModelID.allCases) { modelID in
+                        profileRow(
+                            title: modelID.displayName,
+                            subtitle: "Built in",
+                            icon: modelID.systemImage,
+                            active: chatStore.activeDynamicProfileID == nil
+                                && chatStore.activeBaseModelID == modelID
+                        )
+                        .tag(ProfileLibrarySelection.builtIn(modelID))
+                    }
+                }
+                Section("Custom Profiles") {
+                    ForEach(viewModel.profiles) { profile in
+                        profileRow(
+                            title: profile.name,
+                            subtitle: profile.baseModelID.displayName,
+                            icon: "person.crop.rectangle.stack",
+                            active: chatStore.activeDynamicProfileID == profile.id
+                        )
+                        .tag(ProfileLibrarySelection.custom(profile.id))
+                        .contextMenu {
+                            Button("Use Profile") { chatStore.selectDynamicProfile(profile.id) }
+                            Divider()
+                            Button("Delete", role: .destructive) {
+                                viewModel.select(.custom(profile.id))
+                                deleteConfirmationPresented = true
+                            }
+                        }
+                    }
+                    if viewModel.profiles.isEmpty {
+                        Text("No custom profiles")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .listStyle(.sidebar)
-            .searchable(text: $viewModel.searchText, placement: .sidebar, prompt: "Search skills")
 
             Divider()
             HStack {
-                Text("~/.turbocode/SKILLS")
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                Text("\(viewModel.installedSkills.count) installed skills")
+                    .font(AppTypography.metadata)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Button {
+                    revealSkillsDirectory()
+                } label: {
+                    Image(systemName: "folder")
+                }
+                .buttonStyle(.borderless)
+                .help("Reveal Skills in Finder")
+                Button {
                     viewModel.reload()
+                    chatStore.reloadSkills()
+                    chatStore.reloadDynamicProfiles()
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(.borderless)
-                .help("Reload Skills")
+                .help("Reload Profiles and Skills")
             }
             .padding(10)
         }
         .background(.quaternary.opacity(0.08))
     }
 
-    private func skillRow(_ record: SkillEditorRecord) -> some View {
+    private func profileRow(
+        title: String,
+        subtitle: String,
+        icon: String,
+        active: Bool
+    ) -> some View {
         HStack(spacing: 9) {
-            Image(systemName: record.definition == nil ? "exclamationmark.triangle" : "doc.text")
-                .foregroundStyle(record.definition == nil ? .orange : .secondary)
+            Image(systemName: icon)
+                .foregroundStyle(.secondary)
                 .frame(width: 18)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(record.displayName)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
                     .font(.system(size: 12.5, weight: .medium))
                     .lineLimit(1)
-                Text(record.description)
+                Text(subtitle)
                     .font(AppTypography.metadata)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+            }
+            Spacer()
+            if active {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.tint)
+                    .accessibilityLabel("Active profile")
             }
         }
         .padding(.vertical, 3)
     }
 
     @ViewBuilder
-    private var editor: some View {
-        if viewModel.draft != nil {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    editorHeader
-                    identitySection
-                    instructionsSection
-                    modelProfilesSection
-                }
-                .padding(.horizontal, 28)
-                .padding(.vertical, 22)
-                .frame(maxWidth: 1120, alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .top)
-            }
-        } else {
-            ContentUnavailableView {
-                Label("Select a Skill", systemImage: "doc.text")
-            } description: {
-                Text("Choose a valid skill or create a new one.")
-            } actions: {
-                Button("New Skill") { viewModel.requestNewSkill() }
-            }
-        }
-    }
-
-    private var editorHeader: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(viewModel.draft?.originalURL == nil ? "New Skill" : "Edit Skill")
-                    .font(.system(size: 26, weight: .semibold))
-                Text("A SKILL.md remains fully editable from Terminal.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if let url = viewModel.draft?.originalURL {
-                Button {
-                    reveal(url)
-                } label: {
-                    Label("Reveal", systemImage: "folder")
-                }
-                .help("Reveal SKILL.md in Finder")
-            }
-            if viewModel.draft?.originalURL != nil, viewModel.draft?.isBuiltIn == false {
-                Button(role: .destructive) {
-                    deleteConfirmationPresented = true
-                } label: {
-                    Label("Delete", systemImage: "trash")
-                }
-            }
-            Button("Revert") {
-                viewModel.discardChanges()
-            }
-            .disabled(!viewModel.isDirty || viewModel.draft?.originalURL == nil)
-
-            Button("Save") {
-                viewModel.save()
-            }
-            .keyboardShortcut("s", modifiers: .command)
-            .buttonStyle(.borderedProminent)
-            .disabled(!viewModel.canSave)
-        }
-    }
-
-    private var identitySection: some View {
-        sectionCard(title: "Identity", subtitle: "Used for discovery and /skill commands.") {
-            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 12) {
-                GridRow {
-                    Text("Name")
-                        .foregroundStyle(.secondary)
-                    TextField("lowercase-kebab-name", text: nameBinding)
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(viewModel.draft?.isBuiltIn == true)
-                }
-                GridRow {
-                    Text("Description")
-                        .foregroundStyle(.secondary)
-                    TextField("When should TurboCode activate this skill?", text: descriptionBinding)
-                        .textFieldStyle(.roundedBorder)
-                }
-            }
-            .gridColumnAlignment(.leading)
-
-            if let url = viewModel.draft?.originalURL {
-                HStack(spacing: 7) {
-                    Text(abbreviatedPath(url.path))
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Button {
-                        copy(url.path)
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Copy Path")
-                }
-            }
-        }
-    }
-
-    private var instructionsSection: some View {
-        sectionCard(title: "Instructions", subtitle: "Markdown loaded when the skill is activated.") {
-            TextEditor(text: promptBinding)
-                .font(.system(size: 12.5, design: .monospaced))
-                .scrollContentBackground(.hidden)
-                .padding(8)
-                .frame(minHeight: 230)
-                .background(.background, in: RoundedRectangle(cornerRadius: 8))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
-                }
-        }
-    }
-
-    private var modelProfilesSection: some View {
-        let profiles = viewModel.modelProfiles(settings: settings)
-        let selected = profiles.first(where: { $0.id == viewModel.selectedProfileID }) ?? profiles[0]
-        return sectionCard(
-            title: "Model Profiles",
-            subtitle: "Inherit TurboCode defaults or compose a focused tool set for each model."
-        ) {
-            Picker("Model", selection: $viewModel.selectedProfileID) {
-                ForEach(profiles) { profile in
-                    Text(profile.id.displayName).tag(profile.id)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-
-            profileEditor(selected)
-                .id(selected.id)
-                .transition(.opacity)
-        }
-    }
-
-    private func profileEditor(_ profile: SkillModelProfileOption) -> some View {
-        let isEnabled = viewModel.override(for: profile.id) != nil
-        let profileOverride = viewModel.override(for: profile.id)
-        return VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(profile.id.displayName)
-                        .font(.system(size: 15, weight: .semibold))
-                    Text(profile.subtitle)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(tierLabel(profile.tier))
-                    .font(AppTypography.metadata)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(.quaternary.opacity(0.3), in: Capsule())
-            }
-
-            Toggle("Customize this model", isOn: Binding(
-                get: { viewModel.override(for: profile.id) != nil },
-                set: { viewModel.setOverrideEnabled($0, for: profile) }
-            ))
-
-            if isEnabled, let profileOverride {
-                Toggle("Start from the default tool set", isOn: Binding(
-                    get: { viewModel.override(for: profile.id)?.inheritsDefaults ?? true },
-                    set: { viewModel.setInheritsDefaults($0, for: profile) }
-                ))
-
-                Text(profileOverride.inheritsDefaults
-                     ? "Default tools stay available. Tools added here extend the profile."
-                     : "Only the tools added here will be requested by this skill.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                toolComposer(profile, profileOverride: profileOverride)
+    private var detail: some View {
+        switch viewModel.selection {
+        case .builtIn(let modelID):
+            builtInDetail(modelID)
+        case .custom:
+            if let draft = viewModel.draft {
+                customDetail(draft)
             } else {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle")
-                        .foregroundStyle(.secondary)
-                    Text("Uses the default \(profile.id.displayName) profile with \(profile.defaultToolCount) tools.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 8)
+                ContentUnavailableView("Profile Unavailable", systemImage: "exclamationmark.triangle")
             }
         }
-        .animation(.easeInOut(duration: 0.16), value: isEnabled)
     }
 
-    private func toolComposer(
-        _ profile: SkillModelProfileOption,
-        profileOverride: SkillModelOverride
-    ) -> some View {
-        let customIDs = Set(profileOverride.toolIDs)
-        let inheritedIDs = profileOverride.inheritsDefaults
-            ? Set(profile.defaultToolIDs.map(\.rawValue))
-            : []
-        let effectiveIDs = customIDs.union(inheritedIDs)
-        let availableTools = ModelToolCatalog.descriptors.filter { descriptor in
-            let matchesSearch = viewModel.toolSearchText.isEmpty
-                || descriptor.name.localizedCaseInsensitiveContains(viewModel.toolSearchText)
-                || descriptor.id.rawValue.localizedCaseInsensitiveContains(viewModel.toolSearchText)
-            return matchesSearch && !effectiveIDs.contains(descriptor.id.rawValue)
-        }
+    private func builtInDetail(_ modelID: ProfileBaseModelID) -> some View {
+        let option = viewModel.modelOption(for: modelID, settings: settings)
+        let defaultTools = ModelToolCatalog.descriptors.filter { option.defaultToolIDs.contains($0.id) }
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                HStack(alignment: .top, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Label(modelID.displayName, systemImage: modelID.systemImage)
+                            .font(.system(size: 27, weight: .semibold))
+                        Text(option.subtitle)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Create Override") {
+                        suggestedBaseModel = modelID
+                        suggestedCopyDefaults = true
+                        newProfilePresented = true
+                    }
+                    Button("Use Default") {
+                        chatStore.selectBuiltInProfile(modelID)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!option.isAvailable)
+                }
 
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Tool composition", systemImage: "rectangle.2.swap")
-                    .font(.system(size: 12.5, weight: .semibold))
-                Spacer()
-                Text("Drag tools between lists or use the buttons")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                infoBanner(
+                    icon: "lock.shield",
+                    title: "Built-in profile",
+                    text: "Defaults stay unchanged. Create an override to choose an explicit set of tools and skills."
+                )
+
+                sectionCard(
+                    title: "Default Capabilities",
+                    subtitle: "These capabilities are managed by TurboCode and may evolve with the model."
+                ) {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 8)], spacing: 8) {
+                        ForEach(defaultTools) { tool in
+                            capabilityBadge(icon: tool.systemImage, title: tool.name, subtitle: tool.id.rawValue)
+                        }
+                    }
+                    if !viewModel.installedSkills.isEmpty, option.defaultToolIDs.contains(.loadSkill) {
+                        Divider()
+                        Text("All installed skills are available on demand.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
+            .padding(28)
+            .frame(maxWidth: 1120, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
+    }
 
-            HStack(alignment: .top, spacing: 12) {
-                toolColumn(title: "Available", count: availableTools.count) {
-                    TextField("Filter tools", text: $viewModel.toolSearchText)
-                        .textFieldStyle(.roundedBorder)
-                    ScrollView {
-                        LazyVStack(spacing: 2) {
-                            ForEach(availableTools) { tool in
-                                availableToolRow(tool, profile: profile)
+    private func customDetail(_ draft: UserDynamicProfile) -> some View {
+        let option = viewModel.modelOption(for: draft.baseModelID, settings: settings)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                HStack(alignment: .top, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Custom Profile")
+                            .font(.system(size: 27, weight: .semibold))
+                        Text("Only included tools and skills are loaded into the model session.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(role: .destructive) {
+                        deleteConfirmationPresented = true
+                    } label: {
+                        Label("Delete", systemImage: "trash")
+                    }
+                    Button("Revert") { viewModel.discardChanges() }
+                        .disabled(!viewModel.isDirty)
+                    Button("Save") { viewModel.save() }
+                        .keyboardShortcut("s", modifiers: .command)
+                        .disabled(!viewModel.canSave)
+                    Button("Use Profile") {
+                        if !viewModel.isDirty || viewModel.save() {
+                            chatStore.selectDynamicProfile(draft.id)
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!option.isAvailable)
+                }
+
+                if !option.isAvailable {
+                    infoBanner(
+                        icon: "exclamationmark.triangle",
+                        title: "Model unavailable",
+                        text: "Enable and configure \(draft.baseModelID.displayName) before using this profile."
+                    )
+                }
+
+                sectionCard(title: "Profile", subtitle: "A recognizable name and the model this profile controls.") {
+                    Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 12) {
+                        GridRow {
+                            Text("Name").foregroundStyle(.secondary)
+                            TextField("Profile name", text: nameBinding)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        GridRow {
+                            Text("Description").foregroundStyle(.secondary)
+                            TextField("What is this profile for?", text: summaryBinding)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        GridRow {
+                            Text("Model").foregroundStyle(.secondary)
+                            Picker("Model", selection: baseModelBinding) {
+                                ForEach(viewModel.modelOptions(settings: settings)) { model in
+                                    Label(model.id.displayName, systemImage: model.id.systemImage)
+                                        .tag(model.id)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: 280, alignment: .leading)
+                        }
+                    }
+                }
+
+                sectionCard(
+                    title: "Included Capabilities",
+                    subtitle: "The saved list is explicit: everything outside Included is excluded."
+                ) {
+                    Picker("Capability", selection: $capabilityKind) {
+                        ForEach(CapabilityKind.allCases) { kind in Text(kind.rawValue).tag(kind) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 320)
+
+                    capabilityComposer(option: option)
+                }
+            }
+            .padding(28)
+            .frame(maxWidth: 1120, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
+    }
+
+    @ViewBuilder
+    private func capabilityComposer(option: ProfileModelOption) -> some View {
+        let search = viewModel.capabilitySearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        HStack(alignment: .top, spacing: 12) {
+            capabilityColumn(title: "Available", targeted: availableDropTargeted) {
+                TextField("Filter \(capabilityKind.rawValue.lowercased())", text: $viewModel.capabilitySearch)
+                    .textFieldStyle(.roundedBorder)
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        if capabilityKind == .tools {
+                            ForEach(availableTools(option: option, search: search)) { tool in
+                                availableToolRow(tool, option: option)
+                            }
+                        } else {
+                            ForEach(availableSkills(search: search)) { skill in
+                                availableSkillRow(skill)
                             }
                         }
                     }
                 }
-                .background(
-                    availableDropIsTargeted ? Color.accentColor.opacity(0.08) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 9)
-                )
-                .dropDestination(for: String.self) { values, _ in
-                    let customIDs = Set(profileOverride.toolIDs)
-                    let removable = values.filter(customIDs.contains)
-                    for value in removable {
-                        viewModel.removeTool(value, from: profile)
-                    }
-                    return !removable.isEmpty
-                } isTargeted: { targeted in
-                    withAnimation(.easeInOut(duration: 0.12)) {
-                        availableDropIsTargeted = targeted
-                    }
-                }
+            }
+            .dropDestination(for: String.self) { values, _ in
+                remove(values: values)
+            } isTargeted: { availableDropTargeted = $0 }
 
-                toolColumn(title: "Profile", count: effectiveIDs.count) {
-                    profileToolList(
-                        profile,
-                        profileOverride: profileOverride,
-                        inheritedIDs: inheritedIDs
-                    )
-                }
-                .background(
-                    profileDropIsTargeted ? Color.accentColor.opacity(0.08) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 9)
-                )
-                .dropDestination(for: String.self) { values, _ in
-                    var accepted = false
-                    for value in values {
-                        guard let toolID = ToolCapabilityID(rawValue: value),
-                              profile.compatibleToolIDs.contains(toolID),
-                              !effectiveIDs.contains(value) else { continue }
-                        viewModel.addTool(toolID, to: profile)
-                        accepted = true
-                    }
-                    return accepted
-                } isTargeted: { targeted in
-                    withAnimation(.easeInOut(duration: 0.12)) {
-                        profileDropIsTargeted = targeted
+            capabilityColumn(title: "Included", targeted: includedDropTargeted) {
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        if capabilityKind == .tools {
+                            ForEach(includedTools()) { tool in includedToolRow(tool, option: option) }
+                            ForEach(missingToolIDs(), id: \.self) { toolID in
+                                missingCapabilityRow(toolID) {
+                                    if let id = ToolCapabilityID(rawValue: toolID) {
+                                        viewModel.setTool(id, included: false)
+                                    } else {
+                                        viewModel.updateDraft { $0.toolIDs.removeAll { $0 == toolID } }
+                                    }
+                                }
+                            }
+                        } else {
+                            ForEach(includedSkills()) { skill in includedSkillRow(skill) }
+                            ForEach(missingSkillIDs(), id: \.self) { skillID in
+                                missingCapabilityRow(skillID) {
+                                    viewModel.setSkill(skillID, included: false)
+                                }
+                            }
+                        }
+                        if includedCount == 0 {
+                            ContentUnavailableView(
+                                "No \(capabilityKind.rawValue)",
+                                systemImage: "arrow.left.arrow.right",
+                                description: Text("Drag items here or use the add buttons.")
+                            )
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 36)
+                        }
                     }
                 }
             }
-            .frame(height: 286)
+            .dropDestination(for: String.self) { values, _ in
+                include(values: values, option: option)
+            } isTargeted: { includedDropTargeted = $0 }
+        }
+        .frame(height: 350)
+    }
+
+    private func availableTools(option: ProfileModelOption, search: String) -> [ToolCapabilityDescriptor] {
+        ModelToolCatalog.descriptors.filter {
+            $0.id != .loadSkill && $0.id != .callPowerfulModel
+                && !viewModel.containsTool($0.id)
+                && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)
+                    || $0.id.rawValue.localizedCaseInsensitiveContains(search))
         }
     }
 
-    private func profileToolList(
-        _ profile: SkillModelProfileOption,
-        profileOverride: SkillModelOverride,
-        inheritedIDs: Set<String>
-    ) -> some View {
-        let customIDs = profileOverride.toolIDs
-        let inheritedTools = ModelToolCatalog.descriptors.filter { inheritedIDs.contains($0.id.rawValue) }
-        return ScrollView {
-            LazyVStack(spacing: 2) {
-                ForEach(inheritedTools) { tool in
-                    profileToolRow(tool.id.rawValue, inherited: true, profile: profile)
-                }
-                ForEach(customIDs.filter { !inheritedIDs.contains($0) }, id: \.self) { toolID in
-                    profileToolRow(toolID, inherited: false, profile: profile)
-                }
-                if inheritedTools.isEmpty && customIDs.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "arrow.down.doc")
-                            .font(.system(size: 22))
-                            .foregroundStyle(.tertiary)
-                        Text("Drop tools here")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 54)
-                }
-            }
+    private func includedTools() -> [ToolCapabilityDescriptor] {
+        ModelToolCatalog.descriptors.filter { viewModel.containsTool($0.id) }
+    }
+
+    private func availableSkills(search: String) -> [TurboCodeSkillDefinition] {
+        viewModel.installedSkills.filter {
+            !viewModel.containsSkill($0.name)
+                && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)
+                    || $0.description.localizedCaseInsensitiveContains(search))
         }
     }
 
-    @ViewBuilder
-    private func availableToolRow(
-        _ tool: ToolCapabilityDescriptor,
-        profile: SkillModelProfileOption
-    ) -> some View {
-        let compatible = profile.compatibleToolIDs.contains(tool.id)
-        let row = HStack(spacing: 8) {
-            Image(systemName: tool.systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(tool.name)
-                    .font(.system(size: 11.5, weight: .medium))
-                Text(tool.id.rawValue)
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-            }
-            Spacer()
-            if compatible {
-                Button {
-                    viewModel.addTool(tool.id, to: profile)
-                } label: {
-                    Image(systemName: "plus.circle")
-                }
-                .buttonStyle(.borderless)
-                .help("Add \(tool.name)")
-            } else {
-                Text("Unavailable")
-                    .font(AppTypography.metadata)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 5)
-        .background(.quaternary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-        .opacity(compatible ? 1 : 0.58)
-
-        if compatible {
-            row.draggable(tool.id.rawValue) {
-                Label(tool.name, systemImage: tool.systemImage)
-                    .padding(8)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-            }
-        } else {
-            row
-        }
+    private func includedSkills() -> [TurboCodeSkillDefinition] {
+        viewModel.installedSkills.filter { viewModel.containsSkill($0.name) }
     }
 
-    @ViewBuilder
-    private func profileToolRow(
-        _ toolID: String,
-        inherited: Bool,
-        profile: SkillModelProfileOption
-    ) -> some View {
-        let descriptor = ToolCapabilityID(rawValue: toolID).map { ModelToolCatalog.descriptor(for: $0) }
-        let row = HStack(spacing: 8) {
-            Image(systemName: descriptor?.systemImage ?? "questionmark.circle")
-                .foregroundStyle(descriptor == nil ? .orange : .secondary)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(descriptor?.name ?? toolID)
-                    .font(.system(size: 11.5, weight: .medium))
-                Text(inherited ? "Inherited" : descriptor?.id.rawValue ?? "Unknown tool ID")
-                    .font(AppTypography.metadata)
-                    .foregroundStyle(.tertiary)
-            }
-            Spacer()
-            if !inherited {
-                Button {
-                    viewModel.removeTool(toolID, from: profile)
-                } label: {
-                    Image(systemName: "minus.circle")
-                }
-                .buttonStyle(.borderless)
-                .help("Remove Tool")
-            }
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 5)
-        .background(.quaternary.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-
-        if inherited {
-            row
-        } else {
-            row.draggable(toolID) {
-                Label(descriptor?.name ?? toolID, systemImage: descriptor?.systemImage ?? "questionmark.circle")
-                    .padding(8)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-            }
-        }
+    private func missingToolIDs() -> [String] {
+        let known = Set(ModelToolCatalog.descriptors.map { $0.id.rawValue })
+        return viewModel.draft?.toolIDs.filter { !known.contains($0) } ?? []
     }
 
-    private func toolColumn<Content: View>(
+    private func missingSkillIDs() -> [String] {
+        let installed = Set(viewModel.installedSkills.map(\.name))
+        return viewModel.draft?.skillIDs.filter { !installed.contains($0) } ?? []
+    }
+
+    private var includedCount: Int {
+        capabilityKind == .tools
+            ? (viewModel.draft?.toolIDs.count ?? 0)
+            : (viewModel.draft?.skillIDs.count ?? 0)
+    }
+
+    private func availableToolRow(_ tool: ToolCapabilityDescriptor, option: ProfileModelOption) -> some View {
+        let compatible = option.compatibleToolIDs.contains(tool.id)
+        return capabilityRow(
+            icon: tool.systemImage,
+            title: tool.name,
+            subtitle: compatible ? tool.id.rawValue : "Unavailable for this model",
+            compatible: compatible,
+            actionIcon: compatible ? "plus.circle" : nil
+        ) {
+            viewModel.setTool(tool.id, included: true)
+        }
+        .draggable(tool.id.rawValue)
+        .opacity(compatible ? 1 : 0.55)
+    }
+
+    private func includedToolRow(_ tool: ToolCapabilityDescriptor, option: ProfileModelOption) -> some View {
+        let compatible = option.compatibleToolIDs.contains(tool.id)
+        return capabilityRow(
+            icon: compatible ? tool.systemImage : "exclamationmark.triangle",
+            title: tool.name,
+            subtitle: compatible ? tool.id.rawValue : "Not supported by \(option.id.displayName)",
+            compatible: compatible,
+            actionIcon: "minus.circle"
+        ) {
+            viewModel.setTool(tool.id, included: false)
+        }
+        .draggable(tool.id.rawValue)
+    }
+
+    private func availableSkillRow(_ skill: TurboCodeSkillDefinition) -> some View {
+        capabilityRow(
+            icon: "doc.text",
+            title: skill.name,
+            subtitle: skill.description,
+            compatible: true,
+            actionIcon: "plus.circle"
+        ) { viewModel.setSkill(skill.name, included: true) }
+        .draggable(skill.name)
+    }
+
+    private func includedSkillRow(_ skill: TurboCodeSkillDefinition) -> some View {
+        capabilityRow(
+            icon: "doc.text",
+            title: skill.name,
+            subtitle: skill.description,
+            compatible: true,
+            actionIcon: "minus.circle"
+        ) { viewModel.setSkill(skill.name, included: false) }
+        .draggable(skill.name)
+    }
+
+    private func missingCapabilityRow(_ id: String, remove: @escaping () -> Void) -> some View {
+        capabilityRow(
+            icon: "exclamationmark.triangle",
+            title: id,
+            subtitle: "Not currently installed",
+            compatible: false,
+            actionIcon: "minus.circle",
+            action: remove
+        )
+    }
+
+    private func capabilityRow(
+        icon: String,
         title: String,
-        count: Int,
+        subtitle: String,
+        compatible: Bool,
+        actionIcon: String?,
+        action: @escaping () -> Void
+    ) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .foregroundStyle(compatible ? Color.secondary : Color.orange)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 11.5, weight: .medium)).lineLimit(1)
+                Text(subtitle).font(AppTypography.metadata).foregroundStyle(.tertiary).lineLimit(2)
+            }
+            Spacer()
+            if let actionIcon {
+                Button(action: action) { Image(systemName: actionIcon) }
+                    .buttonStyle(.borderless)
+                    .disabled(!compatible && actionIcon == "plus.circle")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(.quaternary.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+    }
+
+    private func capabilityColumn<Content: View>(
+        title: String,
+        targeted: Bool,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(title)
-                    .font(.system(size: 11.5, weight: .semibold))
-                Spacer()
-                Text("\(count)")
-                    .font(AppTypography.metadata)
-                    .foregroundStyle(.secondary)
-            }
+            Text(title).font(.system(size: 12, weight: .semibold))
             content()
         }
-        .padding(10)
+        .padding(11)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(.quaternary.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
+        .background(
+            targeted ? Color.accentColor.opacity(0.1) : Color.secondary.opacity(0.04),
+            in: RoundedRectangle(cornerRadius: 10)
+        )
         .overlay {
-            RoundedRectangle(cornerRadius: 9)
-                .stroke(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(targeted ? Color.accentColor : Color(nsColor: .separatorColor), lineWidth: 1)
         }
+    }
+
+    private func include(values: [String], option: ProfileModelOption) -> Bool {
+        var changed = false
+        if capabilityKind == .tools {
+            for value in values {
+                guard let id = ToolCapabilityID(rawValue: value), option.compatibleToolIDs.contains(id) else { continue }
+                viewModel.setTool(id, included: true)
+                changed = true
+            }
+        } else {
+            let names = Set(viewModel.installedSkills.map(\.name))
+            for value in values where names.contains(value) {
+                viewModel.setSkill(value, included: true)
+                changed = true
+            }
+        }
+        return changed
+    }
+
+    private func remove(values: [String]) -> Bool {
+        var changed = false
+        if capabilityKind == .tools {
+            for value in values {
+                guard let id = ToolCapabilityID(rawValue: value), viewModel.containsTool(id) else { continue }
+                viewModel.setTool(id, included: false)
+                changed = true
+            }
+        } else {
+            for value in values where viewModel.containsSkill(value) {
+                viewModel.setSkill(value, included: false)
+                changed = true
+            }
+        }
+        return changed
     }
 
     private func sectionCard<Content: View>(
@@ -545,11 +597,8 @@ struct SkillsView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 16, weight: .semibold))
-                Text(subtitle)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                Text(title).font(.system(size: 16, weight: .semibold))
+                Text(subtitle).font(.callout).foregroundStyle(.secondary)
             }
             content()
         }
@@ -561,10 +610,36 @@ struct SkillsView: View {
         }
     }
 
-    private var skillSelection: Binding<String?> {
+    private func infoBanner(icon: String, title: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon).foregroundStyle(.secondary).frame(width: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 12.5, weight: .semibold))
+                Text(text).font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.quaternary.opacity(0.14), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func capabilityBadge(icon: String, title: String, subtitle: String) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon).foregroundStyle(.secondary).frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 11.5, weight: .medium))
+                Text(subtitle).font(AppTypography.metadata).foregroundStyle(.tertiary)
+            }
+            Spacer()
+        }
+        .padding(9)
+        .background(.background.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var selectionBinding: Binding<ProfileLibrarySelection?> {
         Binding(
-            get: { viewModel.selectedRecordID },
-            set: { viewModel.requestSelection($0) }
+            get: { viewModel.selection },
+            set: { if let value = $0 { viewModel.select(value) } }
         )
     }
 
@@ -575,55 +650,115 @@ struct SkillsView: View {
         )
     }
 
-    private var descriptionBinding: Binding<String> {
+    private var summaryBinding: Binding<String> {
         Binding(
-            get: { viewModel.draft?.description ?? "" },
-            set: { value in viewModel.updateDraft { $0.description = value } }
+            get: { viewModel.draft?.summary ?? "" },
+            set: { value in viewModel.updateDraft { $0.summary = value } }
         )
     }
 
-    private var promptBinding: Binding<String> {
+    private var baseModelBinding: Binding<ProfileBaseModelID> {
         Binding(
-            get: { viewModel.draft?.prompt ?? "" },
-            set: { value in viewModel.updateDraft { $0.prompt = value } }
+            get: { viewModel.draft?.baseModelID ?? .onDevice },
+            set: { value in viewModel.updateDraft { $0.baseModelID = value } }
         )
     }
 
-    private var discardAlertPresented: Binding<Bool> {
-        Binding(
-            get: { viewModel.confirmationMessage != nil },
-            set: { if !$0 { viewModel.cancelDiscard() } }
-        )
-    }
-
-    private var errorAlertPresented: Binding<Bool> {
+    private var errorPresented: Binding<Bool> {
         Binding(
             get: { viewModel.errorMessage != nil },
             set: { if !$0 { viewModel.errorMessage = nil } }
         )
     }
 
-    private func tierLabel(_ tier: ModelToolTier) -> String {
-        switch tier {
-        case .none: "Unavailable"
-        case .onDevice: "On-device"
-        case .standard: "Standard"
-        case .enhanced: "Enhanced"
+    private func revealSkillsDirectory() {
+        NSWorkspace.shared.open(TurboCodeConfig.shared.skillsDirectoryURL)
+    }
+}
+
+private struct NewDynamicProfileSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let modelOptions: [ProfileModelOption]
+    let onCreate: (String, String, ProfileBaseModelID, Bool) -> Bool
+    @State private var name = ""
+    @State private var summary = ""
+    @State private var baseModelID: ProfileBaseModelID
+    @State private var copyDefaults = false
+    @FocusState private var nameFocused: Bool
+
+    init(
+        initialBaseModel: ProfileBaseModelID,
+        initialCopyDefaults: Bool,
+        modelOptions: [ProfileModelOption],
+        onCreate: @escaping (String, String, ProfileBaseModelID, Bool) -> Bool
+    ) {
+        self.modelOptions = modelOptions
+        self.onCreate = onCreate
+        _baseModelID = State(initialValue: initialBaseModel)
+        _copyDefaults = State(initialValue: initialCopyDefaults)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("New Profile").font(.system(size: 21, weight: .semibold))
+                Text("Choose a model and a starting point. Capabilities can be composed next.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 13) {
+                GridRow {
+                    Text("Name")
+                    TextField("GitHub PR Assistant", text: $name)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($nameFocused)
+                }
+                GridRow {
+                    Text("Description")
+                    TextField("Focused purpose", text: $summary)
+                        .textFieldStyle(.roundedBorder)
+                }
+                GridRow {
+                    Text("Model")
+                    Picker("Model", selection: $baseModelID) {
+                        ForEach(modelOptions) { option in
+                            Text(option.id.displayName).tag(option.id)
+                        }
+                    }
+                    .labelsHidden()
+                }
+                GridRow {
+                    Text("Start with")
+                    Picker("Starting point", selection: $copyDefaults) {
+                        Text("Empty").tag(false)
+                        Text("Model Defaults").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+            }
+
+            Text(copyDefaults
+                 ? "Copies the model's current tools and installed skills into an explicit list."
+                 : "Starts with no tools or skills, ideal for a focused workflow.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Button("Cancel", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Create") {
+                    if onCreate(name, summary, baseModelID, copyDefaults) { dismiss() }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
         }
-    }
-
-    private func reveal(_ url: URL) {
-        NSWorkspace.shared.activateFileViewerSelecting([url])
-    }
-
-    private func copy(_ value: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(value, forType: .string)
-    }
-
-    private func abbreviatedPath(_ path: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        guard path.hasPrefix(home) else { return path }
-        return "~" + String(path.dropFirst(home.count))
+        .padding(24)
+        .frame(width: 510)
+        .onAppear { nameFocused = true }
     }
 }

@@ -196,14 +196,15 @@ struct InputFieldView: View {
                     .foregroundStyle(.secondary)
             } else {
                 Menu {
-                    Section("Backend") {
+                    Section("Default Profiles") {
                         Button {
-                            chatStore.switchBackend(to: .foundationApple)
+                            chatStore.selectBuiltInProfile(.onDevice)
                         } label: {
-                            if chatStore.activeBackend == .foundationApple {
-                                Label("Foundation Apple", systemImage: "checkmark")
+                            if chatStore.activeDynamicProfileID == nil,
+                               chatStore.activeBackend == .foundationApple {
+                                Label("On-device", systemImage: "checkmark")
                             } else {
-                                Text("Foundation Apple")
+                                Text("On-device")
                             }
                         }
 
@@ -211,7 +212,8 @@ struct InputFieldView: View {
                             Button {
                                 chatStore.switchRemoteModel(to: model.id)
                             } label: {
-                                if chatStore.activeRemoteModelID == model.id,
+                                if chatStore.activeDynamicProfileID == nil,
+                                   chatStore.activeRemoteModelID == model.id,
                                    chatStore.activeBackend != .foundationApple {
                                     Label(model.name, systemImage: "checkmark")
                                 } else {
@@ -219,6 +221,22 @@ struct InputFieldView: View {
                                 }
                             }
                             .disabled(!chatStore.isConfigured(model))
+                        }
+                    }
+
+                    if !chatStore.dynamicProfiles.isEmpty {
+                        Section("Custom Profiles") {
+                            ForEach(chatStore.dynamicProfiles) { profile in
+                                Button {
+                                    chatStore.selectDynamicProfile(profile.id)
+                                } label: {
+                                    if chatStore.activeDynamicProfileID == profile.id {
+                                        Label(profile.name, systemImage: "checkmark")
+                                    } else {
+                                        Text(profile.name)
+                                    }
+                                }
+                            }
                         }
                     }
 

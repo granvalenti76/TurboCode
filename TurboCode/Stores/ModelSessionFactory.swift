@@ -10,6 +10,7 @@ struct ModelSessionConfiguration {
     let workspaceRoot: String
     let agentTuning: AgentTuningConfig
     let availableSkills: [TurboCodeSkillDefinition]
+    let activeDynamicProfile: UserDynamicProfile?
     let skillActivations: SkillActivations
     let reasoningLevel: ContextOptions.ReasoningLevel?
     let delegateReasoningLevel: ContextOptions.ReasoningLevel?
@@ -116,7 +117,8 @@ enum ModelSessionFactory {
             context: toolContext(
                 for: configuration,
                 repositoryMap: activeRemoteConfiguration?.repositoryMap
-            )
+            ),
+            selectedIDs: configuration.activeDynamicProfile?.resolvedToolIDs
         )
 
         return LanguageModelSession(
@@ -139,7 +141,8 @@ enum ModelSessionFactory {
                         .turboCodeGuide,
                         .listWorkspace,
                         .swiftWorkspaceMap,
-                        .xcodeProject
+                        .xcodeProject,
+                        .writeOnDevice
                     ],
                     repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
                         ?? 32_768
