@@ -27,8 +27,8 @@ struct MessageTimelineView: View {
 
                     ForEach(turns) { turn in
                         TurnView(turn: turn)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 4)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 8)
                     }
 
                     // Live reasoning block (streaming)
@@ -196,7 +196,7 @@ struct TurnView: View {
     let turn: Turn
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 8) {
             ForEach(turn.blocks) { block in
                 ChatBlockView(block: block)
             }
@@ -278,6 +278,7 @@ struct LiveAssistantBlock: View {
         Markdown(text)
             .markdownTheme(AppTypography.chatMarkdownTheme(size: chatFontSize))
             .textSelection(.enabled)
+            .frame(maxWidth: 1040, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
     }

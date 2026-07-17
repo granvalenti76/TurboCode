@@ -11,7 +11,7 @@ public final class SettingsStore {
         didSet { UserDefaults.standard.set(theme.rawValue, forKey: "theme") }
     }
     public var language: String = "en"
-    public var fontSize: Double = 17.0 {
+    public var fontSize: Double = 16.0 {
         didSet { UserDefaults.standard.set(fontSize, forKey: "fontSize") }
     }
     public var maxChatWidth: Double = 1440.0 {
@@ -80,12 +80,16 @@ public final class SettingsStore {
         language = defaults.string(forKey: "language") ?? "en"
         let savedFontSize = defaults.double(forKey: "fontSize")
         let typographyVersion = defaults.integer(forKey: "chatTypographyVersion")
-        if typographyVersion < 1 {
-            fontSize = savedFontSize == 0 || savedFontSize == 15 ? 17 : savedFontSize
+        if typographyVersion < 2 {
+            // Version 2 adopts a denser conversation scale. Preserve explicit
+            // non-default choices while migrating the previous 17 pt default.
+            fontSize = savedFontSize == 0 || savedFontSize == 15 || savedFontSize == 17
+                ? 16
+                : savedFontSize
             defaults.set(fontSize, forKey: "fontSize")
-            defaults.set(1, forKey: "chatTypographyVersion")
+            defaults.set(2, forKey: "chatTypographyVersion")
         } else {
-            fontSize = savedFontSize == 0 ? 17 : savedFontSize
+            fontSize = savedFontSize == 0 ? 16 : savedFontSize
         }
         let savedMaxWidth = defaults.double(forKey: "maxChatWidth")
         let layoutWidthVersion = defaults.integer(forKey: "chatLayoutWidthVersion")

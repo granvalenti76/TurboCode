@@ -41,7 +41,7 @@ struct InputFieldView: View {
         .background(Color(.windowBackgroundColor))
         .padding(.horizontal, 24)
         .padding(.top, 6)
-        .padding(.bottom, 16)
+        .padding(.bottom, compact ? 16 : 12)
     }
 
     // MARK: - Composer Card
@@ -49,7 +49,7 @@ struct InputFieldView: View {
     private var composerCard: some View {
         VStack(spacing: 0) {
             // ── Top section: text field + controls ──
-            VStack(alignment: .leading, spacing: compact ? 10 : 16) {
+            VStack(alignment: .leading, spacing: compact ? 10 : 12) {
                 textField
 
                 HStack(spacing: 10) {
@@ -59,7 +59,7 @@ struct InputFieldView: View {
                     sendButton
                 }
             }
-            .padding(compact ? 16 : 20)
+            .padding(16)
 
             Divider()
 
@@ -78,7 +78,7 @@ struct InputFieldView: View {
                 .lineLimit(1...10)
                 .focused($isFocused)
                 .disabled(chatStore.busy)
-                .padding(.bottom, compact ? 12 : 28)
+                .padding(.bottom, compact ? 12 : 18)
                 .contentShape(Rectangle())
                 .simultaneousGesture(
                     TapGesture().onEnded {
@@ -314,7 +314,7 @@ struct InputFieldView: View {
         .font(AppTypography.controlEmphasized)
         .foregroundStyle(.secondary)
         .padding(.horizontal, compact ? 16 : 20)
-        .padding(.vertical, compact ? 7 : 10)
+        .padding(.vertical, compact ? 7 : 8)
     }
 
     private var orchestratorModeMenu: some View {

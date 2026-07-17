@@ -61,12 +61,12 @@ struct ChatBlockView: View {
                     editView
                 } else {
                     Text(block.text)
-                        .font(AppTypography.chatBody(size: chatFontSize))
+                        .font(AppTypography.chatBody(size: max(13, chatFontSize - 1)))
                         .foregroundStyle(AppTypography.chatForeground)
                         .textSelection(.enabled)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
                         .contextMenu {
                             Button("Edit") {
                                 editText = block.text
@@ -123,44 +123,42 @@ struct ChatBlockView: View {
     // MARK: - Assistant Bubble (left-aligned)
 
     private var assistantBubble: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Markdown(visibleAssistantText)
-                    .markdownTheme(AppTypography.chatMarkdownTheme(size: chatFontSize))
-                    .textSelection(.enabled)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    
-                if !visibleAssistantText.isEmpty {
-                    HStack(spacing: 12) {
-                        Button {
-                            copyAssistantResponse()
-                        } label: {
-                            Image(systemName: didCopyAssistantResponse ? "checkmark" : "square.on.square")
-                                .font(.system(size: 15, weight: .regular))
-                                .foregroundStyle(didCopyAssistantResponse ? Color.green : Color.secondary.opacity(0.72))
-                                .frame(width: 22, height: 22)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .opacity(isHoveringAssistantResponse || didCopyAssistantResponse ? 1 : 0)
-                        .allowsHitTesting(isHoveringAssistantResponse)
-                        .animation(.easeOut(duration: 0.16), value: isHoveringAssistantResponse)
-                        .help(didCopyAssistantResponse ? "Copied" : "Copy response")
-                        .accessibilityLabel(didCopyAssistantResponse ? "Response copied" : "Copy response")
+        VStack(alignment: .leading, spacing: 4) {
+            Markdown(visibleAssistantText)
+                .markdownTheme(AppTypography.chatMarkdownTheme(size: chatFontSize))
+                .textSelection(.enabled)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-                        Text(block.createdAt, format: .dateTime.hour().minute())
-                            .font(.system(size: 13))
-                            .foregroundStyle(.tertiary)
+            if !visibleAssistantText.isEmpty {
+                HStack(spacing: 10) {
+                    Button {
+                        copyAssistantResponse()
+                    } label: {
+                        Image(systemName: didCopyAssistantResponse ? "checkmark" : "square.on.square")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(didCopyAssistantResponse ? Color.green : Color.secondary.opacity(0.72))
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
                     }
-                    .padding(.top, 2)
-                }
-            }
+                    .buttonStyle(.plain)
+                    .opacity(isHoveringAssistantResponse || didCopyAssistantResponse ? 1 : 0)
+                    .allowsHitTesting(isHoveringAssistantResponse)
+                    .animation(.easeOut(duration: 0.16), value: isHoveringAssistantResponse)
+                    .help(didCopyAssistantResponse ? "Copied" : "Copy response")
+                    .accessibilityLabel(didCopyAssistantResponse ? "Response copied" : "Copy response")
 
-            Spacer()
+                    Text(block.createdAt, format: .dateTime.hour().minute())
+                        .font(AppTypography.metadata)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 1)
+            }
         }
+        .frame(maxWidth: 1040, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 8)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .contentShape(Rectangle())
         .onHover { isHovering in
             isHoveringAssistantResponse = isHovering

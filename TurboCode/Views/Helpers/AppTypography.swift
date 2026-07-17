@@ -31,12 +31,12 @@ enum AppTypography {
                 ForegroundColor(chatForeground)
             }
             .strong {
-                FontWeight(.semibold)
+                FontWeight(.medium)
             }
             .code {
                 FontFamilyVariant(.monospaced)
                 FontSize(.em(0.9))
-                BackgroundColor(Color.primary.opacity(0.06))
+                BackgroundColor(Color.primary.opacity(0.045))
             }
             .heading1 { configuration in
                 chatHeading(configuration.label, size: 1.5, top: 22, bottom: 12)
@@ -59,8 +59,8 @@ enum AppTypography {
             .paragraph { configuration in
                 configuration.label
                     .fixedSize(horizontal: false, vertical: true)
-                    .relativeLineSpacing(.em(0.28))
-                    .markdownMargin(top: 0, bottom: 14)
+                    .relativeLineSpacing(.em(0.22))
+                    .markdownMargin(top: 0, bottom: 10)
             }
             .blockquote { configuration in
                 HStack(spacing: 0) {
@@ -92,8 +92,8 @@ enum AppTypography {
             }
             .listItem { configuration in
                 configuration.label
-                    .relativeLineSpacing(.em(0.28))
-                    .markdownMargin(top: .em(0.18))
+                    .relativeLineSpacing(.em(0.2))
+                    .markdownMargin(top: .em(0.12))
             }
     }
 
@@ -114,7 +114,7 @@ enum AppTypography {
 }
 
 private struct ChatFontSizeKey: EnvironmentKey {
-    static let defaultValue: CGFloat = 17
+    static let defaultValue: CGFloat = 16
 }
 
 extension EnvironmentValues {
