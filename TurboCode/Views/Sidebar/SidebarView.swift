@@ -50,7 +50,7 @@ struct SidebarView: View {
     private var headerView: some View {
         HStack {
             Text("TurboCode")
-                .font(.system(size: 22, weight: .semibold))
+                .font(AppTypography.sidebarHeader)
 
             Spacer()
 
@@ -84,7 +84,7 @@ struct SidebarView: View {
                 chatStore.setRoute(.chat)
                 Task { await chatStore.createThread() }
             } label: {
-                navigationLabel(icon: "square.and.pencil", title: "New chat")
+                navigationLabel(icon: "square.and.pencil", title: "New Chat")
             }
             .buttonStyle(.plain)
 
@@ -181,14 +181,16 @@ struct SidebarView: View {
                         .font(.system(size: 14))
                         .foregroundStyle(.tertiary)
                         .frame(width: 20)
-                    Text("All chats")
+                    Text("All Chats")
                         .font(AppTypography.sidebarLabel)
                     Spacer()
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 7)
                 .contentShape(Rectangle())
-                .sidebarSelectionBackground(chatStore.selectedProject == nil)
+                .sidebarSelectionBackground(
+                    chatStore.selectedProject == nil && chatStore.activeThreadId == nil
+                )
             }
             .buttonStyle(.plain)
             .listRowInsets(sidebarRowInsets)
@@ -234,7 +236,7 @@ struct SidebarView: View {
                         .font(.system(size: 14))
                         .foregroundStyle(.tertiary)
                         .frame(width: 20)
-                    Text("Add workspace...")
+                    Text("Add workspace…")
                         .font(AppTypography.sidebarLabel)
                         .foregroundStyle(.secondary)
                     Spacer()

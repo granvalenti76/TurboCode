@@ -36,7 +36,7 @@ struct InputFieldView: View {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .strokeBorder(.separator, lineWidth: 0.5)
                 }
-                .shadow(color: .black.opacity(0.08), radius: 10, y: 3)
+                .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
         }
         .background(Color(.windowBackgroundColor))
         .padding(.horizontal, 24)
@@ -52,13 +52,10 @@ struct InputFieldView: View {
             VStack(alignment: .leading, spacing: compact ? 10 : 16) {
                 textField
 
-                HStack(spacing: 14) {
-                    attachButton
-
+                HStack(spacing: 10) {
                     Spacer()
 
                     backendMenu
-                    micButton
                     sendButton
                 }
             }
@@ -75,7 +72,7 @@ struct InputFieldView: View {
 
     private var textField: some View {
         VStack(alignment: .leading, spacing: 8) {
-            TextField("Do anything", text: $viewModel.messageText, axis: .vertical)
+            TextField("Describe a Swift or SwiftUI task…", text: $viewModel.messageText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(AppTypography.chatBody(size: chatFontSize))
                 .lineLimit(1...10)
@@ -188,19 +185,6 @@ struct InputFieldView: View {
         }.prefix(6))
     }
 
-    // MARK: - Attach Button
-
-    private var attachButton: some View {
-        Button {
-            // TODO: attach files
-        } label: {
-            Image(systemName: "plus")
-                .frame(width: 28, height: 28)
-        }
-        .buttonStyle(.plain)
-        .help("Attach files")
-    }
-
     // MARK: - Backend Menu
 
     private var backendMenu: some View {
@@ -277,30 +261,17 @@ struct InputFieldView: View {
                     }
                 } label: {
                     if chatStore.activeModelSupportsReasoning {
-                        Text("\(chatStore.composerModel) \(reasoningEffort.rawValue)")
+                        Text("\(chatStore.composerModel) · \(reasoningEffort.rawValue)")
                     } else {
                         Text(chatStore.composerModel)
                     }
                 }
                 .menuStyle(.borderlessButton)
-                .font(.system(size: 15, weight: .medium))
+                .font(AppTypography.controlEmphasized)
                 .fixedSize()
             }
         }
         .disabled(chatStore.busy)
-    }
-
-    // MARK: - Microphone Button
-
-    private var micButton: some View {
-        Button {
-            // TODO: voice input
-        } label: {
-            Image(systemName: "mic")
-                .frame(width: 28, height: 28)
-        }
-        .buttonStyle(.plain)
-        .help("Voice input")
     }
 
     // MARK: - Send Button
@@ -340,10 +311,10 @@ struct InputFieldView: View {
 
             Spacer()
         }
-        .font(.system(size: 13, weight: .medium))
+        .font(AppTypography.controlEmphasized)
         .foregroundStyle(.secondary)
         .padding(.horizontal, compact ? 16 : 20)
-        .padding(.vertical, compact ? 8 : 12)
+        .padding(.vertical, compact ? 7 : 10)
     }
 
     private var orchestratorModeMenu: some View {
@@ -363,49 +334,42 @@ struct InputFieldView: View {
         .fixedSize()
     }
 
+    @ViewBuilder
     private var branchMenu: some View {
-        let label: String
-        let icon: String
-        if chatStore.workspaceRoot.isEmpty {
-            label = "no repo"
-            icon = "arrow.triangle.branch"
-        } else if !chatStore.isGitRepository {
-            label = "no repo"
-            icon = "arrow.triangle.branch"
-        } else if chatStore.currentBranch.isEmpty {
-            label = "detached HEAD"
-            icon = "arrow.triangle.branch"
+        if chatStore.workspaceRoot.isEmpty || !chatStore.isGitRepository {
+            Label("No Git repository", systemImage: "arrow.triangle.branch")
+                .foregroundStyle(.tertiary)
+                .help("The selected workspace is not a Git repository")
         } else {
-            label = chatStore.currentBranch
-            icon = "arrow.triangle.branch"
-        }
+            let label = chatStore.currentBranch.isEmpty ? "Detached HEAD" : chatStore.currentBranch
 
-        return Menu {
-            if chatStore.availableBranches.isEmpty {
-                Text(chatStore.currentBranch.isEmpty
-                     ? "No branches available"
-                     : "No commits yet on \(chatStore.currentBranch)")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            } else {
-                ForEach(chatStore.availableBranches, id: \.self) { branch in
-                    Button {
-                        Task { await chatStore.switchToBranch(branch) }
-                    } label: {
-                        HStack {
-                            Text(branch)
-                            if branch == chatStore.currentBranch {
-                                Image(systemName: "checkmark")
+            Menu {
+                if chatStore.availableBranches.isEmpty {
+                    Text(chatStore.currentBranch.isEmpty
+                         ? "No branches available"
+                         : "No commits yet on \(chatStore.currentBranch)")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    ForEach(chatStore.availableBranches, id: \.self) { branch in
+                        Button {
+                            Task { await chatStore.switchToBranch(branch) }
+                        } label: {
+                            HStack {
+                                Text(branch)
+                                if branch == chatStore.currentBranch {
+                                    Image(systemName: "checkmark")
+                                }
                             }
                         }
                     }
                 }
+            } label: {
+                Label(label, systemImage: "arrow.triangle.branch")
             }
-        } label: {
-            Label(label, systemImage: icon)
+            .menuStyle(.borderlessButton)
+            .fixedSize()
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
     }
 }
 

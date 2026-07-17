@@ -7,7 +7,7 @@ struct WorkbenchSplitView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var routeBeforeCustomProfiles: AppRoute = .chat
 
-    private let sidebarWidth: Double = 280
+    private let sidebarWidth: Double = 268
     private let mainMinWidth: Double = 520
 
     /// Keep the window's layout constraint stable while the inspector appears.
@@ -47,7 +47,7 @@ struct WorkbenchSplitView: View {
             .animation(.easeInOut(duration: 0.18), value: chatStore.rightPanelVisible)
         }
         .navigationSplitViewStyle(.balanced)
-        .containerBackground(.ultraThinMaterial.opacity(0.62), for: .window)
+        .containerBackground(.regularMaterial, for: .window)
         .background(alignment: .top) {
             HStack(spacing: 0) {
                 Color.clear

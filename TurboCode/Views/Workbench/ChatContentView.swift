@@ -29,12 +29,12 @@ struct ChatContentView: View {
 
             VStack(spacing: 8) {
                 Text("What should we build in TurboCode?")
-                    .font(.system(size: 24, weight: .bold))
+                    .font(AppTypography.emptyStateTitle)
                     .foregroundStyle(.primary)
 
                 Text("Ask anything or describe what you want to create")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.tertiary)
+                    .font(AppTypography.emptyStateSubtitle)
+                    .foregroundStyle(.secondary)
             }
 
             InputFieldView(compact: true)

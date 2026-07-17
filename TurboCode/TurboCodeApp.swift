@@ -50,7 +50,7 @@ struct TurboCodeApp: App {
 
                 Divider()
 
-                Button("Choose Workspace...") {
+                Button("Choose Workspace…") {
                     chatStore.chooseWorkspace()
                 }
                     .keyboardShortcut("o", modifiers: [.command, .shift])

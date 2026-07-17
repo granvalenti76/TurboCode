@@ -15,7 +15,7 @@ struct WorkspaceToolbarMenu: View {
                 Button {
                     chatStore.chooseWorkspace()
                 } label: {
-                    Label("Change workspace...", systemImage: "arrow.triangle.swap")
+                    Label("Change workspace…", systemImage: "arrow.triangle.swap")
                 }
             }
 
@@ -42,7 +42,7 @@ struct WorkspaceToolbarMenu: View {
             Button {
                 chatStore.chooseWorkspace()
             } label: {
-                Label("Choose workspace...", systemImage: "folder")
+                Label("Choose workspace…", systemImage: "folder")
             }
         } label: {
             HStack(spacing: 4) {

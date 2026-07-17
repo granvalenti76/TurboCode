@@ -6,10 +6,13 @@ import MarkdownUI
 /// A semantic type scale based on SF Pro and SF Mono.
 enum AppTypography {
     static let chatForeground = Color.primary.opacity(0.84)
-    static let sidebarLabel = Font.system(size: 15)
-    static let sidebarTitle = Font.system(size: 15)
+    static let sidebarHeader = Font.system(size: 17, weight: .semibold)
+    static let sidebarLabel = Font.system(size: 14)
+    static let sidebarTitle = Font.system(size: 14)
     static let sidebarMetadata = Font.system(size: 12)
-    static let sectionLabel = Font.system(size: 13, weight: .semibold)
+    static let sectionLabel = Font.system(size: 11, weight: .semibold)
+    static let emptyStateTitle = Font.system(size: 24, weight: .semibold)
+    static let emptyStateSubtitle = Font.system(size: 14)
     static let control = Font.system(size: 13)
     static let controlEmphasized = Font.system(size: 13, weight: .medium)
     static let metadata = Font.system(size: 11)
