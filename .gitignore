@@ -7,3 +7,11 @@ output/
 
 # Per-user Xcode settings
 **/xcuserdata/
+
+# Xcode and Swift build products
+.build/
+DerivedData/
+*.xcresult
+
+# macOS metadata
+.DS_Store
