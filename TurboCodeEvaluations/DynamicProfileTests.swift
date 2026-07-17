@@ -121,6 +121,33 @@ struct DynamicProfileTests {
         #expect(tools.map(\.name) == ["remove_file"])
     }
 
+    @Test("A Swift package profile exposes exactly the initializer tool")
+    func swiftPackageProfileCreatesOneInstance() {
+        let profile = UserDynamicProfile(
+            name: "Swift package initializer",
+            baseModelID: .llama,
+            toolIDs: [ToolCapabilityID.swiftPackageInit.rawValue]
+        )
+        let plan = ModelToolCatalog.plan(
+            profile: .standalone,
+            tier: .standard,
+            context: ToolAccessContext(
+                hasWorkspace: true,
+                hasSkills: false,
+                hasDelegateModel: false,
+                repositoryMapDetail: nil
+            ),
+            selectedIDs: profile.resolvedToolIDs
+        )
+
+        let tools = ModelSessionFactory.toolInstances(
+            for: plan,
+            configuration: makeConfiguration(profile: profile)
+        )
+
+        #expect(tools.map(\.name) == ["swift_package_init"])
+    }
+
     @Test("File operations stay a direct tool in an exclusive profile")
     func fileOperationsDoNotAddSkillActivator() {
         let profile = UserDynamicProfile(

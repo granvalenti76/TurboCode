@@ -299,6 +299,8 @@ enum ModelSessionFactory {
                     workspaceRoot: configuration.workspaceRoot,
                     executionPolicy: configuration.agentTuning.execution
                 )
+            case .swiftPackageInit:
+                return SwiftPackageInitTool(workspaceRoot: configuration.workspaceRoot)
             case .xcodeProject:
                 return XcodeProjectTool(
                     workspaceRoot: configuration.workspaceRoot,
@@ -435,6 +437,9 @@ enum ModelSessionFactory {
             }
             if hasTool(.bash) {
                 text += "\nUse bash for builds, tests, and precise non-Git inspection. Bash can read the workspace but cannot write to it."
+            }
+            if hasTool(.swiftPackageInit) {
+                text += "\nUse swift_package_init instead of bash when creating a new Swift Package Manager scaffold. After it succeeds, use edit_file for source changes and bash for build or test verification."
             }
             if hasTool(.editFile) {
                 text += "\nUse edit_file for every source or text-file creation and modification. Read the relevant range immediately before editing, copy its Revision, and request one contiguous change per call. Never generate unified diff hunks."

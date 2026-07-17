@@ -68,6 +68,12 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                         }
                         BashTool(workspaceRoot: workspaceRoot, executionPolicy: executionPolicy)
                     }
+                    if toolPlan.contains(.swiftPackageInit) {
+                        Instructions {
+                            "Use swift_package_init instead of bash to create a new Swift Package Manager scaffold. Then use edit_file for implementation changes and bash to build or test it."
+                        }
+                        SwiftPackageInitTool(workspaceRoot: workspaceRoot)
+                    }
                     if toolPlan.contains(.xcodeProject) {
                         Instructions {
                             "Use xcode_project instead of bash to inspect, build, or test an Xcode project. Start with inspect when the container or scheme is unknown, and act on the first reported source error before rebuilding."

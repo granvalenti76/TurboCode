@@ -22,6 +22,7 @@ nonisolated enum ToolCapabilityID: String, CaseIterable, Codable, Sendable, Hash
     case fileSystem = "file_system"
     case git
     case bash
+    case swiftPackageInit = "swift_package_init"
     case xcodeProject = "xcode_project"
     case editFile = "edit_file"
     case writeOnDevice = "write_ondevice"
@@ -159,6 +160,14 @@ nonisolated enum ModelToolCatalog {
             hasNativePresentation: false
         ),
         .init(
+            id: .swiftPackageInit,
+            name: "Initialize Swift Package",
+            summary: "Create an official SwiftPM scaffold without overwriting workspace files.",
+            category: .code,
+            systemImage: "shippingbox",
+            hasNativePresentation: false
+        ),
+        .init(
             id: .xcodeProject,
             name: "Xcode Project",
             summary: "Inspect, build, and test Xcode projects with compact diagnostics.",
@@ -240,7 +249,7 @@ nonisolated enum ModelToolCatalog {
         switch id {
         case .turboCodeGuide: .always
         case .listWorkspace, .readFile, .searchWorkspace, .fileSystem, .git,
-             .bash, .editFile, .writeOnDevice, .removeFile: .workspace
+             .bash, .swiftPackageInit, .editFile, .writeOnDevice, .removeFile: .workspace
         case .swiftWorkspaceMap: .repositoryMap
         case .xcodeProject: .capableWorkspace
         case .loadSkill: .skills
@@ -262,6 +271,7 @@ nonisolated enum ModelToolCatalog {
                 (.fileSystem, .workspace),
                 (.git, .workspace),
                 (.bash, .workspace),
+                (.swiftPackageInit, .workspace),
                 (.xcodeProject, .capableWorkspace),
                 (.editFile, .workspace),
                 (.removeFile, .workspace),
@@ -285,6 +295,7 @@ nonisolated enum ModelToolCatalog {
                 (.fileSystem, .workspace),
                 (.git, .workspace),
                 (.bash, .workspace),
+                (.swiftPackageInit, .workspace),
                 (.xcodeProject, .capableWorkspace),
                 (.editFile, .workspace),
                 (.removeFile, .workspace),
