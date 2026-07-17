@@ -320,14 +320,24 @@ struct SkillsView: View {
                         }
                         GridRow {
                             Text("Model").foregroundStyle(.secondary)
-                            Picker("Model", selection: baseModelBinding) {
-                                ForEach(viewModel.modelOptions(settings: settings)) { model in
-                                    Label(model.id.displayName, systemImage: model.id.systemImage)
-                                        .tag(model.id)
+                            HStack(spacing: 14) {
+                                Picker("Model", selection: baseModelBinding) {
+                                    ForEach(viewModel.modelOptions(settings: settings)) { model in
+                                        Label(model.id.displayName, systemImage: model.id.systemImage)
+                                            .tag(model.id)
+                                    }
                                 }
+                                .labelsHidden()
+                                .frame(maxWidth: 280, alignment: .leading)
+                                Toggle("Greedy mode", isOn: greedyModeBinding)
+                                    .toggleStyle(.checkbox)
+                                    .disabled(draft.baseModelID == .deepseek)
+                                Text(draft.baseModelID == .deepseek
+                                     ? "Unavailable with DeepSeek Thinking."
+                                     : "Always pick the most likely token.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
-                            .labelsHidden()
-                            .frame(maxWidth: 280, alignment: .leading)
                         }
                     }
                 }
@@ -717,7 +727,21 @@ struct SkillsView: View {
     private var baseModelBinding: Binding<ProfileBaseModelID> {
         Binding(
             get: { viewModel.draft?.baseModelID ?? .onDevice },
-            set: { value in viewModel.updateDraft { $0.baseModelID = value } }
+            set: { value in
+                viewModel.updateDraft {
+                    $0.baseModelID = value
+                    if value == .deepseek {
+                        $0.greedyMode = false
+                    }
+                }
+            }
+        )
+    }
+
+    private var greedyModeBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.draft?.greedyMode ?? false },
+            set: { value in viewModel.updateDraft { $0.greedyMode = value } }
         )
     }
 

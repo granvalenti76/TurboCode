@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 import FoundationModelsUtilities
 import Testing
 @testable import TurboCode
@@ -15,6 +16,7 @@ struct DynamicProfileTests {
             name: "GitHub PR Assistant",
             summary: "Handles pull requests",
             baseModelID: .pcc,
+            greedyMode: true,
             toolIDs: ["git", "read_file", "git"],
             skillIDs: ["pull-request-review"]
         )
@@ -23,8 +25,43 @@ struct DynamicProfileTests {
         let loaded = try #require(store.load().first)
 
         #expect(loaded == profile)
+        #expect(loaded.greedyMode)
         #expect(loaded.toolIDs == ["git", "read_file"])
         #expect(loaded.resolvedToolIDs.contains(.loadSkill))
+    }
+
+    @Test("Legacy profiles default greedy mode to off")
+    func legacyProfileDefaultsGreedyModeToOff() throws {
+        let profile = UserDynamicProfile(name: "Legacy", baseModelID: .llama)
+        let encoded = try JSONEncoder().encode(profile)
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "greedyMode")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(UserDynamicProfile.self, from: legacyData)
+
+        #expect(!decoded.greedyMode)
+    }
+
+    @Test("Greedy custom profiles select greedy sampling")
+    func greedyProfileSelectsGreedySampling() throws {
+        let profile = UserDynamicProfile(
+            name: "Deterministic",
+            baseModelID: .llama,
+            greedyMode: true
+        )
+
+        let mode = try #require(ModelSessionFactory.profileSamplingMode(profile))
+
+        #expect(mode.kind == .greedy)
+        #expect(ModelSessionFactory.profileSamplingMode(nil) == nil)
+        #expect(ModelSessionFactory.profileSamplingMode(UserDynamicProfile(
+            name: "DeepSeek",
+            baseModelID: .deepseek,
+            greedyMode: true
+        )) == nil)
     }
 
     @Test("An empty profile exposes no capabilities")

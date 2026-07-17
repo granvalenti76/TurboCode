@@ -42,6 +42,49 @@ struct ModelSwitchRegressionTests {
         #expect(result.contains { if case .reasoning = $0 { true } else { false } })
     }
 
+    @Test("A persisted transcript round-trips complete tool exchanges")
+    func persistedTranscriptRoundTrips() throws {
+        let transcript = Transcript(entries: fixtureTranscript())
+        let stored = StoredSession(
+            title: "Persisted chat",
+            projectName: "TurboCode",
+            transcript: transcript
+        )
+
+        let data = try JSONEncoder().encode(stored)
+        let decoded = try JSONDecoder().decode(StoredSession.self, from: data)
+        let restored = try #require(decoded.transcript)
+
+        #expect(restored.count == transcript.count)
+        #expect(restored.contains { entry in
+            guard case .toolCalls(let calls) = entry else { return false }
+            return calls.contains { $0.id == "call-1" && $0.toolName == "git" }
+        })
+        #expect(restored.contains { entry in
+            guard case .toolOutput(let output) = entry else { return false }
+            return output.id == "call-1" && output.toolName == "git"
+        })
+        #expect(restored.contains { if case .reasoning = $0 { true } else { false } })
+        #expect(restored.contains { if case .response = $0 { true } else { false } })
+    }
+
+    @Test("Legacy visible blocks recover user and assistant turns")
+    func legacyBlocksRecoverConversationTurns() {
+        let result = SessionRebuildHistory.fromVisibleBlocks([
+            ChatBlock(kind: .user, text: "Inspect the repository"),
+            ChatBlock(kind: .reasoning, text: "Internal reasoning"),
+            ChatBlock(kind: .tool, text: "git status"),
+            ChatBlock(kind: .assistant, text: "The repository is clean.")
+        ])
+
+        #expect(result.count == 2)
+        #expect(result.contains { if case .prompt = $0 { true } else { false } })
+        #expect(result.contains { if case .response = $0 { true } else { false } })
+        #expect(!result.contains { if case .reasoning = $0 { true } else { false } })
+        #expect(!result.contains { if case .toolCalls = $0 { true } else { false } })
+        #expect(!result.contains { if case .toolOutput = $0 { true } else { false } })
+    }
+
     @Test("A dynamic profile receives only its selected disk skills")
     func dynamicProfileFiltersSkills() throws {
         let root = FileManager.default.temporaryDirectory

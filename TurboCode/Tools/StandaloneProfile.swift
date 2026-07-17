@@ -13,6 +13,7 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let workspaceRoot: String
     let model: any LanguageModel
     let temperature: Double?
+    let samplingMode: GenerationOptions.SamplingMode?
     let reasoningLevel: ContextOptions.ReasoningLevel?
     let dropsCompletedToolCalls: Bool
     let executionPolicy: ExecutionPolicy
@@ -101,6 +102,7 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
         }
         .model(model)
         .temperature(temperature)
+        .samplingMode(samplingMode)
         .reasoningLevel(reasoningLevel)
         .onToolCall { call in
             if let action = onToolStart {

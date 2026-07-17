@@ -32,7 +32,7 @@ struct DelegateProfile: LanguageModelSession.DynamicProfile {
                 await action(call, output)
             }
         }
-        .droppingCompletedToolCalls()
         .rollingWindow(entries: 20)
+        .droppingCompletedToolCalls()
     }
 }
