@@ -173,6 +173,7 @@ public final class ChatStore {
     var diffSections: [FileDiffSection] = []
     var isLoadingDiffs = false
     var diffLoadError: String?
+    private var diffLoadID: UUID?
 
     // Git branch state
     var isGitRepository = false
@@ -185,20 +186,31 @@ public final class ChatStore {
 
     public func reloadDiffs() async {
         guard !workspaceRoot.isEmpty else {
+            diffLoadID = nil
             diffSections = []
             diffLoadError = nil
             isLoadingDiffs = false
             return
         }
 
+        let requestedWorkspace = workspaceRoot
+        let loadID = UUID()
+        diffLoadID = loadID
         isLoadingDiffs = true
         diffLoadError = nil
         diffSections = []
+        defer {
+            if diffLoadID == loadID {
+                isLoadingDiffs = false
+            }
+        }
 
-        let url = URL(fileURLWithPath: workspaceRoot)
+        let url = URL(fileURLWithPath: requestedWorkspace)
         let sections = await FileDiffSection.fromGit(at: url, service: gitService)
 
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled,
+              workspaceRoot == requestedWorkspace,
+              diffLoadID == loadID else { return }
 
         if let sections {
             diffSections = sections
@@ -207,7 +219,6 @@ public final class ChatStore {
             diffSections = []
             diffLoadError = "Not a git repository or git unavailable"
         }
-        isLoadingDiffs = false
     }
 
     public func refreshGitBranches() async {
@@ -837,7 +848,6 @@ public final class ChatStore {
         // The inspector is opt-in: changing workspace must not open it.
         rightPanelMode = nil
         diffSections = []
-        isLoadingDiffs = true
         Task { await reloadDiffs() }
         Task { await refreshGitBranches() }
     }
@@ -845,6 +855,10 @@ public final class ChatStore {
     /// Clear the workspace selection.
     public func clearWorkspace() {
         workspaceRoot = ""
+        diffLoadID = nil
+        diffSections = []
+        diffLoadError = nil
+        isLoadingDiffs = false
         isGitRepository = false
         currentBranch = ""
         availableBranches = []

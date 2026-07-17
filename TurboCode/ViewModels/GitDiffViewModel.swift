@@ -229,15 +229,46 @@ actor GitDiffService {
         process.currentDirectoryURL = cwd
         let outPipe = Pipe(); let errPipe = Pipe()
         process.standardOutput = outPipe; process.standardError = errPipe
-        do { try process.run(); process.waitUntilExit() }
+        do { try process.run() }
         catch { return ShellResult(exitCode: -1, stdout: "", stderr: error.localizedDescription) }
-        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+
+        // A child process can block once either pipe buffer fills. Drain both
+        // streams while Git is running instead of waiting for termination first.
+        let outData = PipeDataCollector()
+        let errData = PipeDataCollector()
+        let readers = DispatchGroup()
+
+        for (handle, collector) in [
+            (outPipe.fileHandleForReading, outData),
+            (errPipe.fileHandleForReading, errData)
+        ] {
+            readers.enter()
+            DispatchQueue.global(qos: .userInitiated).async {
+                collector.store(handle.readDataToEndOfFile())
+                readers.leave()
+            }
+        }
+
+        process.waitUntilExit()
+        readers.wait()
         return ShellResult(
             exitCode: Int(process.terminationStatus),
-            stdout: String(data: outData, encoding: .utf8) ?? "",
-            stderr: String(data: errData, encoding: .utf8) ?? ""
+            stdout: String(data: outData.value, encoding: .utf8) ?? "",
+            stderr: String(data: errData.value, encoding: .utf8) ?? ""
         )
+    }
+}
+
+private nonisolated final class PipeDataCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    var value: Data {
+        lock.withLock { data }
+    }
+
+    func store(_ data: Data) {
+        lock.withLock { self.data = data }
     }
 }
 

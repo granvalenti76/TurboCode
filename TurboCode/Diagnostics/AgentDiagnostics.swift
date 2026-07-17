@@ -13,6 +13,8 @@ nonisolated enum ToolRunOutcome: String, Codable, Sendable {
     case success
     case failed
     case approvalRequired
+    case cancelled
+    case interrupted
 }
 
 nonisolated enum AgentFailureCategory: String, Codable, Sendable {
@@ -27,6 +29,10 @@ nonisolated enum AgentFailureCategory: String, Codable, Sendable {
     case modelUnavailable
     case toolExecution
     case verificationFailed
+    case fileUnavailable
+    case invalidRange
+    case unsupportedContent
+    case interrupted
     case unknown
 }
 
@@ -186,8 +192,10 @@ actor AgentDiagnosticsRecorder {
         error: Error? = nil
     ) {
         guard var run = runs.removeValue(forKey: runID) else { return }
-        run.totalMilliseconds = milliseconds(since: run.startedAt)
+        let finishedAt = Date()
+        run.totalMilliseconds = Int(finishedAt.timeIntervalSince(run.startedAt) * 1_000)
         run.generatedCharacters = generatedCharacters
+        Self.finalizeOpenTools(in: &run, outcome: outcome, finishedAt: finishedAt)
         run.outcome = outcome == .success && run.tools.contains(where: { $0.outcome == .failed })
             ? .successWithToolFailures
             : outcome
@@ -198,6 +206,21 @@ actor AgentDiagnosticsRecorder {
             run.suspectedTool = Self.suspectedTool(in: detail)
         }
         append(run)
+    }
+
+    nonisolated static func finalizeOpenTools(
+        in run: inout AgentRunMetric,
+        outcome: AgentRunOutcome,
+        finishedAt: Date
+    ) {
+        for index in run.tools.indices where run.tools[index].outcome == nil {
+            run.tools[index].durationMilliseconds = max(
+                0,
+                Int(finishedAt.timeIntervalSince(run.tools[index].startedAt) * 1_000)
+            )
+            run.tools[index].outcome = outcome == .cancelled ? .cancelled : .interrupted
+            run.tools[index].failureCategory = .interrupted
+        }
     }
 
     func failureSummary() -> String {
@@ -320,8 +343,24 @@ actor AgentDiagnosticsRecorder {
         if lower.contains("invalid line")
             || lower.contains("overlapping operations")
             || lower.contains("unknown operation")
-            || lower.contains("edit transaction rejected") {
+            || lower.contains("edit transaction rejected")
+            || lower.contains("would not change")
+            || lower.contains("writes files only") {
             return .invalidEdit
+        }
+        if lower.contains("file not found or not readable")
+            || lower.contains("workspace directory does not exist") {
+            return .fileUnavailable
+        }
+        if lower.contains("beyond the end of the file")
+            || lower.contains("startline must")
+            || lower.contains("endline must")
+            || lower.contains("limit must be greater than 0") {
+            return .invalidRange
+        }
+        if lower.contains("as utf-8 text")
+            || lower.contains("not readable utf-8") {
+            return .unsupportedContent
         }
         if lower.contains("not a git repository")
             || lower.contains("requires a git workspace") {
@@ -333,7 +372,8 @@ actor AgentDiagnosticsRecorder {
         }
         if lower.contains("outside the workspace")
             || lower.contains("access denied")
-            || lower.contains("unsafe path") {
+            || lower.contains("unsafe path")
+            || lower.contains("filename must be one file name") {
             return .pathDenied
         }
         if lower.contains("timed out") || lower.contains("timeout") {
