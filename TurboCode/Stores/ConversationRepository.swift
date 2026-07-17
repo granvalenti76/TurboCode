@@ -1,10 +1,12 @@
 import Foundation
+import FoundationModels
 
 /// Domain snapshot used at the persistence boundary.
 struct ConversationSnapshot: Sendable {
     let conversation: Conversation
     let modelBackend: String
     let blocks: [ChatBlock]
+    let transcript: Transcript?
 }
 
 /// Persistence contract for conversations. Keeping this boundary protocol-based
@@ -46,6 +48,7 @@ private extension ConversationSnapshot {
         )
         modelBackend = stored.modelBackend
         blocks = stored.blocks.map(ChatBlock.init)
+        transcript = stored.transcript
     }
 
     var storedSession: StoredSession {
@@ -59,7 +62,8 @@ private extension ConversationSnapshot {
             createdAt: conversation.createdAt,
             updatedAt: conversation.updatedAt,
             modelBackend: modelBackend,
-            blocks: blocks.map(StoredBlock.init)
+            blocks: blocks.map(StoredBlock.init),
+            transcript: transcript
         )
     }
 }

@@ -36,6 +36,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     var name: String
     var summary: String
     var baseModelID: ProfileBaseModelID
+    var greedyMode: Bool
     var toolIDs: [String]
     var skillIDs: [String]
     let createdAt: Date
@@ -46,6 +47,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         name: String,
         summary: String = "",
         baseModelID: ProfileBaseModelID,
+        greedyMode: Bool = false,
         toolIDs: [String] = [],
         skillIDs: [String] = [],
         createdAt: Date = .now,
@@ -55,10 +57,29 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         self.name = name
         self.summary = summary
         self.baseModelID = baseModelID
+        self.greedyMode = greedyMode
         self.toolIDs = toolIDs.uniqued()
         self.skillIDs = skillIDs.uniqued()
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, summary, baseModelID, greedyMode, toolIDs, skillIDs
+        case createdAt, updatedAt
+    }
+
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(UUID.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        summary = try values.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        baseModelID = try values.decode(ProfileBaseModelID.self, forKey: .baseModelID)
+        greedyMode = try values.decodeIfPresent(Bool.self, forKey: .greedyMode) ?? false
+        toolIDs = try values.decodeIfPresent([String].self, forKey: .toolIDs) ?? []
+        skillIDs = try values.decodeIfPresent([String].self, forKey: .skillIDs) ?? []
+        createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
+        updatedAt = try values.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
     }
 
     var resolvedToolIDs: Set<ToolCapabilityID> {

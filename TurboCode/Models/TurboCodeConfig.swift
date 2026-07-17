@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 
 // MARK: - TurboCode Configuration
 
@@ -669,16 +670,26 @@ public struct StoredSession: Codable, Hashable, Sendable, Identifiable {
     public var updatedAt: Date
     public var modelBackend: String
     public var blocks: [StoredBlock]
+    /// The semantic model history. Optional so sessions written by older
+    /// TurboCode versions remain decodable.
+    public var transcript: Transcript?
 
     public init(id: String = UUID().uuidString, title: String,
                 projectName: String, workspacePath: String? = nil,
                 createdAt: Date = .now, updatedAt: Date = .now,
                 modelBackend: String = "Llama-server",
-                blocks: [StoredBlock] = []) {
+                blocks: [StoredBlock] = [], transcript: Transcript? = nil) {
         self.id = id; self.title = title; self.projectName = projectName
         self.workspacePath = workspacePath; self.createdAt = createdAt
         self.updatedAt = updatedAt; self.modelBackend = modelBackend
         self.blocks = blocks
+        self.transcript = transcript
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        // The stable session identity is sufficient for collection hashing;
+        // Transcript is Equatable and Codable but intentionally not Hashable.
+        hasher.combine(id)
     }
 }
 

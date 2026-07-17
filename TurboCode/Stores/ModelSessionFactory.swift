@@ -34,6 +34,7 @@ private struct ToollessProfile: LanguageModelSession.DynamicProfile {
     let instructions: String
     let model: any LanguageModel
     let temperature: Double?
+    let samplingMode: GenerationOptions.SamplingMode?
     let reasoningLevel: ContextOptions.ReasoningLevel?
 
     var body: some LanguageModelSession.DynamicProfile {
@@ -42,6 +43,7 @@ private struct ToollessProfile: LanguageModelSession.DynamicProfile {
         }
         .model(model)
         .temperature(temperature)
+        .samplingMode(samplingMode)
         .reasoningLevel(reasoningLevel)
     }
 }
@@ -88,6 +90,8 @@ enum ModelSessionFactory {
                 remoteModel: activeRemoteConfiguration
             )
         )
+        let samplingMode = profileSamplingMode(configuration.activeDynamicProfile)
+        let temperature = samplingMode == nil ? configuration.activeTemperature : nil
 
         if configuration.orchestratorMode == .orchestrator,
            activeCapabilities.toolAccess != .none {
@@ -105,7 +109,8 @@ enum ModelSessionFactory {
             return makeToollessSession(
                 instructions: instructions,
                 model: activeModel,
-                temperature: configuration.activeTemperature,
+                temperature: temperature,
+                samplingMode: samplingMode,
                 reasoningLevel: activeCapabilities.reasoningLevel,
                 history: history
             )
@@ -129,7 +134,8 @@ enum ModelSessionFactory {
                 diskSkills: configuration.availableSkills,
                 workspaceRoot: configuration.workspaceRoot,
                 model: activeModel,
-                temperature: configuration.activeTemperature,
+                temperature: temperature,
+                samplingMode: samplingMode,
                 reasoningLevel: activeCapabilities.reasoningLevel,
                 dropsCompletedToolCalls: configuration.dropsCompletedToolCalls,
                 executionPolicy: configuration.agentTuning.execution,
@@ -159,6 +165,15 @@ enum ModelSessionFactory {
             ),
             history: history
         )
+    }
+
+    static func profileSamplingMode(
+        _ profile: UserDynamicProfile?
+    ) -> GenerationOptions.SamplingMode? {
+        guard let profile, profile.greedyMode, profile.baseModelID != .deepseek else {
+            return nil
+        }
+        return .greedy
     }
 
     private static func makeOrchestratorSession(
@@ -248,6 +263,7 @@ enum ModelSessionFactory {
         instructions: String,
         model: any LanguageModel,
         temperature: Double?,
+        samplingMode: GenerationOptions.SamplingMode?,
         reasoningLevel: ContextOptions.ReasoningLevel?,
         history: [Transcript.Entry]
     ) -> LanguageModelSession {
@@ -256,6 +272,7 @@ enum ModelSessionFactory {
                 instructions: instructions,
                 model: model,
                 temperature: temperature,
+                samplingMode: samplingMode,
                 reasoningLevel: reasoningLevel
             ),
             history: history
