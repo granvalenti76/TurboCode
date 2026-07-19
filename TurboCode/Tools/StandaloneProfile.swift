@@ -42,21 +42,14 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                 supplementalTools
             } else {
                 if !workspaceRoot.isEmpty {
-                    if toolPlan.contains(.swiftWorkspaceMap) {
-                        Instructions {
-                            "For broad work in an existing Swift project, call swift_workspace_map before reading files. Use its declaration line numbers to keep read_file calls focused."
-                        }
-                    }
+                    // Tool policy lives in ModelSessionFactory's single
+                    // instruction block. Keeping it out of this builder
+                    // prevents Foundation Models from emitting a second
+                    // system-prompt fragment for the same capability.
                     if toolPlan.contains(.readFile) {
-                        Instructions {
-                            "Use read_file with small line ranges and its Revision for focused context."
-                        }
                         ReadFileTool(workspaceRoot: workspaceRoot)
                     }
                     if toolPlan.contains(.git) {
-                        Instructions {
-                            "Use git for every Git operation, including init when the workspace is not yet a repository; Git writes are not blocked by the bash sandbox."
-                        }
                         GitTool(
                             workspaceRoot: workspaceRoot,
                             policy: gitPolicy,
@@ -64,21 +57,10 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                         )
                     }
                     if toolPlan.contains(.bash) {
-                        Instructions {
-                            "Use bash only for Swift Package commands, non-Xcode builds and tests, and precise read-only inspection not covered by a structured tool."
-                        }
                         BashTool(workspaceRoot: workspaceRoot, executionPolicy: executionPolicy)
                     }
                     if toolPlan.contains(.swiftPackageInit) {
-                        Instructions {
-                            "Use swift_package_init instead of bash to create a new Swift Package Manager scaffold. Then use edit_file for implementation changes and bash to build or test it."
-                        }
                         SwiftPackageInitTool(workspaceRoot: workspaceRoot)
-                    }
-                    if toolPlan.contains(.xcodeProject) {
-                        Instructions {
-                            "Use xcode_project instead of bash to inspect, build, or test an Xcode project. Start with inspect when the container or scheme is unknown, and act on the first reported source error before rebuilding."
-                        }
                     }
                     if StandaloneSkills.isEnabled(for: toolPlan) {
                         StandaloneSkills(
@@ -88,9 +70,6 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                         )
                     }
                     if toolPlan.contains(.editFile) {
-                        Instructions {
-                            "Use edit_file for every text-file creation or modification, one contiguous change per call. TurboCode generates and validates changes internally. Provide line operations against a fresh revision and never write unified diff syntax yourself. When writing long prose, include real newline characters and separate paragraphs with a blank line."
-                        }
                         EditFileTool(workspaceRoot: workspaceRoot)
                     }
                 }
