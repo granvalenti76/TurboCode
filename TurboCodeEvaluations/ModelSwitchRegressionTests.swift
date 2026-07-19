@@ -108,6 +108,22 @@ struct ModelSwitchRegressionTests {
         #expect(profile.resolvedToolIDs == [.git, .loadSkill])
     }
 
+    @Test("Runtime skills have a stable cache-friendly order")
+    func runtimeSkillsAreCanonicalized() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCode-SkillOrder-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let zebra = try makeSkill(name: "zebra", root: root)
+        let alpha = try makeSkill(name: "alpha", root: root)
+
+        let resolved = DynamicProfileRuntimeSelection.skills(
+            from: [zebra, alpha],
+            profile: nil
+        )
+
+        #expect(resolved.map(\.name) == ["alpha", "zebra"])
+    }
+
     private func fixtureTranscript() -> [Transcript.Entry] {
         let text: (String) -> Transcript.Segment = {
             .text(Transcript.TextSegment(content: $0))
