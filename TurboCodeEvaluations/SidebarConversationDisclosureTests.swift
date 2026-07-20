@@ -32,9 +32,44 @@ struct SidebarConversationDisclosureTests {
         #expect(limit == 10)
     }
 
+    @Test("Leaving Tools opens the restored conversation in one final state")
+    func utilityToConversationNavigationRestoresBeforeShowingChat() async {
+        let conversation = Conversation(id: "restored", title: "Restored")
+        let restoredBlock = ChatBlock(kind: .assistant, text: "Final timeline")
+        let repository = SidebarConversationRepository(
+            snapshot: ConversationSnapshot(
+                conversation: conversation,
+                modelBackend: "llama",
+                blocks: [restoredBlock],
+                transcript: nil
+            )
+        )
+        let store = ChatStore(conversationRepository: repository)
+        store.threads = [conversation]
+        store.blocks = [ChatBlock(kind: .assistant, text: "Stale timeline")]
+        store.route = .tools
+
+        await store.openThread(conversation.id)
+
+        #expect(store.route == .chat)
+        #expect(store.activeThreadId == conversation.id)
+        #expect(store.blocks.map(\.text) == ["Final timeline"])
+    }
+
     private func makeThreads(count: Int) -> [Conversation] {
         (0..<count).map { index in
             Conversation(id: "thread-\(index)", title: "Thread \(index)")
         }
     }
+}
+
+private struct SidebarConversationRepository: ConversationRepository {
+    let snapshot: ConversationSnapshot
+
+    func save(_ snapshot: ConversationSnapshot) throws {}
+    func load(id: String) throws -> ConversationSnapshot? {
+        snapshot.conversation.id == id ? snapshot : nil
+    }
+    func list() throws -> [ConversationSnapshot] { [snapshot] }
+    func delete(id: String) throws {}
 }

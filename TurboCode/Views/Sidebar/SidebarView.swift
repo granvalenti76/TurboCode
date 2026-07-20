@@ -421,14 +421,10 @@ struct SidebarView: View {
             in: chatStore.sortedThreads,
             current: visibleChatLimit
         )
-        chatStore.setRoute(.chat)
         Task {
-            // If blocks are empty, it's a restored session — load full data.
-            if chatStore.blocks.isEmpty || chatStore.activeThreadId != thread.id {
-                await chatStore.restoreSession(id: thread.id)
-            } else {
-                await chatStore.selectThread(thread.id)
-            }
+            // Chat becomes visible only after its final state is ready, avoiding
+            // a costly intermediate render of the previously active timeline.
+            await chatStore.openThread(thread.id)
         }
     }
 

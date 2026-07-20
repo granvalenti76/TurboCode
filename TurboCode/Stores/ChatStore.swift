@@ -591,6 +591,18 @@ public final class ChatStore {
         activeThreadId = id
     }
 
+    /// Opens a conversation as one navigation transition. Restoring first keeps
+    /// SwiftUI from building the previous, potentially large timeline merely to
+    /// replace it one run-loop later when leaving a utility destination.
+    public func openThread(_ id: String) async {
+        if blocks.isEmpty || activeThreadId != id {
+            await restoreSession(id: id)
+        } else {
+            await selectThread(id)
+        }
+        setRoute(.chat)
+    }
+
     public func createThread(title: String = "New Chat", mode: ConversationMode = .agent) async {
         dismissWorkspaceListingInspector()
         let thread = Conversation(
