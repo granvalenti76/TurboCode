@@ -623,11 +623,13 @@ public final class ChatStore {
         }
     }
 
-    /// Generates a concise title from the first user prompt using the
-    /// Apple on-device model, then updates the active thread's title.
-    public func generateTitle(from prompt: String) async {
-        guard let idx = threads.firstIndex(where: { $0.id == activeThreadId }),
-              threads[idx].title == "New Chat" else { return }
+    /// Generates a concise title from the first user prompt using the Apple
+    /// on-device model, then applies it to the thread that initiated the request.
+    public func generateTitle(from prompt: String, for threadID: String? = nil) async {
+        // Capture identity before inference: the active conversation can change
+        // while the on-device model streams a title in the background.
+        guard let threadID = threadID ?? activeThreadId,
+              threads.contains(where: { $0.id == threadID && $0.title == "New Chat" }) else { return }
 
         let titlePrompt = """
         Generate a very short title (max 6 words) for a conversation that starts with this message.
@@ -649,12 +651,21 @@ public final class ChatStore {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .replacingOccurrences(of: "\"", with: "")
             if !clean.isEmpty {
-                threads[idx].title = String(clean.prefix(60))
-                threads[idx].updatedAt = .now
+                applyGeneratedTitle(String(clean.prefix(60)), to: threadID)
             }
         } catch {
             // Silently fall back to "New Chat"
         }
+    }
+
+    /// Commits an asynchronously generated title by stable identity. Re-finding
+    /// the value prevents array insertions or sorting changes from targeting a
+    /// different conversation, and preserves a title the user renamed meanwhile.
+    func applyGeneratedTitle(_ title: String, to threadID: String) {
+        guard let index = threads.firstIndex(where: { $0.id == threadID }),
+              threads[index].title == "New Chat" else { return }
+        threads[index].title = title
+        threads[index].updatedAt = .now
     }
 
     // MARK: - Session Persistence
@@ -994,10 +1005,12 @@ public final class ChatStore {
 
         isFirstMessage = false
         // Generate the title concurrently with the response, but retain the
-        // task so persistence can wait for the final title.
+        // task so persistence can wait for the final title. Keep the initiating
+        // thread ID stable even if the user navigates before generation finishes.
+        let titleThreadID = activeThreadId
         let titleTask: Task<Void, Never>? = visibleInTimeline ? Task { [weak self] in
             guard let self else { return }
-            await self.generateTitle(from: displayText)
+            await self.generateTitle(from: displayText, for: titleThreadID)
         } : nil
 
         if visibleInTimeline {
