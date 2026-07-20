@@ -63,6 +63,9 @@ public final class ChatStore {
 
     // Navigation
     public var route: AppRoute = .chat
+    /// Custom Profiles is a document-modal presentation, not a replacement for
+    /// the workbench destination underneath it.
+    public var isCustomProfilesPresented: Bool = false
     public var settingsSection: SettingsSection = .general
 
     // Sidebar
@@ -74,6 +77,11 @@ public final class ChatStore {
     public var rightPanelVisible: Bool { rightPanelMode != nil }
     public var rightSidebarWidth: CGFloat = 360
     public var inspectedGitCommit: GitCommitBlock?
+    public var inspectedWorkspaceListingID: String?
+    public var inspectedWorkspaceListing: WorkspaceListingBlock? {
+        guard let inspectedWorkspaceListingID else { return nil }
+        return blocks.first(where: { $0.id == inspectedWorkspaceListingID })?.workspaceListing
+    }
 
     // Terminal
     public var terminalOpen: Bool = false
@@ -276,6 +284,9 @@ public final class ChatStore {
     private var activeProductGuidePresentation: ProductGuideBlock?
     private var activeCompletedRootWrite: String?
     private var activeAssistantPlaceholderID: String?
+    /// Listings produced during the active turn are retained only long enough
+    /// to remove a model-generated echo from the final assistant text.
+    private var activeWorkspaceListingPresentations: [WorkspaceListingBlock] = []
     private var editTransactionGroups: [String: String] = [:]
 
     // MARK: - Onboarding
@@ -579,10 +590,24 @@ public final class ChatStore {
     // MARK: - Actions
 
     public func selectThread(_ id: String) async {
+        if id != activeThreadId { dismissWorkspaceListingInspector() }
         activeThreadId = id
     }
 
+    /// Opens a conversation as one navigation transition. Restoring first keeps
+    /// SwiftUI from building the previous, potentially large timeline merely to
+    /// replace it one run-loop later when leaving a utility destination.
+    public func openThread(_ id: String) async {
+        if blocks.isEmpty || activeThreadId != id {
+            await restoreSession(id: id)
+        } else {
+            await selectThread(id)
+        }
+        setRoute(.chat)
+    }
+
     public func createThread(title: String = "New Chat", mode: ConversationMode = .agent) async {
+        dismissWorkspaceListingInspector()
         let thread = Conversation(
             title: title,
             workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
@@ -623,11 +648,13 @@ public final class ChatStore {
         }
     }
 
-    /// Generates a concise title from the first user prompt using the
-    /// Apple on-device model, then updates the active thread's title.
-    public func generateTitle(from prompt: String) async {
-        guard let idx = threads.firstIndex(where: { $0.id == activeThreadId }),
-              threads[idx].title == "New Chat" else { return }
+    /// Generates a concise title from the first user prompt using the Apple
+    /// on-device model, then applies it to the thread that initiated the request.
+    public func generateTitle(from prompt: String, for threadID: String? = nil) async {
+        // Capture identity before inference: the active conversation can change
+        // while the on-device model streams a title in the background.
+        guard let threadID = threadID ?? activeThreadId,
+              threads.contains(where: { $0.id == threadID && $0.title == "New Chat" }) else { return }
 
         let titlePrompt = """
         Generate a very short title (max 6 words) for a conversation that starts with this message.
@@ -649,12 +676,21 @@ public final class ChatStore {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .replacingOccurrences(of: "\"", with: "")
             if !clean.isEmpty {
-                threads[idx].title = String(clean.prefix(60))
-                threads[idx].updatedAt = .now
+                applyGeneratedTitle(String(clean.prefix(60)), to: threadID)
             }
         } catch {
             // Silently fall back to "New Chat"
         }
+    }
+
+    /// Commits an asynchronously generated title by stable identity. Re-finding
+    /// the value prevents array insertions or sorting changes from targeting a
+    /// different conversation, and preserves a title the user renamed meanwhile.
+    func applyGeneratedTitle(_ title: String, to threadID: String) {
+        guard let index = threads.firstIndex(where: { $0.id == threadID }),
+              threads[index].title == "New Chat" else { return }
+        threads[index].title = title
+        threads[index].updatedAt = .now
     }
 
     // MARK: - Session Persistence
@@ -689,6 +725,7 @@ public final class ChatStore {
     public func restoreSession(id: String) async {
         guard let snapshot = try? conversationRepository.load(id: id),
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
+        dismissWorkspaceListingInspector()
         activeThreadId = id
         blocks = snapshot.blocks
         liveReasoning = ""; liveAssistant = ""
@@ -754,8 +791,45 @@ public final class ChatStore {
     }
 
     public func deleteThread(id: String) async {
+        let deletesActiveThread = activeThreadId == id
+        if deletesActiveThread, let responseTask {
+            // A cancelled response still performs its final persistence pass.
+            // Wait for that pass before deleting, otherwise it can recreate the
+            // session file immediately after the user removes the conversation.
+            responseTask.cancel()
+            await responseTask.value
+        }
+
+        do {
+            try conversationRepository.delete(id: id)
+        } catch {
+            // Keep the visible row when durable deletion fails; pretending the
+            // operation succeeded would make it reappear on the next launch.
+            self.error = "Could not delete the conversation: \(error.localizedDescription)"
+            return
+        }
+        self.error = nil
+
         threads.removeAll { $0.id == id }
-        if activeThreadId == id { activeThreadId = threads.first?.id }
+        guard deletesActiveThread else { return }
+
+        activeThreadId = nil
+        blocks = []
+        liveReasoning = ""
+        liveAssistant = ""
+        isFirstMessage = true
+
+        if let nextThreadID = threads.first?.id {
+            await restoreSession(id: nextThreadID)
+            if activeThreadId == nil {
+                // A never-persisted draft has no snapshot to restore but remains
+                // a valid next selection with a fresh model session.
+                activeThreadId = nextThreadID
+                rebuildSession(keepingHistory: false)
+            }
+        } else {
+            rebuildSession(keepingHistory: false)
+        }
     }
 
     /// Removes a workspace from TurboCode and deletes only its persisted chats.
@@ -976,13 +1050,23 @@ public final class ChatStore {
         promptText: String,
         visibleInTimeline: Bool
     ) async {
+        // Some provider profiles intentionally discard completed tool calls.
+        // Reattach only a relevant recent listing so follow-ups such as
+        // “read TODO.md” remain grounded while the visible user text stays clean.
+        let modelPrompt = WorkspaceListingFollowUpContext.enriching(
+            promptText,
+            blocks: blocks
+        )
+        // Echo filtering is scoped to one response so historical listing names
+        // can never affect unrelated assistant messages.
+        activeWorkspaceListingPresentations = []
 
         let diagnosticsRunID = await AgentDiagnosticsRecorder.shared.startRun(
             backend: activeBackend,
             mode: orchestratorMode,
             profileVersion: AgentProfileVersion.value(for: activeBackend, mode: orchestratorMode),
             workspaceKind: diagnosticsWorkspaceKind,
-            promptCharacters: promptText.count
+            promptCharacters: modelPrompt.count
         )
         activeDiagnosticsRunID = diagnosticsRunID
         let editGroupID = UUID().uuidString
@@ -994,10 +1078,12 @@ public final class ChatStore {
 
         isFirstMessage = false
         // Generate the title concurrently with the response, but retain the
-        // task so persistence can wait for the final title.
+        // task so persistence can wait for the final title. Keep the initiating
+        // thread ID stable even if the user navigates before generation finishes.
+        let titleThreadID = activeThreadId
         let titleTask: Task<Void, Never>? = visibleInTimeline ? Task { [weak self] in
             guard let self else { return }
-            await self.generateTitle(from: displayText)
+            await self.generateTitle(from: displayText, for: titleThreadID)
         } : nil
 
         if visibleInTimeline {
@@ -1015,7 +1101,7 @@ public final class ChatStore {
         activeCompletedRootWrite = nil
 
         do {
-            let stream = session.streamResponse(to: promptText)
+            let stream = session.streamResponse(to: modelPrompt)
             // Delegation detection is handled by TurboCodeDynamicProfile's
             // onToolCall / onToolOutput lifecycle callbacks — no scanning needed.
 
@@ -1077,9 +1163,13 @@ public final class ChatStore {
             // Reset delegation state once streaming is done.
             isDelegating = false
             toolActivities.removeAll()
-            let finalText = accumulatedText.isEmpty
+            let rawFinalText = accumulatedText.isEmpty
                 ? liveReasoning
                 : userVisibleAssistantText(accumulatedText)
+            let finalText = NativeToolEchoFilter.filtering(
+                rawFinalText,
+                workspaceListings: activeWorkspaceListingPresentations
+            )
             let productGuidePresentation = activeProductGuidePresentation
             if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
                 if finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1177,6 +1267,7 @@ public final class ChatStore {
             activeAssistantPlaceholderID = nil
         }
         editTransactionGroups = editTransactionGroups.filter { $0.value != editGroupID }
+        activeWorkspaceListingPresentations = []
         // Persist after the title task finishes so the JSON never races with
         // the Apple on-device title generator and stores a stale "New Chat".
         if let titleTask {
@@ -1338,7 +1429,11 @@ public final class ChatStore {
                 activeCompletedRootWrite = String(text.dropFirst("WRITE_COMPLETE: ".count))
             }
         }
-        if let presentation = ToolPresentationRouter.presentation(for: call, output: output) {
+        if let presentation = ToolPresentationRouter.presentation(
+            for: call,
+            output: output,
+            workspaceName: workspaceRoot.isEmpty ? nil : workspaceLabel
+        ) {
             presentToolPresentation(presentation)
         }
         toolActivities.removeAll { $0.id == call.id }
@@ -1348,6 +1443,7 @@ public final class ChatStore {
         let block: ChatBlock
         switch presentation {
         case .workspaceListing(let listing):
+            activeWorkspaceListingPresentations.append(listing)
             block = ChatBlock(
                 id: "workspace-listing-\(listing.toolCallID)",
                 kind: .workspaceListing,
@@ -1368,6 +1464,7 @@ public final class ChatStore {
         id: String,
         patch: String,
         files: [DiffPatchFileChange],
+        reviewFiles: [DiffReviewFileSnapshot] = [],
         status: DiffPatchStatus
     ) {
         let blockID = activeEditGroupID ?? id
@@ -1380,6 +1477,10 @@ public final class ChatStore {
             payload.patches = patches
             payload.patch = patches.joined(separator: "\n")
             payload.files = mergedFileChanges(payload.files + files)
+            payload.reviewFiles = mergedReviewFiles(
+                existing: payload.reviewFiles ?? [],
+                incoming: reviewFiles
+            )
             payload.status = status
             payload.errorMessage = nil
             blocks[index].diffPatch = payload
@@ -1390,6 +1491,7 @@ public final class ChatStore {
             patch: patch,
             patches: [patch],
             files: files,
+            reviewFiles: reviewFiles.isEmpty ? nil : reviewFiles,
             status: status,
             errorMessage: nil
         )
@@ -1437,6 +1539,22 @@ public final class ChatStore {
         guard let receipt = blocks.first(where: { $0.id == id })?.gitCommit else { return }
         inspectedGitCommit = receipt
         rightPanelMode = .commit
+    }
+
+    /// Shows the immutable snapshot associated with one timeline receipt. The
+    /// inspector never rereads the filesystem, preserving conversational history.
+    public func reviewWorkspaceListing(_ id: String) {
+        guard blocks.contains(where: { $0.id == id && $0.workspaceListing != nil }) else { return }
+        inspectedWorkspaceListingID = id
+        rightPanelMode = .workspaceListing
+    }
+
+    /// Dismisses only the transient workspace snapshot. Other inspectors are
+    /// persistent workbench modes and must not close when the canvas is clicked.
+    func dismissWorkspaceListingInspector() {
+        guard rightPanelMode == .workspaceListing else { return }
+        inspectedWorkspaceListingID = nil
+        rightPanelMode = nil
     }
 
     public func undoGitCommit(_ id: String) {
@@ -1529,6 +1647,27 @@ public final class ChatStore {
         }
     }
 
+    /// Consecutive edit_file calls in one assistant turn share a receipt. The
+    /// review must retain the first before-state and the final after-state.
+    private func mergedReviewFiles(
+        existing: [DiffReviewFileSnapshot],
+        incoming: [DiffReviewFileSnapshot]
+    ) -> [DiffReviewFileSnapshot] {
+        var merged = existing
+        for snapshot in incoming {
+            if let index = merged.firstIndex(where: { $0.path == snapshot.path }) {
+                merged[index] = DiffReviewFileSnapshot(
+                    path: snapshot.path,
+                    originalText: merged[index].originalText,
+                    modifiedText: snapshot.modifiedText
+                )
+            } else {
+                merged.append(snapshot)
+            }
+        }
+        return merged
+    }
+
     private func toolSummary(for call: Transcript.ToolCall) -> String {
         let path = (try? call.arguments.value(String.self, forProperty: "filePath"))
             ?? (try? call.arguments.value(String.self, forProperty: "path"))
@@ -1605,6 +1744,14 @@ public final class ChatStore {
     }
 
     public func setRoute(_ route: AppRoute) {
+        if route == .skills {
+            // Preserve the current destination behind the native sheet. Using
+            // `.skills` as the visible route used to construct a stale Chat
+            // timeline while presenting the modal, which could beachball.
+            isCustomProfilesPresented = true
+            return
+        }
+        isCustomProfilesPresented = false
         self.route = route
         if route != .chat { rightPanelMode = nil }
     }

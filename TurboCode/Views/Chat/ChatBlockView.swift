@@ -45,7 +45,7 @@ struct ChatBlockView: View {
             ProductGuideWidget(block: block)
         case .workspaceListing:
             if let listing = block.workspaceListing {
-                WorkspaceListingWidget(listing: listing)
+                WorkspaceListingWidget(blockID: block.id, listing: listing)
             }
         }
     }
@@ -66,7 +66,12 @@ struct ChatBlockView: View {
                         .textSelection(.enabled)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                        // A softened rectangle distinguishes prompts from pills
+                        // while retaining the approachable native card treatment.
+                        .background(
+                            .regularMaterial,
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        )
                         .contextMenu {
                             Button("Edit") {
                                 editText = block.text

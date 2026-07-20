@@ -99,6 +99,7 @@ struct ApplyEditsTool: Tool {
                     id: transactionID,
                     patch: prepared.patch,
                     files: prepared.files,
+                    reviewFiles: prepared.reviewFiles,
                     status: .running
                 )
             }
@@ -184,6 +185,7 @@ struct EditFileTool: Tool {
 struct PreparedChangeTransaction: Sendable {
     let patch: String
     let files: [DiffPatchFileChange]
+    let reviewFiles: [DiffReviewFileSnapshot]
 
     nonisolated var additions: Int { files.reduce(0) { $0 + $1.additions } }
     nonisolated var deletions: Int { files.reduce(0) { $0 + $1.deletions } }
@@ -247,7 +249,18 @@ actor ApplyEditsService {
 
         let patch = try makePatch(changes: changes)
         let files = try DiffPatchParser.parse(patch, workspaceRoot: workspaceRoot)
-        return PreparedChangeTransaction(patch: patch, files: files)
+        let reviewFiles = changes.map { change in
+            DiffReviewFileSnapshot(
+                path: change.path,
+                originalText: change.old,
+                modifiedText: change.new
+            )
+        }
+        return PreparedChangeTransaction(
+            patch: patch,
+            files: files,
+            reviewFiles: reviewFiles
+        )
     }
 
     private func validateContentLayout(

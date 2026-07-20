@@ -18,6 +18,8 @@ public enum RightPanelMode: String, Sendable, Hashable {
     case todo
     case changes
     case commit
+    /// A persisted directory snapshot selected from the conversation timeline.
+    case workspaceListing
     case browser
     case file
     case plan

@@ -5,7 +5,6 @@ import SwiftUI
 struct WorkbenchSplitView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var routeBeforeCustomProfiles: AppRoute = .chat
 
     private let sidebarWidth: Double = 268
     private let mainMinWidth: Double = 520
@@ -28,9 +27,27 @@ struct WorkbenchSplitView: View {
                 MainStageView()
                     .frame(minWidth: mainMinWidth)
 
+                if chatStore.rightPanelMode == .workspaceListing {
+                    // The file snapshot behaves like a transient inspector: a
+                    // click anywhere outside it dismisses the panel. This layer
+                    // appears only after Show completes, so it cannot swallow
+                    // the receipt action that opens the inspector.
+                    Color.clear
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            chatStore.dismissWorkspaceListingInspector()
+                        }
+                        .accessibilityHidden(true)
+                        .zIndex(0.5)
+                }
+
                 if chatStore.rightPanelVisible {
                     InspectorPanelView()
-                        .frame(width: 420)
+                        // Metadata columns need slightly more room than the diff
+                        // inspector; the panel remains tertiary and overlays the
+                        // canvas instead of forcing the sidebar to rebalance.
+                        .frame(width: chatStore.rightPanelMode == .workspaceListing ? 500 : 420)
                         .background(.background)
                         .overlay(alignment: .leading) {
                             Divider()
@@ -61,10 +78,6 @@ struct WorkbenchSplitView: View {
         .sheet(isPresented: customProfilesPresented) {
             CustomProfilesSheet()
         }
-        .onChange(of: chatStore.route) { previousRoute, route in
-            guard route == .skills, previousRoute != .skills else { return }
-            routeBeforeCustomProfiles = previousRoute
-        }
         .onChange(of: chatStore.leftSidebarCollapsed, initial: true) { _, collapsed in
             let target: NavigationSplitViewVisibility = collapsed ? .detailOnly : .all
             guard columnVisibility != target else { return }
@@ -91,11 +104,8 @@ struct WorkbenchSplitView: View {
 
     private var customProfilesPresented: Binding<Bool> {
         Binding(
-            get: { chatStore.route == .skills },
-            set: { presented in
-                guard !presented, chatStore.route == .skills else { return }
-                chatStore.setRoute(routeBeforeCustomProfiles)
-            }
+            get: { chatStore.isCustomProfilesPresented },
+            set: { chatStore.isCustomProfilesPresented = $0 }
         )
     }
 }

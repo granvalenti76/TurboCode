@@ -7,6 +7,10 @@ nonisolated public struct WorkspaceListingBlock: Codable, Hashable, Sendable {
     public let totalCount: Int
     public let isTruncated: Bool
     public let errorMessage: String?
+    /// Presentation metadata is optional so sessions saved before the inspector
+    /// existed continue to decode without a migration.
+    public let capturedAt: Date?
+    public let workspaceName: String?
 
     public init(
         toolCallID: String,
@@ -14,7 +18,9 @@ nonisolated public struct WorkspaceListingBlock: Codable, Hashable, Sendable {
         entries: [WorkspaceListingEntry],
         totalCount: Int,
         isTruncated: Bool,
-        errorMessage: String?
+        errorMessage: String?,
+        capturedAt: Date? = nil,
+        workspaceName: String? = nil
     ) {
         self.toolCallID = toolCallID
         self.path = path
@@ -22,6 +28,8 @@ nonisolated public struct WorkspaceListingBlock: Codable, Hashable, Sendable {
         self.totalCount = totalCount
         self.isTruncated = isTruncated
         self.errorMessage = errorMessage
+        self.capturedAt = capturedAt
+        self.workspaceName = workspaceName
     }
 }
 

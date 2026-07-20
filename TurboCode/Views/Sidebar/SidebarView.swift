@@ -5,14 +5,15 @@ import SwiftUI
 struct SidebarView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var isSessionSearchPresented = false
-    @State private var expandedWorkspaces: Set<String> = []
     @State private var workspacePendingRemoval: String?
+    @State private var visibleChatLimit = SidebarConversationDisclosure.batchSize
 
     var body: some View {
         VStack(spacing: 0) {
             headerView
-            navItemsView
             List {
+                primaryActionsSection
+                utilitiesSection
                 projectsSection
                 chatsSection
             }
@@ -22,14 +23,6 @@ struct SidebarView: View {
         }
         .background(Color.clear)
         .frame(minWidth: 240)
-        .onAppear {
-            guard !chatStore.workspaceRoot.isEmpty else { return }
-            expandedWorkspaces.insert(chatStore.workspaceRoot)
-        }
-        .onChange(of: chatStore.workspaceRoot) { _, workspace in
-            guard !workspace.isEmpty else { return }
-            expandedWorkspaces.insert(workspace)
-        }
         .alert("Remove Workspace?", isPresented: workspaceRemovalPresented) {
             Button("Cancel", role: .cancel) {
                 workspacePendingRemoval = nil
@@ -37,11 +30,15 @@ struct SidebarView: View {
             Button("Remove", role: .destructive) {
                 guard let path = workspacePendingRemoval else { return }
                 workspacePendingRemoval = nil
-                expandedWorkspaces.remove(path)
                 Task { await chatStore.removeWorkspace(path) }
             }
         } message: {
             Text(workspaceRemovalMessage)
+        }
+        .onChange(of: chatStore.selectedProject) { _, _ in
+            // Each collection starts compact. Search can still reveal a result
+            // explicitly through openThread(_:), without expanding every list.
+            visibleChatLimit = SidebarConversationDisclosure.batchSize
         }
     }
 
@@ -76,10 +73,12 @@ struct SidebarView: View {
         .padding(.bottom, 10)
     }
 
-    // MARK: - Navigation Items
+    // MARK: - Primary Actions
 
-    private var navItemsView: some View {
-        VStack(spacing: 2) {
+    /// Keep global actions inside the source list so focus, keyboard navigation,
+    /// selection spacing, and scrolling follow the same macOS behavior as projects.
+    private var primaryActionsSection: some View {
+        Section {
             Button {
                 chatStore.setRoute(.chat)
                 Task { await chatStore.createThread() }
@@ -87,22 +86,32 @@ struct SidebarView: View {
                 navigationLabel(icon: "square.and.pencil", title: "New Chat")
             }
             .buttonStyle(.plain)
+            .listRowInsets(sidebarRowInsets)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
 
-            ForEach(NavItem.allCases, id: \.self) { item in
-                Button {
-                    chatStore.setRoute(item.route)
-                } label: {
-                    navigationLabel(
-                        icon: item.icon,
-                        title: item.label,
-                        isSelected: chatStore.route == item.route
-                    )
-                }
-                .buttonStyle(.plain)
+            Button {
+                chatStore.setRoute(.chat)
+                // "All Chats" changes only the visible collection; the active
+                // workspace remains available to tools and to the next new chat.
+                chatStore.selectedProject = nil
+                visibleChatLimit = SidebarConversationDisclosure.batchSize
+            } label: {
+                navigationLabel(
+                    icon: "tray.full",
+                    title: "All Chats",
+                    // A conversation is the primary selection when one is open;
+                    // the section heading still communicates the active collection.
+                    isSelected: chatStore.route == .chat
+                        && chatStore.selectedProject == nil
+                        && chatStore.activeThreadId == nil
+                )
             }
+            .buttonStyle(.plain)
+            .listRowInsets(sidebarRowInsets)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
         }
-        .padding(.horizontal, 10)
-        .padding(.bottom, 8)
     }
 
     private func navigationLabel(
@@ -125,7 +134,33 @@ struct SidebarView: View {
         .sidebarSelectionBackground(isSelected)
     }
 
-    private enum NavItem: CaseIterable {
+    // MARK: - Utilities
+
+    /// Secondary destinations stay in the same native source list but remain
+    /// visually separate from project and conversation navigation.
+    private var utilitiesSection: some View {
+        Section {
+            ForEach(UtilityItem.allCases, id: \.self) { item in
+                Button {
+                    chatStore.setRoute(item.route)
+                } label: {
+                    navigationLabel(
+                        icon: item.icon,
+                        title: item.label,
+                        isSelected: chatStore.route == item.route
+                    )
+                }
+                .buttonStyle(.plain)
+                .listRowInsets(sidebarRowInsets)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+        } header: {
+            sectionHeader("Utilities")
+        }
+    }
+
+    private enum UtilityItem: CaseIterable {
         case tools
         case skills
 
@@ -137,7 +172,9 @@ struct SidebarView: View {
         }
         var icon: String {
             switch self {
-            case .tools: return "hammer"
+            // Tools is a capability catalog and matrix, so a neutral grid is
+            // more faithful than a physical construction or settings metaphor.
+            case .tools: return "square.grid.2x2"
             case .skills: return "doc.text"
             }
         }
@@ -168,63 +205,10 @@ struct SidebarView: View {
 
     private var projectsSection: some View {
         Section {
-            // All threads
-            Button {
-                chatStore.setRoute(.chat)
-                chatStore.selectedProject = nil
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    expandedWorkspaces.removeAll()
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "tray.full")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 20)
-                    Text("All Chats")
-                        .font(AppTypography.sidebarLabel)
-                    Spacer()
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 7)
-                .contentShape(Rectangle())
-                .sidebarSelectionBackground(
-                    chatStore.selectedProject == nil && chatStore.activeThreadId == nil
-                )
-            }
-            .buttonStyle(.plain)
-            .listRowInsets(sidebarRowInsets)
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-
-            // Recent workspace projects with expandable sessions
+            // Workspaces are collection filters, not disclosure containers. Keeping
+            // conversations in one section prevents the same thread appearing twice.
             ForEach(chatStore.recentWorkspaces, id: \.self) { path in
-                let isExpanded = expandedWorkspaces.contains(path)
-
-                workspaceRow(path: path, isExpanded: isExpanded)
-
-                // Keep each workspace's conversations visually attached to its
-                // folder and let the user expand more than one project.
-                if isExpanded {
-                    let workspaceThreads = threads(forWorkspace: path)
-                    if workspaceThreads.isEmpty {
-                        Text("No chats in this project")
-                            .font(AppTypography.sidebarMetadata)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 8)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 52, bottom: 0, trailing: 10))
-                            .listRowBackground(Color.clear)
-                            .listRowSeparator(.hidden)
-                    } else {
-                        ForEach(workspaceThreads.prefix(10)) { thread in
-                            threadRow(for: thread)
-                                .listRowInsets(EdgeInsets(top: 0, leading: 38, bottom: 0, trailing: 10))
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                        }
-                    }
-                }
+                workspaceRow(path: path)
             }
 
             // Add workspace
@@ -254,42 +238,39 @@ struct SidebarView: View {
         }
     }
 
-    private func workspaceRow(path: String, isExpanded: Bool) -> some View {
+    private func workspaceRow(path: String) -> some View {
         let name = URL(fileURLWithPath: path).lastPathComponent
-        let isSelected = chatStore.workspaceRoot == path && chatStore.selectedProject != nil
+        let isActiveWorkspace = chatStore.workspaceRoot == path
+        let isSelectedCollection = chatStore.selectedProject == name
 
         return Button {
             chatStore.setRoute(.chat)
-            withAnimation(.easeInOut(duration: 0.18)) {
-                if isExpanded {
-                    expandedWorkspaces.remove(path)
-                } else {
-                    expandedWorkspaces.insert(path)
-                    if chatStore.workspaceRoot != path || !isSelected {
-                        chatStore.switchToWorkspace(path)
-                    }
-                }
-            }
+            // Browsing a collection must not silently retarget tools, Git, or a
+            // draft message. The toolbar remains the explicit workspace switcher.
+            chatStore.selectedProject = name
+            visibleChatLimit = SidebarConversationDisclosure.batchSize
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: isSelected ? "folder.fill" : "folder")
+                Image(systemName: isActiveWorkspace ? "folder.fill" : "folder")
                     .font(.system(size: 14))
-                    .foregroundColor(isSelected ? .blue : .secondary)
+                    .foregroundColor(isActiveWorkspace ? .blue : .secondary)
                     .frame(width: 20)
                 Text(name)
                     .font(AppTypography.sidebarLabel)
                     .lineLimit(1)
                 Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.tertiary)
-                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 7)
             .contentShape(Rectangle())
+            .sidebarSelectionBackground(
+                chatStore.route == .chat
+                    && isSelectedCollection
+                    && chatStore.activeThreadId == nil
+            )
         }
         .buttonStyle(.plain)
+        .help(isActiveWorkspace ? "Active workspace" : "Show chats in \(name)")
         .listRowInsets(sidebarRowInsets)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
@@ -312,23 +293,19 @@ struct SidebarView: View {
 
     private var chatsSection: some View {
         Section {
-            if chatStore.selectedProject == nil {
-                if chatStore.threads.isEmpty {
-                    emptyChatsView
-                } else {
-                    chatsList
-                }
+            if chatStore.sortedThreads.isEmpty {
+                emptyChatsView
+            } else {
+                chatsList
             }
         } header: {
-            if chatStore.selectedProject == nil {
-                sectionHeader("Chats")
-            }
+            sectionHeader(chatStore.selectedProject.map { "Chats — \($0)" } ?? "Chats")
         }
     }
 
     private var emptyChatsView: some View {
         HStack {
-            Text("No chats")
+            Text(chatStore.selectedProject == nil ? "No chats" : "No chats in this project")
                 .font(AppTypography.sidebarMetadata)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -339,13 +316,65 @@ struct SidebarView: View {
         .listRowSeparator(.hidden)
     }
 
+    @ViewBuilder
     private var chatsList: some View {
-        ForEach(chatStore.sortedThreads.prefix(10)) { thread in
-            threadRow(for: thread)
+        let sortedThreads = chatStore.sortedThreads
+        let visibleThreadIDs = SidebarConversationDisclosure.visibleIDs(
+            in: sortedThreads,
+            limit: visibleChatLimit
+        )
+
+        // Keep ordering and filtering as value snapshots, but resolve each row
+        // from the observable store so an asynchronously generated title is
+        // immediately reflected without changing the row's stable identity.
+        ForEach(visibleThreadIDs, id: \.self) { threadID in
+            if let thread = chatStore.threads.first(where: { $0.id == threadID }) {
+                threadRow(for: thread)
+                    .listRowInsets(sidebarRowInsets)
+                    .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
+        }
+
+        if sortedThreads.count > SidebarConversationDisclosure.batchSize {
+            chatDisclosureButton(totalCount: sortedThreads.count)
                 .listRowInsets(sidebarRowInsets)
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
         }
+    }
+
+    private func chatDisclosureButton(totalCount: Int) -> some View {
+        let remaining = max(0, totalCount - visibleChatLimit)
+        let revealsMore = remaining > 0
+        let nextBatchCount = min(SidebarConversationDisclosure.batchSize, remaining)
+
+        return Button {
+            if revealsMore {
+                visibleChatLimit = SidebarConversationDisclosure.nextLimit(
+                    current: visibleChatLimit,
+                    total: totalCount
+                )
+            } else {
+                visibleChatLimit = SidebarConversationDisclosure.batchSize
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: revealsMore ? "ellipsis" : "chevron.up")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+                Text(revealsMore ? "Show \(nextBatchCount) More" : "Show Less")
+                    .font(AppTypography.sidebarMetadata)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(revealsMore ? "Reveal more chats" : "Collapse chats")
     }
 
     private var sidebarRowInsets: EdgeInsets {
@@ -369,19 +398,12 @@ struct SidebarView: View {
         return "This removes \(name) and \(chats) from TurboCode. Files in the workspace will not be deleted."
     }
 
-    private func threads(forWorkspace path: String) -> [Conversation] {
-        chatStore.threads
-            .filter { !$0.isArchived && $0.workspace == path }
-            .sorted { lhs, rhs in
-                if lhs.isPinned != rhs.isPinned { return lhs.isPinned }
-                return lhs.updatedAt > rhs.updatedAt
-            }
-    }
-
     private func threadRow(for thread: Conversation) -> some View {
         ThreadRowView(
             thread: thread,
-            isSelected: thread.id == chatStore.activeThreadId,
+            // Only the currently visible destination receives source-list
+            // selection; an open chat stays available while browsing utilities.
+            isSelected: chatStore.route == .chat && thread.id == chatStore.activeThreadId,
             onSelect: {
                 openThread(thread)
             },
@@ -394,15 +416,43 @@ struct SidebarView: View {
     }
 
     private func openThread(_ thread: Conversation) {
-        chatStore.setRoute(.chat)
+        visibleChatLimit = SidebarConversationDisclosure.limitRevealing(
+            threadID: thread.id,
+            in: chatStore.sortedThreads,
+            current: visibleChatLimit
+        )
         Task {
-            // If blocks are empty, it's a restored session — load full data.
-            if chatStore.blocks.isEmpty || chatStore.activeThreadId != thread.id {
-                await chatStore.restoreSession(id: thread.id)
-            } else {
-                await chatStore.selectThread(thread.id)
-            }
+            // Chat becomes visible only after its final state is ready, avoiding
+            // a costly intermediate render of the previously active timeline.
+            await chatStore.openThread(thread.id)
         }
     }
 
+}
+
+/// Pure batching policy for the sidebar's progressive chat disclosure. Keeping
+/// it independent from SwiftUI state makes the five-row contract reviewable and
+/// prevents search results from opening without a visible selected row.
+nonisolated enum SidebarConversationDisclosure {
+    static let batchSize = 5
+
+    static func visibleIDs(in threads: [Conversation], limit: Int) -> [String] {
+        Array(threads.prefix(max(batchSize, limit))).map(\.id)
+    }
+
+    static func nextLimit(current: Int, total: Int) -> Int {
+        min(total, max(batchSize, current) + batchSize)
+    }
+
+    static func limitRevealing(
+        threadID: String,
+        in threads: [Conversation],
+        current: Int
+    ) -> Int {
+        guard let index = threads.firstIndex(where: { $0.id == threadID }) else {
+            return current
+        }
+        let requiredBatch = ((index / batchSize) + 1) * batchSize
+        return max(current, requiredBatch)
+    }
 }
