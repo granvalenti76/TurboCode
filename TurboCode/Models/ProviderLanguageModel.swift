@@ -106,6 +106,9 @@ nonisolated final class DeepSeekRequestAdapter: URLProtocol, URLSessionDataDeleg
     private var streamBuffer = Data()
     private var capturedReasoning = ""
     private var capturedToolCalls: [Int: CapturedDeepSeekToolCall] = [:]
+    private var promptCacheHitTokens: Int?
+    private var promptCacheMissTokens: Int?
+    private var promptTokens: Int?
 
     override class func canInit(with request: URLRequest) -> Bool {
         request.value(forHTTPHeaderField: adapterHeader) == "deepseek"
@@ -166,6 +169,13 @@ nonisolated final class DeepSeekRequestAdapter: URLProtocol, URLSessionDataDeleg
             Array(capturedToolCalls.values),
             reasoning: capturedReasoning
         )
+        Self.appendDebugCacheUsage(
+            hitTokens: promptCacheHitTokens,
+            missTokens: promptCacheMissTokens,
+            promptTokens: promptTokens,
+            toolCallCount: capturedToolCalls.count,
+            failed: error != nil
+        )
         if let error {
             client?.urlProtocol(self, didFailWithError: error)
         } else {
@@ -205,6 +215,12 @@ nonisolated final class DeepSeekRequestAdapter: URLProtocol, URLSessionDataDeleg
             object.removeValue(forKey: "tool_choice")
             normalizeThinkingToolMessages(in: &object)
             restoreMissingToolCallMessages(in: &object)
+            // Restoration happens after the generic transcript has been
+            // normalized because it repairs orphan tool outputs using the
+            // streamed DeepSeek metadata. The restored assistant tool-call
+            // message can itself sit after a separate Foundation Models
+            // response fragment, so fold the transcript once more.
+            normalizeThinkingToolMessages(in: &object)
         }
         writeDebugWireSummary(object: object)
         request.httpBodyStream = nil
@@ -228,7 +244,7 @@ nonisolated final class DeepSeekRequestAdapter: URLProtocol, URLSessionDataDeleg
         return data.isEmpty ? nil : data
     }
 
-    private static func normalizeThinkingToolMessages(in object: inout [String: Any]) {
+    static func normalizeThinkingToolMessages(in object: inout [String: Any]) {
         guard var messages = object["messages"] as? [[String: Any]] else { return }
         var index = 0
         while index < messages.count {
@@ -237,6 +253,35 @@ nonisolated final class DeepSeekRequestAdapter: URLProtocol, URLSessionDataDeleg
                   !toolCalls.isEmpty else {
                 index += 1
                 continue
+            }
+
+            // Foundation Models records visible response text, reasoning, and
+            // tool calls as separate transcript entries. DeepSeek emits and
+            // expects those values as fields of one assistant message. Replay
+            // that original shape so the output-boundary cache prefix remains
+            // reusable by the next tool sub-request.
+            var fragmentStart = index
+            while fragmentStart > 0,
+                  messages[fragmentStart - 1]["role"] as? String == "assistant",
+                  (messages[fragmentStart - 1]["tool_calls"] as? [[String: Any]])?.isEmpty
+                    != false {
+                fragmentStart -= 1
+            }
+            if fragmentStart < index {
+                let fragments = messages[fragmentStart...index]
+                var merged = messages[index]
+                let content = fragments.compactMap { $0["content"] as? String }.joined()
+                let reasoning = fragments.compactMap {
+                    $0["reasoning_content"] as? String
+                }.joined()
+                if fragments.contains(where: { $0["content"] is String }) {
+                    merged["content"] = content
+                }
+                if !reasoning.isEmpty {
+                    merged["reasoning_content"] = reasoning
+                }
+                messages.replaceSubrange(fragmentStart...index, with: [merged])
+                index = fragmentStart
             }
 
             // DeepSeek V4 requires an explicit, non-null content value on the
@@ -376,7 +421,15 @@ nonisolated final class DeepSeekRequestAdapter: URLProtocol, URLSessionDataDeleg
         let clean = string.hasSuffix("\r") ? String(string.dropLast()) : string
         guard clean.hasPrefix("data: "), clean != "data: [DONE]",
               let data = String(clean.dropFirst(6)).data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return
+        }
+        if let usage = object["usage"] as? [String: Any] {
+            promptCacheHitTokens = (usage["prompt_cache_hit_tokens"] as? NSNumber)?.intValue
+            promptCacheMissTokens = (usage["prompt_cache_miss_tokens"] as? NSNumber)?.intValue
+            promptTokens = (usage["prompt_tokens"] as? NSNumber)?.intValue
+        }
+        guard
               let choice = (object["choices"] as? [[String: Any]])?.first,
               let delta = choice["delta"] as? [String: Any] else { return }
 
@@ -426,6 +479,41 @@ nonisolated final class DeepSeekRequestAdapter: URLProtocol, URLSessionDataDeleg
             withJSONObject: summary,
             options: [.prettyPrinted, .sortedKeys]
         ) {
+            try? data.write(to: url, options: .atomic)
+        }
+#endif
+    }
+
+    private static func appendDebugCacheUsage(
+        hitTokens: Int?,
+        missTokens: Int?,
+        promptTokens: Int?,
+        toolCallCount: Int,
+        failed: Bool
+    ) {
+#if DEBUG
+        guard hitTokens != nil || missTokens != nil else { return }
+        let record: [String: Any] = [
+            "createdAt": ISO8601DateFormatter().string(from: Date()),
+            "profileVersion": "premium-deepseek-cache-v11",
+            "promptCacheHitTokens": hitTokens ?? 0,
+            "promptCacheMissTokens": missTokens ?? 0,
+            "promptTokens": promptTokens ?? 0,
+            "toolCallCount": toolCallCount,
+            "failed": failed
+        ]
+        guard var data = try? JSONSerialization.data(withJSONObject: record) else { return }
+        data.append(0x0A)
+        let directory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".turbocode/diagnostics", isDirectory: true)
+        let url = directory.appendingPathComponent("deepseek-cache-usage.jsonl")
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: url.path),
+           let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
             try? data.write(to: url, options: .atomic)
         }
 #endif

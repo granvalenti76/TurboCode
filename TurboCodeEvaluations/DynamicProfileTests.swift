@@ -131,6 +131,45 @@ struct DynamicProfileTests {
         #expect(tools.map(\.name) == ["write_ondevice"])
     }
 
+    @Test("DeepSeek keeps skill-backed tools directly available")
+    func deepSeekUsesCacheStableToolDefinitions() throws {
+        let deepSeek = try #require(RemoteModelConfig.defaults.first { $0.id == "deepseek" })
+        let session = ModelSessionFactory.makeSession(
+            configuration: ModelSessionConfiguration(
+                backend: .premium,
+                activeRemoteModel: deepSeek,
+                delegateRemoteModel: .fallbackLlama,
+                orchestratorMode: .standalone,
+                workspaceRoot: "/tmp/workspace",
+                agentTuning: .default,
+                availableSkills: [],
+                activeDynamicProfile: nil,
+                skillActivations: SkillActivations(),
+                reasoningLevel: .deep,
+                delegateReasoningLevel: nil,
+                activeTemperature: nil,
+                delegateTemperature: nil,
+                dropsCompletedToolCalls: false
+            ),
+            history: [],
+            events: ModelSessionEvents(
+                toolStarted: { _, _ in },
+                toolFinished: { _, _, _ in },
+                delegationChanged: { _ in }
+            )
+        )
+
+        let firstEntry = try #require(session.transcript.first)
+        guard case .instructions(let instructions) = firstEntry else {
+            Issue.record("Expected the session to begin with instructions")
+            return
+        }
+        let names = instructions.toolDefinitions.map { $0.name }
+        #expect(names.contains("file_system"))
+        #expect(names.contains("grep"))
+        #expect(!names.contains("toggle_skill"))
+    }
+
     @Test("A remove-only profile exposes exactly the flat removal tool")
     func removeOnlyProfileCreatesOneInstance() {
         let profile = UserDynamicProfile(
