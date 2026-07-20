@@ -16,6 +16,7 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let samplingMode: GenerationOptions.SamplingMode?
     let reasoningLevel: ContextOptions.ReasoningLevel?
     let dropsCompletedToolCalls: Bool
+    let usesCacheStableToolDefinitions: Bool
     let executionPolicy: ExecutionPolicy
     let gitPolicy: GitPolicy
     let toolPlan: ModelToolPlan
@@ -62,7 +63,14 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                     if toolPlan.contains(.swiftPackageInit) {
                         SwiftPackageInitTool(workspaceRoot: workspaceRoot)
                     }
-                    if StandaloneSkills.isEnabled(for: toolPlan) {
+                    if usesCacheStableToolDefinitions {
+                        if toolPlan.contains(.fileSystem) {
+                            FileSystemTool(workspaceRoot: workspaceRoot)
+                        }
+                        if toolPlan.contains(.searchWorkspace) {
+                            GrepTool(workspaceRoot: workspaceRoot)
+                        }
+                    } else if StandaloneSkills.isEnabled(for: toolPlan) {
                         StandaloneSkills(
                             activations: activations,
                             workspaceRoot: workspaceRoot,
