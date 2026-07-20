@@ -444,7 +444,7 @@ enum AgentProfileVersion {
         case .foundationServe: return "pcc-layout-guard-v6"
         case .foundationApple: return "ondevice-layout-guard-v6"
         case .llamaServer: return "llama-layout-guard-v6"
-        case .premium: return "premium-deepseek-tools-v9"
+        case .premium: return "premium-deepseek-cache-v11"
         }
     }
 }

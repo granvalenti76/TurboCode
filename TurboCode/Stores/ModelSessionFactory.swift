@@ -138,6 +138,8 @@ enum ModelSessionFactory {
                 samplingMode: samplingMode,
                 reasoningLevel: activeCapabilities.reasoningLevel,
                 dropsCompletedToolCalls: configuration.dropsCompletedToolCalls,
+                usesCacheStableToolDefinitions:
+                    activeRemoteConfiguration?.reasoningTransport == .deepseekThinking,
                 executionPolicy: configuration.agentTuning.execution,
                 gitPolicy: configuration.agentTuning.git,
                 toolPlan: standalonePlan,
