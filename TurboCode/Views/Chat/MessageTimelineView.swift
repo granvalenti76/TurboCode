@@ -9,72 +9,90 @@ struct MessageTimelineView: View {
     @Environment(ChatStore.self) private var chatStore
     @Environment(SettingsStore.self) private var settings
     @Environment(\.chatFontSize) private var chatFontSize
-    @State private var scrollID: String?
-    @State private var autoScroll: Bool = true
+
+    /// SwiftUI owns the concrete offset; the timeline only asks for the
+    /// semantic bottom edge when the user is following the live response.
+    @State private var scrollPosition = ScrollPosition(
+        idType: String.self,
+        edge: .bottom
+    )
+    /// These related flags move through one reducer so geometry and phase
+    /// callbacks cannot leave the timeline in a contradictory state.
+    @State private var scrollFollowState = TimelineScrollFollowState()
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    // Empty state
-                    if chatStore.blocks.isEmpty && chatStore.liveReasoning.isEmpty && chatStore.liveAssistant.isEmpty {
-                        emptyState
-                            .id("empty-state")
-                    }
-
-                    // Group blocks into turns
-                    let turns = groupBlocks(chatStore.blocks)
-
-                    ForEach(turns) { turn in
-                        TurnView(turn: turn)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 8)
-                    }
-
-                    // Live reasoning block (streaming)
-                    if !chatStore.liveReasoning.isEmpty {
-                        LiveReasoningBlock(text: chatStore.liveReasoning)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 4)
-                            .id("live-reasoning")
-                    }
-
-                    // Live assistant block (streaming)
-                    if !chatStore.liveAssistant.isEmpty {
-                        LiveAssistantBlock(text: chatStore.liveAssistant)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 4)
-                            .id("live-assistant")
-                    }
-
-                    if chatStore.busy {
-                        ModelActivityIndicator(summary: modelActivitySummary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 4)
-                            .id("model-activity")
-                    }
-
-                    // Bottom anchor for auto-scroll
-                    Color.clear
-                        .frame(height: 1)
-                        .id("bottom-anchor")
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                // Empty state
+                if chatStore.blocks.isEmpty && chatStore.liveReasoning.isEmpty && chatStore.liveAssistant.isEmpty {
+                    emptyState
+                        .id("empty-state")
                 }
-                .frame(maxWidth: CGFloat(settings.maxChatWidth))
-                .frame(maxWidth: .infinity)
+
+                // Group blocks into turns
+                let turns = groupBlocks(chatStore.blocks)
+
+                ForEach(turns) { turn in
+                    TurnView(turn: turn)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                }
+
+                // Live reasoning block (streaming)
+                if !chatStore.liveReasoning.isEmpty {
+                    LiveReasoningBlock(text: chatStore.liveReasoning)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                        .id("live-reasoning")
+                }
+
+                // Live assistant block (streaming)
+                if !chatStore.liveAssistant.isEmpty {
+                    LiveAssistantBlock(text: chatStore.liveAssistant)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                        .id("live-assistant")
+                }
+
+                if chatStore.busy {
+                    ModelActivityIndicator(summary: modelActivitySummary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                        .id("model-activity")
+                }
+
+                // A stable target lets ScrollPosition preserve the bottom
+                // through insertions, removals, and streamed text reflow.
+                Color.clear
+                    .frame(height: 1)
+                    .id("bottom-anchor")
             }
-            .scrollContentBackground(.hidden)
-            .onChange(of: chatStore.blocks.count) { _, _ in
-                scrollToBottom(proxy)
+            .scrollTargetLayout()
+            .frame(maxWidth: CGFloat(settings.maxChatWidth))
+            .frame(maxWidth: .infinity)
+        }
+        .scrollPosition($scrollPosition, anchor: .bottom)
+        .scrollContentBackground(.hidden)
+        .onScrollGeometryChange(
+            for: TimelineScrollSnapshot.self,
+            of: TimelineScrollSnapshot.init
+        ) { oldSnapshot, newSnapshot in
+            // Geometry also changes while streamed Markdown wraps. It may
+            // update the physical offset, but must not be mistaken for the
+            // user's decision to leave the live edge.
+            if scrollFollowState.updateGeometry(from: oldSnapshot, to: newSnapshot) {
+                scrollToBottom()
             }
-            .onChange(of: chatStore.liveAssistant) { _, _ in
-                if autoScroll { scrollToBottom(proxy) }
-            }
-            .onChange(of: chatStore.activeToolActivity?.id) { _, _ in
-                if autoScroll { scrollToBottom(proxy) }
-            }
-            .onChange(of: chatStore.busy) { _, _ in
-                if autoScroll { scrollToBottom(proxy) }
-            }
+        }
+        .onScrollPhaseChange { _, newPhase in
+            scrollFollowState.updateScrollPhase(newPhase)
+        }
+        .task(id: chatStore.activeThreadId) {
+            // A restored thread may replace blocks without changing their
+            // count. Wait for its first layout before selecting the bottom.
+            scrollFollowState.resetForConversation()
+            await Task.yield()
+            scrollToBottom()
         }
     }
 
@@ -114,10 +132,83 @@ struct MessageTimelineView: View {
 
     // MARK: - Helpers
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.2)) {
-            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+    private func scrollToBottom() {
+        // Streaming can relayout several times per second. Disabling animation
+        // prevents overlapping scroll transactions and scrollbar thumb jitter.
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            scrollPosition.scrollTo(edge: .bottom)
         }
+    }
+}
+
+/// The small Equatable projection keeps rapid geometry changes local to the
+/// timeline instead of invalidating unrelated application state.
+nonisolated struct TimelineScrollSnapshot: Equatable {
+    static let bottomTolerance: CGFloat = 48
+
+    let contentHeight: CGFloat
+    let visibleMaxY: CGFloat
+
+    init(contentHeight: CGFloat, visibleMaxY: CGFloat) {
+        self.contentHeight = contentHeight
+        self.visibleMaxY = visibleMaxY
+    }
+
+    init(_ geometry: ScrollGeometry) {
+        self.init(
+            contentHeight: geometry.contentSize.height,
+            visibleMaxY: geometry.visibleRect.maxY
+        )
+    }
+
+    var isNearBottom: Bool {
+        contentHeight - visibleMaxY <= Self.bottomTolerance
+    }
+}
+
+/// Owns the user-intent invariant for live scrolling. Content growth may
+/// request a bottom adjustment, but only user-driven phases may disable it.
+nonisolated struct TimelineScrollFollowState: Equatable {
+    private(set) var followsLatestMessage = true
+    private(set) var isNearBottom = true
+    private(set) var isUserScrolling = false
+
+    /// Returns true only when a non-user layout change should remain pinned to
+    /// the bottom. Streaming callers use this to avoid per-token animations.
+    mutating func updateGeometry(
+        from oldSnapshot: TimelineScrollSnapshot,
+        to newSnapshot: TimelineScrollSnapshot
+    ) -> Bool {
+        isNearBottom = newSnapshot.isNearBottom
+        if isUserScrolling {
+            followsLatestMessage = newSnapshot.isNearBottom
+            return false
+        }
+        return followsLatestMessage
+            && oldSnapshot.contentHeight != newSnapshot.contentHeight
+    }
+
+    mutating func updateScrollPhase(_ phase: ScrollPhase) {
+        switch phase {
+        case .tracking, .interacting, .decelerating:
+            isUserScrolling = true
+        case .idle:
+            if isUserScrolling {
+                followsLatestMessage = isNearBottom
+            }
+            isUserScrolling = false
+        case .animating:
+            // Programmatic movement must never disable live following.
+            break
+        }
+    }
+
+    mutating func resetForConversation() {
+        followsLatestMessage = true
+        isNearBottom = true
+        isUserScrolling = false
     }
 }
 
