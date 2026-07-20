@@ -172,7 +172,9 @@ struct SidebarView: View {
         }
         var icon: String {
             switch self {
-            case .tools: return "hammer"
+            // Tools is a capability catalog and matrix, so a neutral grid is
+            // more faithful than a physical construction or settings metaphor.
+            case .tools: return "square.grid.2x2"
             case .skills: return "doc.text"
             }
         }
