@@ -30,7 +30,10 @@ struct WorkbenchSplitView: View {
 
                 if chatStore.rightPanelVisible {
                     InspectorPanelView()
-                        .frame(width: 420)
+                        // Metadata columns need slightly more room than the diff
+                        // inspector; the panel remains tertiary and overlays the
+                        // canvas instead of forcing the sidebar to rebalance.
+                        .frame(width: chatStore.rightPanelMode == .workspaceListing ? 500 : 420)
                         .background(.background)
                         .overlay(alignment: .leading) {
                             Divider()

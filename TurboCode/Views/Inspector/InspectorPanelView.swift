@@ -7,7 +7,10 @@ struct InspectorPanelView: View {
 
     var body: some View {
         Group {
-            if chatStore.rightPanelMode == .commit,
+            if chatStore.rightPanelMode == .workspaceListing,
+               let listing = chatStore.inspectedWorkspaceListing {
+                WorkspaceListingInspectorView(listing: listing)
+            } else if chatStore.rightPanelMode == .commit,
                let receipt = chatStore.inspectedGitCommit {
                 GitCommitInspectorView(receipt: receipt)
             } else if chatStore.isLoadingDiffs {
@@ -62,6 +65,186 @@ struct InspectorPanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
     }
+}
+
+// MARK: - Workspace Listing Inspector
+
+/// Detailed view of one immutable list_workspace result. It intentionally has
+/// no refresh action: a new filesystem read must create a new timeline receipt.
+private struct WorkspaceListingInspectorView: View {
+    let listing: WorkspaceListingBlock
+
+    @Environment(ChatStore.self) private var chatStore
+    @State private var sortOrder = [KeyPathComparator(\WorkspaceListingEntry.name)]
+
+    private var sortedEntries: [WorkspaceListingEntry] {
+        listing.entries.sorted(using: sortOrder)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+
+            if let errorMessage = listing.errorMessage {
+                ContentUnavailableView(
+                    "Directory unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text(errorMessage)
+                )
+            } else if listing.entries.isEmpty {
+                ContentUnavailableView(
+                    "Empty Directory",
+                    systemImage: "folder",
+                    description: Text("This directory contained no items in the captured snapshot.")
+                )
+            } else {
+                Table(sortedEntries, sortOrder: $sortOrder) {
+                    TableColumn("Name", value: \.name) { entry in
+                        HStack(spacing: 7) {
+                            Image(systemName: iconName(for: entry))
+                                .foregroundStyle(iconColor(for: entry))
+                                .frame(width: 16)
+                            Text(entry.name)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .help(entry.relativePath)
+                        }
+                    }
+
+                    TableColumn("Modified", value: \.sortableModifiedAt) { entry in
+                        Text(formattedDate(entry.modifiedAt) ?? "—")
+                            .foregroundStyle(entry.modifiedAt == nil ? .tertiary : .secondary)
+                    }
+                    .width(min: 82, ideal: 94)
+
+                    TableColumn("Size", value: \.sortableSizeBytes) { entry in
+                        Text(formattedSize(entry.sizeBytes) ?? "—")
+                            .foregroundStyle(entry.sizeBytes == nil ? .tertiary : .secondary)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                    .width(min: 52, ideal: 66)
+                }
+                .font(.system(size: 12))
+            }
+
+            if listing.isTruncated, listing.errorMessage == nil {
+                Divider()
+                Label(
+                    "Showing \(listing.entries.count) of \(listing.totalCount) items. List a more specific folder for a complete result.",
+                    systemImage: "ellipsis.circle"
+                )
+                .font(AppTypography.metadata)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "folder.fill")
+                .foregroundStyle(.blue)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Workspace Files")
+                    .font(.system(size: 15, weight: .semibold))
+
+                HStack(spacing: 6) {
+                    if let workspaceName = listing.workspaceName {
+                        Text(workspaceName)
+                        Text("·")
+                    }
+                    Text(displayPath)
+                        .fontDesign(.monospaced)
+                    Text("·")
+                    Text(countLabel)
+                    if let capturedAt = listing.capturedAt {
+                        Text("·")
+                        Text("Snapshot \(capturedAt.formatted(date: .omitted, time: .shortened))")
+                    }
+                }
+                .font(AppTypography.metadata)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(listing.path, forType: .string)
+            } label: {
+                Image(systemName: "doc.on.doc")
+            }
+            .buttonStyle(.borderless)
+            .help("Copy directory path")
+
+            Button {
+                chatStore.inspectedWorkspaceListingID = nil
+                chatStore.rightPanelMode = nil
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .help("Close inspector")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .frame(minHeight: 52)
+    }
+
+    private var displayPath: String {
+        listing.path == "." ? "Workspace Root" : listing.path
+    }
+
+    private var countLabel: String {
+        "\(listing.totalCount) \(listing.totalCount == 1 ? "item" : "items")"
+    }
+
+    private func formattedDate(_ value: String?) -> String? {
+        guard let value, let date = ISO8601DateFormatter().date(from: value) else { return nil }
+        return date.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private func formattedSize(_ value: Int?) -> String? {
+        value.map { ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .file) }
+    }
+
+    private func iconName(for entry: WorkspaceListingEntry) -> String {
+        switch entry.kind {
+        case .directory: "folder.fill"
+        case .symbolicLink: "link"
+        case .file:
+            switch entry.fileExtension {
+            case "swift": "swift"
+            case "xcodeproj", "xcworkspace": "hammer.fill"
+            case "md", "txt": "doc.text.fill"
+            case "json", "plist", "yaml", "yml": "curlybraces"
+            case "png", "jpg", "jpeg", "heic", "svg": "photo.fill"
+            default: "doc.fill"
+            }
+        }
+    }
+
+    private func iconColor(for entry: WorkspaceListingEntry) -> Color {
+        switch entry.kind {
+        case .directory: .blue
+        case .symbolicLink: .purple
+        case .file where entry.fileExtension == "swift": .orange
+        case .file: .secondary
+        }
+    }
+}
+
+private extension WorkspaceListingEntry {
+    /// Nonoptional presentation keys let native Table column headers provide
+    /// sorting while directories continue to render blank metadata cells.
+    var sortableModifiedAt: String { modifiedAt ?? "" }
+    var sortableSizeBytes: Int { sizeBytes ?? -1 }
 }
 
 // MARK: - Commit Inspector

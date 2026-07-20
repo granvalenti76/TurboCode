@@ -74,6 +74,11 @@ public final class ChatStore {
     public var rightPanelVisible: Bool { rightPanelMode != nil }
     public var rightSidebarWidth: CGFloat = 360
     public var inspectedGitCommit: GitCommitBlock?
+    public var inspectedWorkspaceListingID: String?
+    public var inspectedWorkspaceListing: WorkspaceListingBlock? {
+        guard let inspectedWorkspaceListingID else { return nil }
+        return blocks.first(where: { $0.id == inspectedWorkspaceListingID })?.workspaceListing
+    }
 
     // Terminal
     public var terminalOpen: Bool = false
@@ -276,6 +281,9 @@ public final class ChatStore {
     private var activeProductGuidePresentation: ProductGuideBlock?
     private var activeCompletedRootWrite: String?
     private var activeAssistantPlaceholderID: String?
+    /// Listings produced during the active turn are retained only long enough
+    /// to remove a model-generated echo from the final assistant text.
+    private var activeWorkspaceListingPresentations: [WorkspaceListingBlock] = []
     private var editTransactionGroups: [String: String] = [:]
 
     // MARK: - Onboarding
@@ -579,10 +587,12 @@ public final class ChatStore {
     // MARK: - Actions
 
     public func selectThread(_ id: String) async {
+        if id != activeThreadId { closeWorkspaceListingInspector() }
         activeThreadId = id
     }
 
     public func createThread(title: String = "New Chat", mode: ConversationMode = .agent) async {
+        closeWorkspaceListingInspector()
         let thread = Conversation(
             title: title,
             workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
@@ -700,6 +710,7 @@ public final class ChatStore {
     public func restoreSession(id: String) async {
         guard let snapshot = try? conversationRepository.load(id: id),
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
+        closeWorkspaceListingInspector()
         activeThreadId = id
         blocks = snapshot.blocks
         liveReasoning = ""; liveAssistant = ""
@@ -987,13 +998,23 @@ public final class ChatStore {
         promptText: String,
         visibleInTimeline: Bool
     ) async {
+        // Some provider profiles intentionally discard completed tool calls.
+        // Reattach only a relevant recent listing so follow-ups such as
+        // “read TODO.md” remain grounded while the visible user text stays clean.
+        let modelPrompt = WorkspaceListingFollowUpContext.enriching(
+            promptText,
+            blocks: blocks
+        )
+        // Echo filtering is scoped to one response so historical listing names
+        // can never affect unrelated assistant messages.
+        activeWorkspaceListingPresentations = []
 
         let diagnosticsRunID = await AgentDiagnosticsRecorder.shared.startRun(
             backend: activeBackend,
             mode: orchestratorMode,
             profileVersion: AgentProfileVersion.value(for: activeBackend, mode: orchestratorMode),
             workspaceKind: diagnosticsWorkspaceKind,
-            promptCharacters: promptText.count
+            promptCharacters: modelPrompt.count
         )
         activeDiagnosticsRunID = diagnosticsRunID
         let editGroupID = UUID().uuidString
@@ -1028,7 +1049,7 @@ public final class ChatStore {
         activeCompletedRootWrite = nil
 
         do {
-            let stream = session.streamResponse(to: promptText)
+            let stream = session.streamResponse(to: modelPrompt)
             // Delegation detection is handled by TurboCodeDynamicProfile's
             // onToolCall / onToolOutput lifecycle callbacks — no scanning needed.
 
@@ -1090,9 +1111,13 @@ public final class ChatStore {
             // Reset delegation state once streaming is done.
             isDelegating = false
             toolActivities.removeAll()
-            let finalText = accumulatedText.isEmpty
+            let rawFinalText = accumulatedText.isEmpty
                 ? liveReasoning
                 : userVisibleAssistantText(accumulatedText)
+            let finalText = NativeToolEchoFilter.filtering(
+                rawFinalText,
+                workspaceListings: activeWorkspaceListingPresentations
+            )
             let productGuidePresentation = activeProductGuidePresentation
             if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
                 if finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1190,6 +1215,7 @@ public final class ChatStore {
             activeAssistantPlaceholderID = nil
         }
         editTransactionGroups = editTransactionGroups.filter { $0.value != editGroupID }
+        activeWorkspaceListingPresentations = []
         // Persist after the title task finishes so the JSON never races with
         // the Apple on-device title generator and stores a stale "New Chat".
         if let titleTask {
@@ -1351,7 +1377,11 @@ public final class ChatStore {
                 activeCompletedRootWrite = String(text.dropFirst("WRITE_COMPLETE: ".count))
             }
         }
-        if let presentation = ToolPresentationRouter.presentation(for: call, output: output) {
+        if let presentation = ToolPresentationRouter.presentation(
+            for: call,
+            output: output,
+            workspaceName: workspaceRoot.isEmpty ? nil : workspaceLabel
+        ) {
             presentToolPresentation(presentation)
         }
         toolActivities.removeAll { $0.id == call.id }
@@ -1361,6 +1391,7 @@ public final class ChatStore {
         let block: ChatBlock
         switch presentation {
         case .workspaceListing(let listing):
+            activeWorkspaceListingPresentations.append(listing)
             block = ChatBlock(
                 id: "workspace-listing-\(listing.toolCallID)",
                 kind: .workspaceListing,
@@ -1450,6 +1481,20 @@ public final class ChatStore {
         guard let receipt = blocks.first(where: { $0.id == id })?.gitCommit else { return }
         inspectedGitCommit = receipt
         rightPanelMode = .commit
+    }
+
+    /// Shows the immutable snapshot associated with one timeline receipt. The
+    /// inspector never rereads the filesystem, preserving conversational history.
+    public func reviewWorkspaceListing(_ id: String) {
+        guard blocks.contains(where: { $0.id == id && $0.workspaceListing != nil }) else { return }
+        inspectedWorkspaceListingID = id
+        rightPanelMode = .workspaceListing
+    }
+
+    private func closeWorkspaceListingInspector() {
+        guard rightPanelMode == .workspaceListing else { return }
+        inspectedWorkspaceListingID = nil
+        rightPanelMode = nil
     }
 
     public func undoGitCommit(_ id: String) {

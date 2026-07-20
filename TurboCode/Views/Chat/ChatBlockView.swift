@@ -45,7 +45,7 @@ struct ChatBlockView: View {
             ProductGuideWidget(block: block)
         case .workspaceListing:
             if let listing = block.workspaceListing {
-                WorkspaceListingWidget(listing: listing)
+                WorkspaceListingWidget(blockID: block.id, listing: listing)
             }
         }
     }

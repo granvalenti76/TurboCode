@@ -1,3 +1,4 @@
+import Foundation
 import FoundationModels
 
 nonisolated enum ToolPresentation: Sendable {
@@ -9,7 +10,9 @@ nonisolated enum ToolPresentation: Sendable {
 nonisolated enum ToolPresentationRouter {
     static func presentation(
         for call: Transcript.ToolCall,
-        output: Transcript.ToolOutput
+        output: Transcript.ToolOutput,
+        workspaceName: String?,
+        capturedAt: Date = .now
     ) -> ToolPresentation? {
         guard call.toolName == "list_workspace" else { return nil }
         for segment in output.segments {
@@ -35,7 +38,9 @@ nonisolated enum ToolPresentationRouter {
                     entries: entries,
                     totalCount: listing.totalCount,
                     isTruncated: listing.isTruncated,
-                    errorMessage: listing.errorMessage
+                    errorMessage: listing.errorMessage,
+                    capturedAt: capturedAt,
+                    workspaceName: workspaceName
                 )
             )
         }
