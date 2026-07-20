@@ -63,6 +63,9 @@ public final class ChatStore {
 
     // Navigation
     public var route: AppRoute = .chat
+    /// Custom Profiles is a document-modal presentation, not a replacement for
+    /// the workbench destination underneath it.
+    public var isCustomProfilesPresented: Bool = false
     public var settingsSection: SettingsSection = .general
 
     // Sidebar
@@ -788,8 +791,45 @@ public final class ChatStore {
     }
 
     public func deleteThread(id: String) async {
+        let deletesActiveThread = activeThreadId == id
+        if deletesActiveThread, let responseTask {
+            // A cancelled response still performs its final persistence pass.
+            // Wait for that pass before deleting, otherwise it can recreate the
+            // session file immediately after the user removes the conversation.
+            responseTask.cancel()
+            await responseTask.value
+        }
+
+        do {
+            try conversationRepository.delete(id: id)
+        } catch {
+            // Keep the visible row when durable deletion fails; pretending the
+            // operation succeeded would make it reappear on the next launch.
+            self.error = "Could not delete the conversation: \(error.localizedDescription)"
+            return
+        }
+        self.error = nil
+
         threads.removeAll { $0.id == id }
-        if activeThreadId == id { activeThreadId = threads.first?.id }
+        guard deletesActiveThread else { return }
+
+        activeThreadId = nil
+        blocks = []
+        liveReasoning = ""
+        liveAssistant = ""
+        isFirstMessage = true
+
+        if let nextThreadID = threads.first?.id {
+            await restoreSession(id: nextThreadID)
+            if activeThreadId == nil {
+                // A never-persisted draft has no snapshot to restore but remains
+                // a valid next selection with a fresh model session.
+                activeThreadId = nextThreadID
+                rebuildSession(keepingHistory: false)
+            }
+        } else {
+            rebuildSession(keepingHistory: false)
+        }
     }
 
     /// Removes a workspace from TurboCode and deletes only its persisted chats.
@@ -1704,6 +1744,14 @@ public final class ChatStore {
     }
 
     public func setRoute(_ route: AppRoute) {
+        if route == .skills {
+            // Preserve the current destination behind the native sheet. Using
+            // `.skills` as the visible route used to construct a stale Chat
+            // timeline while presenting the modal, which could beachball.
+            isCustomProfilesPresented = true
+            return
+        }
+        isCustomProfilesPresented = false
         self.route = route
         if route != .chat { rightPanelMode = nil }
     }
