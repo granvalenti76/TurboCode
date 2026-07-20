@@ -6,6 +6,7 @@ struct DiffPatchWidget: View {
 
     @Environment(ChatStore.self) private var chatStore
     @State private var showsAllFiles = false
+    @State private var showsNativeReview = false
     @State private var displayedAdditions = 0
     @State private var displayedDeletions = 0
 
@@ -23,6 +24,10 @@ struct DiffPatchWidget: View {
                 .appendingPathComponent(".git")
                 .path
         )
+    }
+
+    private var hasNativeReview: Bool {
+        !(patch.reviewFiles ?? []).isEmpty
     }
 
     var body: some View {
@@ -52,6 +57,9 @@ struct DiffPatchWidget: View {
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .task(id: patch.status) {
             await animateCountsIfNeeded()
+        }
+        .sheet(isPresented: $showsNativeReview) {
+            DiffPatchReviewSheet(patch: patch)
         }
     }
 
@@ -100,9 +108,15 @@ struct DiffPatchWidget: View {
             }
 
             if (patch.status == .applied || patch.status == .undone),
-               canReviewInGitInspector {
+               hasNativeReview || canReviewInGitInspector {
                 Button("Review") {
-                    chatStore.reviewDiffPatch(blockID)
+                    if hasNativeReview {
+                        showsNativeReview = true
+                    } else {
+                        // Legacy and raw-patch receipts have no immutable full
+                        // text snapshot, so retain the previous Git fallback.
+                        chatStore.reviewDiffPatch(blockID)
+                    }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)

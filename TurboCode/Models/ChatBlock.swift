@@ -91,11 +91,30 @@ public struct DiffPatchBlock: Sendable, Hashable, Codable {
     public var patch: String
     public var patches: [String]?
     public var files: [DiffPatchFileChange]
+    /// Immutable before/after text captured by structured edit tools. Optional
+    /// so historical receipts and raw patch tools remain decodable.
+    public var reviewFiles: [DiffReviewFileSnapshot]?
     public var status: DiffPatchStatus
     public var errorMessage: String?
 
     public var additions: Int { files.reduce(0) { $0 + $1.additions } }
     public var deletions: Int { files.reduce(0) { $0 + $1.deletions } }
+}
+
+/// Full text snapshots used by the native document-modal review. Keeping both
+/// sides prevents later workspace edits from changing historical evidence.
+nonisolated public struct DiffReviewFileSnapshot: Identifiable, Sendable, Hashable, Codable {
+    public let path: String
+    public let originalText: String?
+    public let modifiedText: String?
+
+    public var id: String { path }
+
+    public init(path: String, originalText: String?, modifiedText: String?) {
+        self.path = path
+        self.originalText = originalText
+        self.modifiedText = modifiedText
+    }
 }
 
 public struct DiffPatchFileChange: Identifiable, Sendable, Hashable, Codable {

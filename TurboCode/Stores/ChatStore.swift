@@ -587,12 +587,12 @@ public final class ChatStore {
     // MARK: - Actions
 
     public func selectThread(_ id: String) async {
-        if id != activeThreadId { closeWorkspaceListingInspector() }
+        if id != activeThreadId { dismissWorkspaceListingInspector() }
         activeThreadId = id
     }
 
     public func createThread(title: String = "New Chat", mode: ConversationMode = .agent) async {
-        closeWorkspaceListingInspector()
+        dismissWorkspaceListingInspector()
         let thread = Conversation(
             title: title,
             workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
@@ -710,7 +710,7 @@ public final class ChatStore {
     public func restoreSession(id: String) async {
         guard let snapshot = try? conversationRepository.load(id: id),
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
-        closeWorkspaceListingInspector()
+        dismissWorkspaceListingInspector()
         activeThreadId = id
         blocks = snapshot.blocks
         liveReasoning = ""; liveAssistant = ""
@@ -1412,6 +1412,7 @@ public final class ChatStore {
         id: String,
         patch: String,
         files: [DiffPatchFileChange],
+        reviewFiles: [DiffReviewFileSnapshot] = [],
         status: DiffPatchStatus
     ) {
         let blockID = activeEditGroupID ?? id
@@ -1424,6 +1425,10 @@ public final class ChatStore {
             payload.patches = patches
             payload.patch = patches.joined(separator: "\n")
             payload.files = mergedFileChanges(payload.files + files)
+            payload.reviewFiles = mergedReviewFiles(
+                existing: payload.reviewFiles ?? [],
+                incoming: reviewFiles
+            )
             payload.status = status
             payload.errorMessage = nil
             blocks[index].diffPatch = payload
@@ -1434,6 +1439,7 @@ public final class ChatStore {
             patch: patch,
             patches: [patch],
             files: files,
+            reviewFiles: reviewFiles.isEmpty ? nil : reviewFiles,
             status: status,
             errorMessage: nil
         )
@@ -1491,7 +1497,9 @@ public final class ChatStore {
         rightPanelMode = .workspaceListing
     }
 
-    private func closeWorkspaceListingInspector() {
+    /// Dismisses only the transient workspace snapshot. Other inspectors are
+    /// persistent workbench modes and must not close when the canvas is clicked.
+    func dismissWorkspaceListingInspector() {
         guard rightPanelMode == .workspaceListing else { return }
         inspectedWorkspaceListingID = nil
         rightPanelMode = nil
@@ -1585,6 +1593,27 @@ public final class ChatStore {
                 deletions: total.deletions
             )
         }
+    }
+
+    /// Consecutive edit_file calls in one assistant turn share a receipt. The
+    /// review must retain the first before-state and the final after-state.
+    private func mergedReviewFiles(
+        existing: [DiffReviewFileSnapshot],
+        incoming: [DiffReviewFileSnapshot]
+    ) -> [DiffReviewFileSnapshot] {
+        var merged = existing
+        for snapshot in incoming {
+            if let index = merged.firstIndex(where: { $0.path == snapshot.path }) {
+                merged[index] = DiffReviewFileSnapshot(
+                    path: snapshot.path,
+                    originalText: merged[index].originalText,
+                    modifiedText: snapshot.modifiedText
+                )
+            } else {
+                merged.append(snapshot)
+            }
+        }
+        return merged
     }
 
     private func toolSummary(for call: Transcript.ToolCall) -> String {

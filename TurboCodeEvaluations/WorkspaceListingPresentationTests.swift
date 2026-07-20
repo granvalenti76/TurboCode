@@ -52,6 +52,23 @@ struct WorkspaceListingPresentationTests {
         #expect(store.inspectedWorkspaceListing == listing)
     }
 
+    @Test("Click-away dismissal closes only a workspace listing inspector")
+    func workspaceListingDismissalIsScoped() {
+        let store = ChatStore(conversationRepository: ListingConversationRepository())
+        let listing = makeListing()
+        store.blocks = [listingBlock(listing)]
+        store.reviewWorkspaceListing("listing-block")
+
+        store.dismissWorkspaceListingInspector()
+
+        #expect(store.rightPanelMode == nil)
+        #expect(store.inspectedWorkspaceListingID == nil)
+
+        store.rightPanelMode = .changes
+        store.dismissWorkspaceListingInspector()
+        #expect(store.rightPanelMode == .changes)
+    }
+
     @Test("Listings saved before inspector metadata still decode")
     func legacyListingDecodesWithoutPresentationMetadata() throws {
         let legacyJSON = """

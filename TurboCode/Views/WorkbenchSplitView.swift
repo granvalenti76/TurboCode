@@ -28,6 +28,21 @@ struct WorkbenchSplitView: View {
                 MainStageView()
                     .frame(minWidth: mainMinWidth)
 
+                if chatStore.rightPanelMode == .workspaceListing {
+                    // The file snapshot behaves like a transient inspector: a
+                    // click anywhere outside it dismisses the panel. This layer
+                    // appears only after Show completes, so it cannot swallow
+                    // the receipt action that opens the inspector.
+                    Color.clear
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            chatStore.dismissWorkspaceListingInspector()
+                        }
+                        .accessibilityHidden(true)
+                        .zIndex(0.5)
+                }
+
                 if chatStore.rightPanelVisible {
                     InspectorPanelView()
                         // Metadata columns need slightly more room than the diff

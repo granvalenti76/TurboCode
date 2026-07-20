@@ -6,6 +6,7 @@ struct SidebarView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var isSessionSearchPresented = false
     @State private var workspacePendingRemoval: String?
+    @State private var visibleChatLimit = SidebarConversationDisclosure.batchSize
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,6 +34,11 @@ struct SidebarView: View {
             }
         } message: {
             Text(workspaceRemovalMessage)
+        }
+        .onChange(of: chatStore.selectedProject) { _, _ in
+            // Each collection starts compact. Search can still reveal a result
+            // explicitly through openThread(_:), without expanding every list.
+            visibleChatLimit = SidebarConversationDisclosure.batchSize
         }
     }
 
@@ -89,6 +95,7 @@ struct SidebarView: View {
                 // "All Chats" changes only the visible collection; the active
                 // workspace remains available to tools and to the next new chat.
                 chatStore.selectedProject = nil
+                visibleChatLimit = SidebarConversationDisclosure.batchSize
             } label: {
                 navigationLabel(
                     icon: "tray.full",
@@ -239,6 +246,7 @@ struct SidebarView: View {
             // Browsing a collection must not silently retarget tools, Git, or a
             // draft message. The toolbar remains the explicit workspace switcher.
             chatStore.selectedProject = name
+            visibleChatLimit = SidebarConversationDisclosure.batchSize
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: isActiveWorkspace ? "folder.fill" : "folder")
@@ -306,18 +314,65 @@ struct SidebarView: View {
         .listRowSeparator(.hidden)
     }
 
+    @ViewBuilder
     private var chatsList: some View {
+        let sortedThreads = chatStore.sortedThreads
+        let visibleThreadIDs = SidebarConversationDisclosure.visibleIDs(
+            in: sortedThreads,
+            limit: visibleChatLimit
+        )
+
         // Keep ordering and filtering as value snapshots, but resolve each row
         // from the observable store so an asynchronously generated title is
         // immediately reflected without changing the row's stable identity.
-        ForEach(chatStore.sortedThreads.prefix(10).map(\.id), id: \.self) { threadID in
+        ForEach(visibleThreadIDs, id: \.self) { threadID in
             if let thread = chatStore.threads.first(where: { $0.id == threadID }) {
                 threadRow(for: thread)
                     .listRowInsets(sidebarRowInsets)
                     .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+                .listRowSeparator(.hidden)
             }
         }
+
+        if sortedThreads.count > SidebarConversationDisclosure.batchSize {
+            chatDisclosureButton(totalCount: sortedThreads.count)
+                .listRowInsets(sidebarRowInsets)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+        }
+    }
+
+    private func chatDisclosureButton(totalCount: Int) -> some View {
+        let remaining = max(0, totalCount - visibleChatLimit)
+        let revealsMore = remaining > 0
+        let nextBatchCount = min(SidebarConversationDisclosure.batchSize, remaining)
+
+        return Button {
+            if revealsMore {
+                visibleChatLimit = SidebarConversationDisclosure.nextLimit(
+                    current: visibleChatLimit,
+                    total: totalCount
+                )
+            } else {
+                visibleChatLimit = SidebarConversationDisclosure.batchSize
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: revealsMore ? "ellipsis" : "chevron.up")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20)
+                Text(revealsMore ? "Show \(nextBatchCount) More" : "Show Less")
+                    .font(AppTypography.sidebarMetadata)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(revealsMore ? "Reveal more chats" : "Collapse chats")
     }
 
     private var sidebarRowInsets: EdgeInsets {
@@ -359,6 +414,11 @@ struct SidebarView: View {
     }
 
     private func openThread(_ thread: Conversation) {
+        visibleChatLimit = SidebarConversationDisclosure.limitRevealing(
+            threadID: thread.id,
+            in: chatStore.sortedThreads,
+            current: visibleChatLimit
+        )
         chatStore.setRoute(.chat)
         Task {
             // If blocks are empty, it's a restored session — load full data.
@@ -370,4 +430,31 @@ struct SidebarView: View {
         }
     }
 
+}
+
+/// Pure batching policy for the sidebar's progressive chat disclosure. Keeping
+/// it independent from SwiftUI state makes the five-row contract reviewable and
+/// prevents search results from opening without a visible selected row.
+nonisolated enum SidebarConversationDisclosure {
+    static let batchSize = 5
+
+    static func visibleIDs(in threads: [Conversation], limit: Int) -> [String] {
+        Array(threads.prefix(max(batchSize, limit))).map(\.id)
+    }
+
+    static func nextLimit(current: Int, total: Int) -> Int {
+        min(total, max(batchSize, current) + batchSize)
+    }
+
+    static func limitRevealing(
+        threadID: String,
+        in threads: [Conversation],
+        current: Int
+    ) -> Int {
+        guard let index = threads.firstIndex(where: { $0.id == threadID }) else {
+            return current
+        }
+        let requiredBatch = ((index / batchSize) + 1) * batchSize
+        return max(current, requiredBatch)
+    }
 }
