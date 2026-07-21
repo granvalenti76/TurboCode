@@ -222,9 +222,16 @@ nonisolated final class DeepSeekRequestAdapter: URLProtocol, URLSessionDataDeleg
             // response fragment, so fold the transcript once more.
             normalizeThinkingToolMessages(in: &object)
         }
+        stabilizeCachePrefix(in: &object)
         writeDebugWireSummary(object: object)
         request.httpBodyStream = nil
-        request.httpBody = try? JSONSerialization.data(withJSONObject: object)
+        // DeepSeek matches cache entries from token zero. Recursively sorting
+        // object keys keeps equivalent generated schemas byte-stable instead
+        // of relying on Dictionary/JSONEncoder iteration order.
+        request.httpBody = try? JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys]
+        )
     }
 
     private static func requestBody(from request: NSMutableURLRequest) -> Data? {
@@ -356,7 +363,69 @@ nonisolated final class DeepSeekRequestAdapter: URLProtocol, URLSessionDataDeleg
 #endif
             index += 1 + normalizedOutputs.count
         }
+
+        // Foundation Models also persists a tool-free DeepSeek response as
+        // adjacent reasoning and visible-content assistant entries. DeepSeek
+        // emitted those fields in one assistant message, and its output-boundary
+        // cache can only be reused when the next request replays that shape.
+        // Tool-call groups are already reconstructed above and must remain
+        // separate from their tool outputs, so only fold tool-free runs here.
+        mergeToolFreeAssistantFragments(in: &messages)
         object["messages"] = messages
+    }
+
+    static func stabilizeCachePrefix(in object: inout [String: Any]) {
+        guard var tools = object["tools"] as? [[String: Any]] else { return }
+        // Tool order is semantically irrelevant to the API but participates in
+        // DeepSeek's leading prompt. Foundation Models can rebuild the array as
+        // capabilities are resolved, so use the function name as its transport
+        // contract while leaving message and tool-call order untouched.
+        tools.sort { lhs, rhs in
+            let left = (lhs["function"] as? [String: Any])?["name"] as? String ?? ""
+            let right = (rhs["function"] as? [String: Any])?["name"] as? String ?? ""
+            return left.localizedStandardCompare(right) == .orderedAscending
+        }
+        object["tools"] = tools
+    }
+
+    private static func mergeToolFreeAssistantFragments(
+        in messages: inout [[String: Any]]
+    ) {
+        var start = 0
+        while start < messages.count {
+            guard messages[start]["role"] as? String == "assistant" else {
+                start += 1
+                continue
+            }
+
+            var end = start + 1
+            while end < messages.count,
+                  messages[end]["role"] as? String == "assistant" {
+                end += 1
+            }
+            let fragments = messages[start..<end]
+            guard fragments.count > 1,
+                  fragments.allSatisfy({ message in
+                      (message["tool_calls"] as? [[String: Any]])?.isEmpty != false
+                  }) else {
+                start = end
+                continue
+            }
+
+            var merged = messages[start]
+            let content = fragments.compactMap { $0["content"] as? String }.joined()
+            let reasoning = fragments.compactMap {
+                $0["reasoning_content"] as? String
+            }.joined()
+            if fragments.contains(where: { $0["content"] is String }) {
+                merged["content"] = content
+            }
+            if !reasoning.isEmpty {
+                merged["reasoning_content"] = reasoning
+            }
+            messages.replaceSubrange(start..<end, with: [merged])
+            start += 1
+        }
     }
 
     private static func restoreMissingToolCallMessages(in object: inout [String: Any]) {
