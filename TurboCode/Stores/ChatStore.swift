@@ -1061,8 +1061,11 @@ public final class ChatStore {
         // can never affect unrelated assistant messages.
         activeWorkspaceListingPresentations = []
 
+        // A run retains the backend it started with even if settings change
+        // while the asynchronous response is finishing.
+        let diagnosticsBackend = activeBackend
         let diagnosticsRunID = await AgentDiagnosticsRecorder.shared.startRun(
-            backend: activeBackend,
+            backend: diagnosticsBackend,
             mode: orchestratorMode,
             profileVersion: AgentProfileVersion.value(for: activeBackend, mode: orchestratorMode),
             workspaceKind: diagnosticsWorkspaceKind,
@@ -1108,6 +1111,15 @@ public final class ChatStore {
             for try await snapshot in stream {
                 try Task.checkCancellation()
 
+                if diagnosticsBackend == .foundationApple, let diagnosticsRunID {
+                    // Snapshots expose the authoritative on-device token and
+                    // prefix-cache counters; the recorder keeps only the latest.
+                    await AgentDiagnosticsRecorder.shared.recordUsage(
+                        runID: diagnosticsRunID,
+                        usage: snapshot.usage
+                    )
+                }
+
                 // Fast path: update liveAssistant for quick UI feedback
                 if !snapshot.content.isEmpty {
                     if !didRecordFirstToken, let diagnosticsRunID {
@@ -1115,7 +1127,7 @@ public final class ChatStore {
                         await AgentDiagnosticsRecorder.shared.markFirstToken(runID: diagnosticsRunID)
                     }
                     accumulatedText = snapshot.content
-                    if activeBackend == .foundationApple,
+                    if diagnosticsBackend == .foundationApple,
                        OnDeviceStreamingGuard.isPathological(snapshot.content) {
                         throw OnDeviceStreamingGuard.Failure.repetitiveOutput
                     }
@@ -1250,6 +1262,20 @@ public final class ChatStore {
             }
         }
         if let diagnosticsRunID {
+            if diagnosticsBackend == .foundationApple {
+                let model = SystemLanguageModel.default
+                // Some beta execution contexts temporarily report zero while
+                // assets are unavailable. The current macOS 27 model is 8K, so
+                // retain a useful diagnostic limit until the runtime answers.
+                let reportedContextSize = model.contextSize
+                let contextSize = reportedContextSize > 0 ? reportedContextSize : 8_192
+                let contextTokens = try? await model.tokenCount(for: session.transcript)
+                await AgentDiagnosticsRecorder.shared.recordContext(
+                    runID: diagnosticsRunID,
+                    tokenCount: contextTokens,
+                    contextSize: contextSize
+                )
+            }
             await AgentDiagnosticsRecorder.shared.finishRun(
                 runID: diagnosticsRunID,
                 outcome: diagnosticsOutcome,

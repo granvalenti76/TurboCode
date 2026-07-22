@@ -4,6 +4,7 @@ import SwiftUI
 
 @main
 struct TurboCodeApp: App {
+    @Environment(\.openWindow) private var openWindow
     @State private var chatStore: ChatStore
     @State private var settingsStore = SettingsStore()
 
@@ -118,6 +119,12 @@ struct TurboCodeApp: App {
                     Task { await chatStore.printToolFailureSummary() }
                 }
 
+                Button("On-Device Statistics") {
+                    // A dedicated window keeps live developer diagnostics out
+                    // of the product navigation and conversation state.
+                    openWindow(id: "on-device-statistics")
+                }
+
                 if let benchmarkStatus = chatStore.benchmarkStatus {
                     Divider()
                     Button(benchmarkStatus) {}
@@ -128,6 +135,13 @@ struct TurboCodeApp: App {
 
             // Settings — handled by the native Settings scene below
         }
+
+#if DEBUG
+        Window("On-Device Statistics", id: "on-device-statistics") {
+            OnDeviceStatisticsView()
+        }
+        .defaultSize(width: 880, height: 700)
+#endif
 
         // Native macOS Settings window
         Settings {

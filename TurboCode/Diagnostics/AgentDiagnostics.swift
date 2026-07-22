@@ -68,6 +68,15 @@ nonisolated struct AgentRunMetric: Codable, Sendable {
     var failureFingerprint: String?
     var suspectedTool: String?
     var tools: [ToolRunMetric]
+    /// Per-response token usage is optional so diagnostics recorded before
+    /// macOS 27 continue to decode without a migration step.
+    var inputTokenCount: Int?
+    var cachedInputTokenCount: Int?
+    var outputTokenCount: Int?
+    /// Context occupancy is sampled after the run because accumulated usage
+    /// counts the same cached prefix again on every turn.
+    var contextTokenCount: Int?
+    var contextSize: Int?
 }
 
 nonisolated private struct ToolFailureKey: Hashable {
@@ -115,9 +124,34 @@ actor AgentDiagnosticsRecorder {
             failureCategory: nil,
             failureFingerprint: nil,
             suspectedTool: nil,
-            tools: []
+            tools: [],
+            inputTokenCount: nil,
+            cachedInputTokenCount: nil,
+            outputTokenCount: nil,
+            contextTokenCount: nil,
+            contextSize: nil
         )
         return id
+    }
+
+    /// Captures the latest streaming snapshot. Foundation Models reports
+    /// cumulative values for the current response, so replacing rather than
+    /// adding prevents intermediate snapshots from inflating the totals.
+    func recordUsage(runID: String, usage: LanguageModelSession.Usage) {
+        guard var run = runs[runID] else { return }
+        run.inputTokenCount = usage.input.totalTokenCount
+        run.cachedInputTokenCount = usage.input.cachedTokenCount
+        run.outputTokenCount = usage.output.totalTokenCount
+        runs[runID] = run
+    }
+
+    /// Stores current transcript occupancy independently from response usage.
+    /// This is the value that can safely be compared with the context limit.
+    func recordContext(runID: String, tokenCount: Int?, contextSize: Int) {
+        guard var run = runs[runID] else { return }
+        run.contextTokenCount = tokenCount
+        run.contextSize = contextSize
+        runs[runID] = run
     }
 
     func markFirstToken(runID: String) {
@@ -224,15 +258,9 @@ actor AgentDiagnosticsRecorder {
     }
 
     func failureSummary() -> String {
-        let url = Self.diagnosticsDirectoryURL.appendingPathComponent("runs.jsonl")
-        guard let contents = try? String(contentsOf: url, encoding: .utf8) else {
+        let runs = Self.persistedRuns()
+        guard !runs.isEmpty else {
             return "No diagnostic runs recorded yet."
-        }
-
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let runs = contents.split(whereSeparator: \.isNewline).compactMap { line in
-            try? decoder.decode(AgentRunMetric.self, from: Data(line.utf8))
         }
         var failures: [ToolFailureKey: Int] = [:]
 
@@ -266,6 +294,17 @@ actor AgentDiagnosticsRecorder {
         }
         return (["Tool failures across \(runs.count) diagnostic run(s):"] + rows)
             .joined(separator: "\n")
+    }
+
+    /// Returns persisted and currently active on-device runs for the Developer
+    /// statistics window. Filtering here keeps remote-provider diagnostics out
+    /// of the UI even when they share the same root conversation.
+    func onDeviceRuns() -> [AgentRunMetric] {
+        let persisted = Self.persistedRuns()
+        let active = runs.values.filter { $0.backend == ModelBackend.foundationApple.rawValue }
+        return (persisted + active)
+            .filter { $0.backend == ModelBackend.foundationApple.rawValue }
+            .sorted { $0.startedAt > $1.startedAt }
     }
 
     private func milliseconds(since date: Date) -> Int {
@@ -423,6 +462,16 @@ actor AgentDiagnosticsRecorder {
     nonisolated private static var diagnosticsDirectoryURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".turbocode/diagnostics", isDirectory: true)
+    }
+
+    nonisolated private static func persistedRuns() -> [AgentRunMetric] {
+        let url = diagnosticsDirectoryURL.appendingPathComponent("runs.jsonl")
+        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return contents.split(whereSeparator: \.isNewline).compactMap { line in
+            try? decoder.decode(AgentRunMetric.self, from: Data(line.utf8))
+        }
     }
 
     nonisolated private static func fingerprint(_ detail: String) -> String {
