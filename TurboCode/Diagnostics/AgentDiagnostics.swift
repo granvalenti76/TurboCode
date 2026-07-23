@@ -494,6 +494,7 @@ enum AgentProfileVersion {
         case .foundationApple: return "ondevice-layout-guard-v6"
         case .llamaServer: return "llama-layout-guard-v6"
         case .premium: return "premium-deepseek-cache-v11"
+        case .codex: return "codex-app-server-v1"
         }
     }
 }

@@ -210,13 +210,16 @@ struct InputFieldView: View {
                             }
                         }
 
+                        codexProfileMenu
+
                         ForEach(chatStore.enabledRemoteModels) { model in
                             Button {
                                 chatStore.switchRemoteModel(to: model.id)
                             } label: {
                                 if chatStore.activeDynamicProfileID == nil,
                                    chatStore.activeRemoteModelID == model.id,
-                                   chatStore.activeBackend != .foundationApple {
+                                   chatStore.activeBackend != .foundationApple,
+                                   chatStore.activeBackend != .codex {
                                     Label(model.name, systemImage: "checkmark")
                                 } else {
                                     Text(model.name)
@@ -242,7 +245,8 @@ struct InputFieldView: View {
                         }
                     }
 
-                    if chatStore.activeModelSupportsReasoning {
+                    if chatStore.activeModelSupportsReasoning,
+                       chatStore.activeBackend != .codex {
                         Divider()
                         Section("Reasoning") {
                             ForEach(ReasoningEffort.allCases, id: \.self) { effort in
@@ -251,7 +255,10 @@ struct InputFieldView: View {
                                     chatStore.setReasoningEffort(effort)
                                 } label: {
                                     if reasoningEffort == effort {
-                                        Label(effort.rawValue, systemImage: "checkmark")
+                                        Label(
+                                            effort.rawValue,
+                                            systemImage: "checkmark"
+                                        )
                                     } else {
                                         Text(effort.rawValue)
                                     }
@@ -261,7 +268,9 @@ struct InputFieldView: View {
                     }
                 } label: {
                     if chatStore.activeModelSupportsReasoning {
-                        Text("\(chatStore.composerModel) · \(reasoningEffort.rawValue)")
+                        Text(
+                            "\(chatStore.composerModel) · \(activeReasoningLabel)"
+                        )
                     } else {
                         Text(chatStore.composerModel)
                     }
@@ -272,6 +281,92 @@ struct InputFieldView: View {
             }
         }
         .disabled(chatStore.busy)
+    }
+
+    /// Keeps the primary profile menu compact. Model and reasoning choices
+    /// appear only after the user opens Codex, following macOS progressive
+    /// disclosure instead of flattening every server-provided model.
+    private var codexProfileMenu: some View {
+        Menu {
+            Section("Model") {
+                if chatStore.codexModels.isEmpty {
+                    Button {
+                        Task { await chatStore.selectCodexProfile() }
+                    } label: {
+                        if chatStore.activeBackend == .codex {
+                            Label(
+                                chatStore.codexDisplayName,
+                                systemImage: "checkmark"
+                            )
+                        } else {
+                            Text("Luna")
+                        }
+                    }
+                    .help("Connect to Codex and load available models")
+                } else {
+                    ForEach(chatStore.codexModels) { model in
+                        Button {
+                            Task {
+                                await chatStore.selectCodexProfile(
+                                    modelID: model.id
+                                )
+                            }
+                        } label: {
+                            if chatStore.activeBackend == .codex,
+                               chatStore.codexModel?.id == model.id {
+                                Label(
+                                    model.displayName,
+                                    systemImage: "checkmark"
+                                )
+                            } else {
+                                Text(model.displayName)
+                            }
+                        }
+                        .help(model.description)
+                    }
+                }
+            }
+
+            if chatStore.activeBackend == .codex {
+                Divider()
+                Section("Reasoning") {
+                    ForEach(
+                        chatStore.codexReasoningOptions,
+                        id: \.reasoningEffort
+                    ) { option in
+                        Button {
+                            chatStore.setCodexReasoningEffort(
+                                option.reasoningEffort
+                            )
+                        } label: {
+                            if chatStore.codexReasoningEffort
+                                == option.reasoningEffort {
+                                Label(
+                                    option.reasoningEffort.displayName,
+                                    systemImage: "checkmark"
+                                )
+                            } else {
+                                Text(option.reasoningEffort.displayName)
+                            }
+                        }
+                        .help(option.description)
+                    }
+                }
+            }
+        } label: {
+            if chatStore.activeBackend == .codex {
+                Label("Codex", systemImage: "checkmark")
+            } else {
+                Text("Codex")
+            }
+        }
+    }
+
+    private var activeReasoningLabel: String {
+        if chatStore.activeBackend == .codex {
+            return chatStore.codexReasoningEffort.displayName
+        }
+        return reasoningEffort.rawValue
     }
 
     // MARK: - Send Button
@@ -297,9 +392,24 @@ struct InputFieldView: View {
         .buttonStyle(.borderedProminent)
         .controlSize(.regular)
         .clipShape(Circle())
-        .disabled(!chatStore.busy && (!viewModel.canSend || chatStore.isIncompleteSkillCommand(viewModel.messageText)))
+        .disabled(
+            !chatStore.busy
+                && (
+                    !viewModel.canSend
+                    || chatStore.isIncompleteSkillCommand(viewModel.messageText)
+                    || !chatStore.activeProfileCanSend
+                )
+        )
         .keyboardShortcut(.return, modifiers: [])
-        .help(chatStore.busy ? "Stop response" : "Send message")
+        .help(sendButtonHelp)
+    }
+
+    private var sendButtonHelp: String {
+        if chatStore.busy { return "Stop response" }
+        if !chatStore.activeProfileCanSend {
+            return "Wait for Codex to connect or sign in first"
+        }
+        return "Send message"
     }
 
     // MARK: - Bottom Info Bar
