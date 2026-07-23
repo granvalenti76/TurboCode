@@ -24,6 +24,9 @@ struct WorkspaceListingToolOutput {
     var totalCount: Int
     var isTruncated: Bool
     var errorMessage: String?
+    /// Optional model-only direction appended for runtimes that need help
+    /// continuing from a broad listing. Native presentation ignores it.
+    var modelGuidance: String?
 }
 
 /// Flat, read-only directory listing designed to be reliable for smaller models.
@@ -32,6 +35,12 @@ struct ListWorkspaceTool: Tool {
     typealias Output = WorkspaceListingToolOutput
 
     let workspaceRoot: String
+    let suggestsXcodeAnalysisTools: Bool
+
+    init(workspaceRoot: String, suggestsXcodeAnalysisTools: Bool = false) {
+        self.workspaceRoot = workspaceRoot
+        self.suggestsXcodeAnalysisTools = suggestsXcodeAnalysisTools
+    }
 
     var name: String { "list_workspace" }
     var description: String {
@@ -53,21 +62,23 @@ struct ListWorkspaceTool: Tool {
             let snapshot = try WorkspaceBrowsingService(workspaceRoot: workspaceRoot)
                 .listDirectory(at: arguments.path)
             let formatter = ISO8601DateFormatter()
+            let entries = snapshot.entries.map { entry in
+                WorkspaceListingToolEntry(
+                    name: entry.name,
+                    relativePath: entry.relativePath,
+                    kind: entry.kind.rawValue,
+                    sizeBytes: entry.sizeBytes,
+                    modifiedAt: entry.modifiedAt.map(formatter.string(from:)),
+                    fileExtension: entry.fileExtension
+                )
+            }
             return WorkspaceListingToolOutput(
                 path: snapshot.relativePath,
-                entries: snapshot.entries.map { entry in
-                    WorkspaceListingToolEntry(
-                        name: entry.name,
-                        relativePath: entry.relativePath,
-                        kind: entry.kind.rawValue,
-                        sizeBytes: entry.sizeBytes,
-                        modifiedAt: entry.modifiedAt.map(formatter.string(from:)),
-                        fileExtension: entry.fileExtension
-                    )
-                },
+                entries: entries,
                 totalCount: snapshot.totalCount,
                 isTruncated: snapshot.isTruncated,
-                errorMessage: nil
+                errorMessage: nil,
+                modelGuidance: xcodeAnalysisGuidance(for: entries)
             )
         } catch {
             return WorkspaceListingToolOutput(
@@ -75,8 +86,32 @@ struct ListWorkspaceTool: Tool {
                 entries: [],
                 totalCount: 0,
                 isTruncated: false,
-                errorMessage: error.localizedDescription
+                errorMessage: error.localizedDescription,
+                modelGuidance: nil
             )
         }
+    }
+
+    /// Llama benefits from an explicit next action after discovering an Xcode
+    /// container; other profiles retain the compact listing-only payload.
+    private func xcodeAnalysisGuidance(
+        for entries: [WorkspaceListingToolEntry]
+    ) -> String? {
+        guard suggestsXcodeAnalysisTools,
+              entries.contains(where: { entry in
+                  let extensionName = URL(fileURLWithPath: entry.name)
+                      .pathExtension
+                      .lowercased()
+                  return extensionName == "xcodeproj" || extensionName == "xcworkspace"
+              }) else { return nil }
+
+        return """
+        An Xcode project or workspace is present. Continue the requested analysis
+        without asking for confirmation. Use swift_workspace_map to orient around
+        Swift declarations, read_file for relevant source ranges, toggle_skill
+        with code-reader before grep when text search is needed, xcode_project for
+        project discovery/build/test information, and git for repository state or
+        changes. Call only the tools needed to complete the user's request.
+        """
     }
 }

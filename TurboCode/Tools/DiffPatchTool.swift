@@ -591,7 +591,11 @@ actor DiffPatchService {
         process.standardError = error
         do {
             try process.run()
-            try input.fileHandleForWriting.write(contentsOf: Data(patch.utf8))
+            // BSD patch treats a space as the end of an unquoted header path unless
+            // the path is terminated by a tab. Generated patches omit timestamps,
+            // so add that delimiter to keep workspace paths with spaces intact.
+            let nativePatch = patchWithDelimitedHeaderPaths(patch)
+            try input.fileHandleForWriting.write(contentsOf: Data(nativePatch.utf8))
             try input.fileHandleForWriting.close()
             process.waitUntilExit()
         } catch {
@@ -603,6 +607,14 @@ actor DiffPatchService {
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return (process.terminationStatus, detail)
+    }
+
+    private func patchWithDelimitedHeaderPaths(_ patch: String) -> String {
+        patch.components(separatedBy: .newlines).map { line in
+            guard (line.hasPrefix("--- ") || line.hasPrefix("+++ ")),
+                  !line.contains("\t") else { return line }
+            return line + "\t"
+        }.joined(separator: "\n")
     }
 
     private func runGitApply(
