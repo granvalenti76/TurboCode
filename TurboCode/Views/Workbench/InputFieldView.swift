@@ -210,15 +210,7 @@ struct InputFieldView: View {
                             }
                         }
 
-                        Button {
-                            Task { await chatStore.selectCodexProfile() }
-                        } label: {
-                            if chatStore.activeBackend == .codex {
-                                Label("Codex · Luna", systemImage: "checkmark")
-                            } else {
-                                Text("Codex · Luna")
-                            }
-                        }
+                        codexProfileMenu
 
                         ForEach(chatStore.enabledRemoteModels) { model in
                             Button {
@@ -253,45 +245,22 @@ struct InputFieldView: View {
                         }
                     }
 
-                    if chatStore.activeModelSupportsReasoning {
+                    if chatStore.activeModelSupportsReasoning,
+                       chatStore.activeBackend != .codex {
                         Divider()
                         Section("Reasoning") {
-                            if chatStore.activeBackend == .codex {
-                                ForEach(
-                                    chatStore.codexReasoningOptions,
-                                    id: \.reasoningEffort
-                                ) { option in
-                                    Button {
-                                        chatStore.setCodexReasoningEffort(
-                                            option.reasoningEffort
+                            ForEach(ReasoningEffort.allCases, id: \.self) { effort in
+                                Button {
+                                    reasoningEffort = effort
+                                    chatStore.setReasoningEffort(effort)
+                                } label: {
+                                    if reasoningEffort == effort {
+                                        Label(
+                                            effort.rawValue,
+                                            systemImage: "checkmark"
                                         )
-                                    } label: {
-                                        if chatStore.codexReasoningEffort
-                                            == option.reasoningEffort {
-                                            Label(
-                                                option.reasoningEffort.displayName,
-                                                systemImage: "checkmark"
-                                            )
-                                        } else {
-                                            Text(option.reasoningEffort.displayName)
-                                        }
-                                    }
-                                    .help(option.description)
-                                }
-                            } else {
-                                ForEach(ReasoningEffort.allCases, id: \.self) { effort in
-                                    Button {
-                                        reasoningEffort = effort
-                                        chatStore.setReasoningEffort(effort)
-                                    } label: {
-                                        if reasoningEffort == effort {
-                                            Label(
-                                                effort.rawValue,
-                                                systemImage: "checkmark"
-                                            )
-                                        } else {
-                                            Text(effort.rawValue)
-                                        }
+                                    } else {
+                                        Text(effort.rawValue)
                                     }
                                 }
                             }
@@ -312,6 +281,85 @@ struct InputFieldView: View {
             }
         }
         .disabled(chatStore.busy)
+    }
+
+    /// Keeps the primary profile menu compact. Model and reasoning choices
+    /// appear only after the user opens Codex, following macOS progressive
+    /// disclosure instead of flattening every server-provided model.
+    private var codexProfileMenu: some View {
+        Menu {
+            Section("Model") {
+                if chatStore.codexModels.isEmpty {
+                    Button {
+                        Task { await chatStore.selectCodexProfile() }
+                    } label: {
+                        if chatStore.activeBackend == .codex {
+                            Label(
+                                chatStore.codexDisplayName,
+                                systemImage: "checkmark"
+                            )
+                        } else {
+                            Text("Luna")
+                        }
+                    }
+                    .help("Connect to Codex and load available models")
+                } else {
+                    ForEach(chatStore.codexModels) { model in
+                        Button {
+                            Task {
+                                await chatStore.selectCodexProfile(
+                                    modelID: model.id
+                                )
+                            }
+                        } label: {
+                            if chatStore.activeBackend == .codex,
+                               chatStore.codexModel?.id == model.id {
+                                Label(
+                                    model.displayName,
+                                    systemImage: "checkmark"
+                                )
+                            } else {
+                                Text(model.displayName)
+                            }
+                        }
+                        .help(model.description)
+                    }
+                }
+            }
+
+            if chatStore.activeBackend == .codex {
+                Divider()
+                Section("Reasoning") {
+                    ForEach(
+                        chatStore.codexReasoningOptions,
+                        id: \.reasoningEffort
+                    ) { option in
+                        Button {
+                            chatStore.setCodexReasoningEffort(
+                                option.reasoningEffort
+                            )
+                        } label: {
+                            if chatStore.codexReasoningEffort
+                                == option.reasoningEffort {
+                                Label(
+                                    option.reasoningEffort.displayName,
+                                    systemImage: "checkmark"
+                                )
+                            } else {
+                                Text(option.reasoningEffort.displayName)
+                            }
+                        }
+                        .help(option.description)
+                    }
+                }
+            }
+        } label: {
+            if chatStore.activeBackend == .codex {
+                Label("Codex", systemImage: "checkmark")
+            } else {
+                Text("Codex")
+            }
+        }
     }
 
     private var activeReasoningLabel: String {

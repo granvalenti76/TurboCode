@@ -16,6 +16,16 @@ public enum ModelBackend: String, CaseIterable, Sendable {
     case codex = "Codex"
 }
 
+/// Captures a menu choice while the asynchronous Codex handoff completes.
+/// Storing identifiers rather than closures keeps the transition isolated to
+/// ChatStore's main actor.
+private enum TurboCodeProfileSelection {
+    case backend(ModelBackend)
+    case remoteModel(String)
+    case builtIn(ProfileBaseModelID)
+    case dynamic(UUID)
+}
+
 // MARK: - Central ChatStore
 
 @MainActor
@@ -135,6 +145,10 @@ public final class ChatStore {
 
     var codexConnectionState: CodexConnectionState = .idle
     var codexModel: CodexModelDescriptor?
+    var codexModels: [CodexModelDescriptor] = []
+    private var preferredCodexModelID: String =
+        UserDefaults.standard.string(forKey: "codexModelID")
+            ?? CodexAppServerClient.lunaModelID
     var codexLoginURL: URL?
     var codexReasoningEffort: CodexReasoningEffort =
         UserDefaults.standard.string(forKey: "codexReasoningEffort")
@@ -146,6 +160,12 @@ public final class ChatStore {
             ?? CodexReasoningEffort.allCases.map {
                 CodexReasoningOption(reasoningEffort: $0, description: "")
             }
+    }
+
+    var codexDisplayName: String {
+        codexModel?.displayName
+            ?? UserDefaults.standard.string(forKey: "codexModelDisplayName")
+            ?? "Luna"
     }
 
     var activeProfileCanSend: Bool {
@@ -306,8 +326,23 @@ public final class ChatStore {
     /// PCC, DeepSeek and the Apple on-device model.
     @ObservationIgnored private let codexClient = CodexAppServerClient()
     @ObservationIgnored private var codexThreadIDs: [String: String] = [:]
+    /// App Server reports both cumulative traffic and the current context
+    /// footprint. Handoff decisions use the latter to avoid double-counting
+    /// the repeated input prefix across turns.
+    @ObservationIgnored private var codexTokenUsageByThread: [
+        String: CodexTokenUsage
+    ] = [:]
+    /// Context imported from TurboCode remains turn-scoped application data,
+    /// so it never masquerades as a user-authored Codex message.
+    @ObservationIgnored private var codexImportedContexts: [String: String] = [:]
+    /// The boundary prevents a later return to Codex from re-importing the
+    /// portion of the timeline that its own thread already knows.
+    @ObservationIgnored private var codexHandoffBoundaryBlockIDs: [
+        String: String
+    ] = [:]
     /// Bridges Codex JSON-RPC approvals to the same review UI used by native
-    /// TurboCode tools without registering a fake FoundationModels action.
+    /// TurboCode tools. Dynamic tools are registered with App Server separately
+    /// and execute the concrete TurboCode implementations.
     @ObservationIgnored private var codexApprovals: [
         String: CodexApprovalRequest
     ] = [:]
@@ -405,6 +440,10 @@ public final class ChatStore {
             Task { await selectCodexProfile() }
             return
         }
+        if activeBackend == .codex {
+            beginCodexHandoff(to: .backend(backend))
+            return
+        }
         clearDynamicProfileSelection()
         if backend == .foundationApple {
             activeBackend = .foundationApple
@@ -423,6 +462,10 @@ public final class ChatStore {
         guard !busy, orchestratorMode == .standalone,
               let model = remoteModels.first(where: { $0.id == id && $0.enabled }),
               isConfigured(model) else { return }
+        if activeBackend == .codex {
+            beginCodexHandoff(to: .remoteModel(id))
+            return
+        }
         clearDynamicProfileSelection()
         selectRemoteModel(model)
         rebuildSession(discardingCapabilityContext: true)
@@ -431,11 +474,28 @@ public final class ChatStore {
     /// Selects Codex immediately, then verifies ChatGPT authentication and
     /// Luna availability in the background. Connection failure is a runtime
     /// state, not a reason to silently revert the user's menu selection.
-    func selectCodexProfile() async {
+    func selectCodexProfile(modelID: String? = nil) async {
         guard !busy, orchestratorMode == .standalone else { return }
+        if let modelID {
+            preferredCodexModelID = modelID
+            UserDefaults.standard.set(modelID, forKey: "codexModelID")
+        }
+        let isEnteringFromTurboCode = activeBackend != .codex
+        if isEnteringFromTurboCode, let turboThreadID = activeThreadId {
+            // Import only turns created since Codex last handed control back.
+            // On the first switch the absent boundary intentionally selects
+            // the entire useful visible conversation.
+            let context = RuntimeContextHandoff.render(
+                blocks: blocks,
+                after: codexHandoffBoundaryBlockIDs[turboThreadID]
+            )
+            if !context.isEmpty {
+                codexImportedContexts[turboThreadID] = context
+            }
+        }
         clearDynamicProfileSelection()
         activeBackend = .codex
-        composerModel = "Codex · Luna"
+        composerModel = "Codex · \(codexDisplayName)"
         codexConnectionState = .connecting
         error = nil
 
@@ -494,12 +554,25 @@ public final class ChatStore {
     }
 
     private func connectCodexProfile() async throws {
-        let snapshot = try await codexClient.prepareLuna()
-        codexModel = snapshot.luna
-        if !snapshot.luna.supportedReasoningEfforts.contains(where: {
+        let snapshot = try await codexClient.prepareCodex(
+            selectedModelID: preferredCodexModelID
+        )
+        codexModels = snapshot.models
+        codexModel = snapshot.selectedModel
+        preferredCodexModelID = snapshot.selectedModel.id
+        UserDefaults.standard.set(
+            snapshot.selectedModel.id,
+            forKey: "codexModelID"
+        )
+        UserDefaults.standard.set(
+            snapshot.selectedModel.displayName,
+            forKey: "codexModelDisplayName"
+        )
+        composerModel = "Codex · \(snapshot.selectedModel.displayName)"
+        if !snapshot.selectedModel.supportedReasoningEfforts.contains(where: {
             $0.reasoningEffort == codexReasoningEffort
         }) {
-            codexReasoningEffort = snapshot.luna.defaultReasoningEffort
+            codexReasoningEffort = snapshot.selectedModel.defaultReasoningEffort
             UserDefaults.standard.set(
                 codexReasoningEffort.rawValue,
                 forKey: "codexReasoningEffort"
@@ -511,6 +584,10 @@ public final class ChatStore {
 
     func selectBuiltInProfile(_ id: ProfileBaseModelID) {
         guard !busy, orchestratorMode == .standalone else { return }
+        if activeBackend == .codex {
+            beginCodexHandoff(to: .builtIn(id))
+            return
+        }
         clearDynamicProfileSelection()
         guard applyBaseModel(id) else { return }
         rebuildSession(discardingCapabilityContext: true)
@@ -518,12 +595,122 @@ public final class ChatStore {
 
     func selectDynamicProfile(_ id: UUID) {
         guard !busy, orchestratorMode == .standalone,
-              let profile = dynamicProfiles.first(where: { $0.id == id }),
-              applyBaseModel(profile.baseModelID) else { return }
+              let profile = dynamicProfiles.first(where: { $0.id == id }) else {
+            return
+        }
+        if activeBackend == .codex {
+            beginCodexHandoff(to: .dynamic(id))
+            return
+        }
+        guard applyBaseModel(profile.baseModelID) else { return }
         activeDynamicProfileID = profile.id
         UserDefaults.standard.set(profile.id.uuidString, forKey: "activeDynamicProfileID")
         composerModel = profile.name
         rebuildSession(discardingCapabilityContext: true)
+    }
+
+    /// Freezes profile selection while Codex prepares any required compact
+    /// context. The destination session is installed only after the handoff is
+    /// ready, preventing a half-switched UI/runtime state.
+    private func beginCodexHandoff(to selection: TurboCodeProfileSelection) {
+        guard !busy, activeBackend == .codex else { return }
+        busy = true
+        Task {
+            await completeCodexHandoff(to: selection)
+            busy = false
+        }
+    }
+
+    private func completeCodexHandoff(
+        to selection: TurboCodeProfileSelection
+    ) async {
+        guard let turboThreadID = activeThreadId else {
+            _ = applyTurboCodeSelection(selection)
+            rebuildSession(discardingCapabilityContext: true)
+            return
+        }
+
+        let usage = codexTokenUsageByThread[turboThreadID]
+        let history: [Transcript.Entry]
+        var didSummarize = false
+        if RuntimeContextHandoff.shouldSummarizeCodexContext(
+            lastTotalTokens: usage?.lastTotalTokens
+        ), let summary = try? await requestCodexHandoffSummary(
+            turboThreadID: turboThreadID
+        ), !summary.isEmpty {
+            history = RuntimeContextHandoff.transcript(fromSummary: summary)
+            didSummarize = true
+        } else if RuntimeContextHandoff.shouldSummarizeCodexContext(
+            lastTotalTokens: usage?.lastTotalTokens
+        ) {
+            // A summary failure must not trap the user in Codex. Keep a bounded
+            // recent slice as a deterministic, reviewable fallback.
+            let fallback = RuntimeContextHandoff.render(
+                blocks: blocks,
+                maximumCharacters: 24_000
+            )
+            history = RuntimeContextHandoff.transcript(fromSummary: fallback)
+        } else {
+            history = RuntimeContextHandoff.transcript(from: blocks)
+        }
+
+        guard applyTurboCodeSelection(selection) else { return }
+        if didSummarize {
+            blocks.append(
+                ChatBlock(
+                    kind: .compaction,
+                    text: "Codex context summarized for the selected TurboCode profile."
+                )
+            )
+        }
+        codexHandoffBoundaryBlockIDs[turboThreadID] = blocks.last?.id
+        codexImportedContexts.removeValue(forKey: turboThreadID)
+        rebuildSession(
+            keepingHistory: false,
+            discardingCapabilityContext: true,
+            restoringHistory: history
+        )
+    }
+
+    /// Applies a captured menu choice without rebuilding. This is separated
+    /// from the public selectors so a Codex handoff can inject one precise
+    /// transcript into the newly configured FoundationModels session.
+    private func applyTurboCodeSelection(
+        _ selection: TurboCodeProfileSelection
+    ) -> Bool {
+        clearDynamicProfileSelection()
+        switch selection {
+        case .backend(let backend):
+            if backend == .foundationApple {
+                activeBackend = .foundationApple
+                composerModel = backend.rawValue
+                return true
+            }
+            guard let model = remoteModels.first(where: {
+                $0.enabled && isConfigured($0)
+                    && Self.backend(for: $0.role) == backend
+            }) else { return false }
+            selectRemoteModel(model)
+            return true
+        case .remoteModel(let id):
+            guard let model = remoteModels.first(where: {
+                $0.id == id && $0.enabled && isConfigured($0)
+            }) else { return false }
+            selectRemoteModel(model)
+            return true
+        case .builtIn(let id):
+            return applyBaseModel(id)
+        case .dynamic(let id):
+            guard let profile = dynamicProfiles.first(where: { $0.id == id }),
+                  applyBaseModel(profile.baseModelID) else { return false }
+            activeDynamicProfileID = profile.id
+            UserDefaults.standard.set(
+                profile.id.uuidString,
+                forKey: "activeDynamicProfileID"
+            )
+            composerModel = profile.name
+            return true
+        }
     }
 
     func reloadDynamicProfiles(selecting id: UUID? = nil) {
@@ -891,7 +1078,16 @@ public final class ChatStore {
         clearDynamicProfileSelection()
         if identifier == ModelBackend.codex.rawValue {
             activeBackend = .codex
-            composerModel = "Codex · Luna"
+            composerModel = "Codex · \(codexDisplayName)"
+            if let turboThreadID = activeThreadId {
+                // Codex thread identifiers are process-local. A restored
+                // TurboCode session therefore initializes its fresh App Server
+                // thread from the persisted visible timeline.
+                let context = RuntimeContextHandoff.render(blocks: blocks)
+                if !context.isEmpty {
+                    codexImportedContexts[turboThreadID] = context
+                }
+            }
             Task { await selectCodexProfile() }
             return
         }
@@ -1229,6 +1425,7 @@ public final class ChatStore {
         activeAssistantPlaceholderID = placeholderID
         liveAssistant = ""
         liveReasoning = ""
+        activeWorkspaceListingPresentations.removeAll()
         error = nil
 
         guard let turboThreadID = activeThreadId else {
@@ -1239,16 +1436,27 @@ public final class ChatStore {
         var assistantText = ""
         var reasoningText = ""
         do {
-            let snapshot = try await codexClient.prepareLuna()
-            codexModel = snapshot.luna
+            let snapshot = try await codexClient.prepareCodex(
+                selectedModelID: preferredCodexModelID
+            )
+            codexModels = snapshot.models
+            codexModel = snapshot.selectedModel
+            preferredCodexModelID = snapshot.selectedModel.id
+            composerModel = "Codex · \(snapshot.selectedModel.displayName)"
             codexConnectionState = .ready(planType: snapshot.planType)
 
             let codexThreadID: String
             if let existing = codexThreadIDs[turboThreadID] {
                 codexThreadID = existing
             } else {
+                let dynamicTools = CodexTurboCodeToolBridge.specifications(
+                    workspaceRoot: workspaceRoot,
+                    agentTuning: agentTuning
+                )
                 codexThreadID = try await codexClient.startThread(
-                    workspaceRoot: workspaceRoot
+                    workspaceRoot: workspaceRoot,
+                    modelID: snapshot.selectedModel.model,
+                    dynamicTools: dynamicTools
                 )
                 codexThreadIDs[turboThreadID] = codexThreadID
             }
@@ -1257,7 +1465,9 @@ public final class ChatStore {
                 threadID: codexThreadID,
                 text: promptText,
                 workspaceRoot: workspaceRoot,
-                effort: codexReasoningEffort
+                modelID: snapshot.selectedModel.model,
+                effort: codexReasoningEffort,
+                additionalApplicationContext: codexImportedContexts[turboThreadID]
             )
             for try await event in stream {
                 try Task.checkCancellation()
@@ -1269,9 +1479,38 @@ public final class ChatStore {
                     reasoningText += delta
                     liveReasoning = reasoningText
                 case .diffUpdated:
-                    // `turn/diff/updated` is already semantic. The next layer
-                    // converts it into TurboCode's native edit receipt.
+                    // Supported edits are directed through apply_edits so the
+                    // existing Review/Undo transaction remains authoritative.
                     break
+                case .toolCallRequested(let call):
+                    toolActivities.removeAll { $0.id == call.callID }
+                    toolActivities.append(
+                        ToolActivity(
+                            id: call.callID,
+                            summary: CodexTurboCodeToolBridge.activitySummary(
+                                for: call.tool
+                            )
+                        )
+                    )
+                    let result: CodexDynamicToolResult
+                    do {
+                        let execution = try await CodexTurboCodeToolBridge.execute(
+                            call,
+                            workspaceRoot: workspaceRoot,
+                            workspaceName: workspaceRoot.isEmpty
+                                ? nil
+                                : workspaceLabel,
+                            agentTuning: agentTuning
+                        )
+                        if let presentation = execution.presentation {
+                            presentCodexToolPresentation(presentation)
+                        }
+                        result = execution.result
+                    } catch {
+                        result = .failure(error.localizedDescription)
+                    }
+                    toolActivities.removeAll { $0.id == call.callID }
+                    try await codexClient.resolveToolCall(call, result: result)
                 case .approvalRequested(let request):
                     codexApprovals[request.presentationID] = request
                     presentApproval(
@@ -1282,6 +1521,8 @@ public final class ChatStore {
                             summary: request.summary
                         )
                     )
+                case .tokenUsageUpdated(let usage):
+                    codexTokenUsageByThread[turboThreadID] = usage
                 case .completed(let status, let errorMessage):
                     if status == "failed" {
                         throw CodexAppServerError.invalidResponse(
@@ -1360,6 +1601,8 @@ public final class ChatStore {
 
         liveAssistant = ""
         liveReasoning = ""
+        toolActivities.removeAll()
+        activeWorkspaceListingPresentations.removeAll()
         if activeAssistantPlaceholderID == placeholderID {
             activeAssistantPlaceholderID = nil
         }
@@ -1367,6 +1610,73 @@ public final class ChatStore {
             await titleTask.value
         }
         await persistSession(for: turboThreadID)
+    }
+
+    /// Uses Codex itself to compact a large Codex-owned thread. This hidden
+    /// maintenance turn cannot mutate the workspace: tool calls fail visibly
+    /// to the model and approval requests are denied before it can continue.
+    private func requestCodexHandoffSummary(
+        turboThreadID: String
+    ) async throws -> String {
+        guard let codexThreadID = codexThreadIDs[turboThreadID] else {
+            throw CodexAppServerError.invalidResponse(
+                "missing Codex thread for context handoff"
+            )
+        }
+        let prompt = """
+        Prepare a compact technical handoff for another coding model. Do not \
+        call tools and do not continue the task. Include: the user's objective, \
+        decisions and constraints, files changed or inspected, completed \
+        validations, current repository/runtime state, unresolved issues, and \
+        the exact next useful action. Preserve concrete paths, identifiers, and \
+        errors. Omit private reasoning and conversational filler.
+        """
+        let stream = try await codexClient.startTurn(
+            threadID: codexThreadID,
+            text: prompt,
+            workspaceRoot: workspaceRoot,
+            modelID: codexModel?.model ?? preferredCodexModelID,
+            effort: .low
+        )
+        var summary = ""
+        for try await event in stream {
+            switch event {
+            case .agentDelta(let delta):
+                summary += delta
+            case .toolCallRequested(let call):
+                try await codexClient.resolveToolCall(
+                    call,
+                    result: .failure(
+                        "Tools are disabled while preparing a runtime handoff."
+                    )
+                )
+            case .approvalRequested(let request):
+                try await codexClient.resolveApproval(request, approved: false)
+            case .tokenUsageUpdated(let usage):
+                codexTokenUsageByThread[turboThreadID] = usage
+            case .completed(let status, let errorMessage):
+                if status == "failed" {
+                    throw CodexAppServerError.invalidResponse(
+                        errorMessage ?? "Codex context summary failed."
+                    )
+                }
+            case .reasoningDelta, .diffUpdated:
+                break
+            }
+        }
+        return summary.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Inserts a Codex-requested TurboCode receipt before the active assistant
+    /// placeholder, matching the ordering used by FoundationModels tool calls.
+    private func presentCodexToolPresentation(
+        _ presentation: CodexToolPresentation
+    ) {
+        switch presentation {
+        case .workspaceListing(let listing):
+            activeWorkspaceListingPresentations.append(listing)
+            presentToolPresentation(.workspaceListing(listing))
+        }
     }
 
     private func performSendMessage(

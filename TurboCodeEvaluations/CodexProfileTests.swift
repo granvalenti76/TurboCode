@@ -80,6 +80,80 @@ struct CodexProfileTests {
         #expect(CodexReasoningEffort.ultra.displayName == "Ultra")
     }
 
+    @Test("Codex context threshold uses latest usage rather than cumulative traffic")
+    func codexContextThresholdUsesLatestUsage() {
+        let usage = CodexAppServerClient.tokenUsage(
+            from: .object([
+                "tokenUsage": .object([
+                    "last": .object(["totalTokens": .integer(9_800)]),
+                    "total": .object(["totalTokens": .integer(48_000)]),
+                    "modelContextWindow": .integer(114_688)
+                ])
+            ])
+        )
+
+        #expect(usage?.lastTotalTokens == 9_800)
+        #expect(usage?.cumulativeTotalTokens == 48_000)
+        #expect(usage?.modelContextWindow == 114_688)
+        #expect(
+            !RuntimeContextHandoff.shouldSummarizeCodexContext(
+                lastTotalTokens: usage?.lastTotalTokens
+            )
+        )
+        #expect(
+            RuntimeContextHandoff.shouldSummarizeCodexContext(
+                lastTotalTokens: 10_001
+            )
+        )
+    }
+
+    @Test("Runtime handoff excludes reasoning and retains widget outcomes")
+    @MainActor
+    func runtimeHandoffFiltersPresentationNoise() {
+        let listing = WorkspaceListingBlock(
+            toolCallID: "call-1",
+            path: ".",
+            entries: [
+                WorkspaceListingEntry(
+                    name: "App.swift",
+                    relativePath: "TurboCode/App.swift",
+                    kind: .file,
+                    sizeBytes: 128,
+                    modifiedAt: nil,
+                    fileExtension: "swift"
+                )
+            ],
+            totalCount: 1,
+            isTruncated: false,
+            errorMessage: nil
+        )
+        let boundary = ChatBlock(
+            id: "boundary",
+            kind: .assistant,
+            text: "Already known by Codex"
+        )
+        let blocks = [
+            boundary,
+            ChatBlock(kind: .reasoning, text: "private chain of thought"),
+            ChatBlock(kind: .user, text: "Inspect the project"),
+            ChatBlock(
+                kind: .workspaceListing,
+                text: "",
+                workspaceListing: listing
+            )
+        ]
+
+        let rendered = RuntimeContextHandoff.render(
+            blocks: blocks,
+            after: boundary.id
+        )
+
+        #expect(!rendered.contains("Already known"))
+        #expect(!rendered.contains("private chain"))
+        #expect(rendered.contains("USER:\nInspect the project"))
+        #expect(rendered.contains("TurboCode/App.swift"))
+    }
+
     @Test("Catalog decoding accepts reasoning levels used by other models")
     func catalogDecodingAcceptsOtherModelReasoningLevels() throws {
         let data = Data(
@@ -119,6 +193,51 @@ struct CodexProfileTests {
 
         #expect(catalog.data.count == 2)
         #expect(catalog.data.last?.id == CodexAppServerClient.lunaModelID)
+    }
+
+    @Test("Codex catalog honors selection and keeps deterministic fallbacks")
+    func codexCatalogSelectionUsesPreferredThenLunaThenFirst() throws {
+        let options = [
+            CodexReasoningOption(
+                reasoningEffort: .medium,
+                description: "Balanced"
+            )
+        ]
+        let sol = CodexModelDescriptor(
+            id: "gpt-5.6-sol",
+            model: "gpt-5.6-sol",
+            displayName: "Sol",
+            description: "Frontier",
+            supportedReasoningEfforts: options,
+            defaultReasoningEffort: .medium
+        )
+        let luna = CodexModelDescriptor(
+            id: CodexAppServerClient.lunaModelID,
+            model: CodexAppServerClient.lunaModelID,
+            displayName: "Luna",
+            description: "Efficient",
+            supportedReasoningEfforts: options,
+            defaultReasoningEffort: .medium
+        )
+
+        #expect(
+            CodexAppServerClient.selectModel(
+                from: [sol, luna],
+                preferredID: sol.id
+            )?.id == sol.id
+        )
+        #expect(
+            CodexAppServerClient.selectModel(
+                from: [sol, luna],
+                preferredID: "unavailable"
+            )?.id == luna.id
+        )
+        #expect(
+            CodexAppServerClient.selectModel(
+                from: [sol],
+                preferredID: nil
+            )?.id == sol.id
+        )
     }
 
     @Test("App Server pipe chunks preserve partial JSONL records")
@@ -191,5 +310,78 @@ struct CodexProfileTests {
                 "scope": .string("turn")
             ])
         )
+    }
+
+    @Test("Codex dynamic tool request retains structured arguments")
+    func dynamicToolRequestRetainsStructuredArguments() {
+        let request = CodexAppServerClient.dynamicToolCall(
+            id: .integer(41),
+            params: .object([
+                "callId": .string("call-7"),
+                "threadId": .string("thread-1"),
+                "turnId": .string("turn-1"),
+                "tool": .string("list_workspace"),
+                "arguments": .object(["path": .string("TurboCode")])
+            ])
+        )
+
+        #expect(request?.rpcID == .integer(41))
+        #expect(request?.callID == "call-7")
+        #expect(request?.tool == "list_workspace")
+        #expect(request?.arguments["path"]?.stringValue == "TurboCode")
+    }
+
+    @Test("Codex exposes the TurboCode tools with native presentations")
+    func codexExposesNativePresentationTools() {
+        let specs = CodexTurboCodeToolBridge.specifications(
+            workspaceRoot: "/workspace",
+            agentTuning: .default
+        )
+        let names = Set(specs.map(\.name))
+
+        #expect(names.contains("list_workspace"))
+        #expect(names.contains("apply_edits"))
+        #expect(names.contains("git"))
+        #expect(
+            specs.allSatisfy {
+                $0.inputSchema["type"]?.stringValue == "object"
+            }
+        )
+    }
+
+    @Test("Codex list workspace calls the native listing pipeline")
+    func codexListWorkspaceCallsNativeListingPipeline() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("hello".utf8).write(
+            to: root.appendingPathComponent("Example.txt")
+        )
+        let call = CodexDynamicToolCall(
+            rpcID: .integer(9),
+            callID: "call-9",
+            tool: "list_workspace",
+            arguments: .object(["path": .string(".")])
+        )
+
+        let execution = try await CodexTurboCodeToolBridge.execute(
+            call,
+            workspaceRoot: root.path,
+            workspaceName: "Fixture",
+            agentTuning: .default
+        )
+
+        #expect(execution.result.succeeded)
+        guard case .workspaceListing(let listing) = execution.presentation else {
+            Issue.record("Expected a workspace listing presentation")
+            return
+        }
+        #expect(listing.toolCallID == "call-9")
+        #expect(listing.entries.map(\.name) == ["Example.txt"])
+        #expect(listing.workspaceName == "Fixture")
     }
 }

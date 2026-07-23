@@ -40,7 +40,8 @@ nonisolated struct CodexModelDescriptor: Codable, Sendable, Hashable, Identifiab
 nonisolated struct CodexRuntimeSnapshot: Sendable, Hashable {
     let accountEmail: String?
     let planType: String?
-    let luna: CodexModelDescriptor
+    let models: [CodexModelDescriptor]
+    let selectedModel: CodexModelDescriptor
 }
 
 nonisolated enum CodexConnectionState: Sendable, Equatable {
@@ -61,8 +62,19 @@ nonisolated enum CodexTurnEvent: Sendable, Equatable {
     case agentDelta(String)
     case reasoningDelta(String)
     case diffUpdated(String)
+    case toolCallRequested(CodexDynamicToolCall)
     case approvalRequested(CodexApprovalRequest)
+    case tokenUsageUpdated(CodexTokenUsage)
     case completed(status: String, errorMessage: String?)
+}
+
+/// App Server reports both the latest turn's context consumption and a
+/// cumulative total. Handoff compaction uses `lastTotalTokens`: cumulative
+/// usage counts repeated context across turns and is not the current size.
+nonisolated struct CodexTokenUsage: Sendable, Equatable {
+    let lastTotalTokens: Int
+    let cumulativeTotalTokens: Int
+    let modelContextWindow: Int?
 }
 
 /// A server-initiated approval request. The protocol-specific response bodies
@@ -89,7 +101,7 @@ nonisolated enum CodexAppServerError: LocalizedError, Sendable {
     case requestTimedOut(method: String, serverDetail: String?)
     case chatGPTLoginRequired
     case loginFailed(String)
-    case lunaUnavailable
+    case modelUnavailable
     case turnAlreadyRunning
 
     var errorDescription: String? {
@@ -113,8 +125,8 @@ nonisolated enum CodexAppServerError: LocalizedError, Sendable {
             "Sign in with ChatGPT through Codex before selecting this profile."
         case .loginFailed(let detail):
             "Codex sign-in failed: \(detail)"
-        case .lunaUnavailable:
-            "GPT-5.6 Luna is not available for the current ChatGPT account."
+        case .modelUnavailable:
+            "No Codex model is available for the current ChatGPT account."
         case .turnAlreadyRunning:
             "A Codex turn is already running."
         }
@@ -172,7 +184,12 @@ actor CodexAppServerClient {
         String: CheckedContinuation<Void, any Error>
     ] = [:]
 
-    func prepareLuna() async throws -> CodexRuntimeSnapshot {
+    /// Loads the account-scoped visible catalog and resolves a preferred model.
+    /// App Server ordering is preserved because it reflects the runtime's own
+    /// availability and recommendation policy.
+    func prepareCodex(
+        selectedModelID: String?
+    ) async throws -> CodexRuntimeSnapshot {
         try await connectIfNeeded()
 
         // Account inspection is deliberately not a profile-selection gate.
@@ -188,17 +205,34 @@ actor CodexAppServerClient {
             ]
         )
         let catalog: CodexModelListResult = try decode(modelResult)
-        guard let luna = catalog.data.first(where: {
-            $0.id == Self.lunaModelID || $0.model == Self.lunaModelID
-        }) else {
-            throw CodexAppServerError.lunaUnavailable
+        guard let selectedModel = Self.selectModel(
+            from: catalog.data,
+            preferredID: selectedModelID
+        ) else {
+            throw CodexAppServerError.modelUnavailable
         }
 
         return CodexRuntimeSnapshot(
             accountEmail: nil,
             planType: nil,
-            luna: luna
+            models: catalog.data,
+            selectedModel: selectedModel
         )
+    }
+
+    /// A saved account-specific choice wins; Luna remains the compatibility
+    /// default, and the server's first visible model is the final fallback.
+    nonisolated static func selectModel(
+        from models: [CodexModelDescriptor],
+        preferredID: String?
+    ) -> CodexModelDescriptor? {
+        preferredID.flatMap { requestedID in
+            models.first(where: {
+                $0.id == requestedID || $0.model == requestedID
+            })
+        } ?? models.first(where: {
+            $0.id == Self.lunaModelID || $0.model == Self.lunaModelID
+        }) ?? models.first
     }
 
     /// Starts the App Server managed ChatGPT OAuth flow. TurboCode opens the
@@ -240,17 +274,27 @@ actor CodexAppServerClient {
         }
     }
 
-    func startThread(workspaceRoot: String) async throws -> String {
+    func startThread(
+        workspaceRoot: String,
+        modelID: String,
+        dynamicTools: [CodexDynamicToolSpec]
+    ) async throws -> String {
         try await connectIfNeeded()
         var params: [String: CodexJSONValue] = [
-            "model": .string(Self.lunaModelID),
+            "model": .string(modelID),
             // Codex keeps its own agent loop, while the workspace-write sandbox
             // limits mutations to the project selected in TurboCode.
             "sandbox": .string(Self.workspaceSandbox),
             // Escalations are routed into TurboCode's native Allow/Deny banner;
             // they must never be silently accepted by the App Server client.
             "approvalPolicy": .string("on-request"),
-            "serviceName": .string("turbocode")
+            "serviceName": .string("turbocode"),
+            // Dynamic tools are sticky thread configuration. Codex selects
+            // them inside its native loop while TurboCode executes them.
+            "dynamicTools": .array(dynamicTools.map(\.jsonValue)),
+            "developerInstructions": .string(
+                CodexTurboCodeToolBridge.developerInstructions
+            )
         ]
         if !workspaceRoot.isEmpty {
             params["cwd"] = .string(workspaceRoot)
@@ -267,7 +311,9 @@ actor CodexAppServerClient {
         threadID: String,
         text: String,
         workspaceRoot: String,
-        effort: CodexReasoningEffort
+        modelID: String,
+        effort: CodexReasoningEffort,
+        additionalApplicationContext: String? = nil
     ) async throws -> AsyncThrowingStream<CodexTurnEvent, any Error> {
         guard activeTurnContinuation == nil else {
             throw CodexAppServerError.turnAlreadyRunning
@@ -292,12 +338,23 @@ actor CodexAppServerClient {
                     "text": .string(text)
                 ])
             ]),
-            "model": .string(Self.lunaModelID),
+            "model": .string(modelID),
             "effort": .string(effort.rawValue),
             "summary": .string("concise")
         ]
         if !workspaceRoot.isEmpty {
             params["cwd"] = .string(workspaceRoot)
+        }
+        if let additionalApplicationContext,
+           !additionalApplicationContext.isEmpty {
+            // Application context initializes a Codex turn without fabricating
+            // a user-authored message in the conversation.
+            params["additionalContext"] = .object([
+                "turbocode_session_handoff": .object([
+                    "kind": .string("application"),
+                    "value": .string(additionalApplicationContext)
+                ])
+            ])
         }
 
         do {
@@ -336,6 +393,29 @@ actor CodexAppServerClient {
                 "result": approved
                     ? request.acceptedResult
                     : request.declinedResult
+            ])
+        )
+    }
+
+    /// Returns client-side dynamic tool output to the exact App Server request
+    /// that paused the Codex loop. Failures are model-visible and still close
+    /// the request, preventing a malformed tool call from hanging the turn.
+    func resolveToolCall(
+        _ call: CodexDynamicToolCall,
+        result: CodexDynamicToolResult
+    ) throws {
+        try send(
+            .object([
+                "id": call.rpcID.jsonValue,
+                "result": .object([
+                    "contentItems": .array([
+                        .object([
+                            "type": .string("inputText"),
+                            "text": .string(result.text)
+                        ])
+                    ]),
+                    "success": .bool(result.succeeded)
+                ])
             ])
         )
     }
@@ -429,6 +509,12 @@ actor CodexAppServerClient {
                                 forInfoDictionaryKey: "CFBundleShortVersionString"
                             ) as? String ?? "0.1.0"
                         )
+                    ]),
+                    // App Server currently gates client-provided dynamic tools
+                    // behind this capability; opting in is explicit and local
+                    // to the TurboCode connection.
+                    "capabilities": .object([
+                        "experimentalApi": .bool(true)
                     ])
                 ]
             )
@@ -577,6 +663,12 @@ actor CodexAppServerClient {
         }
 
         if let id = message.id, let method = message.method {
+            if method == "item/tool/call",
+               let params = message.params,
+               let call = Self.dynamicToolCall(id: id, params: params) {
+                activeTurnContinuation?.yield(.toolCallRequested(call))
+                return
+            }
             guard let params = message.params,
                   let approval = Self.approvalRequest(
                       id: id,
@@ -636,6 +728,10 @@ actor CodexAppServerClient {
             if let diff = params["diff"]?.stringValue {
                 activeTurnContinuation?.yield(.diffUpdated(diff))
             }
+        case "thread/tokenUsage/updated":
+            if let usage = Self.tokenUsage(from: params) {
+                activeTurnContinuation?.yield(.tokenUsageUpdated(usage))
+            }
         case "turn/completed":
             let turn = params["turn"]
             let status = turn?["status"]?.stringValue ?? "completed"
@@ -660,6 +756,41 @@ actor CodexAppServerClient {
         default:
             break
         }
+    }
+
+    /// Decodes only the documented dynamic-tool request shape. Keeping the raw
+    /// arguments as a Sendable JSON tree lets the concrete TurboCode bridge
+    /// validate each schema without leaking `[String: Any]` across actors.
+    nonisolated static func dynamicToolCall(
+        id: CodexRPCID,
+        params: CodexJSONValue
+    ) -> CodexDynamicToolCall? {
+        guard let callID = params["callId"]?.stringValue,
+              let tool = params["tool"]?.stringValue,
+              let arguments = params["arguments"] else {
+            return nil
+        }
+        return CodexDynamicToolCall(
+            rpcID: id,
+            callID: callID,
+            tool: tool,
+            arguments: arguments
+        )
+    }
+
+    nonisolated static func tokenUsage(
+        from params: CodexJSONValue
+    ) -> CodexTokenUsage? {
+        guard let usage = params["tokenUsage"],
+              let last = usage["last"]?["totalTokens"]?.integerValue,
+              let cumulative = usage["total"]?["totalTokens"]?.integerValue else {
+            return nil
+        }
+        return CodexTokenUsage(
+            lastTotalTokens: last,
+            cumulativeTotalTokens: cumulative,
+            modelContextWindow: usage["modelContextWindow"]?.integerValue
+        )
     }
 
     private func failPendingRequestsForInvalidMessage(_ detail: String) {

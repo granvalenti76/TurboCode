@@ -363,8 +363,8 @@ enum ModelSessionFactory {
         remoteModel: RemoteModelConfig?
     ) -> ModelToolTier {
         if backend == .foundationApple { return .onDevice }
-        // Codex owns its tool catalog in App Server and must never receive a
-        // duplicate FoundationModels tool surface.
+        // Codex receives TurboCode tools through App Server dynamic tools and
+        // must never receive a duplicate FoundationModels session surface.
         if backend == .codex { return .none }
         return remoteModel?.repositoryMap == .enhanced ? .enhanced : .standard
     }
