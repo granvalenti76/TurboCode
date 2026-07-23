@@ -294,7 +294,12 @@ enum ModelSessionFactory {
             case .turboCodeGuide:
                 return TurboCodeGuideTool(store: .live)
             case .listWorkspace:
-                return ListWorkspaceTool(workspaceRoot: configuration.workspaceRoot)
+                return ListWorkspaceTool(
+                    workspaceRoot: configuration.workspaceRoot,
+                    // Only llama-server models need an explicit continuation
+                    // hint after discovering an Xcode container.
+                    suggestsXcodeAnalysisTools: configuration.backend == .llamaServer
+                )
             case .swiftWorkspaceMap:
                 return SwiftWorkspaceMapTool(
                     workspaceRoot: configuration.workspaceRoot,
@@ -400,10 +405,11 @@ enum ModelSessionFactory {
         You are NOT Apple's built-in assistant. Never refer to yourself as an Apple
         model or any Apple product. Your name is TurboCode.
         """
+        // Only the on-device model needs an explicit brevity guard. Remote
+        // models should choose formatting from the task instead of spending
+        // prompt budget on a blanket Markdown requirement.
         if configuration.backend == .foundationApple {
             text += "\nUse short plain-text responses. Use Markdown only when it materially improves readability; never emit empty code fences."
-        } else {
-            text += "\nAlways use Markdown formatting in your responses: **bold**, `code`, ```code blocks```, tables, etc."
         }
         text += "\nStructured tool results with a native TurboCode presentation are already visible to the user. Do not repeat, enumerate, or tabulate their contents in the assistant response. Add only a brief contextual sentence when useful, unless the user explicitly requests analysis of the result."
         if hasTool(.turboCodeGuide) {
