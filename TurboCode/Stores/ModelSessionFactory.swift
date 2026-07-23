@@ -363,6 +363,9 @@ enum ModelSessionFactory {
         remoteModel: RemoteModelConfig?
     ) -> ModelToolTier {
         if backend == .foundationApple { return .onDevice }
+        // Codex owns its tool catalog in App Server and must never receive a
+        // duplicate FoundationModels tool surface.
+        if backend == .codex { return .none }
         return remoteModel?.repositoryMap == .enhanced ? .enhanced : .standard
     }
 
@@ -376,6 +379,10 @@ enum ModelSessionFactory {
             providerModel(
                 for: configuration.activeRemoteModel ?? RemoteModelConfig.fallbackLlama
             )
+        case .codex:
+            // ChatStore dispatches Codex turns before this placeholder session
+            // is used. A concrete model is still required by the factory type.
+            SystemLanguageModel.default
         }
     }
 

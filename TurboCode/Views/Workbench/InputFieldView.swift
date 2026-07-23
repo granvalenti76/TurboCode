@@ -210,13 +210,24 @@ struct InputFieldView: View {
                             }
                         }
 
+                        Button {
+                            Task { await chatStore.selectCodexProfile() }
+                        } label: {
+                            if chatStore.activeBackend == .codex {
+                                Label("Codex · Luna", systemImage: "checkmark")
+                            } else {
+                                Text("Codex · Luna")
+                            }
+                        }
+
                         ForEach(chatStore.enabledRemoteModels) { model in
                             Button {
                                 chatStore.switchRemoteModel(to: model.id)
                             } label: {
                                 if chatStore.activeDynamicProfileID == nil,
                                    chatStore.activeRemoteModelID == model.id,
-                                   chatStore.activeBackend != .foundationApple {
+                                   chatStore.activeBackend != .foundationApple,
+                                   chatStore.activeBackend != .codex {
                                     Label(model.name, systemImage: "checkmark")
                                 } else {
                                     Text(model.name)
@@ -245,15 +256,42 @@ struct InputFieldView: View {
                     if chatStore.activeModelSupportsReasoning {
                         Divider()
                         Section("Reasoning") {
-                            ForEach(ReasoningEffort.allCases, id: \.self) { effort in
-                                Button {
-                                    reasoningEffort = effort
-                                    chatStore.setReasoningEffort(effort)
-                                } label: {
-                                    if reasoningEffort == effort {
-                                        Label(effort.rawValue, systemImage: "checkmark")
-                                    } else {
-                                        Text(effort.rawValue)
+                            if chatStore.activeBackend == .codex {
+                                ForEach(
+                                    chatStore.codexReasoningOptions,
+                                    id: \.reasoningEffort
+                                ) { option in
+                                    Button {
+                                        chatStore.setCodexReasoningEffort(
+                                            option.reasoningEffort
+                                        )
+                                    } label: {
+                                        if chatStore.codexReasoningEffort
+                                            == option.reasoningEffort {
+                                            Label(
+                                                option.reasoningEffort.displayName,
+                                                systemImage: "checkmark"
+                                            )
+                                        } else {
+                                            Text(option.reasoningEffort.displayName)
+                                        }
+                                    }
+                                    .help(option.description)
+                                }
+                            } else {
+                                ForEach(ReasoningEffort.allCases, id: \.self) { effort in
+                                    Button {
+                                        reasoningEffort = effort
+                                        chatStore.setReasoningEffort(effort)
+                                    } label: {
+                                        if reasoningEffort == effort {
+                                            Label(
+                                                effort.rawValue,
+                                                systemImage: "checkmark"
+                                            )
+                                        } else {
+                                            Text(effort.rawValue)
+                                        }
                                     }
                                 }
                             }
@@ -261,7 +299,9 @@ struct InputFieldView: View {
                     }
                 } label: {
                     if chatStore.activeModelSupportsReasoning {
-                        Text("\(chatStore.composerModel) · \(reasoningEffort.rawValue)")
+                        Text(
+                            "\(chatStore.composerModel) · \(activeReasoningLabel)"
+                        )
                     } else {
                         Text(chatStore.composerModel)
                     }
@@ -272,6 +312,13 @@ struct InputFieldView: View {
             }
         }
         .disabled(chatStore.busy)
+    }
+
+    private var activeReasoningLabel: String {
+        if chatStore.activeBackend == .codex {
+            return chatStore.codexReasoningEffort.displayName
+        }
+        return reasoningEffort.rawValue
     }
 
     // MARK: - Send Button
@@ -297,9 +344,24 @@ struct InputFieldView: View {
         .buttonStyle(.borderedProminent)
         .controlSize(.regular)
         .clipShape(Circle())
-        .disabled(!chatStore.busy && (!viewModel.canSend || chatStore.isIncompleteSkillCommand(viewModel.messageText)))
+        .disabled(
+            !chatStore.busy
+                && (
+                    !viewModel.canSend
+                    || chatStore.isIncompleteSkillCommand(viewModel.messageText)
+                    || !chatStore.activeProfileCanSend
+                )
+        )
         .keyboardShortcut(.return, modifiers: [])
-        .help(chatStore.busy ? "Stop response" : "Send message")
+        .help(sendButtonHelp)
+    }
+
+    private var sendButtonHelp: String {
+        if chatStore.busy { return "Stop response" }
+        if !chatStore.activeProfileCanSend {
+            return "Wait for Codex to connect or sign in first"
+        }
+        return "Send message"
     }
 
     // MARK: - Bottom Info Bar

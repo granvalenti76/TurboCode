@@ -1,16 +1,25 @@
 import Foundation
+import LocalAuthentication
 import Security
 
 enum CredentialStore {
     private static let service = Bundle.main.bundleIdentifier ?? "art.granvalenti.turbocode"
 
     static func value(for account: String) -> String? {
+        let authenticationContext = LAContext()
+        authenticationContext.interactionNotAllowed = true
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            // Credential availability is queried while constructing ChatStore
+            // and rendering the model menu. Those background checks must never
+            // summon a modal Keychain dialog and stall unrelated profiles such
+            // as Codex. A credential that needs renewed authorization is
+            // treated as unavailable until the user saves it again in Settings.
+            kSecUseAuthenticationContext as String: authenticationContext
         ]
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
