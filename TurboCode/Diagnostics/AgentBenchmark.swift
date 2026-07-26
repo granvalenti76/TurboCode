@@ -1,6 +1,5 @@
 import Foundation
 import FoundationModels
-import FoundationModelsUtilities
 
 #if DEBUG
 nonisolated struct AgentBenchmarkResult: Sendable {
@@ -34,12 +33,9 @@ nonisolated private struct BenchmarkVerificationError: LocalizedError, Sendable 
 }
 
 private struct AgentBenchmarkProfile: LanguageModelSession.DynamicProfile {
-    let kind: AgentBenchmarkKind
     let workspaceRoot: String
     let model: any LanguageModel
     let reasoningLevel: ContextOptions.ReasoningLevel?
-    let activations: SkillActivations
-    let usesAgentWorkflowSkills: Bool
     let onToolStart: @Sendable (Transcript.ToolCall) async -> Void
     let onToolEnd: @Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void
 
@@ -47,49 +43,15 @@ private struct AgentBenchmarkProfile: LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
             Instructions {
                 """
-                \(kind.profileInstructions) Complete the requested change with tools,
-                verify the build, and keep the final
+                You are running TurboCode's deterministic editing benchmark. Complete the
+                requested file change with tools. Read the target range immediately before
+                editing, copy its Revision exactly, perform the edit, and keep the final
                 response brief. Never emit unified diff text and never only describe the edit.
                 """
             }
-            if usesAgentWorkflowSkills {
-                // Read access precedes workflow selection so the benchmark also
-                // exercises the production observation/action phase boundary.
-                ReadFileTool(workspaceRoot: workspaceRoot)
-                if kind == .swiftPackage {
-                    AgentWorkflowSkills(
-                        activations: activations,
-                        tools: [
-                            BashTool(workspaceRoot: workspaceRoot),
-                            EditFileTool(workspaceRoot: workspaceRoot, reportsChanges: false)
-                        ]
-                    )
-                } else {
-                    AgentWorkflowSkills(
-                        activations: activations,
-                        tools: [
-                            EditFileTool(workspaceRoot: workspaceRoot, reportsChanges: false),
-                            XcodeProjectTool(
-                                workspaceRoot: workspaceRoot,
-                                executionPolicy: ExecutionPolicy(allowNetworkAccess: false),
-                                enhancedOutput: false
-                            )
-                        ]
-                    )
-                }
-            } else {
-                ReadFileTool(workspaceRoot: workspaceRoot)
-                EditFileTool(workspaceRoot: workspaceRoot, reportsChanges: false)
-                if kind == .swiftPackage {
-                    BashTool(workspaceRoot: workspaceRoot)
-                } else {
-                    XcodeProjectTool(
-                        workspaceRoot: workspaceRoot,
-                        executionPolicy: ExecutionPolicy(allowNetworkAccess: false),
-                        enhancedOutput: false
-                    )
-                }
-            }
+            ReadFileTool(workspaceRoot: workspaceRoot)
+            BashTool(workspaceRoot: workspaceRoot)
+            EditFileTool(workspaceRoot: workspaceRoot, reportsChanges: false)
         }
         .model(model)
         .reasoningLevel(reasoningLevel)
@@ -123,23 +85,27 @@ enum AgentBenchmarkRunner {
     static func run(
         backend: ModelBackend,
         model: any LanguageModel,
-        reasoningLevel: ContextOptions.ReasoningLevel?,
-        kind: AgentBenchmarkKind = .swiftPackage
+        reasoningLevel: ContextOptions.ReasoningLevel?
     ) async -> AgentBenchmarkResult {
         let startedAt = Date()
-        let prompt = kind.prompt
+        let prompt = """
+        In Sample.md, replace the Placeholder line with exactly two prose paragraphs.
+        The first paragraph must be "TurboCode edits quickly." and the second must be
+        "Paragraph breaks stay intact." Separate them with one blank line. Use the
+        editing tool and verify the file after the edit.
+        """
         let runID = await AgentDiagnosticsRecorder.shared.startRun(
             backend: backend,
             mode: .standalone,
             profileVersion: AgentProfileVersion.value(for: backend, mode: .standalone),
-            workspaceKind: kind.workspaceKind,
+            workspaceKind: "git",
             promptCharacters: prompt.count,
             source: "benchmark"
         )
 
         let workspace: URL
         do {
-            workspace = try AgentBenchmarkFixture.make(kind)
+            workspace = try makeFixture()
         } catch {
             if let runID {
                 await AgentDiagnosticsRecorder.shared.finishRun(
@@ -154,13 +120,9 @@ enum AgentBenchmarkRunner {
         defer { try? FileManager.default.removeItem(at: workspace) }
 
         let profile = AgentBenchmarkProfile(
-            kind: kind,
             workspaceRoot: workspace.path,
             model: model,
             reasoningLevel: reasoningLevel,
-            activations: SkillActivations(),
-            usesAgentWorkflowSkills:
-                backend == .llamaServer || backend == .foundationServe,
             onToolStart: { call in
                 guard let runID else { return }
                 await AgentDiagnosticsRecorder.shared.toolStarted(
@@ -193,51 +155,19 @@ enum AgentBenchmarkRunner {
                 }
             }
 
-            let fileURL = workspace.appendingPathComponent(kind.expectedFilePath)
+            let fileURL = workspace.appendingPathComponent("Sample.md")
             let content = try String(contentsOf: fileURL, encoding: .utf8)
-            let toolCalls = session.transcript.flatMap { entry -> [Transcript.ToolCall] in
-                guard case .toolCalls(let calls) = entry else { return [] }
-                return Array(calls)
-            }
-            let calledTools = Set(toolCalls.map(\.toolName))
-            guard content == kind.expectedContent else {
-                let renderedContent = content
-                    .replacingOccurrences(of: "\n", with: "\\n")
+            let expected = """
+            # Notes
+
+            TurboCode edits quickly.
+
+            Paragraph breaks stay intact.
+            """
+            guard content == expected else {
                 throw BenchmarkVerificationError(
-                    detail: """
-                    Benchmark verification failed: exact paragraph layout was not preserved. \
-                    Calls: \(calledTools.sorted().joined(separator: ", ")). \
-                    Actual: "\(renderedContent)"
-                    """
+                    detail: "Benchmark verification failed: exact paragraph layout was not preserved."
                 )
-            }
-            var requiredTools = kind.requiredToolNames
-            if profile.usesAgentWorkflowSkills {
-                requiredTools.insert("load_agent_workflow")
-            }
-            guard requiredTools.isSubset(of: calledTools) else {
-                let missing = requiredTools.subtracting(calledTools).sorted()
-                throw BenchmarkVerificationError(
-                    detail: """
-                    Benchmark verification failed: missing agent-loop calls \
-                    \(missing.joined(separator: ", ")).
-                    """
-                )
-            }
-            if kind == .xcodeProject {
-                let xcodeActions = toolCalls
-                    .filter { $0.toolName == "xcode_project" }
-                    .compactMap {
-                        try? $0.arguments.value(String.self, forProperty: "action")
-                    }
-                guard xcodeActions.contains("inspect"), xcodeActions.contains("build") else {
-                    throw BenchmarkVerificationError(
-                        detail: """
-                        Benchmark verification failed: Xcode actions were \
-                        \(xcodeActions.joined(separator: ", ")); inspect and build are required.
-                        """
-                    )
-                }
             }
             if let runID {
                 await AgentDiagnosticsRecorder.shared.finishRun(
@@ -250,7 +180,7 @@ enum AgentBenchmarkRunner {
                 backend: backend.rawValue,
                 succeeded: true,
                 durationMilliseconds: elapsed(since: startedAt),
-                detail: "verified \(kind.expectedFilePath) and completed the \(kind.rawValue) loop"
+                detail: "verified Sample.md paragraph layout"
             )
         } catch {
             if let runID {
@@ -262,6 +192,50 @@ enum AgentBenchmarkRunner {
                 )
             }
             return result(backend: backend, startedAt: startedAt, error: error)
+        }
+    }
+
+    private static func makeFixture() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCodeBenchmark-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try """
+        # Notes
+
+        Placeholder
+        """.write(
+            to: directory.appendingPathComponent("Sample.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try runGit(["init", "--quiet"], in: directory)
+        try runGit(["add", "Sample.md"], in: directory)
+        try runGit(
+            [
+                "-c", "user.name=TurboCode Benchmark",
+                "-c", "user.email=benchmark@localhost",
+                "commit", "--quiet", "-m", "Initial fixture"
+            ],
+            in: directory
+        )
+        return directory
+    }
+
+    private static func runGit(_ arguments: [String], in directory: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = directory
+        let errorPipe = Pipe()
+        process.standardError = errorPipe
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let detail = String(decoding: data, as: UTF8.self)
+            throw BenchmarkVerificationError(
+                detail: "Could not prepare benchmark Git fixture: \(detail)"
+            )
         }
     }
 

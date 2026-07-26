@@ -105,7 +105,7 @@ struct ReadFileTool: Tool {
 
         return """
         File: \(fileURL.path)
-        Revision (copy only this value): \(FileRevision.hash(content))
+        Revision: \(FileRevision.hash(content))
         Lines: \(startLine)-\(endLine) of \(totalLines)
 
         \(numberedLines.joined(separator: "\n"))

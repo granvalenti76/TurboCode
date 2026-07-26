@@ -9,8 +9,6 @@ struct DelegateProfile: LanguageModelSession.DynamicProfile {
     let instructions: String
     let tools: [any Tool]
     let model: any LanguageModel
-    let activations: SkillActivations
-    let usesAgentWorkflowSkills: Bool
     let temperature: Double?
     let reasoningLevel: ContextOptions.ReasoningLevel?
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
@@ -19,13 +17,7 @@ struct DelegateProfile: LanguageModelSession.DynamicProfile {
     var body: some LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
             Instructions(instructions)
-            if usesAgentWorkflowSkills {
-                // Delegated Llama/PCC work receives the same just-in-time loop
-                // contract as a standalone session.
-                AgentWorkflowSkills(activations: activations, tools: tools)
-            } else {
-                tools
-            }
+            tools
         }
         .model(model)
         .temperature(temperature)
