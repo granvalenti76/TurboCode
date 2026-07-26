@@ -100,17 +100,23 @@ public final class ChatStore {
     public var terminalHeight: CGFloat = 360
 
     // Workspace
-    public var workspaceRoot: String = ""
-    public var workspaceLabel: String { workspaceRoot.isEmpty ? "No workspace" : URL(fileURLWithPath: workspaceRoot).lastPathComponent }
+    // Forwarding preserves the public view API while WorkspaceStore owns the
+    // observable state and Git-derived values.
+    public var workspaceRoot: String {
+        get { workspaceStore.root }
+        set { workspaceStore.root = newValue }
+    }
+    public var workspaceLabel: String { workspaceStore.label }
 
-    // Recent workspace paths (persisted in UserDefaults, used by sidebar Projects)
     public var recentWorkspaces: [String] {
-        get { UserDefaults.standard.stringArray(forKey: "recentWorkspaces") ?? [] }
-        set { UserDefaults.standard.set(newValue, forKey: "recentWorkspaces") }
+        get { workspaceStore.recentWorkspaces }
+        set { workspaceStore.recentWorkspaces = newValue }
     }
 
-    // Selected project in sidebar (filters threads)
-    public var selectedProject: String? = nil
+    public var selectedProject: String? {
+        get { workspaceStore.selectedProject }
+        set { workspaceStore.selectedProject = newValue }
+    }
 
     // Backend
     public var activeBackend: ModelBackend = .llamaServer
@@ -223,100 +229,36 @@ public final class ChatStore {
         }
     }
 
-    // Diff inspector state (persiste oltre il ciclo di vita della view)
-    var diffSections: [FileDiffSection] = []
-    var isLoadingDiffs = false
-    var diffLoadError: String?
-    private var diffLoadID: UUID?
+    // Workspace/Git state remains forwarded until views adopt WorkspaceStore.
+    var diffSections: [FileDiffSection] { workspaceStore.diffSections }
+    var isLoadingDiffs: Bool { workspaceStore.isLoadingDiffs }
+    var diffLoadError: String? { workspaceStore.diffLoadError }
+    var isGitRepository: Bool { workspaceStore.isGitRepository }
+    var currentBranch: String { workspaceStore.currentBranch }
+    var availableBranches: [String] { workspaceStore.availableBranches }
 
-    // Git branch state
-    var isGitRepository = false
-    var currentBranch: String = ""
-    var availableBranches: [String] = []
-
+    private let workspaceStore: WorkspaceStore
+    /// Retained temporarily for commit-receipt undo, which still coordinates
+    /// timeline mutation and persistence inside ChatStore.
     private let gitService: any GitRepositoryServicing
     private let diffPatchService: any DiffPatchApplying
     private let conversationRepository: any ConversationRepository
 
     public func reloadDiffs() async {
-        guard !workspaceRoot.isEmpty else {
-            diffLoadID = nil
-            diffSections = []
-            diffLoadError = nil
-            isLoadingDiffs = false
-            return
-        }
-
-        let requestedWorkspace = workspaceRoot
-        let loadID = UUID()
-        diffLoadID = loadID
-        isLoadingDiffs = true
-        diffLoadError = nil
-        diffSections = []
-        defer {
-            if diffLoadID == loadID {
-                isLoadingDiffs = false
-            }
-        }
-
-        let url = URL(fileURLWithPath: requestedWorkspace)
-        let sections = await FileDiffSection.fromGit(at: url, service: gitService)
-
-        guard !Task.isCancelled,
-              workspaceRoot == requestedWorkspace,
-              diffLoadID == loadID else { return }
-
-        if let sections {
-            diffSections = sections
-            diffLoadError = nil
-        } else {
-            diffSections = []
-            diffLoadError = "Not a git repository or git unavailable"
-        }
+        await workspaceStore.reloadDiffs()
     }
 
     public func refreshGitBranches() async {
-        guard !workspaceRoot.isEmpty else {
-            isGitRepository = false
-            currentBranch = ""
-            availableBranches = []
-            return
-        }
-
-        let requestedWorkspace = workspaceRoot
-        let url = URL(fileURLWithPath: requestedWorkspace)
-        let isRepository = await gitService.isGitRepository(at: url)
-        guard workspaceRoot == requestedWorkspace, !Task.isCancelled else { return }
-        guard isRepository else {
-            isGitRepository = false
-            currentBranch = ""
-            availableBranches = []
-            return
-        }
-        let branch = await gitService.currentBranch(at: url)
-        let branches = await gitService.allBranches(at: url)
-
-        guard workspaceRoot == requestedWorkspace, !Task.isCancelled else { return }
-
-        isGitRepository = true
-        currentBranch = branch ?? ""
-        availableBranches = branches
+        await workspaceStore.refreshGitBranches()
     }
 
     public func refreshGitAfterToolMutation() async {
-        await refreshGitBranches()
-        await reloadDiffs()
+        await workspaceStore.refreshGitAfterToolMutation()
     }
 
     /// Switch to a different git branch. Refreshes state afterwards.
     public func switchToBranch(_ branch: String) async {
-        guard !workspaceRoot.isEmpty else { return }
-        let url = URL(fileURLWithPath: workspaceRoot)
-        let success = await gitService.checkout(branch: branch, at: url)
-        if success {
-            currentBranch = branch
-            await refreshGitBranches()
-        }
+        await workspaceStore.switchToBranch(branch)
     }
 
     // Session — recreated when backend or workspace changes
@@ -388,6 +330,7 @@ public final class ChatStore {
         diffPatchService: any DiffPatchApplying = DiffPatchService()
     ) {
         self.conversationRepository = conversationRepository
+        self.workspaceStore = WorkspaceStore(gitService: gitService)
         self.gitService = gitService
         self.diffPatchService = diffPatchService
         let loadedProfiles = (try? DynamicProfileStore.live.load()) ?? []
@@ -1203,7 +1146,7 @@ public final class ChatStore {
 
         let removedActiveThread = activeThreadId.map(sessionIDs.contains) ?? false
         threads.removeAll { $0.workspace == path }
-        recentWorkspaces = recentWorkspaces.filter { $0 != path }
+        let removedActiveWorkspace = workspaceStore.removeWorkspace(path)
 
         if removedActiveThread {
             activeThreadId = nil
@@ -1213,15 +1156,8 @@ public final class ChatStore {
             isFirstMessage = true
         }
 
-        if workspaceRoot == path {
+        if removedActiveWorkspace {
             responseTask?.cancel()
-            workspaceRoot = ""
-            selectedProject = nil
-            isGitRepository = false
-            currentBranch = ""
-            availableBranches = []
-            diffSections = []
-            isLoadingDiffs = false
             rightPanelMode = nil
             rebuildSession(keepingHistory: false)
         }
@@ -1259,36 +1195,18 @@ public final class ChatStore {
 
     /// Internal: configure workspace, rebuild session, refresh git state.
     private func setWorkspace(_ path: String) {
-        workspaceRoot = path
-        isGitRepository = false
-        currentBranch = ""
-        availableBranches = []
-
-        // Save to recent workspaces
-        var recent = recentWorkspaces
-        recent.removeAll { $0 == path }
-        recent.insert(path, at: 0)
-        recentWorkspaces = Array(recent.prefix(10))
-        selectedProject = URL(fileURLWithPath: path).lastPathComponent
+        workspaceStore.selectWorkspace(path)
 
         rebuildSession(discardingCapabilityContext: true)
         // The inspector is opt-in: changing workspace must not open it.
         rightPanelMode = nil
-        diffSections = []
         Task { await reloadDiffs() }
         Task { await refreshGitBranches() }
     }
 
     /// Clear the workspace selection.
     public func clearWorkspace() {
-        workspaceRoot = ""
-        diffLoadID = nil
-        diffSections = []
-        diffLoadError = nil
-        isLoadingDiffs = false
-        isGitRepository = false
-        currentBranch = ""
-        availableBranches = []
+        workspaceStore.clearWorkspace()
         rebuildSession(discardingCapabilityContext: true)
         rightPanelMode = nil
     }

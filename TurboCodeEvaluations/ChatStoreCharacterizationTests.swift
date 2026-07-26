@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 @testable import TurboCode
 
@@ -104,6 +105,31 @@ struct ChatStoreCharacterizationTests {
         #expect(await gitService.checkedOutBranches() == ["feature/refactor"])
         #expect(store.currentBranch == "feature/refactor")
         #expect(store.availableBranches == ["main", "feature/refactor"])
+    }
+
+    @Test("Forwarded workspace state remains observable")
+    func forwardedWorkspaceStateRemainsObservable() async {
+        let gitService = CharacterizationGitService(
+            isRepository: true,
+            currentBranch: "feature/refactor",
+            branches: ["main", "feature/refactor"]
+        )
+        let store = ChatStore(
+            conversationRepository: CharacterizationConversationRepository(),
+            gitService: gitService
+        )
+        store.workspaceRoot = "/tmp/project"
+
+        await confirmation("Nested workspace mutation is observed") { observed in
+            withObservationTracking {
+                _ = store.currentBranch
+            } onChange: {
+                observed()
+            }
+            await store.refreshGitBranches()
+        }
+
+        #expect(store.currentBranch == "feature/refactor")
     }
 }
 
