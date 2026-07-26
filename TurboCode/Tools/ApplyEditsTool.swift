@@ -4,7 +4,13 @@ import FoundationModels
 
 enum FileRevision {
     nonisolated static func hash(_ content: String) -> String {
-        SHA256.hash(data: Data(content.utf8)).map { String(format: "%02x", $0) }.joined()
+        // A 128-bit content token keeps accidental-collision risk negligible while
+        // being materially easier for small models to copy than a 64-character
+        // digest. It is an optimistic-concurrency guard, not a security signature.
+        SHA256.hash(data: Data(content.utf8))
+            .prefix(16)
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 }
 
@@ -237,8 +243,16 @@ actor ApplyEditsService {
                 throw DiffPatchError.invalidEdit("File '\(relativePath)' already exists and cannot use create.")
             }
             let original = try String(contentsOf: url, encoding: .utf8)
-            guard let revision = request.revision, revision == FileRevision.hash(original) else {
-                throw DiffPatchError.invalidEdit("Revision mismatch for '\(relativePath)'.")
+            let currentRevision = FileRevision.hash(original)
+            guard let revision = request.revision, revision == currentRevision else {
+                // Returning the current token makes a stale-revision result actionable
+                // while the edit service still revalidates it atomically on every retry.
+                throw DiffPatchError.invalidEdit(
+                    """
+                    Revision mismatch for '\(relativePath)'. The current revision is \
+                    \(currentRevision); copy only that value into the revision field.
+                    """
+                )
             }
             let updated = try apply(request.operations, to: original, path: relativePath)
             guard updated != original else {

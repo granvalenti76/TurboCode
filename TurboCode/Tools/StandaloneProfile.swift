@@ -17,11 +17,13 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let reasoningLevel: ContextOptions.ReasoningLevel?
     let dropsCompletedToolCalls: Bool
     let usesCacheStableToolDefinitions: Bool
+    let usesAgentWorkflowSkills: Bool
     let executionPolicy: ExecutionPolicy
     let gitPolicy: GitPolicy
     let toolPlan: ModelToolPlan
     let usesExclusiveToolSelection: Bool
     let supplementalTools: [any Tool]
+    let agentWorkflowTools: [any Tool]
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
 
@@ -36,13 +38,21 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     private var configuredProfile: some LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
             Instructions(instructions)
+            if usesAgentWorkflowSkills {
+                // Llama/PCC initially see one selector; engineering schemas
+                // enter the profile only with the chosen loop.
+                AgentWorkflowSkills(
+                    activations: activations,
+                    tools: agentWorkflowTools
+                )
+            }
             if usesExclusiveToolSelection {
                 // Dynamic profiles are capability boundaries. Register the
                 // resolved instances directly so FoundationModelsUtilities
                 // cannot add activation tools or other implicit capabilities.
                 supplementalTools
             } else {
-                if !workspaceRoot.isEmpty {
+                if !workspaceRoot.isEmpty, !usesAgentWorkflowSkills {
                     // Tool policy lives in ModelSessionFactory's single
                     // instruction block. Keeping it out of this builder
                     // prevents Foundation Models from emitting a second

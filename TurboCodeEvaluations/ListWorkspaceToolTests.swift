@@ -20,12 +20,9 @@ struct ListWorkspaceToolTests {
         let output = try await tool.call(arguments: ListWorkspaceArguments(path: "."))
 
         let guidance = try #require(output.modelGuidance)
-        #expect(guidance.contains("swift_workspace_map"))
-        #expect(guidance.contains("read_file"))
-        #expect(guidance.contains("toggle_skill"))
-        #expect(guidance.contains("grep"))
+        #expect(guidance.contains("xcode-agent-loop"))
+        #expect(guidance.contains("load_agent_workflow"))
         #expect(guidance.contains("xcode_project"))
-        #expect(guidance.contains("git"))
         #expect(guidance.contains("without asking for confirmation"))
     }
 

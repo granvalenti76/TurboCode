@@ -126,6 +126,26 @@ enum ModelSessionFactory {
             selectedIDs: configuration.activeDynamicProfile?.resolvedToolIDs
         )
         let usesExclusiveToolSelection = configuration.activeDynamicProfile != nil
+        let enablesAgentWorkflows = configuration.activeDynamicProfile == nil
+            && usesAgentWorkflowSkills(
+                backend: configuration.backend,
+                remoteModel: activeRemoteConfiguration
+            )
+        let allStandaloneTools = toolInstances(
+            for: standalonePlan,
+            configuration: configuration,
+            repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
+                ?? 32_768
+        )
+        // Keep observation available before workflow selection so a small model can
+        // anchor line ranges and revision tokens while the tool surface is still
+        // stable. Mutation and verification remain gated by the selected workflow.
+        let initialAgentToolNames: Set<String> = [
+            "turbocode_guide",
+            "list_workspace",
+            "read_file"
+        ]
+        let workflowExcludedToolNames = initialAgentToolNames.union(["load_skill"])
 
         return LanguageModelSession(
             profile: StandaloneProfile(
@@ -140,14 +160,17 @@ enum ModelSessionFactory {
                 dropsCompletedToolCalls: configuration.dropsCompletedToolCalls,
                 usesCacheStableToolDefinitions:
                     activeRemoteConfiguration?.reasoningTransport == .deepseekThinking,
+                usesAgentWorkflowSkills: enablesAgentWorkflows,
                 executionPolicy: configuration.agentTuning.execution,
                 gitPolicy: configuration.agentTuning.git,
                 toolPlan: standalonePlan,
                 usesExclusiveToolSelection: usesExclusiveToolSelection,
-                supplementalTools: toolInstances(
-                    for: standalonePlan,
-                    configuration: configuration,
-                    including: usesExclusiveToolSelection ? nil : [
+                supplementalTools: enablesAgentWorkflows
+                    ? allStandaloneTools.filter { initialAgentToolNames.contains($0.name) }
+                    : toolInstances(
+                        for: standalonePlan,
+                        configuration: configuration,
+                        including: usesExclusiveToolSelection ? nil : [
                             .turboCodeGuide,
                             .listWorkspace,
                             .swiftWorkspaceMap,
@@ -155,9 +178,14 @@ enum ModelSessionFactory {
                             .writeOnDevice,
                             .removeFile
                         ],
-                    repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
-                        ?? 32_768
-                ),
+                        repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
+                            ?? 32_768
+                    ),
+                agentWorkflowTools: enablesAgentWorkflows
+                    ? allStandaloneTools.filter {
+                        !workflowExcludedToolNames.contains($0.name)
+                    }
+                    : [],
                 onToolStart: { call in
                     await events.toolStarted(call, configuration.backend)
                 },
@@ -214,6 +242,10 @@ enum ModelSessionFactory {
                 repositoryMapContextTokens: configuration.delegateRemoteModel.contextWindowTokens
             ),
             delegateInstructions: instructions,
+            usesAgentWorkflowSkills: usesAgentWorkflowSkills(
+                backend: delegateBackend,
+                remoteModel: configuration.delegateRemoteModel
+            ),
             onToolStart: { call in
                 await events.toolStarted(call, delegateBackend)
             },
@@ -367,6 +399,20 @@ enum ModelSessionFactory {
         // must never receive a duplicate FoundationModels session surface.
         if backend == .codex { return .none }
         return remoteModel?.repositoryMap == .enhanced ? .enhanced : .standard
+    }
+
+    /// The focused playbooks compensate for smaller local and PCC coding
+    /// models. Premium reasoning models keep their provider-specific stable
+    /// tool surface. The session builder separately keeps user-authored
+    /// exclusive profiles untouched.
+    static func usesAgentWorkflowSkills(
+        backend: ModelBackend,
+        remoteModel: RemoteModelConfig?
+    ) -> Bool {
+        guard backend == .llamaServer || backend == .foundationServe else {
+            return false
+        }
+        return remoteModel?.role == .local || remoteModel?.role == .pcc
     }
 
     private static func activeModel(
