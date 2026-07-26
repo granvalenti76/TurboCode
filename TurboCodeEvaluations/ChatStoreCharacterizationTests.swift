@@ -36,6 +36,36 @@ struct ChatStoreCharacterizationTests {
         #expect(store.pendingApproval == nil)
     }
 
+    @Test("Compatibility approval envelopes retain typed review data")
+    func approvalEnvelopeDecodesReviewData() throws {
+        let request = try #require(ApprovalRequest(toolOutput: """
+        TURBOCODE_APPROVAL_REQUIRED
+        approval_id: approval-1
+        operation: move
+        path: /tmp/source.txt
+        destination: /tmp/destination.txt
+        summary: Move source.txt
+        """))
+
+        #expect(request.id == "approval-1")
+        #expect(request.operation == "move")
+        #expect(request.path == "/tmp/source.txt")
+        #expect(request.destination == "/tmp/destination.txt")
+        #expect(request.summary == "Move source.txt")
+    }
+
+    @Test("Incomplete approval envelopes are rejected")
+    func incompleteApprovalEnvelopeIsRejected() {
+        let request = ApprovalRequest(toolOutput: """
+        TURBOCODE_APPROVAL_REQUIRED
+        approval_id: approval-1
+        operation: delete
+        path: /tmp/file.txt
+        """)
+
+        #expect(request == nil)
+    }
+
     @Test("Git refresh publishes repository and branch state")
     func gitRefreshPublishesServiceSnapshot() async {
         let gitService = CharacterizationGitService(
