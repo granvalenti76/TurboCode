@@ -1,6 +1,5 @@
 import Foundation
 import FoundationModels
-import FoundationModelsUtilities
 
 // MARK: - Call Powerful Model Tool
 
@@ -52,7 +51,6 @@ struct CallPowerfulModelTool: Tool {
     private let delegateTools: [any Tool]
     /// System instructions for the delegate session (workspace context, rules, etc.).
     private let delegateInstructions: String
-    private let usesAgentWorkflowSkills: Bool
     private let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     private let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
 
@@ -62,7 +60,6 @@ struct CallPowerfulModelTool: Tool {
         reasoningLevel: ContextOptions.ReasoningLevel?,
         delegateTools: [any Tool],
         delegateInstructions: String,
-        usesAgentWorkflowSkills: Bool,
         onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)? = nil,
         onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)? = nil
     ) {
@@ -71,7 +68,6 @@ struct CallPowerfulModelTool: Tool {
         self.reasoningLevel = reasoningLevel
         self.delegateTools = delegateTools
         self.delegateInstructions = delegateInstructions
-        self.usesAgentWorkflowSkills = usesAgentWorkflowSkills
         self.onToolStart = onToolStart
         self.onToolEnd = onToolEnd
     }
@@ -80,7 +76,6 @@ struct CallPowerfulModelTool: Tool {
         let task = arguments.task
         let tools = delegateTools
         let instructions = delegateInstructions
-        let usesAgentWorkflowSkills = usesAgentWorkflowSkills
         let model = model
         let temperature = temperature
         let reasoningLevel = reasoningLevel
@@ -93,8 +88,6 @@ struct CallPowerfulModelTool: Tool {
                     instructions: instructions,
                     tools: tools,
                     model: model,
-                    activations: SkillActivations(),
-                    usesAgentWorkflowSkills: usesAgentWorkflowSkills,
                     temperature: temperature,
                     reasoningLevel: reasoningLevel,
                     onToolStart: toolStart,

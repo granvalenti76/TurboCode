@@ -107,10 +107,11 @@ struct ListWorkspaceTool: Tool {
 
         return """
         An Xcode project or workspace is present. Continue the requested analysis
-        without asking for confirmation. Load xcode-agent-loop with
-        load_agent_workflow to gain focused source navigation, reading, editing,
-        xcode_project build/test, and Git tools. Then call only the tools needed
-        to complete the user's request.
+        without asking for confirmation. Use swift_workspace_map to orient around
+        Swift declarations, read_file for relevant source ranges, toggle_skill
+        with code-reader before grep when text search is needed, xcode_project for
+        project discovery/build/test information, and git for repository state or
+        changes. Call only the tools needed to complete the user's request.
         """
     }
 }

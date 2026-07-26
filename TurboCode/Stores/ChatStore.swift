@@ -2401,12 +2401,9 @@ public final class ChatStore {
         case "list_workspace":
             let path = try? call.arguments.value(String.self, forProperty: "path")
             return path == "." ? "Browsing workspace" : "Browsing \(path ?? "workspace")"
-        case "activate_skill", "toggle_skill", "load_skill", "load_agent_workflow":
+        case "activate_skill", "toggle_skill", "load_skill":
             let skill = try? call.arguments.value(String.self, forProperty: "skill")
-            return skill.map { "Loading \($0)" }
-                ?? (call.toolName == "load_agent_workflow"
-                    ? "Loading engineering workflow"
-                    : "Loading skill")
+            return skill.map { "Loading \($0)" } ?? "Loading skill"
         default:
             return "Using \(call.toolName.replacingOccurrences(of: "_", with: " "))"
         }

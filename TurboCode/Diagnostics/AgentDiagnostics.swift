@@ -490,11 +490,9 @@ enum AgentProfileVersion {
     static func value(for backend: ModelBackend, mode: OrchestratorMode) -> String {
         if mode == .orchestrator { return "orchestrator-v2" }
         switch backend {
-        // Keep workflow-gated runs separate from the former flat tool surface
-        // so latency and recovery metrics remain comparable within one protocol.
-        case .foundationServe: return "pcc-agent-workflow-v7"
+        case .foundationServe: return "pcc-layout-guard-v6"
         case .foundationApple: return "ondevice-layout-guard-v6"
-        case .llamaServer: return "llama-agent-workflow-v7"
+        case .llamaServer: return "llama-layout-guard-v6"
         case .premium: return "premium-deepseek-cache-v11"
         case .codex: return "codex-app-server-v1"
         }
