@@ -234,8 +234,8 @@ public final class ChatStore {
     var currentBranch: String = ""
     var availableBranches: [String] = []
 
-    private let gitService = GitDiffService()
-    private let diffPatchService = DiffPatchService()
+    private let gitService: any GitRepositoryServicing
+    private let diffPatchService: any DiffPatchApplying
     private let conversationRepository: any ConversationRepository
 
     public func reloadDiffs() async {
@@ -382,8 +382,14 @@ public final class ChatStore {
         self.init(conversationRepository: DiskConversationRepository())
     }
 
-    init(conversationRepository: any ConversationRepository) {
+    init(
+        conversationRepository: any ConversationRepository,
+        gitService: any GitRepositoryServicing = GitDiffService(),
+        diffPatchService: any DiffPatchApplying = DiffPatchService()
+    ) {
         self.conversationRepository = conversationRepository
+        self.gitService = gitService
+        self.diffPatchService = diffPatchService
         let loadedProfiles = (try? DynamicProfileStore.live.load()) ?? []
         let savedProfileID = UserDefaults.standard.string(forKey: "activeDynamicProfileID")
             .flatMap(UUID.init(uuidString:))
@@ -2296,7 +2302,8 @@ public final class ChatStore {
                     try await diffPatchService.apply(
                         patch: patch,
                         workspaceRoot: payload.workspaceRoot,
-                        reverse: true
+                        reverse: true,
+                        tolerateInaccurateEOF: false
                     )
                     revertedPatches.append(patch)
                 }
@@ -2305,7 +2312,9 @@ public final class ChatStore {
                 for patch in revertedPatches.reversed() {
                     try? await diffPatchService.apply(
                         patch: patch,
-                        workspaceRoot: payload.workspaceRoot
+                        workspaceRoot: payload.workspaceRoot,
+                        reverse: false,
+                        tolerateInaccurateEOF: false
                     )
                 }
                 updateDiffPatchBlock(

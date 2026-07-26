@@ -248,7 +248,7 @@ enum DiffPatchParser {
 
 // MARK: - Git Executor
 
-actor DiffPatchService {
+actor DiffPatchService: DiffPatchApplying {
     private struct NativeFileSnapshot {
         let url: URL
         let contents: Data?
