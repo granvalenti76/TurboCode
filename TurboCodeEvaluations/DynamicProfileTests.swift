@@ -168,6 +168,82 @@ struct DynamicProfileTests {
         #expect(names.contains("file_system"))
         #expect(names.contains("grep"))
         #expect(!names.contains("toggle_skill"))
+        #expect(!names.contains("load_agent_workflow"))
+    }
+
+    @Test("Llama and PCC receive capability-gated engineering workflows")
+    func smallerRemoteModelsReceiveAgentWorkflows() throws {
+        let pcc = try #require(RemoteModelConfig.defaults.first { $0.role == .pcc })
+
+        #expect(ModelSessionFactory.usesAgentWorkflowSkills(
+            backend: .llamaServer,
+            remoteModel: .fallbackLlama
+        ))
+        #expect(ModelSessionFactory.usesAgentWorkflowSkills(
+            backend: .foundationServe,
+            remoteModel: pcc
+        ))
+        #expect(!ModelSessionFactory.usesAgentWorkflowSkills(
+            backend: .premium,
+            remoteModel: RemoteModelConfig.defaults.first { $0.role == .premium }
+        ))
+
+        let session = ModelSessionFactory.makeSession(
+            configuration: makeConfiguration(profile: nil),
+            history: [],
+            events: inertEvents
+        )
+        let firstEntry = try #require(session.transcript.first)
+        guard case .instructions(let instructions) = firstEntry else {
+            Issue.record("Expected the Llama session to begin with instructions")
+            return
+        }
+        let initialNames = Set(instructions.toolDefinitions.map(\.name))
+        #expect(initialNames.contains("load_agent_workflow"))
+        #expect(initialNames.contains("list_workspace"))
+        #expect(initialNames.contains("read_file"))
+        #expect(!initialNames.contains("edit_file"))
+        #expect(!initialNames.contains("bash"))
+        #expect(!initialNames.contains("xcode_project"))
+    }
+
+    @Test("Exclusive profiles do not gain an implicit workflow selector")
+    func exclusiveProfilesDoNotReceiveAgentWorkflows() throws {
+        let profile = UserDynamicProfile(
+            name: "Reader only",
+            baseModelID: .llama,
+            toolIDs: [ToolCapabilityID.readFile.rawValue]
+        )
+        let session = ModelSessionFactory.makeSession(
+            configuration: makeConfiguration(profile: profile),
+            history: [],
+            events: inertEvents
+        )
+        let firstEntry = try #require(session.transcript.first)
+        guard case .instructions(let instructions) = firstEntry else {
+            Issue.record("Expected the exclusive session to begin with instructions")
+            return
+        }
+
+        #expect(instructions.toolDefinitions.map(\.name) == ["read_file"])
+    }
+
+    @Test("Agent workflows cover Xcode, SwiftPM, verification, and recovery")
+    func agentWorkflowCatalogDefinesCompleteEngineeringLoops() throws {
+        let descriptors = AgentWorkflowSkillCatalog.descriptors
+        let names = Set(descriptors.map(\.name))
+        let combined = descriptors.map(\.prompt).joined(separator: "\n")
+
+        #expect(names == [
+            "xcode-agent-loop",
+            "swift-package-agent-loop",
+            "diagnostic-recovery"
+        ])
+        #expect(combined.contains("xcode_project"))
+        #expect(combined.contains("swift build"))
+        #expect(combined.contains("swift test"))
+        #expect(combined.contains("edit_file"))
+        #expect(combined.contains("repeat the same verification"))
     }
 
     @Test("A remove-only profile exposes exactly the flat removal tool")
@@ -276,10 +352,18 @@ struct DynamicProfileTests {
         return url
     }
 
-    private func makeConfiguration(profile: UserDynamicProfile) -> ModelSessionConfiguration {
+    private var inertEvents: ModelSessionEvents {
+        ModelSessionEvents(
+            toolStarted: { _, _ in },
+            toolFinished: { _, _, _ in },
+            delegationChanged: { _ in }
+        )
+    }
+
+    private func makeConfiguration(profile: UserDynamicProfile?) -> ModelSessionConfiguration {
         ModelSessionConfiguration(
-            backend: profile.baseModelID == .onDevice ? .foundationApple : .llamaServer,
-            activeRemoteModel: profile.baseModelID == .onDevice ? nil : .fallbackLlama,
+            backend: profile?.baseModelID == .onDevice ? .foundationApple : .llamaServer,
+            activeRemoteModel: profile?.baseModelID == .onDevice ? nil : .fallbackLlama,
             delegateRemoteModel: .fallbackLlama,
             orchestratorMode: .standalone,
             workspaceRoot: "/tmp/workspace",

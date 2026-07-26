@@ -1,38 +1,203 @@
-# Repository Guidelines
+# AGENTS.md
 
-## Project Structure & Module Organization
+# TurboCode Development Guide
 
-`TurboCode/` contains the Swift 6 macOS application. Keep UI in `Views/`, presentation state in `ViewModels/` and `Stores/`, data types in `Models/`, and integrations in `Services/` or `Tools/`. Product references live in `TurboCode/Documentation/`. `TurboCodeEvaluations/` contains Swift Testing suites and agent evaluations. Assets belong in `Media.xcassets`; project settings live in `TurboCode.xcodeproj`.
+## Mission
 
-## Product Direction
+TurboCode is a native Swift / SwiftUI macOS application.
 
-Treat `PRODUCT.md` as the contract. Preserve safety and reviewability while minimizing latency and context. Follow Apple's macOS Human Interface Guidelines with native, accessible SwiftUI or AppKit conventions. Avoid desktop automation, broad multi-language IDE features, and unrestricted shell behavior.
+The primary goal is to make the smallest correct change that satisfies the requested feature or bug fix.
 
-## Build, Test, and Development Commands
+Avoid architectural rewrites unless explicitly requested.
 
-- `open TurboCode.xcodeproj` opens the project in Xcode. Select the `TurboCode` scheme to run the app.
-- `xcodebuild -project TurboCode.xcodeproj -scheme TurboCode -configuration Debug build` builds the debug app and resolves Swift packages.
-- `xcodebuild test -project TurboCode.xcodeproj -scheme TurboCodeEvaluations -destination 'platform=macOS'` runs the evaluation and unit-test target.
-- `git diff --check` detects whitespace errors before a commit.
+---
 
-The project requires macOS 27, Xcode 27, and Swift 6.
+# General workflow
 
-## Coding Style & Naming Conventions
+Always follow this workflow.
 
-Follow Swift API design: four-space indentation, `UpperCamelCase` for types, and `lowerCamelCase` for methods, properties, and enum cases. Match filenames to their primary type, such as `SessionSearchViewModel.swift`. Prefer focused SwiftUI views and keep workspace, Git, Xcode, and provider behavior behind existing service/tool boundaries. Use `@MainActor` for UI-owned mutable state and preserve explicit concurrency annotations. No separate formatter or linter is configured; use Xcode formatting and keep warnings clean.
+1. Understand the request.
+2. Identify the minimum set of files involved.
+3. Read only those files.
+4. Follow only direct dependencies.
+5. Explain the implementation plan.
+6. Wait for approval if the requested change is significant.
+7. Implement.
+8. Run targeted verification.
+9. Summarize changes.
 
-## Code Comments & Documentation
+Never skip directly to implementation.
 
-Every code change must add or update comments that make the modified behavior easy to review and maintain. Document the intent behind non-obvious logic, invariants, provider-specific workarounds, concurrency or safety constraints, and important tradeoffs. Keep public types and APIs documented with concise Swift documentation comments where their purpose is not already self-evident. When behavior changes, update nearby comments so they remain accurate. Prefer comments that explain why the code exists and what must remain true; avoid comments that merely repeat the syntax or narrate an obvious statement.
+---
 
-## Testing Guidelines
+# Repository exploration policy
 
-Tests use Apple's Swift Testing framework (`import Testing`), with descriptive `@Suite` and `@Test` labels and `#expect` assertions. Name test methods by observable behavior, for example `recentSessionsAreLimitedAndOrdered()`. Add focused coverage in `TurboCodeEvaluations/` for changed logic; update golden evaluations only when intended agent behavior changes. Run the shared evaluation scheme before opening a pull request.
+Repository-wide exploration is expensive.
 
-## Commit & Pull Request Guidelines
+DO NOT scan the whole repository unless explicitly requested.
 
-History uses short, imperative subjects such as `Add native session search` and `Fix DeepSeek edit argument parsing`. Keep commits scoped to one coherent change. Pull requests should explain the user-visible outcome, note build/test results, link relevant issues, and include screenshots for SwiftUI changes. Call out changes to entitlements, signing, model configuration, or persisted data.
+Prefer targeted exploration.
 
-## Security & Configuration
+Good:
 
-Never commit credentials or local `~/.turbocode` data. Store API keys in macOS Keychain, and document configuration changes in `CONFIGURATION.md`. Preserve workspace path validation, revision checks, and confirmation gates around destructive Git or shell operations.
+- "Read LoginView.swift"
+- "Inspect AuthService.swift"
+- "Follow references from ConversationRepository"
+
+Bad:
+
+- "Analyze the whole project"
+- "Understand the entire architecture"
+
+---
+
+# Scope policy
+
+Stay inside the requested scope.
+
+Do not:
+
+- clean unrelated code
+- rename symbols outside the feature
+- reformat unrelated files
+- perform opportunistic refactors
+
+Only touch files required by the task.
+
+---
+
+# Reading policy
+
+Read files lazily.
+
+Only open another file when it is necessary to understand the current one.
+
+Avoid recursive repository exploration.
+
+---
+
+# Architecture
+
+Typical layering:
+
+Views
+↓
+
+ViewModels
+
+↓
+
+Services
+
+↓
+
+Models
+
+Avoid bypassing the architecture.
+
+Business logic belongs in Services.
+
+Views should remain lightweight.
+
+---
+
+# Swift guidelines
+
+Prefer:
+
+- Swift Concurrency
+- async/await
+- actors when shared mutable state exists
+- Sendable where appropriate
+
+Avoid:
+
+- unnecessary DispatchQueue usage
+- callback pyramids
+- force unwraps
+- force casts
+
+---
+
+# SwiftUI guidelines
+
+Views should:
+
+- remain declarative
+- avoid business logic
+- avoid networking
+- avoid persistence
+
+Prefer moving logic into ViewModels or Services.
+
+---
+
+# Refactoring
+
+Only refactor when:
+
+- required by the feature
+- fixing an actual design issue
+- explicitly requested
+
+Never refactor "because it looks nicer."
+
+---
+
+# Testing
+
+Run only relevant tests first.
+
+Avoid running the full test suite unless requested.
+
+If no tests exist:
+
+Explain what should be tested manually.
+
+---
+
+# Output style
+
+Before implementation:
+
+Return:
+
+- files involved
+- implementation plan
+- assumptions
+- risks
+
+After implementation:
+
+Return:
+
+- modified files
+- summary
+- possible regressions
+- recommended tests
+
+Keep explanations concise.
+
+---
+
+# Performance
+
+Minimize token usage.
+
+Avoid repeating previous analyses.
+
+Reuse information already discovered.
+
+Do not restate repository structure repeatedly.
+
+---
+
+# If uncertain
+
+Ask.
+
+Do not invent architecture.
+
+Do not guess APIs.
+
+Do not create new abstractions without justification.
