@@ -5,7 +5,6 @@ import Foundation
 
 /// An App Intent that lists files and directories at a given path.
 /// Can be invoked via Shortcuts, Siri, or the app's command palette.
-@available(macOS 13.0, iOS 16.0, watchOS 9.0, *)
 struct ListFilesIntent: AppIntent {
     static let title: LocalizedStringResource = "List Files in Directory"
     static let description: IntentDescription = """
