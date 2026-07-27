@@ -59,16 +59,24 @@ public final class ChatStore {
     public var blocks: [ChatBlock] = []
     public var liveReasoning: String = ""
     public var liveAssistant: String = ""
-    public var toolActivities: [ToolActivity] = []
-    public var activeToolActivity: ToolActivity? { toolActivities.last }
+    // Forwarded during the refactor so timeline views keep their current API.
+    public var toolActivities: [ToolActivity] {
+        get { toolInteractionStore.activities }
+        set { toolInteractionStore.activities = newValue }
+    }
+    public var activeToolActivity: ToolActivity? {
+        toolInteractionStore.activeActivity
+    }
 
     // First-message layout state — true on launch and new chat,
     // becomes false after the first message is sent
     public var isFirstMessage: Bool = true
 
     // Pending user approval for a destructive tool operation
-    public var pendingApproval: ApprovalRequest? = nil
-    private var queuedApprovals: [ApprovalRequest] = []
+    public var pendingApproval: ApprovalRequest? {
+        get { toolInteractionStore.pendingApproval }
+        set { toolInteractionStore.pendingApproval = newValue }
+    }
 
     // Composer
     public var composerModel: String = "auto"
@@ -253,6 +261,7 @@ public final class ChatStore {
 
     private let workspaceStore: WorkspaceStore
     private let conversationStore: ConversationStore
+    private let toolInteractionStore: ToolInteractionStore
     /// Retained temporarily for commit-receipt undo, which still coordinates
     /// timeline mutation and persistence inside ChatStore.
     private let gitService: any GitRepositoryServicing
@@ -345,6 +354,7 @@ public final class ChatStore {
     ) {
         self.conversationStore = ConversationStore(repository: conversationRepository)
         self.workspaceStore = WorkspaceStore(gitService: gitService)
+        self.toolInteractionStore = ToolInteractionStore()
         self.gitService = gitService
         self.diffPatchService = diffPatchService
         let loadedProfiles = (try? DynamicProfileStore.live.load()) ?? []
@@ -1374,13 +1384,10 @@ public final class ChatStore {
                     // existing Review/Undo transaction remains authoritative.
                     break
                 case .toolCallRequested(let call):
-                    toolActivities.removeAll { $0.id == call.callID }
-                    toolActivities.append(
-                        ToolActivity(
-                            id: call.callID,
-                            summary: CodexTurboCodeToolBridge.activitySummary(
-                                for: call.tool
-                            )
+                    toolInteractionStore.beginActivity(
+                        id: call.callID,
+                        summary: CodexTurboCodeToolBridge.activitySummary(
+                            for: call.tool
                         )
                     )
                     let result: CodexDynamicToolResult
@@ -1400,7 +1407,7 @@ public final class ChatStore {
                     } catch {
                         result = .failure(error.localizedDescription)
                     }
-                    toolActivities.removeAll { $0.id == call.callID }
+                    toolInteractionStore.endActivity(id: call.callID)
                     try await codexClient.resolveToolCall(call, result: result)
                 case .approvalRequested(let request):
                     codexApprovals[request.presentationID] = request
@@ -1490,7 +1497,7 @@ public final class ChatStore {
 
         liveAssistant = ""
         liveReasoning = ""
-        toolActivities.removeAll()
+        toolInteractionStore.clearActivities()
         activeWorkspaceListingPresentations.removeAll()
         if activeAssistantPlaceholderID == placeholderID {
             activeAssistantPlaceholderID = nil
@@ -1697,7 +1704,7 @@ public final class ChatStore {
             // Stream ended: finalize the assistant block.
             // Reset delegation state once streaming is done.
             isDelegating = false
-            toolActivities.removeAll()
+            toolInteractionStore.clearActivities()
             let rawFinalText = accumulatedText.isEmpty
                 ? liveReasoning
                 : userVisibleAssistantText(accumulatedText)
@@ -1750,7 +1757,7 @@ public final class ChatStore {
             liveReasoning = ""
             liveAssistant = ""
             isDelegating = false
-            toolActivities.removeAll()
+            toolInteractionStore.clearActivities()
             self.error = nil
         } catch where error is CancellationError || Task.isCancelled {
             diagnosticsOutcome = .cancelled
@@ -1768,12 +1775,12 @@ public final class ChatStore {
             liveReasoning = ""
             liveAssistant = ""
             isDelegating = false
-            toolActivities.removeAll()
+            toolInteractionStore.clearActivities()
             self.error = nil
         } catch {
             diagnosticsOutcome = .failed
             diagnosticsError = error
-            toolActivities.removeAll()
+            toolInteractionStore.clearActivities()
             self.error = error.localizedDescription
             if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
                 blocks[i] = ChatBlock(
@@ -1876,8 +1883,7 @@ public final class ChatStore {
     /// Approve a pending tool operation, execute the exact registered action,
     /// then inform the model that the action completed.
     public func approveAction() {
-        guard let request = pendingApproval else { return }
-        advanceApprovalQueue()
+        guard let request = toolInteractionStore.takePendingApproval() else { return }
 
         if let codexApproval = codexApprovals.removeValue(forKey: request.id) {
             Task {
@@ -1909,8 +1915,7 @@ public final class ChatStore {
 
     /// Reject a pending tool operation.
     public func rejectAction() {
-        guard let request = pendingApproval else { return }
-        advanceApprovalQueue()
+        guard let request = toolInteractionStore.takePendingApproval() else { return }
         if let codexApproval = codexApprovals.removeValue(forKey: request.id) {
             Task {
                 do {
@@ -1938,26 +1943,11 @@ public final class ChatStore {
     /// Receives approval requests directly from ToolApprovalRegistry. Transcript
     /// parsing remains a compatibility fallback for external model adapters.
     public func presentApproval(_ request: ApprovalRequest) {
-        guard pendingApproval?.id != request.id,
-              !queuedApprovals.contains(where: { $0.id == request.id }) else { return }
-
-        if pendingApproval == nil {
-            pendingApproval = request
-        } else {
-            queuedApprovals.append(request)
-        }
-    }
-
-    private func advanceApprovalQueue() {
-        pendingApproval = queuedApprovals.isEmpty ? nil : queuedApprovals.removeFirst()
+        toolInteractionStore.enqueueApproval(request)
     }
 
     public func dismissApproval(id: String) {
-        if pendingApproval?.id == id {
-            advanceApprovalQueue()
-        } else {
-            queuedApprovals.removeAll(where: { $0.id == id })
-        }
+        toolInteractionStore.dismissApproval(id: id)
     }
 
     private func sendInternalMessageWhenIdle(_ text: String) async {
@@ -1978,8 +1968,10 @@ public final class ChatStore {
         guard call.toolName != "diff_patch",
               call.toolName != "apply_edits",
               call.toolName != "edit_file" else { return }
-        toolActivities.removeAll { $0.id == call.id }
-        toolActivities.append(ToolActivity(id: call.id, summary: toolSummary(for: call)))
+        toolInteractionStore.beginActivity(
+            id: call.id,
+            summary: toolSummary(for: call)
+        )
     }
 
     private func endToolActivity(
@@ -2018,7 +2010,7 @@ public final class ChatStore {
         ) {
             presentToolPresentation(presentation)
         }
-        toolActivities.removeAll { $0.id == call.id }
+        toolInteractionStore.endActivity(id: call.id)
     }
 
     private func presentToolPresentation(_ presentation: ToolPresentation) {
