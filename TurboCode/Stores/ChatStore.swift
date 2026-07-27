@@ -56,9 +56,18 @@ public final class ChatStore {
     }
 
     // Timeline
-    public var blocks: [ChatBlock] = []
-    public var liveReasoning: String = ""
-    public var liveAssistant: String = ""
+    public var blocks: [ChatBlock] {
+        get { timelineStore.blocks }
+        set { timelineStore.blocks = newValue }
+    }
+    public var liveReasoning: String {
+        get { timelineStore.liveReasoning }
+        set { timelineStore.liveReasoning = newValue }
+    }
+    public var liveAssistant: String {
+        get { timelineStore.liveAssistant }
+        set { timelineStore.liveAssistant = newValue }
+    }
     // Forwarded during the refactor so timeline views keep their current API.
     public var toolActivities: [ToolActivity] {
         get { toolInteractionStore.activities }
@@ -70,7 +79,10 @@ public final class ChatStore {
 
     // First-message layout state — true on launch and new chat,
     // becomes false after the first message is sent
-    public var isFirstMessage: Bool = true
+    public var isFirstMessage: Bool {
+        get { timelineStore.isFirstMessage }
+        set { timelineStore.isFirstMessage = newValue }
+    }
 
     // Pending user approval for a destructive tool operation
     public var pendingApproval: ApprovalRequest? {
@@ -114,7 +126,7 @@ public final class ChatStore {
     public var inspectedWorkspaceListingID: String?
     public var inspectedWorkspaceListing: WorkspaceListingBlock? {
         guard let inspectedWorkspaceListingID else { return nil }
-        return blocks.first(where: { $0.id == inspectedWorkspaceListingID })?.workspaceListing
+        return timelineStore.block(id: inspectedWorkspaceListingID)?.workspaceListing
     }
 
     // Terminal
@@ -262,6 +274,7 @@ public final class ChatStore {
     private let workspaceStore: WorkspaceStore
     private let conversationStore: ConversationStore
     private let toolInteractionStore: ToolInteractionStore
+    private let timelineStore: ChatTimelineStore
     /// Retained temporarily for commit-receipt undo, which still coordinates
     /// timeline mutation and persistence inside ChatStore.
     private let gitService: any GitRepositoryServicing
@@ -319,11 +332,8 @@ public final class ChatStore {
     private var activeEditGroupID: String?
     private var activeProductGuidePresentation: ProductGuideBlock?
     private var activeCompletedRootWrite: String?
-    private var activeAssistantPlaceholderID: String?
     /// Listings produced during the active turn are retained only long enough
     /// to remove a model-generated echo from the final assistant text.
-    private var activeWorkspaceListingPresentations: [WorkspaceListingBlock] = []
-    private var editTransactionGroups: [String: String] = [:]
 
     // MARK: - Onboarding
 
@@ -355,6 +365,7 @@ public final class ChatStore {
         self.conversationStore = ConversationStore(repository: conversationRepository)
         self.workspaceStore = WorkspaceStore(gitService: gitService)
         self.toolInteractionStore = ToolInteractionStore()
+        self.timelineStore = ChatTimelineStore()
         self.gitService = gitService
         self.diffPatchService = diffPatchService
         let loadedProfiles = (try? DynamicProfileStore.live.load()) ?? []
@@ -907,10 +918,7 @@ public final class ChatStore {
             workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
             mode: mode
         )
-        blocks = []
-        liveReasoning = ""
-        liveAssistant = ""
-        isFirstMessage = true
+        timelineStore.reset()
         rebuildSession(keepingHistory: false)
     }
 
@@ -926,9 +934,7 @@ public final class ChatStore {
         )
         guard created, !hasOrphanedBlocks else { return }
 
-        liveReasoning = ""
-        liveAssistant = ""
-        isFirstMessage = true
+        timelineStore.reset()
         rebuildSession(keepingHistory: false)
     }
 
@@ -1005,9 +1011,7 @@ public final class ChatStore {
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
         dismissWorkspaceListingInspector()
         activeThreadId = id
-        blocks = snapshot.blocks
-        liveReasoning = ""; liveAssistant = ""
-        isFirstMessage = blocks.isEmpty
+        timelineStore.restore(snapshot.blocks)
         if let wp = snapshot.conversation.workspace, workspaceRoot != wp {
             workspaceRoot = wp
         }
@@ -1103,10 +1107,7 @@ public final class ChatStore {
         guard deletesActiveThread else { return }
 
         activeThreadId = nil
-        blocks = []
-        liveReasoning = ""
-        liveAssistant = ""
-        isFirstMessage = true
+        timelineStore.reset()
 
         if let nextThreadID {
             await restoreSession(id: nextThreadID)
@@ -1128,10 +1129,7 @@ public final class ChatStore {
         let removedActiveWorkspace = workspaceStore.removeWorkspace(path)
 
         if conversationRemoval.removedActiveThread {
-            blocks = []
-            liveReasoning = ""
-            liveAssistant = ""
-            isFirstMessage = true
+            timelineStore.reset()
         }
 
         if removedActiveWorkspace {
@@ -1302,31 +1300,19 @@ public final class ChatStore {
         promptText: String,
         visibleInTimeline: Bool
     ) async {
-        isFirstMessage = false
         let titleThreadID = activeThreadId
         let titleTask: Task<Void, Never>? = visibleInTimeline ? Task { [weak self] in
             guard let self else { return }
             await self.generateTitle(from: displayText, for: titleThreadID)
         } : nil
 
-        if visibleInTimeline {
-            blocks.append(ChatBlock(kind: .user, text: displayText))
-        }
-
         let placeholderID = UUID().uuidString
         let modelName = composerModel
-        blocks.append(
-            ChatBlock(
-                id: placeholderID,
-                kind: .assistant,
-                text: "",
-                model: modelName
-            )
+        timelineStore.beginResponse(
+            displayText: visibleInTimeline ? displayText : nil,
+            placeholderID: placeholderID,
+            model: modelName
         )
-        activeAssistantPlaceholderID = placeholderID
-        liveAssistant = ""
-        liveReasoning = ""
-        activeWorkspaceListingPresentations.removeAll()
         error = nil
 
         guard let turboThreadID = activeThreadId else {
@@ -1431,36 +1417,28 @@ public final class ChatStore {
             }
             try Task.checkCancellation()
 
-            if let index = blocks.firstIndex(where: { $0.id == placeholderID }) {
-                if assistantText.trimmingCharacters(
-                    in: .whitespacesAndNewlines
-                ).isEmpty {
-                    blocks.remove(at: index)
-                } else {
-                    blocks[index] = ChatBlock(
-                        id: placeholderID,
-                        kind: .assistant,
-                        text: assistantText,
-                        model: modelName
-                    )
-                }
-            }
-            if !reasoningText.isEmpty, !assistantText.isEmpty,
-               let index = blocks.firstIndex(where: { $0.id == placeholderID }) {
-                blocks.insert(
-                    ChatBlock(
-                        kind: .reasoning,
-                        text: reasoningText,
-                        model: modelName
-                    ),
-                    at: index
-                )
-            }
+            let assistantBlock = assistantText.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty ? nil : ChatBlock(
+                id: placeholderID,
+                kind: .assistant,
+                text: assistantText,
+                model: modelName
+            )
+            let reasoningBlock = !reasoningText.isEmpty && !assistantText.isEmpty
+                ? ChatBlock(kind: .reasoning, text: reasoningText, model: modelName)
+                : nil
+            timelineStore.finalizeResponse(
+                placeholderID: placeholderID,
+                assistantBlock: assistantBlock,
+                reasoningBlock: reasoningBlock
+            )
             conversationStore.touchThread(id: turboThreadID)
         } catch where error is CancellationError || Task.isCancelled {
             await codexClient.interruptActiveTurn()
-            if let index = blocks.firstIndex(where: { $0.id == placeholderID }) {
-                blocks[index] = ChatBlock(
+            timelineStore.replaceBlock(
+                id: placeholderID,
+                with: ChatBlock(
                     id: placeholderID,
                     kind: .assistant,
                     text: assistantText.isEmpty
@@ -1468,40 +1446,37 @@ public final class ChatStore {
                         : assistantText,
                     model: modelName
                 )
-            }
+            )
             self.error = nil
         } catch let codexError as CodexAppServerError
             where codexError.requiresChatGPTLogin {
             codexConnectionState = .signedOut
             self.error = nil
-            if let index = blocks.firstIndex(where: { $0.id == placeholderID }) {
-                blocks[index] = ChatBlock(
+            timelineStore.replaceBlock(
+                id: placeholderID,
+                with: ChatBlock(
                     id: placeholderID,
                     kind: .assistant,
                     text: "Sign in with ChatGPT to continue with Codex.",
                     model: modelName
                 )
-            }
+            )
         } catch {
             codexConnectionState = .failed(error.localizedDescription)
             self.error = error.localizedDescription
-            if let index = blocks.firstIndex(where: { $0.id == placeholderID }) {
-                blocks[index] = ChatBlock(
+            timelineStore.replaceBlock(
+                id: placeholderID,
+                with: ChatBlock(
                     id: placeholderID,
                     kind: .assistant,
                     text: "Error: \(error.localizedDescription)",
                     model: modelName
                 )
-            }
+            )
         }
 
-        liveAssistant = ""
-        liveReasoning = ""
+        timelineStore.finishResponse(placeholderID: placeholderID)
         toolInteractionStore.clearActivities()
-        activeWorkspaceListingPresentations.removeAll()
-        if activeAssistantPlaceholderID == placeholderID {
-            activeAssistantPlaceholderID = nil
-        }
         if let titleTask {
             await titleTask.value
         }
@@ -1570,7 +1545,6 @@ public final class ChatStore {
     ) {
         switch presentation {
         case .workspaceListing(let listing):
-            activeWorkspaceListingPresentations.append(listing)
             presentToolPresentation(.workspaceListing(listing))
         }
     }
@@ -1587,9 +1561,6 @@ public final class ChatStore {
             promptText,
             blocks: blocks
         )
-        // Echo filtering is scoped to one response so historical listing names
-        // can never affect unrelated assistant messages.
-        activeWorkspaceListingPresentations = []
 
         // A run retains the backend it started with even if settings change
         // while the asynchronous response is finishing.
@@ -1609,7 +1580,6 @@ public final class ChatStore {
         var didRecordFirstToken = false
         var diagnosticsGeneratedCharacters = 0
 
-        isFirstMessage = false
         // Generate the title concurrently with the response, but retain the
         // task so persistence can wait for the final title. Keep the initiating
         // thread ID stable even if the user navigates before generation finishes.
@@ -1619,13 +1589,12 @@ public final class ChatStore {
             await self.generateTitle(from: displayText, for: titleThreadID)
         } : nil
 
-        if visibleInTimeline {
-            blocks.append(ChatBlock(kind: .user, text: displayText))
-        }
-
         let placeholderId = UUID().uuidString
-        blocks.append(ChatBlock(id: placeholderId, kind: .assistant, text: "", model: composerModel))
-        activeAssistantPlaceholderID = placeholderId
+        timelineStore.beginResponse(
+            displayText: visibleInTimeline ? displayText : nil,
+            placeholderID: placeholderId,
+            model: composerModel
+        )
 
         runtimeStatus = .ready
         error = nil
@@ -1710,34 +1679,28 @@ public final class ChatStore {
                 : userVisibleAssistantText(accumulatedText)
             let finalText = NativeToolEchoFilter.filtering(
                 rawFinalText,
-                workspaceListings: activeWorkspaceListingPresentations
+                workspaceListings: timelineStore.workspaceListingPresentations
             )
             let productGuidePresentation = activeProductGuidePresentation
-            if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
-                if finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    blocks.remove(at: i)
-                } else {
-                    blocks[i] = ChatBlock(
-                        id: placeholderId,
-                        kind: productGuidePresentation == nil ? .assistant : .productGuide,
-                        text: finalText,
-                        model: composerModel,
-                        productGuide: productGuidePresentation
-                    )
-                }
-            }
-
-            // Separate reasoning block if model output BOTH reasoning and content.
-            if !liveReasoning.isEmpty && !accumulatedText.isEmpty {
-                if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
-                    blocks.insert(
-                        ChatBlock(kind: .reasoning, text: liveReasoning, model: composerModel),
-                        at: i
-                    )
-                }
-            }
-            liveReasoning = ""
-            liveAssistant = ""  // hide live streaming block
+            let assistantBlock = finalText.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty ? nil : ChatBlock(
+                id: placeholderId,
+                kind: productGuidePresentation == nil ? .assistant : .productGuide,
+                text: finalText,
+                model: composerModel,
+                productGuide: productGuidePresentation
+            )
+            let reasoningBlock = !liveReasoning.isEmpty && !accumulatedText.isEmpty
+                ? ChatBlock(kind: .reasoning, text: liveReasoning, model: composerModel)
+                : nil
+            timelineStore.finalizeResponse(
+                placeholderID: placeholderId,
+                assistantBlock: assistantBlock,
+                reasoningBlock: reasoningBlock
+            )
+            timelineStore.liveReasoning = ""
+            timelineStore.liveAssistant = ""
 
             if let activeThreadId {
                 conversationStore.touchThread(id: activeThreadId)
@@ -1746,16 +1709,17 @@ public final class ChatStore {
             diagnosticsOutcome = .failed
             let stoppedText = activeCompletedRootWrite.map { "Created `\($0)`." }
                 ?? "Response stopped because the on-device model began repeating output. Please retry."
-            if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
-                blocks[i] = ChatBlock(
+            timelineStore.replaceBlock(
+                id: placeholderId,
+                with: ChatBlock(
                     id: placeholderId,
                     kind: .assistant,
                     text: stoppedText,
                     model: composerModel
                 )
-            }
-            liveReasoning = ""
-            liveAssistant = ""
+            )
+            timelineStore.liveReasoning = ""
+            timelineStore.liveAssistant = ""
             isDelegating = false
             toolInteractionStore.clearActivities()
             self.error = nil
@@ -1764,16 +1728,17 @@ public final class ChatStore {
             // Keep whatever the model had already produced and mark an empty
             // response clearly, without presenting cancellation as an error.
             let partialText = accumulatedText.isEmpty ? liveReasoning : accumulatedText
-            if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
-                blocks[i] = ChatBlock(
+            timelineStore.replaceBlock(
+                id: placeholderId,
+                with: ChatBlock(
                     id: placeholderId,
                     kind: .assistant,
                     text: partialText.isEmpty ? "Response interrupted." : partialText,
                     model: composerModel
                 )
-            }
-            liveReasoning = ""
-            liveAssistant = ""
+            )
+            timelineStore.liveReasoning = ""
+            timelineStore.liveAssistant = ""
             isDelegating = false
             toolInteractionStore.clearActivities()
             self.error = nil
@@ -1782,14 +1747,15 @@ public final class ChatStore {
             diagnosticsError = error
             toolInteractionStore.clearActivities()
             self.error = error.localizedDescription
-            if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
-                blocks[i] = ChatBlock(
+            timelineStore.replaceBlock(
+                id: placeholderId,
+                with: ChatBlock(
                     id: placeholderId,
                     kind: .assistant,
                     text: "Error: \(error.localizedDescription)",
                     model: composerModel
                 )
-            }
+            )
         }
         if let diagnosticsRunID {
             if diagnosticsBackend == .foundationApple {
@@ -1819,11 +1785,8 @@ public final class ChatStore {
         if activeEditGroupID == editGroupID {
             activeEditGroupID = nil
         }
-        if activeAssistantPlaceholderID == placeholderId {
-            activeAssistantPlaceholderID = nil
-        }
-        editTransactionGroups = editTransactionGroups.filter { $0.value != editGroupID }
-        activeWorkspaceListingPresentations = []
+        timelineStore.finishResponse(placeholderID: placeholderId)
+        timelineStore.clearEditGroup(editGroupID)
         // Persist after the title task finishes so the JSON never races with
         // the Apple on-device title generator and stores a stale "New Chat".
         if let titleTask {
@@ -2014,23 +1977,9 @@ public final class ChatStore {
     }
 
     private func presentToolPresentation(_ presentation: ToolPresentation) {
-        let block: ChatBlock
         switch presentation {
         case .workspaceListing(let listing):
-            activeWorkspaceListingPresentations.append(listing)
-            block = ChatBlock(
-                id: "workspace-listing-\(listing.toolCallID)",
-                kind: .workspaceListing,
-                text: listing.path,
-                workspaceListing: listing
-            )
-        }
-        guard !blocks.contains(where: { $0.id == block.id }) else { return }
-        if let placeholderID = activeAssistantPlaceholderID,
-           let index = blocks.firstIndex(where: { $0.id == placeholderID }) {
-            blocks.insert(block, at: index)
-        } else {
-            blocks.append(block)
+            timelineStore.presentWorkspaceListing(listing)
         }
     }
 
@@ -2041,40 +1990,15 @@ public final class ChatStore {
         reviewFiles: [DiffReviewFileSnapshot] = [],
         status: DiffPatchStatus
     ) {
-        let blockID = activeEditGroupID ?? id
-        editTransactionGroups[id] = blockID
-
-        if let index = blocks.firstIndex(where: { $0.id == blockID }),
-           var payload = blocks[index].diffPatch {
-            var patches = payload.patches ?? [payload.patch]
-            patches.append(patch)
-            payload.patches = patches
-            payload.patch = patches.joined(separator: "\n")
-            payload.files = mergedFileChanges(payload.files + files)
-            payload.reviewFiles = mergedReviewFiles(
-                existing: payload.reviewFiles ?? [],
-                incoming: reviewFiles
-            )
-            payload.status = status
-            payload.errorMessage = nil
-            blocks[index].diffPatch = payload
-            return
-        }
-        let payload = DiffPatchBlock(
+        timelineStore.beginDiffPatch(
+            id: id,
+            editGroupID: activeEditGroupID,
             workspaceRoot: workspaceRoot,
             patch: patch,
-            patches: [patch],
             files: files,
-            reviewFiles: reviewFiles.isEmpty ? nil : reviewFiles,
-            status: status,
-            errorMessage: nil
+            reviewFiles: reviewFiles,
+            status: status
         )
-        let block = ChatBlock(id: blockID, kind: .diffPatch, text: "", diffPatch: payload)
-        if let placeholderIndex = blocks.lastIndex(where: { $0.kind == .assistant && $0.text.isEmpty }) {
-            blocks.insert(block, at: placeholderIndex)
-        } else {
-            blocks.append(block)
-        }
     }
 
     public func updateDiffPatchBlock(
@@ -2082,35 +2006,27 @@ public final class ChatStore {
         status: DiffPatchStatus,
         errorMessage: String? = nil
     ) {
-        let blockID = editTransactionGroups[id] ?? id
-        guard let index = blocks.firstIndex(where: { $0.id == blockID }),
-              var payload = blocks[index].diffPatch else { return }
-        payload.status = status
-        payload.errorMessage = errorMessage
-        blocks[index].diffPatch = payload
-
-        if status == .applied || status == .undone {
+        if timelineStore.updateDiffPatch(
+            id: id,
+            status: status,
+            errorMessage: errorMessage
+        ) {
             Task { await reloadDiffs() }
         }
     }
 
     public func reviewDiffPatch(_ id: String) {
-        guard blocks.contains(where: { $0.id == id && $0.diffPatch != nil }) else { return }
+        guard timelineStore.block(id: id)?.diffPatch != nil else { return }
         rightPanelMode = .changes
         Task { await reloadDiffs() }
     }
 
     public func presentGitCommit(_ receipt: GitCommitBlock) {
-        let block = ChatBlock(kind: .gitCommit, text: "", gitCommit: receipt)
-        if let placeholderIndex = blocks.lastIndex(where: { $0.kind == .assistant && $0.text.isEmpty }) {
-            blocks.insert(block, at: placeholderIndex)
-        } else {
-            blocks.append(block)
-        }
+        timelineStore.presentGitCommit(receipt)
     }
 
     public func reviewGitCommit(_ id: String) {
-        guard let receipt = blocks.first(where: { $0.id == id })?.gitCommit else { return }
+        guard let receipt = timelineStore.block(id: id)?.gitCommit else { return }
         inspectedGitCommit = receipt
         rightPanelMode = .commit
     }
@@ -2118,7 +2034,7 @@ public final class ChatStore {
     /// Shows the immutable snapshot associated with one timeline receipt. The
     /// inspector never rereads the filesystem, preserving conversational history.
     public func reviewWorkspaceListing(_ id: String) {
-        guard blocks.contains(where: { $0.id == id && $0.workspaceListing != nil }) else { return }
+        guard timelineStore.block(id: id)?.workspaceListing != nil else { return }
         inspectedWorkspaceListingID = id
         rightPanelMode = .workspaceListing
     }
@@ -2132,13 +2048,12 @@ public final class ChatStore {
     }
 
     public func undoGitCommit(_ id: String) {
-        guard let index = blocks.firstIndex(where: { $0.id == id }),
-              var receipt = blocks[index].gitCommit,
+        guard var receipt = timelineStore.block(id: id)?.gitCommit,
               receipt.status == .committed else { return }
 
         receipt.status = .undoing
         receipt.errorMessage = nil
-        blocks[index].gitCommit = receipt
+        timelineStore.updateGitCommit(id: id, receipt: receipt)
 
         Task {
             if let failure = await gitService.undoCommit(
@@ -2151,9 +2066,7 @@ public final class ChatStore {
                 receipt.status = .undone
                 receipt.errorMessage = nil
             }
-            if let currentIndex = blocks.firstIndex(where: { $0.id == id }) {
-                blocks[currentIndex].gitCommit = receipt
-            }
+            timelineStore.updateGitCommit(id: id, receipt: receipt)
             if inspectedGitCommit?.hash == receipt.hash {
                 inspectedGitCommit = receipt
             }
@@ -2165,8 +2078,7 @@ public final class ChatStore {
     }
 
     public func undoDiffPatch(_ id: String) {
-        guard let index = blocks.firstIndex(where: { $0.id == id }),
-              let payload = blocks[index].diffPatch,
+        guard let payload = timelineStore.block(id: id)?.diffPatch,
               payload.status == .applied else { return }
 
         updateDiffPatchBlock(id: id, status: .undoing)
@@ -2202,47 +2114,6 @@ public final class ChatStore {
                 await persistSession(for: threadID)
             }
         }
-    }
-
-    private func mergedFileChanges(
-        _ changes: [DiffPatchFileChange]
-    ) -> [DiffPatchFileChange] {
-        var order: [String] = []
-        var totals: [String: (additions: Int, deletions: Int)] = [:]
-        for change in changes {
-            if totals[change.path] == nil { order.append(change.path) }
-            totals[change.path, default: (0, 0)].additions += change.additions
-            totals[change.path, default: (0, 0)].deletions += change.deletions
-        }
-        return order.compactMap { path in
-            guard let total = totals[path] else { return nil }
-            return DiffPatchFileChange(
-                path: path,
-                additions: total.additions,
-                deletions: total.deletions
-            )
-        }
-    }
-
-    /// Consecutive edit_file calls in one assistant turn share a receipt. The
-    /// review must retain the first before-state and the final after-state.
-    private func mergedReviewFiles(
-        existing: [DiffReviewFileSnapshot],
-        incoming: [DiffReviewFileSnapshot]
-    ) -> [DiffReviewFileSnapshot] {
-        var merged = existing
-        for snapshot in incoming {
-            if let index = merged.firstIndex(where: { $0.path == snapshot.path }) {
-                merged[index] = DiffReviewFileSnapshot(
-                    path: snapshot.path,
-                    originalText: merged[index].originalText,
-                    modifiedText: snapshot.modifiedText
-                )
-            } else {
-                merged.append(snapshot)
-            }
-        }
-        return merged
     }
 
     private func toolSummary(for call: Transcript.ToolCall) -> String {
