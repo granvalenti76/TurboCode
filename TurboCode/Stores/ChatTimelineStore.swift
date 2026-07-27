@@ -1,0 +1,208 @@
+import Observation
+
+/// Owns the in-memory timeline aggregate shown by the chat canvas.
+///
+/// This store has no provider, persistence, workspace, or navigation
+/// dependencies. ChatStore decides what a response means; this type only
+/// applies deterministic block transitions and preserves presentation order.
+@MainActor
+@Observable
+final class ChatTimelineStore {
+    var blocks: [ChatBlock] = []
+    var liveReasoning = ""
+    var liveAssistant = ""
+    var isFirstMessage = true
+
+    private(set) var activeAssistantPlaceholderID: String?
+    private(set) var workspaceListingPresentations: [WorkspaceListingBlock] = []
+
+    private var editTransactionGroups: [String: String] = [:]
+
+    /// Resets the complete visible turn state for a new or deleted conversation.
+    func reset() {
+        blocks = []
+        liveReasoning = ""
+        liveAssistant = ""
+        isFirstMessage = true
+        activeAssistantPlaceholderID = nil
+        workspaceListingPresentations = []
+        editTransactionGroups = [:]
+    }
+
+    /// Restores persisted blocks while discarding transient streaming state.
+    func restore(_ restoredBlocks: [ChatBlock]) {
+        reset()
+        blocks = restoredBlocks
+        isFirstMessage = restoredBlocks.isEmpty
+    }
+
+    /// Starts one visible response and records the exact placeholder used to
+    /// order tool receipts ahead of the eventual assistant answer.
+    func beginResponse(
+        displayText: String?,
+        placeholderID: String,
+        model: String
+    ) {
+        isFirstMessage = false
+        if let displayText {
+            blocks.append(ChatBlock(kind: .user, text: displayText))
+        }
+        blocks.append(
+            ChatBlock(
+                id: placeholderID,
+                kind: .assistant,
+                text: "",
+                model: model
+            )
+        )
+        activeAssistantPlaceholderID = placeholderID
+        liveReasoning = ""
+        liveAssistant = ""
+        workspaceListingPresentations = []
+    }
+
+    /// Replaces or removes a response placeholder, then optionally inserts a
+    /// reasoning block immediately before the finalized assistant block.
+    func finalizeResponse(
+        placeholderID: String,
+        assistantBlock: ChatBlock?,
+        reasoningBlock: ChatBlock? = nil
+    ) {
+        guard let index = blocks.firstIndex(where: { $0.id == placeholderID }) else { return }
+        guard let assistantBlock else {
+            blocks.remove(at: index)
+            return
+        }
+
+        blocks[index] = assistantBlock
+        if let reasoningBlock {
+            blocks.insert(reasoningBlock, at: index)
+        }
+    }
+
+    func replaceBlock(id: String, with block: ChatBlock) {
+        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return }
+        blocks[index] = block
+    }
+
+    /// Ends only the matching response so a stale asynchronous completion
+    /// cannot clear a newer response's placeholder identity.
+    func finishResponse(placeholderID: String) {
+        liveReasoning = ""
+        liveAssistant = ""
+        workspaceListingPresentations = []
+        if activeAssistantPlaceholderID == placeholderID {
+            activeAssistantPlaceholderID = nil
+        }
+    }
+
+    func block(id: String) -> ChatBlock? {
+        blocks.first { $0.id == id }
+    }
+
+    /// Inserts a listing once, before the active assistant placeholder, and
+    /// retains its immutable payload for response-local echo filtering.
+    func presentWorkspaceListing(_ listing: WorkspaceListingBlock) {
+        let block = ChatBlock(
+            id: "workspace-listing-\(listing.toolCallID)",
+            kind: .workspaceListing,
+            text: listing.path,
+            workspaceListing: listing
+        )
+        guard !blocks.contains(where: { $0.id == block.id }) else { return }
+        workspaceListingPresentations.append(listing)
+        insertBeforeActivePlaceholderOrAppend(block)
+    }
+
+    func beginDiffPatch(
+        id: String,
+        editGroupID: String?,
+        workspaceRoot: String,
+        patch: String,
+        files: [DiffPatchFileChange],
+        reviewFiles: [DiffReviewFileSnapshot],
+        status: DiffPatchStatus
+    ) {
+        let blockID = editGroupID ?? id
+        editTransactionGroups[id] = blockID
+
+        if let index = blocks.firstIndex(where: { $0.id == blockID }),
+           let payload = blocks[index].diffPatch {
+            blocks[index].diffPatch = ReviewReceiptReducer.merging(
+                payload,
+                patch: patch,
+                files: files,
+                reviewFiles: reviewFiles,
+                status: status
+            )
+            return
+        }
+
+        let payload = DiffPatchBlock(
+            workspaceRoot: workspaceRoot,
+            patch: patch,
+            patches: [patch],
+            files: files,
+            reviewFiles: reviewFiles.isEmpty ? nil : reviewFiles,
+            status: status,
+            errorMessage: nil
+        )
+        insertBeforeEmptyAssistantOrAppend(
+            ChatBlock(id: blockID, kind: .diffPatch, text: "", diffPatch: payload)
+        )
+    }
+
+    /// Returns whether derived workspace diffs should be reloaded.
+    @discardableResult
+    func updateDiffPatch(
+        id: String,
+        status: DiffPatchStatus,
+        errorMessage: String?
+    ) -> Bool {
+        let blockID = editTransactionGroups[id] ?? id
+        guard let index = blocks.firstIndex(where: { $0.id == blockID }),
+              let payload = blocks[index].diffPatch else { return false }
+        blocks[index].diffPatch = ReviewReceiptReducer.updating(
+            payload,
+            status: status,
+            errorMessage: errorMessage
+        )
+        return status == .applied || status == .undone
+    }
+
+    func clearEditGroup(_ editGroupID: String) {
+        editTransactionGroups = editTransactionGroups.filter {
+            $0.value != editGroupID
+        }
+    }
+
+    func presentGitCommit(_ receipt: GitCommitBlock) {
+        insertBeforeEmptyAssistantOrAppend(
+            ChatBlock(kind: .gitCommit, text: "", gitCommit: receipt)
+        )
+    }
+
+    func updateGitCommit(id: String, receipt: GitCommitBlock) {
+        guard let index = blocks.firstIndex(where: { $0.id == id }) else { return }
+        blocks[index].gitCommit = receipt
+    }
+
+    private func insertBeforeActivePlaceholderOrAppend(_ block: ChatBlock) {
+        if let activeAssistantPlaceholderID,
+           let index = blocks.firstIndex(where: { $0.id == activeAssistantPlaceholderID }) {
+            blocks.insert(block, at: index)
+        } else {
+            blocks.append(block)
+        }
+    }
+
+    private func insertBeforeEmptyAssistantOrAppend(_ block: ChatBlock) {
+        if let index = blocks.lastIndex(where: {
+            $0.kind == .assistant && $0.text.isEmpty
+        }) {
+            blocks.insert(block, at: index)
+        } else {
+            blocks.append(block)
+        }
+    }
+}

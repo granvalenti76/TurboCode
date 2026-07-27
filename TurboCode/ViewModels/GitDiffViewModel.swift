@@ -33,7 +33,7 @@ struct FileDiffSection: Identifiable, Hashable {
 
 // MARK: - Actor (identico a Codechat)
 
-actor GitDiffService {
+actor GitDiffService: GitRepositoryServicing {
     enum GitError: LocalizedError {
         case notARepository
         case commandFailed(String)
@@ -284,7 +284,10 @@ private extension String {
 // MARK: - Factory helper (come Codechat)
 
 extension FileDiffSection {
-    static func fromGit(at projectURL: URL, service: GitDiffService) async -> [FileDiffSection]? {
+    static func fromGit(
+        at projectURL: URL,
+        service: any GitRepositoryServicing
+    ) async -> [FileDiffSection]? {
         guard await service.isGitRepository(at: projectURL) else { return nil }
 
         let files: [GitFileStatus]

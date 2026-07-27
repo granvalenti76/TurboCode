@@ -1,33 +1,14 @@
 import Foundation
 import AppKit
 import Observation
-import SwiftUI
 import FoundationModels
 import FoundationModelsUtilities
 
-// MARK: - Model Backend
-
-/// The active inference backend.
-public enum ModelBackend: String, CaseIterable, Sendable {
-    case llamaServer = "Llama-server"
-    case foundationApple = "Foundation Apple"
-    case foundationServe = "Apple PCC"
-    case premium = "Premium"
-    case codex = "Codex"
-}
-
-/// Captures a menu choice while the asynchronous Codex handoff completes.
-/// Storing identifiers rather than closures keeps the transition isolated to
-/// ChatStore's main actor.
-private enum TurboCodeProfileSelection {
-    case backend(ModelBackend)
-    case remoteModel(String)
-    case builtIn(ProfileBaseModelID)
-    case dynamic(UUID)
-}
-
-// MARK: - Central ChatStore
-
+/// Application-level façade that composes the independent chat domains.
+///
+/// State and provider behavior belong to the injected stores/coordinators.
+/// This type retains cross-domain use cases and the stable API consumed by
+/// existing views while those views migrate to narrower dependencies.
 @MainActor
 @Observable
 public final class ChatStore {
@@ -35,29 +16,7 @@ public final class ChatStore {
     public static var shared: ChatStore!
 
     // MARK: - Properties
-    // Threads
-    public var threads: [Conversation] = []
-    public var activeThreadId: String?
-    public var threadSearch: String = ""
-    public var showArchivedThreads: Bool = false
-
-    // Timeline
-    public var blocks: [ChatBlock] = []
-    public var liveReasoning: String = ""
-    public var liveAssistant: String = ""
-    public var toolActivities: [ToolActivity] = []
-    public var activeToolActivity: ToolActivity? { toolActivities.last }
-
-    // First-message layout state — true on launch and new chat,
-    // becomes false after the first message is sent
-    public var isFirstMessage: Bool = true
-
-    // Pending user approval for a destructive tool operation
-    public var pendingApproval: ApprovalRequest? = nil
-    private var queuedApprovals: [ApprovalRequest] = []
-
     // Composer
-    public var composerModel: String = "auto"
     public var composerProviderId: String = ""
     public var composerMode: ConversationMode = .agent
     public var composerInput: String = ""
@@ -73,301 +32,42 @@ public final class ChatStore {
     public var benchmarkStatus: String?
 #endif
 
-    // Navigation
-    public var route: AppRoute = .chat
-    /// Custom Profiles is a document-modal presentation, not a replacement for
-    /// the workbench destination underneath it.
-    public var isCustomProfilesPresented: Bool = false
-    public var settingsSection: SettingsSection = .general
-
-    // Sidebar
-    public var leftSidebarCollapsed: Bool = false
-    public var leftSidebarWidth: CGFloat = 304
-
-    // Right panel
-    public var rightPanelMode: RightPanelMode?
-    public var rightPanelVisible: Bool { rightPanelMode != nil }
-    public var rightSidebarWidth: CGFloat = 360
-    public var inspectedGitCommit: GitCommitBlock?
-    public var inspectedWorkspaceListingID: String?
-    public var inspectedWorkspaceListing: WorkspaceListingBlock? {
-        guard let inspectedWorkspaceListingID else { return nil }
-        return blocks.first(where: { $0.id == inspectedWorkspaceListingID })?.workspaceListing
-    }
-
-    // Terminal
-    public var terminalOpen: Bool = false
-    public var terminalHeight: CGFloat = 360
-
-    // Workspace
-    public var workspaceRoot: String = ""
-    public var workspaceLabel: String { workspaceRoot.isEmpty ? "No workspace" : URL(fileURLWithPath: workspaceRoot).lastPathComponent }
-
-    // Recent workspace paths (persisted in UserDefaults, used by sidebar Projects)
-    public var recentWorkspaces: [String] {
-        get { UserDefaults.standard.stringArray(forKey: "recentWorkspaces") ?? [] }
-        set { UserDefaults.standard.set(newValue, forKey: "recentWorkspaces") }
-    }
-
-    // Selected project in sidebar (filters threads)
-    public var selectedProject: String? = nil
-
-    // Backend
-    public var activeBackend: ModelBackend = .llamaServer
-    public private(set) var agentTuning: AgentTuningConfig = .default
-    public private(set) var remoteModels: [RemoteModelConfig] = RemoteModelConfig.defaults
-    public private(set) var activeRemoteModelID: String = "llama"
-    private(set) var dynamicProfiles: [UserDynamicProfile] = []
-    private(set) var activeDynamicProfileID: UUID?
-
-    var activeDynamicProfile: UserDynamicProfile? {
-        activeDynamicProfileID.flatMap { id in dynamicProfiles.first(where: { $0.id == id }) }
-    }
-
-    var activeBaseModelID: ProfileBaseModelID {
-        if activeBackend == .foundationApple { return .onDevice }
-        return ProfileBaseModelID(rawValue: activeRemoteModelID) ?? .llama
-    }
-
-    public var activeRemoteModel: RemoteModelConfig? {
-        remoteModels.first(where: { $0.id == activeRemoteModelID })
-    }
-
-    public var enabledRemoteModels: [RemoteModelConfig] {
-        remoteModels.filter(\.enabled)
-    }
-
-    public var activeModelSupportsReasoning: Bool {
-        if activeBackend == .codex { return true }
-        return activeBackend != .foundationApple
-            && (activeRemoteModel?.supportsReasoning ?? false)
-    }
-
-    var codexConnectionState: CodexConnectionState = .idle
-    var codexModel: CodexModelDescriptor?
-    var codexModels: [CodexModelDescriptor] = []
-    private var preferredCodexModelID: String =
-        UserDefaults.standard.string(forKey: "codexModelID")
-            ?? CodexAppServerClient.lunaModelID
-    var codexLoginURL: URL?
-    var codexReasoningEffort: CodexReasoningEffort =
-        UserDefaults.standard.string(forKey: "codexReasoningEffort")
-            .flatMap(CodexReasoningEffort.init(rawValue:))
-        ?? .medium
-
-    var codexReasoningOptions: [CodexReasoningOption] {
-        codexModel?.supportedReasoningEfforts
-            ?? CodexReasoningEffort.allCases.map {
-                CodexReasoningOption(reasoningEffort: $0, description: "")
-            }
-    }
-
-    var codexDisplayName: String {
-        codexModel?.displayName
-            ?? UserDefaults.standard.string(forKey: "codexModelDisplayName")
-            ?? "Luna"
-    }
-
-    var activeProfileCanSend: Bool {
-        guard activeBackend == .codex else { return true }
-        if case .ready = codexConnectionState { return true }
-        return false
-    }
-
-    // Shared activation state for the current session profile.
-    public let skillActivations = SkillActivations()
-    private(set) var availableSkills: [TurboCodeSkillDefinition] = []
-
-    /// Maps the persisted ReasoningEffort to FoundationModels' ReasoningLevel.
-    /// The Apple on-device model doesn't support reasoning. Remote models are
-    /// resolved from their declared capabilities and validated again by the
-    /// session factory before the profile is built.
-    public var reasoningLevel: ContextOptions.ReasoningLevel? {
-        guard activeBackend != .foundationApple,
-              activeBackend != .codex else { return nil }
-        return reasoningLevel(for: activeRemoteModel)
-    }
-
-    private func reasoningLevel(for model: RemoteModelConfig?) -> ContextOptions.ReasoningLevel? {
-        guard let model, model.supportsReasoning else { return nil }
-        let raw = UserDefaults.standard.string(forKey: "reasoningEffort") ?? ReasoningEffort.medium.rawValue
-        switch ReasoningEffort(rawValue: raw) ?? .medium {
-        case .low:    return .light
-        case .medium: return .moderate
-        case .high:   return .deep
-        }
-    }
-
-    // Delegation state — true when the orchestrator has called call_powerful_model
-    // and is waiting for a response from the powerful model.
-    public var isDelegating: Bool = false
-
     // Orchestrator mode
     public var orchestratorMode: OrchestratorMode {
-        didSet {
-            UserDefaults.standard.set(orchestratorMode.rawValue, forKey: "orchestratorMode")
-            if orchestratorMode == .orchestrator {
-                // Switching to orchestrator: force Apple as the active model
-                // and rebuild so CallPowerfulModelTool is registered.
-                activeBackend = .foundationApple
-                activeDynamicProfileID = nil
-                UserDefaults.standard.removeObject(forKey: "activeDynamicProfileID")
-                composerModel = "Apple · Orchestrator"
-                rebuildSession(discardingCapabilityContext: true)
-            } else {
-                // Switching back to standalone: rebuild without the tool;
-                // keep whatever backend was active (Apple stays Apple, Llama stays Llama).
-                composerModel = activeBackend.rawValue
-                rebuildSession(discardingCapabilityContext: true)
-            }
+        get { modelRuntimeStore.orchestratorMode }
+        set {
+            modelRuntimeStore.setOrchestratorMode(newValue)
+            rebuildSession(discardingCapabilityContext: true)
         }
     }
 
-    // Diff inspector state (persiste oltre il ciclo di vita della view)
-    var diffSections: [FileDiffSection] = []
-    var isLoadingDiffs = false
-    var diffLoadError: String?
-    private var diffLoadID: UUID?
-
-    // Git branch state
-    var isGitRepository = false
-    var currentBranch: String = ""
-    var availableBranches: [String] = []
-
-    private let gitService = GitDiffService()
-    private let diffPatchService = DiffPatchService()
-    private let conversationRepository: any ConversationRepository
-
-    public func reloadDiffs() async {
-        guard !workspaceRoot.isEmpty else {
-            diffLoadID = nil
-            diffSections = []
-            diffLoadError = nil
-            isLoadingDiffs = false
-            return
-        }
-
-        let requestedWorkspace = workspaceRoot
-        let loadID = UUID()
-        diffLoadID = loadID
-        isLoadingDiffs = true
-        diffLoadError = nil
-        diffSections = []
-        defer {
-            if diffLoadID == loadID {
-                isLoadingDiffs = false
-            }
-        }
-
-        let url = URL(fileURLWithPath: requestedWorkspace)
-        let sections = await FileDiffSection.fromGit(at: url, service: gitService)
-
-        guard !Task.isCancelled,
-              workspaceRoot == requestedWorkspace,
-              diffLoadID == loadID else { return }
-
-        if let sections {
-            diffSections = sections
-            diffLoadError = nil
-        } else {
-            diffSections = []
-            diffLoadError = "Not a git repository or git unavailable"
-        }
-    }
-
-    public func refreshGitBranches() async {
-        guard !workspaceRoot.isEmpty else {
-            isGitRepository = false
-            currentBranch = ""
-            availableBranches = []
-            return
-        }
-
-        let requestedWorkspace = workspaceRoot
-        let url = URL(fileURLWithPath: requestedWorkspace)
-        let isRepository = await gitService.isGitRepository(at: url)
-        guard workspaceRoot == requestedWorkspace, !Task.isCancelled else { return }
-        guard isRepository else {
-            isGitRepository = false
-            currentBranch = ""
-            availableBranches = []
-            return
-        }
-        let branch = await gitService.currentBranch(at: url)
-        let branches = await gitService.allBranches(at: url)
-
-        guard workspaceRoot == requestedWorkspace, !Task.isCancelled else { return }
-
-        isGitRepository = true
-        currentBranch = branch ?? ""
-        availableBranches = branches
-    }
-
-    public func refreshGitAfterToolMutation() async {
-        await refreshGitBranches()
-        await reloadDiffs()
-    }
-
-    /// Switch to a different git branch. Refreshes state afterwards.
-    public func switchToBranch(_ branch: String) async {
-        guard !workspaceRoot.isEmpty else { return }
-        let url = URL(fileURLWithPath: workspaceRoot)
-        let success = await gitService.checkout(branch: branch, at: url)
-        if success {
-            currentBranch = branch
-            await refreshGitBranches()
-        }
-    }
+    // Internal only so the compatibility façade can forward legacy view API.
+    let workspaceStore: WorkspaceStore
+    let conversationStore: ConversationStore
+    let toolInteractionStore: ToolInteractionStore
+    let timelineStore: ChatTimelineStore
+    let workbenchStore: WorkbenchStore
+    let codexRuntimeStore: CodexRuntimeStore
+    let modelRuntimeStore: ModelRuntimeStore
+    let responseCoordinator: ChatResponseCoordinator
+    private let reviewCoordinator: ReviewCoordinator
 
     // Session — recreated when backend or workspace changes
-    private var session: LanguageModelSession
-    /// Codex owns a separate agent loop and authentication lifecycle. It is not
-    /// adapted into LanguageModelSession, which remains the runtime for Llama,
-    /// PCC, DeepSeek and the Apple on-device model.
-    @ObservationIgnored private let codexClient = CodexAppServerClient()
-    @ObservationIgnored private var codexThreadIDs: [String: String] = [:]
-    /// App Server reports both cumulative traffic and the current context
-    /// footprint. Handoff decisions use the latter to avoid double-counting
-    /// the repeated input prefix across turns.
-    @ObservationIgnored private var codexTokenUsageByThread: [
-        String: CodexTokenUsage
-    ] = [:]
-    /// Context imported from TurboCode remains turn-scoped application data,
-    /// so it never masquerades as a user-authored Codex message.
-    @ObservationIgnored private var codexImportedContexts: [String: String] = [:]
-    /// The boundary prevents a later return to Codex from re-importing the
-    /// portion of the timeline that its own thread already knows.
-    @ObservationIgnored private var codexHandoffBoundaryBlockIDs: [
-        String: String
-    ] = [:]
-    /// Bridges Codex JSON-RPC approvals to the same review UI used by native
-    /// TurboCode tools. Dynamic tools are registered with App Server separately
-    /// and execute the concrete TurboCode implementations.
-    @ObservationIgnored private var codexApprovals: [
-        String: CodexApprovalRequest
-    ] = [:]
-
+    private var session: LanguageModelSession {
+        modelRuntimeStore.session
+    }
     // The currently running response task. Keeping the handle makes the Stop
     // button cancel the actual model stream rather than only changing the UI.
     private var responseTask: Task<Void, Never>?
-    private var activeDiagnosticsRunID: String?
-    private var activeEditGroupID: String?
-    private var activeProductGuidePresentation: ProductGuideBlock?
-    private var activeCompletedRootWrite: String?
-    private var activeAssistantPlaceholderID: String?
-    /// Listings produced during the active turn are retained only long enough
-    /// to remove a model-generated echo from the final assistant text.
-    private var activeWorkspaceListingPresentations: [WorkspaceListingBlock] = []
-    private var editTransactionGroups: [String: String] = [:]
-
     // MARK: - Onboarding
 
     /// Ensures the current `~/.turbocode/` layout exists and applies additive migrations.
     public func ensureOnboarding() async {
         do {
             try TurboCodeConfig.shared.performOnboarding()
-            agentTuning = try TurboCodeConfig.shared.loadAgentTuning()
-            availableSkills = configuredSkills()
+            modelRuntimeStore.applyOnboarding(
+                tuning: try TurboCodeConfig.shared.loadAgentTuning()
+            )
             reloadRemoteModels()
         } catch {
             print("[TurboCode] Onboarding failed: \(error.localizedDescription)")
@@ -382,52 +82,37 @@ public final class ChatStore {
         self.init(conversationRepository: DiskConversationRepository())
     }
 
-    init(conversationRepository: any ConversationRepository) {
-        self.conversationRepository = conversationRepository
-        let loadedProfiles = (try? DynamicProfileStore.live.load()) ?? []
-        let savedProfileID = UserDefaults.standard.string(forKey: "activeDynamicProfileID")
-            .flatMap(UUID.init(uuidString:))
-        let savedProfile = loadedProfiles.first(where: { $0.id == savedProfileID })
-        // Restore orchestrator mode from UserDefaults
-        let saved = UserDefaults.standard.string(forKey: "orchestratorMode")
-            ?? OrchestratorMode.standalone.rawValue
-        let mode = OrchestratorMode(rawValue: saved) ?? .standalone
-        let selectedID = savedProfile?.baseModelID.remoteModelID
-            ?? UserDefaults.standard.string(forKey: "activeRemoteModelID")
-            ?? "llama"
-        let initialRemote = RemoteModelConfig.defaults.first(where: {
-            $0.id == selectedID && Self.hasCredential(for: $0)
-        })
-            ?? RemoteModelConfig.fallbackLlama
-        let restoredProfile = savedProfile.flatMap { profile -> UserDynamicProfile? in
-            if profile.baseModelID == .onDevice { return profile }
-            return profile.baseModelID.remoteModelID == initialRemote.id ? profile : nil
-        }
-        self.activeRemoteModelID = initialRemote.id
-        self.dynamicProfiles = loadedProfiles
-        self.activeDynamicProfileID = mode == .standalone ? restoredProfile?.id : nil
-
-        // Initialise ALL stored properties BEFORE any didSet observers fire.
-        // We set orchestratorMode last so that session is already valid.
-        self.activeBackend = mode == .orchestrator || restoredProfile?.baseModelID == .onDevice
-            ? .foundationApple
-            : Self.backend(for: initialRemote.role)
-        let initialModel: any LanguageModel = mode == .orchestrator || restoredProfile?.baseModelID == .onDevice
-            ? SystemLanguageModel.default
-            : ProviderLanguageModel(
-                configuration: initialRemote,
-                apiKey: initialRemote.credential.flatMap(CredentialStore.value(for:))
-            )
-        self.session = LanguageModelSession(model: initialModel)
-        self.composerModel = mode == .orchestrator
-            ? "Apple \u{00B7} Orchestrator"
-            : (restoredProfile?.name ?? initialRemote.name)
-        if savedProfile != nil, restoredProfile == nil {
-            UserDefaults.standard.removeObject(forKey: "activeDynamicProfileID")
-        }
-
-        // Now safe — didSet fires and calls rebuildSession() as needed.
-        self.orchestratorMode = mode
+    init(
+        conversationRepository: any ConversationRepository,
+        gitService: any GitRepositoryServicing = GitDiffService(),
+        diffPatchService: any DiffPatchApplying = DiffPatchService()
+    ) {
+        let toolInteractions = ToolInteractionStore()
+        let timeline = ChatTimelineStore()
+        let codexRuntime = CodexRuntimeStore()
+        let nativeRunner = NativeResponseRunner()
+        let workspace = WorkspaceStore(gitService: gitService)
+        let workbench = WorkbenchStore()
+        self.conversationStore = ConversationStore(repository: conversationRepository)
+        self.workspaceStore = workspace
+        self.toolInteractionStore = toolInteractions
+        self.timelineStore = timeline
+        self.workbenchStore = workbench
+        self.codexRuntimeStore = codexRuntime
+        self.modelRuntimeStore = ModelRuntimeStore()
+        self.responseCoordinator = ChatResponseCoordinator(
+            timeline: timeline,
+            toolInteractions: toolInteractions,
+            codexRuntime: codexRuntime,
+            nativeRunner: nativeRunner
+        )
+        self.reviewCoordinator = ReviewCoordinator(
+            timeline: timeline,
+            workbench: workbench,
+            workspace: workspace,
+            gitService: gitService,
+            diffPatchService: diffPatchService
+        )
     }
 
     /// Switch inference backend and rebuild the session, preserving user and
@@ -444,30 +129,17 @@ public final class ChatStore {
             beginCodexHandoff(to: .backend(backend))
             return
         }
-        clearDynamicProfileSelection()
-        if backend == .foundationApple {
-            activeBackend = .foundationApple
-            composerModel = backend.rawValue
-        } else if let model = remoteModels.first(where: {
-            $0.enabled && isConfigured($0) && Self.backend(for: $0.role) == backend
-        }) {
-            selectRemoteModel(model)
-        } else {
-            return
-        }
+        guard modelRuntimeStore.selectBackend(backend) else { return }
         rebuildSession(discardingCapabilityContext: true)
     }
 
     public func switchRemoteModel(to id: String) {
-        guard !busy, orchestratorMode == .standalone,
-              let model = remoteModels.first(where: { $0.id == id && $0.enabled }),
-              isConfigured(model) else { return }
+        guard !busy, orchestratorMode == .standalone else { return }
         if activeBackend == .codex {
             beginCodexHandoff(to: .remoteModel(id))
             return
         }
-        clearDynamicProfileSelection()
-        selectRemoteModel(model)
+        guard modelRuntimeStore.selectRemoteModel(id: id) else { return }
         rebuildSession(discardingCapabilityContext: true)
     }
 
@@ -476,39 +148,27 @@ public final class ChatStore {
     /// state, not a reason to silently revert the user's menu selection.
     func selectCodexProfile(modelID: String? = nil) async {
         guard !busy, orchestratorMode == .standalone else { return }
-        if let modelID {
-            preferredCodexModelID = modelID
-            UserDefaults.standard.set(modelID, forKey: "codexModelID")
-        }
         let isEnteringFromTurboCode = activeBackend != .codex
         if isEnteringFromTurboCode, let turboThreadID = activeThreadId {
-            // Import only turns created since Codex last handed control back.
-            // On the first switch the absent boundary intentionally selects
-            // the entire useful visible conversation.
-            let context = RuntimeContextHandoff.render(
-                blocks: blocks,
-                after: codexHandoffBoundaryBlockIDs[turboThreadID]
+            codexRuntimeStore.captureImportedContext(
+                turboThreadID: turboThreadID,
+                blocks: blocks
             )
-            if !context.isEmpty {
-                codexImportedContexts[turboThreadID] = context
-            }
         }
-        clearDynamicProfileSelection()
-        activeBackend = .codex
-        composerModel = "Codex · \(codexDisplayName)"
-        codexConnectionState = .connecting
+        modelRuntimeStore.selectCodex(displayName: codexDisplayName)
         error = nil
 
         do {
-            try await connectCodexProfile()
+            try await codexRuntimeStore.select(modelID: modelID)
+            composerModel = "Codex · \(codexDisplayName)"
         } catch CodexAppServerError.chatGPTLoginRequired {
-            codexConnectionState = .signedOut
+            codexRuntimeStore.markSignedOut()
         } catch let codexError as CodexAppServerError
             where codexError.requiresChatGPTLogin {
-            codexConnectionState = .signedOut
+            codexRuntimeStore.markSignedOut()
             self.error = nil
         } catch {
-            codexConnectionState = .failed(error.localizedDescription)
+            codexRuntimeStore.markFailed(error.localizedDescription)
             self.error = error.localizedDescription
         }
     }
@@ -525,61 +185,21 @@ public final class ChatStore {
     func signInToCodex() {
         guard activeBackend == .codex else { return }
         Task {
-            codexConnectionState = .authenticating
             error = nil
             do {
-                let login = try await codexClient.startChatGPTLogin()
-                codexLoginURL = login.authorizationURL
-                guard NSWorkspace.shared.open(login.authorizationURL) else {
-                    throw CodexAppServerError.loginFailed(
-                        "The authorization page could not be opened."
-                    )
-                }
-                try await codexClient.waitForChatGPTLogin(id: login.id)
-                codexConnectionState = .connecting
-                try await connectCodexProfile()
-                codexLoginURL = nil
+                try await codexRuntimeStore.signIn()
+                composerModel = "Codex · \(codexDisplayName)"
             } catch {
-                codexConnectionState = .failed(error.localizedDescription)
+                codexRuntimeStore.markFailed(error.localizedDescription)
                 self.error = error.localizedDescription
             }
         }
     }
 
     func reopenCodexLoginPage() {
-        guard let codexLoginURL else { return }
-        if !NSWorkspace.shared.open(codexLoginURL) {
+        if !codexRuntimeStore.reopenLoginPage() {
             error = "The Codex authorization page could not be opened."
         }
-    }
-
-    private func connectCodexProfile() async throws {
-        let snapshot = try await codexClient.prepareCodex(
-            selectedModelID: preferredCodexModelID
-        )
-        codexModels = snapshot.models
-        codexModel = snapshot.selectedModel
-        preferredCodexModelID = snapshot.selectedModel.id
-        UserDefaults.standard.set(
-            snapshot.selectedModel.id,
-            forKey: "codexModelID"
-        )
-        UserDefaults.standard.set(
-            snapshot.selectedModel.displayName,
-            forKey: "codexModelDisplayName"
-        )
-        composerModel = "Codex · \(snapshot.selectedModel.displayName)"
-        if !snapshot.selectedModel.supportedReasoningEfforts.contains(where: {
-            $0.reasoningEffort == codexReasoningEffort
-        }) {
-            codexReasoningEffort = snapshot.selectedModel.defaultReasoningEffort
-            UserDefaults.standard.set(
-                codexReasoningEffort.rawValue,
-                forKey: "codexReasoningEffort"
-            )
-        }
-        codexConnectionState = .ready(planType: snapshot.planType)
-        error = nil
     }
 
     func selectBuiltInProfile(_ id: ProfileBaseModelID) {
@@ -588,24 +208,17 @@ public final class ChatStore {
             beginCodexHandoff(to: .builtIn(id))
             return
         }
-        clearDynamicProfileSelection()
-        guard applyBaseModel(id) else { return }
+        guard modelRuntimeStore.selectBuiltInProfile(id) else { return }
         rebuildSession(discardingCapabilityContext: true)
     }
 
     func selectDynamicProfile(_ id: UUID) {
-        guard !busy, orchestratorMode == .standalone,
-              let profile = dynamicProfiles.first(where: { $0.id == id }) else {
-            return
-        }
+        guard !busy, orchestratorMode == .standalone else { return }
         if activeBackend == .codex {
             beginCodexHandoff(to: .dynamic(id))
             return
         }
-        guard applyBaseModel(profile.baseModelID) else { return }
-        activeDynamicProfileID = profile.id
-        UserDefaults.standard.set(profile.id.uuidString, forKey: "activeDynamicProfileID")
-        composerModel = profile.name
+        guard modelRuntimeStore.selectDynamicProfile(id) else { return }
         rebuildSession(discardingCapabilityContext: true)
     }
 
@@ -630,32 +243,14 @@ public final class ChatStore {
             return
         }
 
-        let usage = codexTokenUsageByThread[turboThreadID]
-        let history: [Transcript.Entry]
-        var didSummarize = false
-        if RuntimeContextHandoff.shouldSummarizeCodexContext(
-            lastTotalTokens: usage?.lastTotalTokens
-        ), let summary = try? await requestCodexHandoffSummary(
-            turboThreadID: turboThreadID
-        ), !summary.isEmpty {
-            history = RuntimeContextHandoff.transcript(fromSummary: summary)
-            didSummarize = true
-        } else if RuntimeContextHandoff.shouldSummarizeCodexContext(
-            lastTotalTokens: usage?.lastTotalTokens
-        ) {
-            // A summary failure must not trap the user in Codex. Keep a bounded
-            // recent slice as a deterministic, reviewable fallback.
-            let fallback = RuntimeContextHandoff.render(
-                blocks: blocks,
-                maximumCharacters: 24_000
-            )
-            history = RuntimeContextHandoff.transcript(fromSummary: fallback)
-        } else {
-            history = RuntimeContextHandoff.transcript(from: blocks)
-        }
+        let handoff = await codexRuntimeStore.prepareHandoff(
+            turboThreadID: turboThreadID,
+            blocks: blocks,
+            workspaceRoot: workspaceRoot
+        )
 
         guard applyTurboCodeSelection(selection) else { return }
-        if didSummarize {
+        if handoff.didSummarize {
             blocks.append(
                 ChatBlock(
                     kind: .compaction,
@@ -663,12 +258,14 @@ public final class ChatStore {
                 )
             )
         }
-        codexHandoffBoundaryBlockIDs[turboThreadID] = blocks.last?.id
-        codexImportedContexts.removeValue(forKey: turboThreadID)
+        codexRuntimeStore.completeHandoff(
+            turboThreadID: turboThreadID,
+            boundaryBlockID: blocks.last?.id
+        )
         rebuildSession(
             keepingHistory: false,
             discardingCapabilityContext: true,
-            restoringHistory: history
+            restoringHistory: handoff.history
         )
     }
 
@@ -678,52 +275,21 @@ public final class ChatStore {
     private func applyTurboCodeSelection(
         _ selection: TurboCodeProfileSelection
     ) -> Bool {
-        clearDynamicProfileSelection()
         switch selection {
         case .backend(let backend):
-            if backend == .foundationApple {
-                activeBackend = .foundationApple
-                composerModel = backend.rawValue
-                return true
-            }
-            guard let model = remoteModels.first(where: {
-                $0.enabled && isConfigured($0)
-                    && Self.backend(for: $0.role) == backend
-            }) else { return false }
-            selectRemoteModel(model)
-            return true
+            return modelRuntimeStore.selectBackend(backend)
         case .remoteModel(let id):
-            guard let model = remoteModels.first(where: {
-                $0.id == id && $0.enabled && isConfigured($0)
-            }) else { return false }
-            selectRemoteModel(model)
-            return true
+            return modelRuntimeStore.selectRemoteModel(id: id)
         case .builtIn(let id):
-            return applyBaseModel(id)
+            return modelRuntimeStore.selectBuiltInProfile(id)
         case .dynamic(let id):
-            guard let profile = dynamicProfiles.first(where: { $0.id == id }),
-                  applyBaseModel(profile.baseModelID) else { return false }
-            activeDynamicProfileID = profile.id
-            UserDefaults.standard.set(
-                profile.id.uuidString,
-                forKey: "activeDynamicProfileID"
-            )
-            composerModel = profile.name
-            return true
+            return modelRuntimeStore.selectDynamicProfile(id)
         }
     }
 
     func reloadDynamicProfiles(selecting id: UUID? = nil) {
         do {
-            dynamicProfiles = try DynamicProfileStore.live.load()
-            let requestedID = id ?? activeDynamicProfileID
-            if let requestedID, dynamicProfiles.contains(where: { $0.id == requestedID }) {
-                if id != nil || activeDynamicProfileID == requestedID {
-                    selectDynamicProfile(requestedID)
-                }
-            } else if activeDynamicProfileID != nil {
-                clearDynamicProfileSelection()
-                composerModel = activeBaseModelID.displayName
+            if try modelRuntimeStore.reloadDynamicProfiles(selecting: id) {
                 rebuildSession(discardingCapabilityContext: true)
             }
         } catch {
@@ -732,125 +298,21 @@ public final class ChatStore {
     }
 
     public func reloadRemoteModels() {
-        guard let loaded = try? TurboCodeConfig.shared.loadRemoteModels(), !loaded.isEmpty else { return }
-        remoteModels = loaded
-        let selected = loaded.first(where: {
-            $0.id == activeRemoteModelID && $0.enabled && isConfigured($0)
-        }) ?? loaded.first(where: {
-            $0.enabled && $0.role == .local && isConfigured($0)
-        }) ?? loaded.first(where: {
-            $0.enabled && isConfigured($0)
-        })
-        if let selected {
-            activeRemoteModelID = selected.id
-            if orchestratorMode == .standalone,
-               activeBackend != .foundationApple,
-               activeBackend != .codex {
-                selectRemoteModel(selected)
-            }
-        }
-        if let activeDynamicProfile {
-            composerModel = activeDynamicProfile.name
-        }
+        guard modelRuntimeStore.reloadRemoteModels() else { return }
         rebuildSession(discardingCapabilityContext: true)
     }
 
     public func isConfigured(_ model: RemoteModelConfig) -> Bool {
-        Self.hasCredential(for: model)
-    }
-
-    private static func hasCredential(for model: RemoteModelConfig) -> Bool {
-        guard let credential = model.credential else { return true }
-        return !(CredentialStore.value(for: credential) ?? "").isEmpty
+        modelRuntimeStore.isConfigured(model)
     }
 
     func setReasoningEffort(_ effort: ReasoningEffort) {
-        UserDefaults.standard.set(effort.rawValue, forKey: "reasoningEffort")
+        modelRuntimeStore.setReasoningEffort(effort)
         rebuildSession()
     }
 
     func setCodexReasoningEffort(_ effort: CodexReasoningEffort) {
-        guard codexReasoningOptions.contains(where: {
-            $0.reasoningEffort == effort
-        }) else { return }
-        codexReasoningEffort = effort
-        UserDefaults.standard.set(effort.rawValue, forKey: "codexReasoningEffort")
-    }
-
-    private func selectRemoteModel(_ model: RemoteModelConfig) {
-        activeRemoteModelID = model.id
-        UserDefaults.standard.set(model.id, forKey: "activeRemoteModelID")
-        activeBackend = Self.backend(for: model.role)
-        composerModel = model.name
-    }
-
-    private func applyBaseModel(_ id: ProfileBaseModelID) -> Bool {
-        if id == .onDevice {
-            activeBackend = .foundationApple
-            composerModel = id.displayName
-            return true
-        }
-        guard let remoteID = id.remoteModelID,
-              let model = remoteModels.first(where: { $0.id == remoteID && $0.enabled }),
-              isConfigured(model) else { return false }
-        selectRemoteModel(model)
-        return true
-    }
-
-    private func clearDynamicProfileSelection() {
-        activeDynamicProfileID = nil
-        UserDefaults.standard.removeObject(forKey: "activeDynamicProfileID")
-    }
-
-    private static func backend(for role: RemoteModelRole) -> ModelBackend {
-        switch role {
-        case .local: .llamaServer
-        case .pcc: .foundationServe
-        case .premium: .premium
-        }
-    }
-
-    private func languageModel(for model: RemoteModelConfig) -> ProviderLanguageModel {
-        ProviderLanguageModel(
-            configuration: model,
-            apiKey: model.credential.flatMap(CredentialStore.value(for:))
-        )
-    }
-
-    private var delegateRemoteModel: RemoteModelConfig {
-        remoteModels.first(where: {
-            $0.id == agentTuning.orchestrator.delegateModelID
-                && $0.enabled
-                && isConfigured($0)
-        })
-            ?? remoteModels.first(where: { $0.enabled && $0.role == .local && isConfigured($0) })
-            ?? activeRemoteModel.flatMap { $0.enabled && isConfigured($0) ? $0 : nil }
-            ?? remoteModels.first(where: { $0.enabled && isConfigured($0) })
-            ?? RemoteModelConfig.fallbackLlama
-    }
-
-    private func temperature(for model: RemoteModelConfig?) -> Double? {
-        guard let model else { return nil }
-        if model.reasoningTransport == .deepseekThinking,
-           reasoningLevel(for: model) != nil {
-            return nil
-        }
-        return model.temperature
-    }
-
-    private var shouldDropCompletedToolCalls: Bool {
-        guard activeBackend != .foundationApple else { return true }
-        return activeRemoteModel?.reasoningTransport != .deepseekThinking
-    }
-
-    private var persistedModelIdentifier: String {
-        if let activeDynamicProfileID {
-            return "profile:\(activeDynamicProfileID.uuidString)"
-        }
-        if activeBackend == .codex {
-            return ModelBackend.codex.rawValue
-        }
-        return activeBackend == .foundationApple ? activeBackend.rawValue : activeRemoteModelID
+        codexRuntimeStore.setReasoningEffort(effort)
     }
 
     /// Rebuild the session preserving conversation history. Capability changes
@@ -861,48 +323,33 @@ public final class ChatStore {
         discardingCapabilityContext: Bool = false,
         restoringHistory: [Transcript.Entry]? = nil
     ) {
-        let history = restoringHistory ?? SessionRebuildHistory.prepare(
-            session.transcript,
+        modelRuntimeStore.rebuildSession(
+            workspaceRoot: workspaceRoot,
             keepingHistory: keepingHistory,
-            discardingCapabilityContext: discardingCapabilityContext
-        )
-        if discardingCapabilityContext {
-            for name in skillActivations.activeSkillNames {
-                skillActivations.deactivate(name)
-            }
-        }
-        let delegateModel = delegateRemoteModel
-        let sessionSkills = DynamicProfileRuntimeSelection.skills(
-            from: availableSkills,
-            profile: activeDynamicProfile
-        )
-        session = ModelSessionFactory.makeSession(
-            configuration: ModelSessionConfiguration(
-                backend: activeBackend,
-                activeRemoteModel: activeRemoteModel,
-                delegateRemoteModel: delegateModel,
-                orchestratorMode: orchestratorMode,
-                workspaceRoot: workspaceRoot,
-                agentTuning: agentTuning,
-                availableSkills: sessionSkills,
-                activeDynamicProfile: activeDynamicProfile,
-                skillActivations: skillActivations,
-                reasoningLevel: reasoningLevel,
-                delegateReasoningLevel: reasoningLevel(for: delegateModel),
-                activeTemperature: temperature(for: activeRemoteModel),
-                delegateTemperature: temperature(for: delegateModel),
-                dropsCompletedToolCalls: shouldDropCompletedToolCalls
-            ),
-            history: history,
+            discardingCapabilityContext: discardingCapabilityContext,
+            restoringHistory: restoringHistory,
             events: ModelSessionEvents(
                 toolStarted: { [weak self] call, backend in
-                    await self?.beginToolActivity(call, backend: backend)
+                    await self?.responseCoordinator.toolStarted(
+                        call,
+                        backend: backend
+                    )
                 },
                 toolFinished: { [weak self] call, output, backend in
-                    await self?.endToolActivity(call, output: output, backend: backend)
+                    guard let self else { return }
+                    await self.responseCoordinator.toolFinished(
+                        call,
+                        output: output,
+                        backend: backend,
+                        workspaceName: self.workspaceRoot.isEmpty
+                            ? nil
+                            : self.workspaceLabel
+                    )
                 },
                 delegationChanged: { [weak self] isDelegating in
-                    await MainActor.run { self?.isDelegating = isDelegating }
+                    await MainActor.run {
+                        self?.responseCoordinator.delegationChanged(isDelegating)
+                    }
                 }
             )
         )
@@ -929,17 +376,12 @@ public final class ChatStore {
 
     public func createThread(title: String = "New Chat", mode: ConversationMode = .agent) async {
         dismissWorkspaceListingInspector()
-        let thread = Conversation(
+        conversationStore.createThread(
             title: title,
             workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
             mode: mode
         )
-        threads.insert(thread, at: 0)
-        activeThreadId = thread.id
-        blocks = []
-        liveReasoning = ""
-        liveAssistant = ""
-        isFirstMessage = true
+        timelineStore.reset()
         rebuildSession(keepingHistory: false)
     }
 
@@ -948,25 +390,15 @@ public final class ChatStore {
     /// without a thread, attach them to the new metadata instead of discarding
     /// the visible conversation.
     private func ensureActiveThread() {
-        guard let activeThreadId,
-              threads.contains(where: { $0.id == activeThreadId }) else {
-            let hasOrphanedBlocks = !blocks.isEmpty
-            let thread = Conversation(
-                title: "New Chat",
-                workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
-                mode: composerMode
-            )
-            threads.insert(thread, at: 0)
-            self.activeThreadId = thread.id
+        let hasOrphanedBlocks = !blocks.isEmpty
+        let created = conversationStore.ensureActiveThread(
+            workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
+            mode: composerMode
+        )
+        guard created, !hasOrphanedBlocks else { return }
 
-            if !hasOrphanedBlocks {
-                liveReasoning = ""
-                liveAssistant = ""
-                isFirstMessage = true
-                rebuildSession(keepingHistory: false)
-            }
-            return
-        }
+        timelineStore.reset()
+        rebuildSession(keepingHistory: false)
     }
 
     /// Generates a concise title from the first user prompt using the Apple
@@ -1008,10 +440,7 @@ public final class ChatStore {
     /// the value prevents array insertions or sorting changes from targeting a
     /// different conversation, and preserves a title the user renamed meanwhile.
     func applyGeneratedTitle(_ title: String, to threadID: String) {
-        guard let index = threads.firstIndex(where: { $0.id == threadID }),
-              threads[index].title == "New Chat" else { return }
-        threads[index].title = title
-        threads[index].updatedAt = .now
+        conversationStore.applyGeneratedTitle(title, to: threadID)
     }
 
     // MARK: - Session Persistence
@@ -1021,14 +450,14 @@ public final class ChatStore {
         guard let thread = threads.first(where: { $0.id == threadId }) else { return }
         let snapshot = ConversationSnapshot(
             conversation: thread,
-            modelBackend: persistedModelIdentifier,
+            modelBackend: modelRuntimeStore.persistedModelIdentifier,
             blocks: blocks,
             // Codex persists its own rollout. Saving an unrelated Foundation
             // Models transcript here would contaminate later restoration.
             transcript: activeBackend == .codex ? nil : session.transcript
         )
         do {
-            try conversationRepository.save(snapshot)
+            try conversationStore.persist(snapshot)
         } catch {
             print("[TurboCode] Failed to persist session: \(error.localizedDescription)")
         }
@@ -1036,23 +465,16 @@ public final class ChatStore {
 
     /// Loads all session files and populates the thread list.
     public func restoreSessions() async {
-        guard let all = try? conversationRepository.list(),
-              !all.isEmpty else { return }
-        let existingIDs = Set(threads.map(\.id))
-        for snapshot in all where !existingIDs.contains(snapshot.conversation.id) {
-            threads.append(snapshot.conversation)
-        }
+        try? conversationStore.restoreCatalog()
     }
 
     /// Fully restores a past session with its blocks.
     public func restoreSession(id: String) async {
-        guard let snapshot = try? conversationRepository.load(id: id),
+        guard let snapshot = try? conversationStore.snapshot(id: id),
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
         dismissWorkspaceListingInspector()
         activeThreadId = id
-        blocks = snapshot.blocks
-        liveReasoning = ""; liveAssistant = ""
-        isFirstMessage = blocks.isEmpty
+        timelineStore.restore(snapshot.blocks)
         if let wp = snapshot.conversation.workspace, workspaceRoot != wp {
             workspaceRoot = wp
         }
@@ -1072,27 +494,22 @@ public final class ChatStore {
         if identifier.hasPrefix("profile:"),
            let id = UUID(uuidString: String(identifier.dropFirst("profile:".count))),
            dynamicProfiles.contains(where: { $0.id == id }) {
-            selectDynamicProfile(id)
+            _ = modelRuntimeStore.selectDynamicProfile(id)
             return
         }
-        clearDynamicProfileSelection()
         if identifier == ModelBackend.codex.rawValue {
-            activeBackend = .codex
-            composerModel = "Codex · \(codexDisplayName)"
+            modelRuntimeStore.selectCodex(displayName: codexDisplayName)
             if let turboThreadID = activeThreadId {
-                // Codex thread identifiers are process-local. A restored
-                // TurboCode session therefore initializes its fresh App Server
-                // thread from the persisted visible timeline.
-                let context = RuntimeContextHandoff.render(blocks: blocks)
-                if !context.isEmpty {
-                    codexImportedContexts[turboThreadID] = context
-                }
+                codexRuntimeStore.restoreImportedContext(
+                    turboThreadID: turboThreadID,
+                    blocks: blocks
+                )
             }
             Task { await selectCodexProfile() }
             return
         }
         if identifier == ModelBackend.foundationApple.rawValue {
-            activeBackend = .foundationApple
+            _ = modelRuntimeStore.selectBuiltInProfile(.onDevice)
             composerModel = ModelBackend.foundationApple.rawValue
             return
         }
@@ -1106,26 +523,20 @@ public final class ChatStore {
             $0.enabled && ($0.id == identifier || $0.role == legacyRole)
         })
         if let model, isConfigured(model) {
-            selectRemoteModel(model)
+            _ = modelRuntimeStore.selectRemoteModel(id: model.id)
         }
     }
 
     public func renameThread(id: String, title: String) async {
-        guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
-        threads[i].title = title
-        threads[i].updatedAt = .now
+        conversationStore.renameThread(id: id, title: title)
     }
 
     public func pinThread(id: String, pinned: Bool) async {
-        guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
-        threads[i].isPinned = pinned
-        threads[i].updatedAt = .now
+        conversationStore.pinThread(id: id, pinned: pinned)
     }
 
     public func archiveThread(id: String) async {
-        guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
-        threads[i].isArchived = true
-        threads[i].updatedAt = .now
+        conversationStore.archiveThread(id: id)
     }
 
     public func deleteThread(id: String) async {
@@ -1138,8 +549,9 @@ public final class ChatStore {
             await responseTask.value
         }
 
+        let nextThreadID: String?
         do {
-            try conversationRepository.delete(id: id)
+            nextThreadID = try conversationStore.deleteThread(id: id)
         } catch {
             // Keep the visible row when durable deletion fails; pretending the
             // operation succeeded would make it reappear on the next launch.
@@ -1148,16 +560,14 @@ public final class ChatStore {
         }
         self.error = nil
 
-        threads.removeAll { $0.id == id }
+        // Preserve the selection captured before awaiting an in-flight response:
+        // the original transition always cleared that conversation's timeline.
         guard deletesActiveThread else { return }
 
         activeThreadId = nil
-        blocks = []
-        liveReasoning = ""
-        liveAssistant = ""
-        isFirstMessage = true
+        timelineStore.reset()
 
-        if let nextThreadID = threads.first?.id {
+        if let nextThreadID {
             await restoreSession(id: nextThreadID)
             if activeThreadId == nil {
                 // A never-persisted draft has no snapshot to restore but remains
@@ -1173,62 +583,27 @@ public final class ChatStore {
     /// Removes a workspace from TurboCode and deletes only its persisted chats.
     /// The workspace directory and all project files are left untouched.
     public func removeWorkspace(_ path: String) async {
-        var sessionIDs = Set(
-            threads
-                .filter { $0.workspace == path }
-                .map(\.id)
-        )
-        if let storedSessions = try? conversationRepository.list() {
-            sessionIDs.formUnion(
-                storedSessions
-                    .filter { $0.conversation.workspace == path }
-                    .map(\.conversation.id)
-            )
+        let conversationRemoval = conversationStore.removeWorkspace(path)
+        let removedActiveWorkspace = workspaceStore.removeWorkspace(path)
+
+        if conversationRemoval.removedActiveThread {
+            timelineStore.reset()
         }
 
-        var deletionErrors: [String] = []
-        for id in sessionIDs {
-            do {
-                try conversationRepository.delete(id: id)
-            } catch {
-                deletionErrors.append(error.localizedDescription)
-            }
-        }
-
-        let removedActiveThread = activeThreadId.map(sessionIDs.contains) ?? false
-        threads.removeAll { $0.workspace == path }
-        recentWorkspaces = recentWorkspaces.filter { $0 != path }
-
-        if removedActiveThread {
-            activeThreadId = nil
-            blocks = []
-            liveReasoning = ""
-            liveAssistant = ""
-            isFirstMessage = true
-        }
-
-        if workspaceRoot == path {
+        if removedActiveWorkspace {
             responseTask?.cancel()
-            workspaceRoot = ""
-            selectedProject = nil
-            isGitRepository = false
-            currentBranch = ""
-            availableBranches = []
-            diffSections = []
-            isLoadingDiffs = false
             rightPanelMode = nil
             rebuildSession(keepingHistory: false)
         }
 
-        if !deletionErrors.isEmpty {
-            error = "Some workspace chats could not be removed: \(deletionErrors.joined(separator: "; "))"
+        if !conversationRemoval.deletionErrors.isEmpty {
+            let details = conversationRemoval.deletionErrors.joined(separator: "; ")
+            error = "Some workspace chats could not be removed: \(details)"
         }
     }
 
     public func restoreThread(id: String) async {
-        guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
-        threads[i].isArchived = false
-        threads[i].updatedAt = .now
+        conversationStore.restoreThread(id: id)
     }
 
     /// Open a folder picker and set workspaceRoot.
@@ -1253,43 +628,27 @@ public final class ChatStore {
 
     /// Internal: configure workspace, rebuild session, refresh git state.
     private func setWorkspace(_ path: String) {
-        workspaceRoot = path
-        isGitRepository = false
-        currentBranch = ""
-        availableBranches = []
-
-        // Save to recent workspaces
-        var recent = recentWorkspaces
-        recent.removeAll { $0 == path }
-        recent.insert(path, at: 0)
-        recentWorkspaces = Array(recent.prefix(10))
-        selectedProject = URL(fileURLWithPath: path).lastPathComponent
+        workspaceStore.selectWorkspace(path)
 
         rebuildSession(discardingCapabilityContext: true)
         // The inspector is opt-in: changing workspace must not open it.
         rightPanelMode = nil
-        diffSections = []
         Task { await reloadDiffs() }
         Task { await refreshGitBranches() }
     }
 
     /// Clear the workspace selection.
     public func clearWorkspace() {
-        workspaceRoot = ""
-        diffLoadID = nil
-        diffSections = []
-        diffLoadError = nil
-        isLoadingDiffs = false
-        isGitRepository = false
-        currentBranch = ""
-        availableBranches = []
+        workspaceStore.clearWorkspace()
         rebuildSession(discardingCapabilityContext: true)
         rightPanelMode = nil
     }
 
     public func sendMessage(_ text: String) async {
         refreshSkillsIfNeeded()
-        guard let promptText = resolvedPrompt(for: text) else { return }
+        guard let promptText = modelRuntimeStore.resolvedPrompt(
+            for: text
+        ) else { return }
         await sendMessage(text, promptText: promptText, visibleInTimeline: true)
     }
 
@@ -1302,60 +661,15 @@ public final class ChatStore {
     }
 
     func applyAgentTuning(_ value: AgentTuningConfig) {
-        guard let validated = try? value.validated() else { return }
-        agentTuning = validated
-        availableSkills = configuredSkills()
+        guard modelRuntimeStore.applyAgentTuning(value) else { return }
         rebuildSession(discardingCapabilityContext: true)
-    }
-
-    private func configuredSkills() -> [TurboCodeSkillDefinition] {
-        let discovered = TurboCodeConfig.shared.loadSkills()
-        guard !agentTuning.skills.discoversUserSkills else { return discovered }
-        let builtInNames: Set<String> = ["turbocode", "skill-creator"]
-        return discovered.filter { builtInNames.contains($0.name) }
     }
 
     private func refreshSkillsIfNeeded(forceRebuild: Bool = false) {
-        let discovered = configuredSkills()
-        guard forceRebuild || discovered != availableSkills else { return }
-        availableSkills = discovered
+        guard modelRuntimeStore.refreshSkills(
+            force: forceRebuild
+        ) else { return }
         rebuildSession(discardingCapabilityContext: true)
-    }
-
-    private func resolvedPrompt(for displayText: String) -> String? {
-        let trimmed = displayText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !isIncompleteSkillCommand(trimmed) else { return nil }
-        guard trimmed.hasPrefix("/") else { return displayText }
-
-        let parts = trimmed.split(separator: " ", maxSplits: 2).map(String.init)
-        let skillName: String
-        let request: String
-
-        if parts.first == "/skill" {
-            guard parts.count >= 2 else { return nil }
-            skillName = parts[1]
-            request = parts.count == 3 ? parts[2] : ""
-        } else {
-            skillName = String((parts.first ?? "").dropFirst())
-            request = parts.count >= 2 ? parts.dropFirst().joined(separator: " ") : ""
-        }
-
-        guard let skill = availableSkills.first(where: { $0.name == skillName }) else {
-            return displayText
-        }
-        let userRequest = request.isEmpty
-            ? "Apply this skill and respond appropriately to the selected command."
-            : request
-        return """
-        The user explicitly selected the TurboCode skill '\(skill.name)'. Its instructions follow.
-
-        <skill name="\(skill.name)">
-        \(skill.prompt)
-        </skill>
-
-        User request:
-        \(userRequest)
-        """
     }
 
     private func sendMessage(
@@ -1401,210 +715,31 @@ public final class ChatStore {
         promptText: String,
         visibleInTimeline: Bool
     ) async {
-        isFirstMessage = false
         let titleThreadID = activeThreadId
         let titleTask: Task<Void, Never>? = visibleInTimeline ? Task { [weak self] in
             guard let self else { return }
             await self.generateTitle(from: displayText, for: titleThreadID)
         } : nil
 
-        if visibleInTimeline {
-            blocks.append(ChatBlock(kind: .user, text: displayText))
-        }
-
-        let placeholderID = UUID().uuidString
-        let modelName = composerModel
-        blocks.append(
-            ChatBlock(
-                id: placeholderID,
-                kind: .assistant,
-                text: "",
-                model: modelName
-            )
-        )
-        activeAssistantPlaceholderID = placeholderID
-        liveAssistant = ""
-        liveReasoning = ""
-        activeWorkspaceListingPresentations.removeAll()
         error = nil
-
         guard let turboThreadID = activeThreadId else {
             self.error = "TurboCode could not create the conversation."
             return
         }
-
-        var assistantText = ""
-        var reasoningText = ""
-        do {
-            let snapshot = try await codexClient.prepareCodex(
-                selectedModelID: preferredCodexModelID
-            )
-            codexModels = snapshot.models
-            codexModel = snapshot.selectedModel
-            preferredCodexModelID = snapshot.selectedModel.id
-            composerModel = "Codex · \(snapshot.selectedModel.displayName)"
-            codexConnectionState = .ready(planType: snapshot.planType)
-
-            let codexThreadID: String
-            if let existing = codexThreadIDs[turboThreadID] {
-                codexThreadID = existing
-            } else {
-                let dynamicTools = CodexTurboCodeToolBridge.specifications(
-                    workspaceRoot: workspaceRoot,
-                    agentTuning: agentTuning
-                )
-                codexThreadID = try await codexClient.startThread(
-                    workspaceRoot: workspaceRoot,
-                    modelID: snapshot.selectedModel.model,
-                    dynamicTools: dynamicTools
-                )
-                codexThreadIDs[turboThreadID] = codexThreadID
-            }
-
-            let stream = try await codexClient.startTurn(
-                threadID: codexThreadID,
-                text: promptText,
-                workspaceRoot: workspaceRoot,
-                modelID: snapshot.selectedModel.model,
-                effort: codexReasoningEffort,
-                additionalApplicationContext: codexImportedContexts[turboThreadID]
-            )
-            for try await event in stream {
-                try Task.checkCancellation()
-                switch event {
-                case .agentDelta(let delta):
-                    assistantText += delta
-                    liveAssistant = assistantText
-                case .reasoningDelta(let delta):
-                    reasoningText += delta
-                    liveReasoning = reasoningText
-                case .diffUpdated:
-                    // Supported edits are directed through apply_edits so the
-                    // existing Review/Undo transaction remains authoritative.
-                    break
-                case .toolCallRequested(let call):
-                    toolActivities.removeAll { $0.id == call.callID }
-                    toolActivities.append(
-                        ToolActivity(
-                            id: call.callID,
-                            summary: CodexTurboCodeToolBridge.activitySummary(
-                                for: call.tool
-                            )
-                        )
-                    )
-                    let result: CodexDynamicToolResult
-                    do {
-                        let execution = try await CodexTurboCodeToolBridge.execute(
-                            call,
-                            workspaceRoot: workspaceRoot,
-                            workspaceName: workspaceRoot.isEmpty
-                                ? nil
-                                : workspaceLabel,
-                            agentTuning: agentTuning
-                        )
-                        if let presentation = execution.presentation {
-                            presentCodexToolPresentation(presentation)
-                        }
-                        result = execution.result
-                    } catch {
-                        result = .failure(error.localizedDescription)
-                    }
-                    toolActivities.removeAll { $0.id == call.callID }
-                    try await codexClient.resolveToolCall(call, result: result)
-                case .approvalRequested(let request):
-                    codexApprovals[request.presentationID] = request
-                    presentApproval(
-                        ApprovalRequest(
-                            id: request.presentationID,
-                            operation: request.operation,
-                            path: request.path,
-                            summary: request.summary
-                        )
-                    )
-                case .tokenUsageUpdated(let usage):
-                    codexTokenUsageByThread[turboThreadID] = usage
-                case .completed(let status, let errorMessage):
-                    if status == "failed" {
-                        throw CodexAppServerError.invalidResponse(
-                            errorMessage ?? "Codex turn failed."
-                        )
-                    }
-                }
-            }
-            try Task.checkCancellation()
-
-            if let index = blocks.firstIndex(where: { $0.id == placeholderID }) {
-                if assistantText.trimmingCharacters(
-                    in: .whitespacesAndNewlines
-                ).isEmpty {
-                    blocks.remove(at: index)
-                } else {
-                    blocks[index] = ChatBlock(
-                        id: placeholderID,
-                        kind: .assistant,
-                        text: assistantText,
-                        model: modelName
-                    )
-                }
-            }
-            if !reasoningText.isEmpty, !assistantText.isEmpty,
-               let index = blocks.firstIndex(where: { $0.id == placeholderID }) {
-                blocks.insert(
-                    ChatBlock(
-                        kind: .reasoning,
-                        text: reasoningText,
-                        model: modelName
-                    ),
-                    at: index
-                )
-            }
-            if let index = threads.firstIndex(where: { $0.id == turboThreadID }) {
-                threads[index].updatedAt = .now
-            }
-        } catch where error is CancellationError || Task.isCancelled {
-            await codexClient.interruptActiveTurn()
-            if let index = blocks.firstIndex(where: { $0.id == placeholderID }) {
-                blocks[index] = ChatBlock(
-                    id: placeholderID,
-                    kind: .assistant,
-                    text: assistantText.isEmpty
-                        ? "Response interrupted."
-                        : assistantText,
-                    model: modelName
-                )
-            }
-            self.error = nil
-        } catch let codexError as CodexAppServerError
-            where codexError.requiresChatGPTLogin {
-            codexConnectionState = .signedOut
-            self.error = nil
-            if let index = blocks.firstIndex(where: { $0.id == placeholderID }) {
-                blocks[index] = ChatBlock(
-                    id: placeholderID,
-                    kind: .assistant,
-                    text: "Sign in with ChatGPT to continue with Codex.",
-                    model: modelName
-                )
-            }
-        } catch {
-            codexConnectionState = .failed(error.localizedDescription)
-            self.error = error.localizedDescription
-            if let index = blocks.firstIndex(where: { $0.id == placeholderID }) {
-                blocks[index] = ChatBlock(
-                    id: placeholderID,
-                    kind: .assistant,
-                    text: "Error: \(error.localizedDescription)",
-                    model: modelName
-                )
-            }
-        }
-
-        liveAssistant = ""
-        liveReasoning = ""
-        toolActivities.removeAll()
-        activeWorkspaceListingPresentations.removeAll()
-        if activeAssistantPlaceholderID == placeholderID {
-            activeAssistantPlaceholderID = nil
+        let result = await responseCoordinator.performCodex(
+            displayText: displayText,
+            promptText: promptText,
+            visibleInTimeline: visibleInTimeline,
+            turboThreadID: turboThreadID,
+            workspaceRoot: workspaceRoot,
+            workspaceName: workspaceRoot.isEmpty ? nil : workspaceLabel,
+            agentTuning: agentTuning,
+            modelName: composerModel
+        )
+        composerModel = "Codex · \(codexDisplayName)"
+        error = result.errorMessage
+        if result.touchedConversation {
+            conversationStore.touchThread(id: turboThreadID)
         }
         if let titleTask {
             await titleTask.value
@@ -1612,322 +747,33 @@ public final class ChatStore {
         await persistSession(for: turboThreadID)
     }
 
-    /// Uses Codex itself to compact a large Codex-owned thread. This hidden
-    /// maintenance turn cannot mutate the workspace: tool calls fail visibly
-    /// to the model and approval requests are denied before it can continue.
-    private func requestCodexHandoffSummary(
-        turboThreadID: String
-    ) async throws -> String {
-        guard let codexThreadID = codexThreadIDs[turboThreadID] else {
-            throw CodexAppServerError.invalidResponse(
-                "missing Codex thread for context handoff"
-            )
-        }
-        let prompt = """
-        Prepare a compact technical handoff for another coding model. Do not \
-        call tools and do not continue the task. Include: the user's objective, \
-        decisions and constraints, files changed or inspected, completed \
-        validations, current repository/runtime state, unresolved issues, and \
-        the exact next useful action. Preserve concrete paths, identifiers, and \
-        errors. Omit private reasoning and conversational filler.
-        """
-        let stream = try await codexClient.startTurn(
-            threadID: codexThreadID,
-            text: prompt,
-            workspaceRoot: workspaceRoot,
-            modelID: codexModel?.model ?? preferredCodexModelID,
-            effort: .low
-        )
-        var summary = ""
-        for try await event in stream {
-            switch event {
-            case .agentDelta(let delta):
-                summary += delta
-            case .toolCallRequested(let call):
-                try await codexClient.resolveToolCall(
-                    call,
-                    result: .failure(
-                        "Tools are disabled while preparing a runtime handoff."
-                    )
-                )
-            case .approvalRequested(let request):
-                try await codexClient.resolveApproval(request, approved: false)
-            case .tokenUsageUpdated(let usage):
-                codexTokenUsageByThread[turboThreadID] = usage
-            case .completed(let status, let errorMessage):
-                if status == "failed" {
-                    throw CodexAppServerError.invalidResponse(
-                        errorMessage ?? "Codex context summary failed."
-                    )
-                }
-            case .reasoningDelta, .diffUpdated:
-                break
-            }
-        }
-        return summary.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Inserts a Codex-requested TurboCode receipt before the active assistant
-    /// placeholder, matching the ordering used by FoundationModels tool calls.
-    private func presentCodexToolPresentation(
-        _ presentation: CodexToolPresentation
-    ) {
-        switch presentation {
-        case .workspaceListing(let listing):
-            activeWorkspaceListingPresentations.append(listing)
-            presentToolPresentation(.workspaceListing(listing))
-        }
-    }
-
     private func performSendMessage(
         displayText: String,
         promptText: String,
         visibleInTimeline: Bool
     ) async {
-        // Some provider profiles intentionally discard completed tool calls.
-        // Reattach only a relevant recent listing so follow-ups such as
-        // “read TODO.md” remain grounded while the visible user text stays clean.
-        let modelPrompt = WorkspaceListingFollowUpContext.enriching(
-            promptText,
-            blocks: blocks
-        )
-        // Echo filtering is scoped to one response so historical listing names
-        // can never affect unrelated assistant messages.
-        activeWorkspaceListingPresentations = []
-
-        // A run retains the backend it started with even if settings change
-        // while the asynchronous response is finishing.
-        let diagnosticsBackend = activeBackend
-        let diagnosticsRunID = await AgentDiagnosticsRecorder.shared.startRun(
-            backend: diagnosticsBackend,
-            mode: orchestratorMode,
-            profileVersion: AgentProfileVersion.value(for: activeBackend, mode: orchestratorMode),
-            workspaceKind: diagnosticsWorkspaceKind,
-            promptCharacters: modelPrompt.count
-        )
-        activeDiagnosticsRunID = diagnosticsRunID
-        let editGroupID = UUID().uuidString
-        activeEditGroupID = editGroupID
-        var diagnosticsOutcome: AgentRunOutcome = .success
-        var diagnosticsError: Error?
-        var didRecordFirstToken = false
-        var diagnosticsGeneratedCharacters = 0
-
-        isFirstMessage = false
-        // Generate the title concurrently with the response, but retain the
-        // task so persistence can wait for the final title. Keep the initiating
-        // thread ID stable even if the user navigates before generation finishes.
         let titleThreadID = activeThreadId
         let titleTask: Task<Void, Never>? = visibleInTimeline ? Task { [weak self] in
             guard let self else { return }
             await self.generateTitle(from: displayText, for: titleThreadID)
         } : nil
-
-        if visibleInTimeline {
-            blocks.append(ChatBlock(kind: .user, text: displayText))
-        }
-
-        let placeholderId = UUID().uuidString
-        blocks.append(ChatBlock(id: placeholderId, kind: .assistant, text: "", model: composerModel))
-        activeAssistantPlaceholderID = placeholderId
-
         runtimeStatus = .ready
         error = nil
-        var accumulatedText = ""
-        activeProductGuidePresentation = nil
-        activeCompletedRootWrite = nil
-
-        do {
-            let stream = session.streamResponse(to: modelPrompt)
-            // Delegation detection is handled by TurboCodeDynamicProfile's
-            // onToolCall / onToolOutput lifecycle callbacks — no scanning needed.
-
-            for try await snapshot in stream {
-                try Task.checkCancellation()
-
-                if diagnosticsBackend == .foundationApple, let diagnosticsRunID {
-                    // Snapshots expose the authoritative on-device token and
-                    // prefix-cache counters; the recorder keeps only the latest.
-                    await AgentDiagnosticsRecorder.shared.recordUsage(
-                        runID: diagnosticsRunID,
-                        usage: snapshot.usage
-                    )
-                }
-
-                // Fast path: update liveAssistant for quick UI feedback
-                if !snapshot.content.isEmpty {
-                    if !didRecordFirstToken, let diagnosticsRunID {
-                        didRecordFirstToken = true
-                        await AgentDiagnosticsRecorder.shared.markFirstToken(runID: diagnosticsRunID)
-                    }
-                    accumulatedText = snapshot.content
-                    if diagnosticsBackend == .foundationApple,
-                       OnDeviceStreamingGuard.isPathological(snapshot.content) {
-                        throw OnDeviceStreamingGuard.Failure.repetitiveOutput
-                    }
-                    diagnosticsGeneratedCharacters = max(
-                        diagnosticsGeneratedCharacters,
-                        snapshot.content.count
-                    )
-                    liveAssistant = userVisibleAssistantText(accumulatedText)
-                }
-
-                // Process transcript entries for reasoning and tool approvals.
-                for entry in snapshot.transcriptEntries {
-                    if case .reasoning(let reasoning) = entry {
-                        for segment in reasoning.segments {
-                            if case .text(let t) = segment {
-                                if !didRecordFirstToken, !t.content.isEmpty, let diagnosticsRunID {
-                                    didRecordFirstToken = true
-                                    await AgentDiagnosticsRecorder.shared.markFirstToken(
-                                        runID: diagnosticsRunID
-                                    )
-                                }
-                                liveReasoning = t.content
-                                diagnosticsGeneratedCharacters = max(
-                                    diagnosticsGeneratedCharacters,
-                                    t.content.count
-                                )
-                            }
-                        }
-                    }
-
-                    if case .toolOutput(let output) = entry {
-                        let text = output.segments.compactMap { segment -> String? in
-                            if case .text(let t) = segment { return t.content }
-                            return nil
-                        }.joined()
-                        if let request = ApprovalRequest(toolOutput: text) {
-                            presentApproval(request)
-                        }
-                    }
-                }
-            }
-            try Task.checkCancellation()
-
-            // Stream ended: finalize the assistant block.
-            // Reset delegation state once streaming is done.
-            isDelegating = false
-            toolActivities.removeAll()
-            let rawFinalText = accumulatedText.isEmpty
-                ? liveReasoning
-                : userVisibleAssistantText(accumulatedText)
-            let finalText = NativeToolEchoFilter.filtering(
-                rawFinalText,
-                workspaceListings: activeWorkspaceListingPresentations
-            )
-            let productGuidePresentation = activeProductGuidePresentation
-            if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
-                if finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    blocks.remove(at: i)
-                } else {
-                    blocks[i] = ChatBlock(
-                        id: placeholderId,
-                        kind: productGuidePresentation == nil ? .assistant : .productGuide,
-                        text: finalText,
-                        model: composerModel,
-                        productGuide: productGuidePresentation
-                    )
-                }
-            }
-
-            // Separate reasoning block if model output BOTH reasoning and content.
-            if !liveReasoning.isEmpty && !accumulatedText.isEmpty {
-                if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
-                    blocks.insert(
-                        ChatBlock(kind: .reasoning, text: liveReasoning, model: composerModel),
-                        at: i
-                    )
-                }
-            }
-            liveReasoning = ""
-            liveAssistant = ""  // hide live streaming block
-
-            if let i = threads.firstIndex(where: { $0.id == activeThreadId }) {
-                threads[i].updatedAt = .now
-            }
-        } catch OnDeviceStreamingGuard.Failure.repetitiveOutput {
-            diagnosticsOutcome = .failed
-            let stoppedText = activeCompletedRootWrite.map { "Created `\($0)`." }
-                ?? "Response stopped because the on-device model began repeating output. Please retry."
-            if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
-                blocks[i] = ChatBlock(
-                    id: placeholderId,
-                    kind: .assistant,
-                    text: stoppedText,
-                    model: composerModel
-                )
-            }
-            liveReasoning = ""
-            liveAssistant = ""
-            isDelegating = false
-            toolActivities.removeAll()
-            self.error = nil
-        } catch where error is CancellationError || Task.isCancelled {
-            diagnosticsOutcome = .cancelled
-            // Keep whatever the model had already produced and mark an empty
-            // response clearly, without presenting cancellation as an error.
-            let partialText = accumulatedText.isEmpty ? liveReasoning : accumulatedText
-            if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
-                blocks[i] = ChatBlock(
-                    id: placeholderId,
-                    kind: .assistant,
-                    text: partialText.isEmpty ? "Response interrupted." : partialText,
-                    model: composerModel
-                )
-            }
-            liveReasoning = ""
-            liveAssistant = ""
-            isDelegating = false
-            toolActivities.removeAll()
-            self.error = nil
-        } catch {
-            diagnosticsOutcome = .failed
-            diagnosticsError = error
-            toolActivities.removeAll()
-            self.error = error.localizedDescription
-            if let i = blocks.firstIndex(where: { $0.id == placeholderId }) {
-                blocks[i] = ChatBlock(
-                    id: placeholderId,
-                    kind: .assistant,
-                    text: "Error: \(error.localizedDescription)",
-                    model: composerModel
-                )
-            }
+        let result = await responseCoordinator.performNative(
+            displayText: displayText,
+            promptText: promptText,
+            visibleInTimeline: visibleInTimeline,
+            blocks: blocks,
+            session: session,
+            backend: activeBackend,
+            mode: orchestratorMode,
+            workspaceKind: diagnosticsWorkspaceKind,
+            modelName: composerModel
+        )
+        error = result.errorMessage
+        if result.touchedConversation, let activeThreadId {
+            conversationStore.touchThread(id: activeThreadId)
         }
-        if let diagnosticsRunID {
-            if diagnosticsBackend == .foundationApple {
-                let model = SystemLanguageModel.default
-                // Some beta execution contexts temporarily report zero while
-                // assets are unavailable. The current macOS 27 model is 8K, so
-                // retain a useful diagnostic limit until the runtime answers.
-                let reportedContextSize = model.contextSize
-                let contextSize = reportedContextSize > 0 ? reportedContextSize : 8_192
-                let contextTokens = try? await model.tokenCount(for: session.transcript)
-                await AgentDiagnosticsRecorder.shared.recordContext(
-                    runID: diagnosticsRunID,
-                    tokenCount: contextTokens,
-                    contextSize: contextSize
-                )
-            }
-            await AgentDiagnosticsRecorder.shared.finishRun(
-                runID: diagnosticsRunID,
-                outcome: diagnosticsOutcome,
-                generatedCharacters: diagnosticsGeneratedCharacters,
-                error: diagnosticsError
-            )
-            if activeDiagnosticsRunID == diagnosticsRunID {
-                activeDiagnosticsRunID = nil
-            }
-        }
-        if activeEditGroupID == editGroupID {
-            activeEditGroupID = nil
-        }
-        if activeAssistantPlaceholderID == placeholderId {
-            activeAssistantPlaceholderID = nil
-        }
-        editTransactionGroups = editTransactionGroups.filter { $0.value != editGroupID }
-        activeWorkspaceListingPresentations = []
         // Persist after the title task finishes so the JSON never races with
         // the Apple on-device title generator and stores a stale "New Chat".
         if let titleTask {
@@ -1936,13 +782,12 @@ public final class ChatStore {
         if let tid = activeThreadId {
             await persistSession(for: tid)
         }
-
     }
 
     public func interrupt() {
         responseTask?.cancel()
         if activeBackend == .codex {
-            Task { await codexClient.interruptActiveTurn() }
+            Task { await codexRuntimeStore.interrupt() }
         }
     }
 
@@ -1958,7 +803,9 @@ public final class ChatStore {
         case .foundationApple:
             model = SystemLanguageModel.default
         case .foundationServe, .llamaServer, .premium:
-            model = languageModel(for: activeRemoteModel ?? RemoteModelConfig.fallbackLlama)
+            model = modelRuntimeStore.languageModel(
+                for: activeRemoteModel ?? RemoteModelConfig.fallbackLlama
+            )
         case .codex:
             benchmarkStatus = "Codex uses its own App Server evaluation path."
             return
@@ -1987,24 +834,20 @@ public final class ChatStore {
     /// Approve a pending tool operation, execute the exact registered action,
     /// then inform the model that the action completed.
     public func approveAction() {
-        guard let request = pendingApproval else { return }
-        advanceApprovalQueue()
-
-        if let codexApproval = codexApprovals.removeValue(forKey: request.id) {
-            Task {
-                do {
-                    try await codexClient.resolveApproval(
-                        codexApproval,
-                        approved: true
-                    )
-                } catch {
-                    self.error = error.localizedDescription
-                }
-            }
-            return
-        }
+        guard let request = toolInteractionStore.takePendingApproval() else { return }
 
         Task {
+            do {
+                if try await codexRuntimeStore.resolveApproval(
+                    id: request.id,
+                    approved: true
+                ) {
+                    return
+                }
+            } catch {
+                self.error = error.localizedDescription
+                return
+            }
             let resolution = await ToolApprovalRegistry.shared.approve(id: request.id)
             if resolution.requiresModelFollowUp {
                 await sendInternalMessageWhenIdle("""
@@ -2020,25 +863,22 @@ public final class ChatStore {
 
     /// Reject a pending tool operation.
     public func rejectAction() {
-        guard let request = pendingApproval else { return }
-        advanceApprovalQueue()
-        if let codexApproval = codexApprovals.removeValue(forKey: request.id) {
-            Task {
-                do {
-                    try await codexClient.resolveApproval(
-                        codexApproval,
-                        approved: false
-                    )
-                } catch {
-                    self.error = error.localizedDescription
-                }
-            }
-            return
-        }
-        if request.operation == "diffPatch" {
-            updateDiffPatchBlock(id: request.id, status: .rejected)
-        }
+        guard let request = toolInteractionStore.takePendingApproval() else { return }
         Task {
+            do {
+                if try await codexRuntimeStore.resolveApproval(
+                    id: request.id,
+                    approved: false
+                ) {
+                    return
+                }
+            } catch {
+                self.error = error.localizedDescription
+                return
+            }
+            if request.operation == "diffPatch" {
+                updateDiffPatchBlock(id: request.id, status: .rejected)
+            }
             let resolution = await ToolApprovalRegistry.shared.reject(id: request.id)
             if resolution.requiresModelFollowUp {
                 await sendInternalMessageWhenIdle("[User rejected tool action: \(request.summary). Do NOT perform this action.]")
@@ -2049,26 +889,11 @@ public final class ChatStore {
     /// Receives approval requests directly from ToolApprovalRegistry. Transcript
     /// parsing remains a compatibility fallback for external model adapters.
     public func presentApproval(_ request: ApprovalRequest) {
-        guard pendingApproval?.id != request.id,
-              !queuedApprovals.contains(where: { $0.id == request.id }) else { return }
-
-        if pendingApproval == nil {
-            pendingApproval = request
-        } else {
-            queuedApprovals.append(request)
-        }
-    }
-
-    private func advanceApprovalQueue() {
-        pendingApproval = queuedApprovals.isEmpty ? nil : queuedApprovals.removeFirst()
+        toolInteractionStore.enqueueApproval(request)
     }
 
     public func dismissApproval(id: String) {
-        if pendingApproval?.id == id {
-            advanceApprovalQueue()
-        } else {
-            queuedApprovals.removeAll(where: { $0.id == id })
-        }
+        toolInteractionStore.dismissApproval(id: id)
     }
 
     private func sendInternalMessageWhenIdle(_ text: String) async {
@@ -2078,81 +903,6 @@ public final class ChatStore {
         await sendMessage(text, visibleInTimeline: false)
     }
 
-    private func beginToolActivity(_ call: Transcript.ToolCall, backend: ModelBackend) async {
-        if let activeDiagnosticsRunID {
-            await AgentDiagnosticsRecorder.shared.toolStarted(
-                runID: activeDiagnosticsRunID,
-                call: call,
-                backend: backend
-            )
-        }
-        guard call.toolName != "diff_patch",
-              call.toolName != "apply_edits",
-              call.toolName != "edit_file" else { return }
-        toolActivities.removeAll { $0.id == call.id }
-        toolActivities.append(ToolActivity(id: call.id, summary: toolSummary(for: call)))
-    }
-
-    private func endToolActivity(
-        _ call: Transcript.ToolCall,
-        output: Transcript.ToolOutput,
-        backend: ModelBackend
-    ) async {
-        if let activeDiagnosticsRunID {
-            await AgentDiagnosticsRecorder.shared.toolFinished(
-                runID: activeDiagnosticsRunID,
-                call: call,
-                output: output,
-                backend: backend
-            )
-        }
-        if call.toolName == "turbocode_guide" {
-            let text = output.segments.compactMap { segment -> String? in
-                if case .text(let value) = segment { return value.content }
-                return nil
-            }.joined()
-            activeProductGuidePresentation = ProductGuideBlock(toolOutput: text)
-        }
-        if call.toolName == "write_ondevice" {
-            let text = output.segments.compactMap { segment -> String? in
-                if case .text(let value) = segment { return value.content }
-                return nil
-            }.joined()
-            if text.hasPrefix("WRITE_COMPLETE: ") {
-                activeCompletedRootWrite = String(text.dropFirst("WRITE_COMPLETE: ".count))
-            }
-        }
-        if let presentation = ToolPresentationRouter.presentation(
-            for: call,
-            output: output,
-            workspaceName: workspaceRoot.isEmpty ? nil : workspaceLabel
-        ) {
-            presentToolPresentation(presentation)
-        }
-        toolActivities.removeAll { $0.id == call.id }
-    }
-
-    private func presentToolPresentation(_ presentation: ToolPresentation) {
-        let block: ChatBlock
-        switch presentation {
-        case .workspaceListing(let listing):
-            activeWorkspaceListingPresentations.append(listing)
-            block = ChatBlock(
-                id: "workspace-listing-\(listing.toolCallID)",
-                kind: .workspaceListing,
-                text: listing.path,
-                workspaceListing: listing
-            )
-        }
-        guard !blocks.contains(where: { $0.id == block.id }) else { return }
-        if let placeholderID = activeAssistantPlaceholderID,
-           let index = blocks.firstIndex(where: { $0.id == placeholderID }) {
-            blocks.insert(block, at: index)
-        } else {
-            blocks.append(block)
-        }
-    }
-
     public func beginDiffPatchBlock(
         id: String,
         patch: String,
@@ -2160,40 +910,15 @@ public final class ChatStore {
         reviewFiles: [DiffReviewFileSnapshot] = [],
         status: DiffPatchStatus
     ) {
-        let blockID = activeEditGroupID ?? id
-        editTransactionGroups[id] = blockID
-
-        if let index = blocks.firstIndex(where: { $0.id == blockID }),
-           var payload = blocks[index].diffPatch {
-            var patches = payload.patches ?? [payload.patch]
-            patches.append(patch)
-            payload.patches = patches
-            payload.patch = patches.joined(separator: "\n")
-            payload.files = mergedFileChanges(payload.files + files)
-            payload.reviewFiles = mergedReviewFiles(
-                existing: payload.reviewFiles ?? [],
-                incoming: reviewFiles
-            )
-            payload.status = status
-            payload.errorMessage = nil
-            blocks[index].diffPatch = payload
-            return
-        }
-        let payload = DiffPatchBlock(
+        reviewCoordinator.beginDiffPatch(
+            id: id,
+            editGroupID: responseCoordinator.activeEditGroupID,
             workspaceRoot: workspaceRoot,
             patch: patch,
-            patches: [patch],
             files: files,
-            reviewFiles: reviewFiles.isEmpty ? nil : reviewFiles,
-            status: status,
-            errorMessage: nil
+            reviewFiles: reviewFiles,
+            status: status
         )
-        let block = ChatBlock(id: blockID, kind: .diffPatch, text: "", diffPatch: payload)
-        if let placeholderIndex = blocks.lastIndex(where: { $0.kind == .assistant && $0.text.isEmpty }) {
-            blocks.insert(block, at: placeholderIndex)
-        } else {
-            blocks.append(block)
-        }
     }
 
     public func updateDiffPatchBlock(
@@ -2201,449 +926,67 @@ public final class ChatStore {
         status: DiffPatchStatus,
         errorMessage: String? = nil
     ) {
-        let blockID = editTransactionGroups[id] ?? id
-        guard let index = blocks.firstIndex(where: { $0.id == blockID }),
-              var payload = blocks[index].diffPatch else { return }
-        payload.status = status
-        payload.errorMessage = errorMessage
-        blocks[index].diffPatch = payload
-
-        if status == .applied || status == .undone {
-            Task { await reloadDiffs() }
-        }
+        reviewCoordinator.updateDiffPatch(
+            id: id,
+            status: status,
+            errorMessage: errorMessage
+        )
     }
 
     public func reviewDiffPatch(_ id: String) {
-        guard blocks.contains(where: { $0.id == id && $0.diffPatch != nil }) else { return }
-        rightPanelMode = .changes
-        Task { await reloadDiffs() }
+        reviewCoordinator.reviewDiffPatch(id)
     }
 
     public func presentGitCommit(_ receipt: GitCommitBlock) {
-        let block = ChatBlock(kind: .gitCommit, text: "", gitCommit: receipt)
-        if let placeholderIndex = blocks.lastIndex(where: { $0.kind == .assistant && $0.text.isEmpty }) {
-            blocks.insert(block, at: placeholderIndex)
-        } else {
-            blocks.append(block)
-        }
+        reviewCoordinator.presentGitCommit(receipt)
     }
 
     public func reviewGitCommit(_ id: String) {
-        guard let receipt = blocks.first(where: { $0.id == id })?.gitCommit else { return }
-        inspectedGitCommit = receipt
-        rightPanelMode = .commit
+        reviewCoordinator.reviewGitCommit(id)
     }
 
     /// Shows the immutable snapshot associated with one timeline receipt. The
     /// inspector never rereads the filesystem, preserving conversational history.
     public func reviewWorkspaceListing(_ id: String) {
-        guard blocks.contains(where: { $0.id == id && $0.workspaceListing != nil }) else { return }
-        inspectedWorkspaceListingID = id
-        rightPanelMode = .workspaceListing
+        reviewCoordinator.reviewWorkspaceListing(id)
     }
 
     /// Dismisses only the transient workspace snapshot. Other inspectors are
     /// persistent workbench modes and must not close when the canvas is clicked.
     func dismissWorkspaceListingInspector() {
-        guard rightPanelMode == .workspaceListing else { return }
-        inspectedWorkspaceListingID = nil
-        rightPanelMode = nil
+        workbenchStore.dismissWorkspaceListingInspector()
     }
 
     public func undoGitCommit(_ id: String) {
-        guard let index = blocks.firstIndex(where: { $0.id == id }),
-              var receipt = blocks[index].gitCommit,
-              receipt.status == .committed else { return }
-
-        receipt.status = .undoing
-        receipt.errorMessage = nil
-        blocks[index].gitCommit = receipt
-
-        Task {
-            if let failure = await gitService.undoCommit(
-                expectedHash: receipt.hash,
-                at: URL(fileURLWithPath: receipt.workspaceRoot)
-            ) {
-                receipt.status = .failed
-                receipt.errorMessage = failure
-            } else {
-                receipt.status = .undone
-                receipt.errorMessage = nil
-            }
-            if let currentIndex = blocks.firstIndex(where: { $0.id == id }) {
-                blocks[currentIndex].gitCommit = receipt
-            }
-            if inspectedGitCommit?.hash == receipt.hash {
-                inspectedGitCommit = receipt
-            }
-            await refreshGitAfterToolMutation()
-            if let threadID = activeThreadId {
-                await persistSession(for: threadID)
-            }
+        reviewCoordinator.undoGitCommit(id) { [weak self] in
+            guard let self,
+                  let threadID = self.activeThreadId else { return }
+            await self.persistSession(for: threadID)
         }
     }
 
     public func undoDiffPatch(_ id: String) {
-        guard let index = blocks.firstIndex(where: { $0.id == id }),
-              let payload = blocks[index].diffPatch,
-              payload.status == .applied else { return }
-
-        updateDiffPatchBlock(id: id, status: .undoing)
-        Task {
-            var revertedPatches: [String] = []
-            do {
-                for patch in (payload.patches ?? [payload.patch]).reversed() {
-                    try await diffPatchService.apply(
-                        patch: patch,
-                        workspaceRoot: payload.workspaceRoot,
-                        reverse: true
-                    )
-                    revertedPatches.append(patch)
-                }
-                updateDiffPatchBlock(id: id, status: .undone)
-            } catch {
-                for patch in revertedPatches.reversed() {
-                    try? await diffPatchService.apply(
-                        patch: patch,
-                        workspaceRoot: payload.workspaceRoot
-                    )
-                }
-                updateDiffPatchBlock(
-                    id: id,
-                    status: .applied,
-                    errorMessage: "Undo failed: \(error.localizedDescription)"
-                )
-            }
-            if let threadID = activeThreadId {
-                await persistSession(for: threadID)
-            }
+        reviewCoordinator.undoDiffPatch(id) { [weak self] in
+            guard let self,
+                  let threadID = self.activeThreadId else { return }
+            await self.persistSession(for: threadID)
         }
-    }
-
-    private func mergedFileChanges(
-        _ changes: [DiffPatchFileChange]
-    ) -> [DiffPatchFileChange] {
-        var order: [String] = []
-        var totals: [String: (additions: Int, deletions: Int)] = [:]
-        for change in changes {
-            if totals[change.path] == nil { order.append(change.path) }
-            totals[change.path, default: (0, 0)].additions += change.additions
-            totals[change.path, default: (0, 0)].deletions += change.deletions
-        }
-        return order.compactMap { path in
-            guard let total = totals[path] else { return nil }
-            return DiffPatchFileChange(
-                path: path,
-                additions: total.additions,
-                deletions: total.deletions
-            )
-        }
-    }
-
-    /// Consecutive edit_file calls in one assistant turn share a receipt. The
-    /// review must retain the first before-state and the final after-state.
-    private func mergedReviewFiles(
-        existing: [DiffReviewFileSnapshot],
-        incoming: [DiffReviewFileSnapshot]
-    ) -> [DiffReviewFileSnapshot] {
-        var merged = existing
-        for snapshot in incoming {
-            if let index = merged.firstIndex(where: { $0.path == snapshot.path }) {
-                merged[index] = DiffReviewFileSnapshot(
-                    path: snapshot.path,
-                    originalText: merged[index].originalText,
-                    modifiedText: snapshot.modifiedText
-                )
-            } else {
-                merged.append(snapshot)
-            }
-        }
-        return merged
-    }
-
-    private func toolSummary(for call: Transcript.ToolCall) -> String {
-        let path = (try? call.arguments.value(String.self, forProperty: "filePath"))
-            ?? (try? call.arguments.value(String.self, forProperty: "path"))
-        let item = path.map { URL(fileURLWithPath: $0).lastPathComponent }
-
-        switch call.toolName {
-        case "read_file":
-            return item.map { "Reading \($0)" } ?? "Reading file"
-        case "grep":
-            return item.map { "Searching in \($0)" } ?? "Searching workspace"
-        case "bash":
-            return "Running command"
-        case "remove_file":
-            return "Preparing file removal"
-        case "git":
-            let operation = try? call.arguments.value(String.self, forProperty: "operation")
-            return operation.map { "Git \($0)" } ?? "Working with Git"
-        case "apply_edits", "edit_file":
-            return "Preparing file changes"
-        case "file_system":
-            let operation = try? call.arguments.value(String.self, forProperty: "operation")
-            switch operation {
-            case "list": return item.map { "Listing \($0)" } ?? "Listing files"
-            case "info": return item.map { "Inspecting \($0)" } ?? "Inspecting item"
-            case "find": return item.map { "Finding files in \($0)" } ?? "Finding files"
-            case "createDirectory": return item.map { "Creating \($0)" } ?? "Creating folder"
-            case "write": return item.map { "Writing \($0)" } ?? "Writing file"
-            case "append": return item.map { "Updating \($0)" } ?? "Updating file"
-            case "copy": return item.map { "Copying \($0)" } ?? "Copying item"
-            case "move": return item.map { "Moving \($0)" } ?? "Moving item"
-            case "delete": return item.map { "Deleting \($0)" } ?? "Deleting item"
-            default: return "Working with files"
-            }
-        case "call_powerful_model":
-            return "Working with coding model"
-        case "turbocode_guide":
-            return "Consulting TurboCode Guide"
-        case "list_workspace":
-            let path = try? call.arguments.value(String.self, forProperty: "path")
-            return path == "." ? "Browsing workspace" : "Browsing \(path ?? "workspace")"
-        case "activate_skill", "toggle_skill", "load_skill":
-            let skill = try? call.arguments.value(String.self, forProperty: "skill")
-            return skill.map { "Loading \($0)" } ?? "Loading skill"
-        default:
-            return "Using \(call.toolName.replacingOccurrences(of: "_", with: " "))"
-        }
-    }
-
-    private func userVisibleAssistantText(_ text: String) -> String {
-        let approvalKeys = Set(["approval_id", "operation", "path", "destination", "summary"])
-        var isSkippingApproval = false
-        var visibleLines: [String] = []
-
-        for line in text.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.contains("TURBOCODE_APPROVAL_REQUIRED") {
-                isSkippingApproval = true
-                continue
-            }
-
-            if isSkippingApproval {
-                let key = trimmed.split(separator: ":", maxSplits: 1).first.map(String.init) ?? ""
-                if trimmed.isEmpty || approvalKeys.contains(key) {
-                    continue
-                }
-                isSkippingApproval = false
-            }
-
-            visibleLines.append(line)
-        }
-
-        return visibleLines.joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     public func setRoute(_ route: AppRoute) {
-        if route == .skills {
-            // Preserve the current destination behind the native sheet. Using
-            // `.skills` as the visible route used to construct a stale Chat
-            // timeline while presenting the modal, which could beachball.
-            isCustomProfilesPresented = true
-            return
-        }
-        isCustomProfilesPresented = false
-        self.route = route
-        if route != .chat { rightPanelMode = nil }
+        workbenchStore.setRoute(route)
     }
 
     public func toggleRightPanel(_ mode: RightPanelMode) {
-        rightPanelMode = rightPanelMode == mode ? nil : mode
+        workbenchStore.toggleRightPanel(mode)
     }
 
-    public func toggleTerminal() { terminalOpen.toggle() }
+    public func toggleTerminal() {
+        workbenchStore.toggleTerminal()
+    }
 
     public func toggleLeftSidebar() {
-        withAnimation(.easeInOut(duration: 0.2)) { leftSidebarCollapsed.toggle() }
+        workbenchStore.toggleLeftSidebar()
     }
 
-    // MARK: - Sorted Threads
-
-    public var sortedThreads: [Conversation] {
-        let q = threadSearch.lowercased().trimmingCharacters(in: .whitespaces)
-        return threads
-            .filter { t in showArchivedThreads ? true : !t.isArchived }
-            .filter { t in
-                if let project = selectedProject {
-                    // Match by lastPathComponent of workspace
-                    return t.workspace.flatMap { URL(fileURLWithPath: $0).lastPathComponent } == project
-                }
-                return true
-            }
-            .filter { t in q.isEmpty ? true : t.title.lowercased().contains(q) }
-            .sorted { a, b in
-                if a.isPinned != b.isPinned { return a.isPinned }
-                return a.updatedAt > b.updatedAt
-            }
-    }
-}
-
-/// Stops a known Foundation Models degeneration before hundreds of empty
-/// Markdown fences are rendered and persisted. It deliberately requires both
-/// substantial output and extremely low information density.
-nonisolated enum OnDeviceStreamingGuard {
-    enum Failure: Error {
-        case repetitiveOutput
-    }
-
-    static func isPathological(_ text: String) -> Bool {
-        guard text.count >= 160 else { return false }
-        let lines = text.components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        let fenceCount = lines.lazy.filter { $0.hasPrefix("```") }.count
-        guard fenceCount >= 12 else { return false }
-
-        let content = lines.filter { !$0.hasPrefix("```") }.joined()
-        return content.count * 5 < text.count
-    }
-}
-
-/// Prepares conversation history for a newly constructed model session. The
-/// destination profile always supplies fresh instructions and tool definitions.
-nonisolated enum SessionRebuildHistory {
-    static func prepare(
-        _ transcript: Transcript,
-        keepingHistory: Bool,
-        discardingCapabilityContext: Bool
-    ) -> [Transcript.Entry] {
-        guard keepingHistory else { return [] }
-        return transcript.filter { entry in
-            switch entry {
-            case .instructions:
-                return false
-            case .toolCalls, .toolOutput, .reasoning:
-                return !discardingCapabilityContext
-            case .prompt, .response:
-                return true
-            @unknown default:
-                return true
-            }
-        }
-    }
-
-    /// Best-effort migration for sessions saved before semantic transcripts
-    /// were persisted. Presentation-only blocks are intentionally ignored.
-    static func fromVisibleBlocks(_ blocks: [ChatBlock]) -> [Transcript.Entry] {
-        blocks.compactMap { block in
-            let segment = Transcript.Segment.text(
-                Transcript.TextSegment(content: block.text)
-            )
-            switch block.kind {
-            case .user:
-                return .prompt(Transcript.Prompt(segments: [segment]))
-            case .assistant, .productGuide:
-                guard !block.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                    return nil
-                }
-                return .response(Transcript.Response(assetIDs: [], segments: [segment]))
-            case .reasoning, .tool, .approval, .review, .compaction,
-                    .diffPatch, .gitCommit, .workspaceListing:
-                return nil
-            }
-        }
-    }
-}
-
-/// Resolves disk skills at the same capability boundary as dynamic tools.
-nonisolated enum DynamicProfileRuntimeSelection {
-    static func skills(
-        from available: [TurboCodeSkillDefinition],
-        profile: UserDynamicProfile?
-    ) -> [TurboCodeSkillDefinition] {
-        // Filesystem discovery order is not a runtime contract. Canonicalizing
-        // it keeps both the instructions catalog and load_skill schema stable,
-        // allowing provider prefix caches (notably DeepSeek's) to be reused.
-        let canonical = available.sorted {
-            $0.name.localizedStandardCompare($1.name) == .orderedAscending
-        }
-        guard let profile else { return canonical }
-        let allowed = Set(profile.skillIDs)
-        return canonical.filter { allowed.contains($0.name) }
-    }
-}
-
-// MARK: - DynamicInstructions for session setup
-
-/// Wraps instructions text and tools into a single DynamicInstructions value.
-// MARK: - Runtime status
-
-public enum RuntimeStatus: String, Sendable, Hashable {
-    case disconnected; case connecting; case ready; case error
-}
-public enum RuntimeConnectionState: String, Sendable, Hashable {
-    case disconnected; case connecting; case ready
-}
-
-// MARK: - Tool Activity
-
-public struct ToolActivity: Identifiable, Sendable, Hashable {
-    public let id: String
-    public let summary: String
-}
-
-// MARK: - Pending Approval
-
-public struct ApprovalRequest: Sendable {
-    public let id: String
-    public let operation: String
-    public let path: String
-    public let destination: String?
-    public let summary: String
-
-    public var displaySummary: String {
-        let item = URL(fileURLWithPath: path).lastPathComponent
-        switch operation {
-        case "createDirectory": return "Create \(item)"
-        case "write": return "Write \(item)"
-        case "append": return "Update \(item)"
-        case "copy": return "Copy \(item)"
-        case "move": return "Move \(item)"
-        case "delete": return "Delete \(item)"
-        case "removeFile": return "Delete \(item)"
-        default: return summary
-        }
-    }
-
-    public init(
-        id: String,
-        operation: String,
-        path: String,
-        destination: String? = nil,
-        summary: String
-    ) {
-        self.id = id
-        self.operation = operation
-        self.path = path
-        self.destination = destination
-        self.summary = summary
-    }
-
-    public init?(toolOutput: String) {
-        guard toolOutput.contains("TURBOCODE_APPROVAL_REQUIRED") else { return nil }
-
-        var values: [String: String] = [:]
-        for line in toolOutput.components(separatedBy: .newlines) {
-            let parts = line.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
-            guard parts.count == 2 else { continue }
-            let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
-            let value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
-            values[key] = value
-        }
-
-        guard let id = values["approval_id"],
-              let operation = values["operation"],
-              let path = values["path"],
-              let summary = values["summary"] else { return nil }
-
-        self.init(
-            id: id,
-            operation: operation,
-            path: path,
-            destination: values["destination"],
-            summary: summary
-        )
-    }
 }

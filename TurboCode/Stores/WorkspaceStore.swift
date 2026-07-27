@@ -1,0 +1,175 @@
+import Foundation
+import Observation
+
+/// Owns the selected workspace and its derived Git presentation state.
+///
+/// ChatStore remains the application-level coordinator: it forwards this state
+/// to existing views and reacts to workspace changes by rebuilding model
+/// sessions or closing inspectors.
+@MainActor
+@Observable
+final class WorkspaceStore {
+    var root: String = ""
+    var selectedProject: String?
+
+    var diffSections: [FileDiffSection] = []
+    var isLoadingDiffs = false
+    var diffLoadError: String?
+
+    var isGitRepository = false
+    var currentBranch: String = ""
+    var availableBranches: [String] = []
+
+    var label: String {
+        root.isEmpty ? "No workspace" : URL(fileURLWithPath: root).lastPathComponent
+    }
+
+    /// Recent paths stay in UserDefaults because they are lightweight sidebar
+    /// preferences rather than conversation or workspace-domain data.
+    var recentWorkspaces: [String] {
+        get { defaults.stringArray(forKey: Self.recentWorkspacesKey) ?? [] }
+        set { defaults.set(newValue, forKey: Self.recentWorkspacesKey) }
+    }
+
+    private static let recentWorkspacesKey = "recentWorkspaces"
+
+    private var diffLoadID: UUID?
+    private let gitService: any GitRepositoryServicing
+    private let defaults: UserDefaults
+
+    init(
+        gitService: any GitRepositoryServicing,
+        defaults: UserDefaults = .standard
+    ) {
+        self.gitService = gitService
+        self.defaults = defaults
+    }
+
+    /// Applies a user-selected workspace synchronously. Refreshes remain
+    /// explicit so ChatStore can rebuild its model session before async Git
+    /// results become visible.
+    func selectWorkspace(_ path: String) {
+        root = path
+        resetGitState()
+
+        var recent = recentWorkspaces
+        recent.removeAll { $0 == path }
+        recent.insert(path, at: 0)
+        recentWorkspaces = Array(recent.prefix(10))
+        selectedProject = URL(fileURLWithPath: path).lastPathComponent
+
+        // Changing roots invalidates the visible diff immediately. The load ID
+        // check in reloadDiffs prevents an older async request from repopulating it.
+        diffSections = []
+    }
+
+    /// Clears an explicit workspace selection while preserving the sidebar
+    /// project filter, matching ChatStore's existing navigation behavior.
+    func clearWorkspace() {
+        root = ""
+        diffLoadID = nil
+        diffSections = []
+        diffLoadError = nil
+        isLoadingDiffs = false
+        resetGitState()
+    }
+
+    /// Removes one recent workspace and clears derived state only when it is
+    /// the active root. The return value lets ChatStore handle session cleanup.
+    @discardableResult
+    func removeWorkspace(_ path: String) -> Bool {
+        recentWorkspaces = recentWorkspaces.filter { $0 != path }
+        guard root == path else { return false }
+
+        root = ""
+        selectedProject = nil
+        resetGitState()
+        diffSections = []
+        isLoadingDiffs = false
+        return true
+    }
+
+    func reloadDiffs() async {
+        guard !root.isEmpty else {
+            diffLoadID = nil
+            diffSections = []
+            diffLoadError = nil
+            isLoadingDiffs = false
+            return
+        }
+
+        let requestedWorkspace = root
+        let loadID = UUID()
+        diffLoadID = loadID
+        isLoadingDiffs = true
+        diffLoadError = nil
+        diffSections = []
+        defer {
+            if diffLoadID == loadID {
+                isLoadingDiffs = false
+            }
+        }
+
+        let url = URL(fileURLWithPath: requestedWorkspace)
+        let sections = await FileDiffSection.fromGit(at: url, service: gitService)
+
+        // Workspace changes and newer reloads make this result stale. Never
+        // publish filesystem state captured for a no-longer-active root.
+        guard !Task.isCancelled,
+              root == requestedWorkspace,
+              diffLoadID == loadID else { return }
+
+        if let sections {
+            diffSections = sections
+            diffLoadError = nil
+        } else {
+            diffSections = []
+            diffLoadError = "Not a git repository or git unavailable"
+        }
+    }
+
+    func refreshGitBranches() async {
+        guard !root.isEmpty else {
+            resetGitState()
+            return
+        }
+
+        let requestedWorkspace = root
+        let url = URL(fileURLWithPath: requestedWorkspace)
+        let isRepository = await gitService.isGitRepository(at: url)
+        guard root == requestedWorkspace, !Task.isCancelled else { return }
+        guard isRepository else {
+            resetGitState()
+            return
+        }
+
+        let branch = await gitService.currentBranch(at: url)
+        let branches = await gitService.allBranches(at: url)
+        guard root == requestedWorkspace, !Task.isCancelled else { return }
+
+        isGitRepository = true
+        currentBranch = branch ?? ""
+        availableBranches = branches
+    }
+
+    func refreshGitAfterToolMutation() async {
+        await refreshGitBranches()
+        await reloadDiffs()
+    }
+
+    /// Changes branches only through the injected service, then reloads the
+    /// authoritative repository state instead of trusting the requested name.
+    func switchToBranch(_ branch: String) async {
+        guard !root.isEmpty else { return }
+        let url = URL(fileURLWithPath: root)
+        guard await gitService.checkout(branch: branch, at: url) else { return }
+        currentBranch = branch
+        await refreshGitBranches()
+    }
+
+    private func resetGitState() {
+        isGitRepository = false
+        currentBranch = ""
+        availableBranches = []
+    }
+}
