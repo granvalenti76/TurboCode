@@ -36,10 +36,24 @@ public final class ChatStore {
 
     // MARK: - Properties
     // Threads
-    public var threads: [Conversation] = []
-    public var activeThreadId: String?
-    public var threadSearch: String = ""
-    public var showArchivedThreads: Bool = false
+    // Forwarding keeps existing sidebar and test call sites stable while
+    // ConversationStore owns the observable catalog.
+    public var threads: [Conversation] {
+        get { conversationStore.threads }
+        set { conversationStore.threads = newValue }
+    }
+    public var activeThreadId: String? {
+        get { conversationStore.activeThreadID }
+        set { conversationStore.activeThreadID = newValue }
+    }
+    public var threadSearch: String {
+        get { conversationStore.search }
+        set { conversationStore.search = newValue }
+    }
+    public var showArchivedThreads: Bool {
+        get { conversationStore.showsArchivedThreads }
+        set { conversationStore.showsArchivedThreads = newValue }
+    }
 
     // Timeline
     public var blocks: [ChatBlock] = []
@@ -238,11 +252,11 @@ public final class ChatStore {
     var availableBranches: [String] { workspaceStore.availableBranches }
 
     private let workspaceStore: WorkspaceStore
+    private let conversationStore: ConversationStore
     /// Retained temporarily for commit-receipt undo, which still coordinates
     /// timeline mutation and persistence inside ChatStore.
     private let gitService: any GitRepositoryServicing
     private let diffPatchService: any DiffPatchApplying
-    private let conversationRepository: any ConversationRepository
 
     public func reloadDiffs() async {
         await workspaceStore.reloadDiffs()
@@ -329,7 +343,7 @@ public final class ChatStore {
         gitService: any GitRepositoryServicing = GitDiffService(),
         diffPatchService: any DiffPatchApplying = DiffPatchService()
     ) {
-        self.conversationRepository = conversationRepository
+        self.conversationStore = ConversationStore(repository: conversationRepository)
         self.workspaceStore = WorkspaceStore(gitService: gitService)
         self.gitService = gitService
         self.diffPatchService = diffPatchService
@@ -878,13 +892,11 @@ public final class ChatStore {
 
     public func createThread(title: String = "New Chat", mode: ConversationMode = .agent) async {
         dismissWorkspaceListingInspector()
-        let thread = Conversation(
+        conversationStore.createThread(
             title: title,
             workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
             mode: mode
         )
-        threads.insert(thread, at: 0)
-        activeThreadId = thread.id
         blocks = []
         liveReasoning = ""
         liveAssistant = ""
@@ -897,25 +909,17 @@ public final class ChatStore {
     /// without a thread, attach them to the new metadata instead of discarding
     /// the visible conversation.
     private func ensureActiveThread() {
-        guard let activeThreadId,
-              threads.contains(where: { $0.id == activeThreadId }) else {
-            let hasOrphanedBlocks = !blocks.isEmpty
-            let thread = Conversation(
-                title: "New Chat",
-                workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
-                mode: composerMode
-            )
-            threads.insert(thread, at: 0)
-            self.activeThreadId = thread.id
+        let hasOrphanedBlocks = !blocks.isEmpty
+        let created = conversationStore.ensureActiveThread(
+            workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
+            mode: composerMode
+        )
+        guard created, !hasOrphanedBlocks else { return }
 
-            if !hasOrphanedBlocks {
-                liveReasoning = ""
-                liveAssistant = ""
-                isFirstMessage = true
-                rebuildSession(keepingHistory: false)
-            }
-            return
-        }
+        liveReasoning = ""
+        liveAssistant = ""
+        isFirstMessage = true
+        rebuildSession(keepingHistory: false)
     }
 
     /// Generates a concise title from the first user prompt using the Apple
@@ -957,10 +961,7 @@ public final class ChatStore {
     /// the value prevents array insertions or sorting changes from targeting a
     /// different conversation, and preserves a title the user renamed meanwhile.
     func applyGeneratedTitle(_ title: String, to threadID: String) {
-        guard let index = threads.firstIndex(where: { $0.id == threadID }),
-              threads[index].title == "New Chat" else { return }
-        threads[index].title = title
-        threads[index].updatedAt = .now
+        conversationStore.applyGeneratedTitle(title, to: threadID)
     }
 
     // MARK: - Session Persistence
@@ -977,7 +978,7 @@ public final class ChatStore {
             transcript: activeBackend == .codex ? nil : session.transcript
         )
         do {
-            try conversationRepository.save(snapshot)
+            try conversationStore.persist(snapshot)
         } catch {
             print("[TurboCode] Failed to persist session: \(error.localizedDescription)")
         }
@@ -985,17 +986,12 @@ public final class ChatStore {
 
     /// Loads all session files and populates the thread list.
     public func restoreSessions() async {
-        guard let all = try? conversationRepository.list(),
-              !all.isEmpty else { return }
-        let existingIDs = Set(threads.map(\.id))
-        for snapshot in all where !existingIDs.contains(snapshot.conversation.id) {
-            threads.append(snapshot.conversation)
-        }
+        try? conversationStore.restoreCatalog()
     }
 
     /// Fully restores a past session with its blocks.
     public func restoreSession(id: String) async {
-        guard let snapshot = try? conversationRepository.load(id: id),
+        guard let snapshot = try? conversationStore.snapshot(id: id),
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
         dismissWorkspaceListingInspector()
         activeThreadId = id
@@ -1060,21 +1056,15 @@ public final class ChatStore {
     }
 
     public func renameThread(id: String, title: String) async {
-        guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
-        threads[i].title = title
-        threads[i].updatedAt = .now
+        conversationStore.renameThread(id: id, title: title)
     }
 
     public func pinThread(id: String, pinned: Bool) async {
-        guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
-        threads[i].isPinned = pinned
-        threads[i].updatedAt = .now
+        conversationStore.pinThread(id: id, pinned: pinned)
     }
 
     public func archiveThread(id: String) async {
-        guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
-        threads[i].isArchived = true
-        threads[i].updatedAt = .now
+        conversationStore.archiveThread(id: id)
     }
 
     public func deleteThread(id: String) async {
@@ -1087,8 +1077,9 @@ public final class ChatStore {
             await responseTask.value
         }
 
+        let nextThreadID: String?
         do {
-            try conversationRepository.delete(id: id)
+            nextThreadID = try conversationStore.deleteThread(id: id)
         } catch {
             // Keep the visible row when durable deletion fails; pretending the
             // operation succeeded would make it reappear on the next launch.
@@ -1097,7 +1088,8 @@ public final class ChatStore {
         }
         self.error = nil
 
-        threads.removeAll { $0.id == id }
+        // Preserve the selection captured before awaiting an in-flight response:
+        // the original transition always cleared that conversation's timeline.
         guard deletesActiveThread else { return }
 
         activeThreadId = nil
@@ -1106,7 +1098,7 @@ public final class ChatStore {
         liveAssistant = ""
         isFirstMessage = true
 
-        if let nextThreadID = threads.first?.id {
+        if let nextThreadID {
             await restoreSession(id: nextThreadID)
             if activeThreadId == nil {
                 // A never-persisted draft has no snapshot to restore but remains
@@ -1122,34 +1114,10 @@ public final class ChatStore {
     /// Removes a workspace from TurboCode and deletes only its persisted chats.
     /// The workspace directory and all project files are left untouched.
     public func removeWorkspace(_ path: String) async {
-        var sessionIDs = Set(
-            threads
-                .filter { $0.workspace == path }
-                .map(\.id)
-        )
-        if let storedSessions = try? conversationRepository.list() {
-            sessionIDs.formUnion(
-                storedSessions
-                    .filter { $0.conversation.workspace == path }
-                    .map(\.conversation.id)
-            )
-        }
-
-        var deletionErrors: [String] = []
-        for id in sessionIDs {
-            do {
-                try conversationRepository.delete(id: id)
-            } catch {
-                deletionErrors.append(error.localizedDescription)
-            }
-        }
-
-        let removedActiveThread = activeThreadId.map(sessionIDs.contains) ?? false
-        threads.removeAll { $0.workspace == path }
+        let conversationRemoval = conversationStore.removeWorkspace(path)
         let removedActiveWorkspace = workspaceStore.removeWorkspace(path)
 
-        if removedActiveThread {
-            activeThreadId = nil
+        if conversationRemoval.removedActiveThread {
             blocks = []
             liveReasoning = ""
             liveAssistant = ""
@@ -1162,15 +1130,14 @@ public final class ChatStore {
             rebuildSession(keepingHistory: false)
         }
 
-        if !deletionErrors.isEmpty {
-            error = "Some workspace chats could not be removed: \(deletionErrors.joined(separator: "; "))"
+        if !conversationRemoval.deletionErrors.isEmpty {
+            let details = conversationRemoval.deletionErrors.joined(separator: "; ")
+            error = "Some workspace chats could not be removed: \(details)"
         }
     }
 
     public func restoreThread(id: String) async {
-        guard let i = threads.firstIndex(where: { $0.id == id }) else { return }
-        threads[i].isArchived = false
-        threads[i].updatedAt = .now
+        conversationStore.restoreThread(id: id)
     }
 
     /// Open a folder picker and set workspaceRoot.
@@ -1482,9 +1449,7 @@ public final class ChatStore {
                     at: index
                 )
             }
-            if let index = threads.firstIndex(where: { $0.id == turboThreadID }) {
-                threads[index].updatedAt = .now
-            }
+            conversationStore.touchThread(id: turboThreadID)
         } catch where error is CancellationError || Task.isCancelled {
             await codexClient.interruptActiveTurn()
             if let index = blocks.firstIndex(where: { $0.id == placeholderID }) {
@@ -1767,8 +1732,8 @@ public final class ChatStore {
             liveReasoning = ""
             liveAssistant = ""  // hide live streaming block
 
-            if let i = threads.firstIndex(where: { $0.id == activeThreadId }) {
-                threads[i].updatedAt = .now
+            if let activeThreadId {
+                conversationStore.touchThread(id: activeThreadId)
             }
         } catch OnDeviceStreamingGuard.Failure.repetitiveOutput {
             diagnosticsOutcome = .failed
@@ -2389,20 +2354,6 @@ public final class ChatStore {
     // MARK: - Sorted Threads
 
     public var sortedThreads: [Conversation] {
-        let q = threadSearch.lowercased().trimmingCharacters(in: .whitespaces)
-        return threads
-            .filter { t in showArchivedThreads ? true : !t.isArchived }
-            .filter { t in
-                if let project = selectedProject {
-                    // Match by lastPathComponent of workspace
-                    return t.workspace.flatMap { URL(fileURLWithPath: $0).lastPathComponent } == project
-                }
-                return true
-            }
-            .filter { t in q.isEmpty ? true : t.title.lowercased().contains(q) }
-            .sorted { a, b in
-                if a.isPinned != b.isPinned { return a.isPinned }
-                return a.updatedAt > b.updatedAt
-            }
+        conversationStore.sortedThreads(selectedProject: selectedProject)
     }
 }
