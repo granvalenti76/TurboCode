@@ -64,6 +64,9 @@ struct ListFilesIntent: AppIntent {
             summary = "\(contents.count) items in \(resolvedPath)"
         }
 
+        // Donate to Siri for future suggestion.
+        try? await donate()
+
         return .result(
             value: items,
             dialog: "\(summary)"
