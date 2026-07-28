@@ -149,7 +149,8 @@ struct DynamicProfileTests {
                 delegateReasoningLevel: nil,
                 activeTemperature: nil,
                 delegateTemperature: nil,
-                dropsCompletedToolCalls: false
+                dropsCompletedToolCalls: false,
+                workspaceInstructions: nil
             ),
             history: [],
             events: ModelSessionEvents(
@@ -168,6 +169,9 @@ struct DynamicProfileTests {
         #expect(names.contains("file_system"))
         #expect(names.contains("grep"))
         #expect(!names.contains("toggle_skill"))
+        // DeepSeek depends on a fixed direct tool surface; skill activation
+        // would change the leading request prefix between otherwise equal turns.
+        #expect(Set(names).count == names.count)
     }
 
     @Test("A remove-only profile exposes exactly the flat removal tool")
@@ -291,7 +295,8 @@ struct DynamicProfileTests {
             delegateReasoningLevel: nil,
             activeTemperature: nil,
             delegateTemperature: nil,
-            dropsCompletedToolCalls: true
+            dropsCompletedToolCalls: true,
+            workspaceInstructions: nil
         )
     }
 }

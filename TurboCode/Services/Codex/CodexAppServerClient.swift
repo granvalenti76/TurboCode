@@ -277,7 +277,8 @@ actor CodexAppServerClient {
     func startThread(
         workspaceRoot: String,
         modelID: String,
-        dynamicTools: [CodexDynamicToolSpec]
+        dynamicTools: [CodexDynamicToolSpec],
+        developerInstructions: String
     ) async throws -> String {
         try await connectIfNeeded()
         var params: [String: CodexJSONValue] = [
@@ -292,9 +293,7 @@ actor CodexAppServerClient {
             // Dynamic tools are sticky thread configuration. Codex selects
             // them inside its native loop while TurboCode executes them.
             "dynamicTools": .array(dynamicTools.map(\.jsonValue)),
-            "developerInstructions": .string(
-                CodexTurboCodeToolBridge.developerInstructions
-            )
+            "developerInstructions": .string(developerInstructions)
         ]
         if !workspaceRoot.isEmpty {
             params["cwd"] = .string(workspaceRoot)

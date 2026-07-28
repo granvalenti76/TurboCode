@@ -71,16 +71,35 @@ nonisolated enum CodexToolBridgeError: LocalizedError, Sendable, Equatable {
 /// FoundationModels profiles, preserving path validation, revision checks,
 /// approval gates, execution limits, and existing visual receipts.
 nonisolated enum CodexTurboCodeToolBridge {
-    static let developerInstructions = """
-    TurboCode provides dynamic workspace tools with native visual receipts.
-    Prefer list_workspace for directory browsing, swift_workspace_map for broad
-    Swift orientation, read_file for precise source ranges, grep for text
-    search, apply_edits for atomic one- or multi-file edits, xcode_project for
-    Xcode inspection/build/test, and git for repository operations. Use these
-    tools instead of shell commands or native file-change tools when they cover
-    the operation. Their structured results and edit/commit receipts are already
-    visible in TurboCode; do not repeat those contents in the final response.
-    """
+    static func developerInstructions(
+        workspaceRoot: String,
+        agentTuning: AgentTuningConfig,
+        dynamicTools: [CodexDynamicToolSpec],
+        workspaceInstructions: WorkspaceInstructions?
+    ) -> String {
+        // Codex owns its agent loop, but receives the same product identity,
+        // safety rules, and optional project instructions as native sessions.
+        TurboCodeSystemPromptBuilder.build(
+            TurboCodeSystemPromptContext(
+                role: .codex,
+                backend: .codex,
+                workspaceRoot: workspaceRoot,
+                agentTuning: agentTuning,
+                toolIDs: [
+                    .listWorkspace,
+                    .swiftWorkspaceMap,
+                    .readFile,
+                    .searchWorkspace,
+                    .editFile,
+                    .xcodeProject,
+                    .git
+                ],
+                toolNames: dynamicTools.map(\.name),
+                availableSkills: [],
+                workspaceInstructions: workspaceInstructions
+            )
+        )
+    }
 
     static func specifications(
         workspaceRoot: String,
