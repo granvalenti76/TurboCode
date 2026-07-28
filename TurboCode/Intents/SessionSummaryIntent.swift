@@ -88,10 +88,6 @@ struct SessionSummaryIntent: AppIntent {
             throw SessionSummaryError.emptyResponse
         }
 
-        // Donate the interaction to Siri so it learns this phrase and intent
-        // association and can suggest or handle it proactively in future.
-        try? await donate()
-
         return .result(
             value: cleanSummary,
             dialog: "Session summary: \(cleanSummary.prefix(150))"

@@ -46,9 +46,6 @@ struct AskTurboCodeIntent: AppIntent {
             throw AskIntentError.emptyResponse
         }
 
-        // Donate to Siri for future suggestion.
-        try? await donate()
-
         return .result(
             value: lastBlock.text,
             dialog: "\(lastBlock.text.prefix(200))"

@@ -17,7 +17,7 @@ Apple on-device and Apple Private Cloud Compute are two different backends. The 
 Open Terminal and start the server on TurboCode's default port:
 
 ```shell
-fm serve --port 1976
+fm serve
 ```
 
 Keep that Terminal process running while using PCC. TurboCode's default PCC entry points to `http://127.0.0.1:1976/v1` and selects the `pcc` model, so no endpoint editing or API key is required. Then choose **Apple PCC** as the standalone model, or as the delegated model under **TurboCode > Settings > Agents > Orchestrator**.

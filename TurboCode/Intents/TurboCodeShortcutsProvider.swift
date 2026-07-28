@@ -57,19 +57,6 @@ struct TurboCodeShortcutsProvider: AppShortcutsProvider {
             systemImageName: "sparkles.rectangle.stack"
         )
 
-        // -- List Files --
-        // Lists files and directories at a given path.
-        // The path parameter is String-typed, so Siri prompts the user for
-        // the path when the Shortcut runs.
-        AppShortcut(
-            intent: ListFilesIntent(),
-            phrases: [
-                "List files in \(.applicationName)",
-                "List directory with \(.applicationName)",
-            ],
-            shortTitle: "List Files",
-            systemImageName: "folder"
-        )
     }
 
     /// Branded tile color shown in the Shortcuts app gallery.

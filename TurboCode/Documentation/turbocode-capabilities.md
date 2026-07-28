@@ -1,6 +1,10 @@
 # What TurboCode Can Do
 
-TurboCode is a native macOS development workbench specialized in Swift, SwiftUI, Xcode projects, and Swift packages. It combines a conversational agent with deterministic project services so that a request can become a reviewable and verified engineering result.
+TurboCode is a native macOS agent harness written entirely in Swift and focused exclusively on developing macOS applications with Swift and SwiftUI. Rather than acting as a general-purpose IDE, it gives language models a purpose-built environment for understanding, modifying, building, testing, and reviewing Apple-platform projects.
+
+Its tool set combines general development operations with dedicated integrations for Xcode, Swift Package Manager, and Git. Shell access remains confined by the sandbox and is exposed to language models only through narrowly scoped wrappers. TurboCode also provides a lightweight repository map that helps local models work effectively when their context windows are limited.
+
+TurboCode natively supports Apple's on-device AFM Core 3 Advanced model with an 8K context window, Apple Private Cloud Compute through `fm serve`, Llama models distributed as GGUF files through `llama-server`, Codex with native OpenAI tool calls and TurboCode-specific tools, and DeepSeek.
 
 ## Understand an existing project
 
