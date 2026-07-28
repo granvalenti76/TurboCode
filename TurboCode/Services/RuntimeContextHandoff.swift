@@ -76,6 +76,15 @@ nonisolated enum RuntimeContextHandoff {
             GIT COMMIT: \(commit.status.rawValue); \(commit.shortHash) \
             \(commit.message); branch \(commit.branch); files: \(files)
             """
+        case .gitStatus:
+            guard let status = block.gitStatus else { return nil }
+            let files = status.files.map {
+                "\($0.path) (+\($0.additions)/-\($0.deletions))"
+            }.joined(separator: ", ")
+            return """
+            GIT STATUS: branch \(status.branch); \(status.changedFilesCount) changed; \
+            files with line statistics: \(files)
+            """
         case .workspaceListing:
             guard let listing = block.workspaceListing else { return nil }
             if let errorMessage = listing.errorMessage {
