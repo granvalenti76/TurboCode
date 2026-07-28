@@ -224,10 +224,22 @@ final class CodexRuntimeStore {
                 workspaceRoot: request.workspaceRoot,
                 agentTuning: request.agentTuning
             )
+            let workspaceInstructions = WorkspaceInstructionsLoader.load(
+                from: request.workspaceRoot
+            )
+            let developerInstructions = CodexTurboCodeToolBridge.developerInstructions(
+                workspaceRoot: request.workspaceRoot,
+                agentTuning: request.agentTuning,
+                dynamicTools: dynamicTools,
+                workspaceInstructions: workspaceInstructions
+            )
+            // App Server instructions are sticky for the thread. Keeping them
+            // fixed preserves Codex context and cache reuse across later turns.
             threadID = try await client.startThread(
                 workspaceRoot: request.workspaceRoot,
                 modelID: snapshot.selectedModel.model,
-                dynamicTools: dynamicTools
+                dynamicTools: dynamicTools,
+                developerInstructions: developerInstructions
             )
             threadIDs[request.turboThreadID] = threadID
         }

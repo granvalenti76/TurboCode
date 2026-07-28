@@ -17,6 +17,7 @@ final class ModelRuntimeStore {
     private(set) var dynamicProfiles: [UserDynamicProfile]
     private(set) var activeDynamicProfileID: UUID?
     private(set) var availableSkills: [TurboCodeSkillDefinition] = []
+    private var workspaceInstructionsRevision: String?
 
     var composerModel: String
     var activeBackend: ModelBackend
@@ -319,6 +320,10 @@ final class ModelRuntimeStore {
                 skillActivations.deactivate(name)
             }
         }
+        let workspaceInstructions = WorkspaceInstructionsLoader.load(
+            from: workspaceRoot
+        )
+        workspaceInstructionsRevision = workspaceInstructions?.revision
         let delegateModel = delegateRemoteModel
         let sessionSkills = DynamicProfileRuntimeSelection.skills(
             from: availableSkills,
@@ -339,11 +344,18 @@ final class ModelRuntimeStore {
                 delegateReasoningLevel: reasoningLevel(for: delegateModel),
                 activeTemperature: temperature(for: activeRemoteModel),
                 delegateTemperature: temperature(for: delegateModel),
-                dropsCompletedToolCalls: shouldDropCompletedToolCalls
+                dropsCompletedToolCalls: shouldDropCompletedToolCalls,
+                workspaceInstructions: workspaceInstructions
             ),
             history: history,
             events: events
         )
+    }
+
+    /// Detects instruction edits without rebuilding stable sessions on every turn.
+    func workspaceInstructionsChanged(in workspaceRoot: String) -> Bool {
+        WorkspaceInstructionsLoader.load(from: workspaceRoot)?.revision
+            != workspaceInstructionsRevision
     }
 
     private func configuredSkills() -> [TurboCodeSkillDefinition] {
