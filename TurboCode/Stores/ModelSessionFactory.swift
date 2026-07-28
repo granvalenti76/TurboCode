@@ -17,6 +17,7 @@ struct ModelSessionConfiguration {
     let activeTemperature: Double?
     let delegateTemperature: Double?
     let dropsCompletedToolCalls: Bool
+    let workspaceInstructions: WorkspaceInstructions?
 }
 
 struct ModelSessionEvents {
@@ -77,7 +78,6 @@ enum ModelSessionFactory {
         history: [Transcript.Entry],
         events: ModelSessionEvents
     ) -> LanguageModelSession {
-        let instructions = instructions(for: configuration)
         let activeModel = activeModel(for: configuration)
         let activeRemoteConfiguration = configuration.backend == .foundationApple
             ? nil
@@ -97,7 +97,6 @@ enum ModelSessionFactory {
            activeCapabilities.toolAccess != .none {
             return makeOrchestratorSession(
                 configuration: configuration,
-                instructions: instructions,
                 activeModel: activeModel,
                 activeCapabilities: activeCapabilities,
                 history: history,
@@ -107,7 +106,12 @@ enum ModelSessionFactory {
 
         guard activeCapabilities.toolAccess != .none else {
             return makeToollessSession(
-                instructions: instructions,
+                instructions: systemPrompt(
+                    for: configuration,
+                    role: .standalone,
+                    backend: configuration.backend,
+                    plan: nil
+                ),
                 model: activeModel,
                 temperature: temperature,
                 samplingMode: samplingMode,
@@ -126,6 +130,12 @@ enum ModelSessionFactory {
             selectedIDs: configuration.activeDynamicProfile?.resolvedToolIDs
         )
         let usesExclusiveToolSelection = configuration.activeDynamicProfile != nil
+        let instructions = systemPrompt(
+            for: configuration,
+            role: .standalone,
+            backend: configuration.backend,
+            plan: standalonePlan
+        )
 
         return LanguageModelSession(
             profile: StandaloneProfile(
@@ -180,7 +190,6 @@ enum ModelSessionFactory {
 
     private static func makeOrchestratorSession(
         configuration: ModelSessionConfiguration,
-        instructions: String,
         activeModel: any LanguageModel,
         activeCapabilities: ResolvedModelCapabilities,
         history: [Transcript.Entry],
@@ -204,6 +213,12 @@ enum ModelSessionFactory {
                 repositoryMap: configuration.delegateRemoteModel.repositoryMap
             )
         )
+        let delegateInstructions = systemPrompt(
+            for: configuration,
+            role: .delegate,
+            backend: delegateBackend,
+            plan: delegatePlan
+        )
         let powerfulTool = CallPowerfulModelTool(
             model: delegateModel,
             temperature: configuration.delegateTemperature,
@@ -213,7 +228,7 @@ enum ModelSessionFactory {
                 configuration: configuration,
                 repositoryMapContextTokens: configuration.delegateRemoteModel.contextWindowTokens
             ),
-            delegateInstructions: instructions,
+            delegateInstructions: delegateInstructions,
             onToolStart: { call in
                 await events.toolStarted(call, delegateBackend)
             },
@@ -234,13 +249,16 @@ enum ModelSessionFactory {
         if orchestratorPlan.contains(.callPowerfulModel) {
             orchestratorTools.append(powerfulTool)
         }
+        let orchestratorInstructions = systemPrompt(
+            for: configuration,
+            role: .orchestrator,
+            backend: .foundationApple,
+            plan: orchestratorPlan
+        )
 
         return LanguageModelSession(
             profile: TurboCodeDynamicProfile(
-                instructions: orchestratorInstructions(
-                    base: instructions,
-                    workspaceRoot: configuration.workspaceRoot
-                ),
+                instructions: orchestratorInstructions,
                 tools: orchestratorTools,
                 model: activeModel,
                 onToolStart: { call in
@@ -401,124 +419,28 @@ enum ModelSessionFactory {
         }
     }
 
-    private static func instructions(for configuration: ModelSessionConfiguration) -> String {
-        let selectedToolIDs = configuration.activeDynamicProfile.map(\.resolvedToolIDs)
-        func hasTool(_ id: ToolCapabilityID) -> Bool {
-            selectedToolIDs?.contains(id) ?? true
-        }
-
-        var text = """
-        You are TurboCode, an AI coding assistant developed by the TurboCode team.
-        You are NOT Apple's built-in assistant. Never refer to yourself as an Apple
-        model or any Apple product. Your name is TurboCode.
-        """
-        // Only the on-device model needs an explicit brevity guard. Remote
-        // models should choose formatting from the task instead of spending
-        // prompt budget on a blanket Markdown requirement.
-        if configuration.backend == .foundationApple {
-            text += "\nUse short plain-text responses. Use Markdown only when it materially improves readability; never emit empty code fences."
-        }
-        text += "\nStructured tool results with a native TurboCode presentation are already visible to the user. Do not repeat, enumerate, or tabulate their contents in the assistant response. Add only a brief contextual sentence when useful, unless the user explicitly requests analysis of the result."
-        if hasTool(.turboCodeGuide) {
-            text += "\nCall turbocode_guide only when the user explicitly asks about the TurboCode product itself, asks what you or the app can do, or requests help with TurboCode capabilities, workflows, models, tools, safety, settings, or best use. Do not call it for greetings, casual conversation, ordinary coding questions, or questions about the user's project. A mere mention of TurboCode is not enough. Pass the user's original question as query, base product facts on the returned official documentation, and answer in the user's language."
-        }
-        switch configuration.agentTuning.agent.responseStyle {
-        case .concise:
-            text += "\nKeep responses concise and lead with the result. Include only details needed to act or verify."
-        case .balanced:
-            text += "\nKeep responses focused, with enough implementation and verification detail to be useful."
-        case .detailed:
-            text += "\nExplain decisions and verification in detail while avoiding repetition."
-        }
-        if configuration.agentTuning.agent.verifiesChanges {
-            text += "\nAfter changing source code, run the most focused available build or test that verifies the change."
-        }
-        if !configuration.availableSkills.isEmpty, hasTool(.loadSkill) {
-            let catalog = configuration.availableSkills
-                .map { "- \($0.name): \($0.description)" }
-                .joined(separator: "\n")
-            text += """
-
-            TurboCode discovers reusable skills automatically from ~/.turbocode/SKILLS/**/SKILL.md.
-            Available skills:
-            \(catalog)
-            Use load_skill when a matching description applies; do not ask permission or announce loading.
-            """
-        }
-        if !configuration.availableSkills.isEmpty, hasTool(.loadSkill) {
-            text += "\nTreat /skill <name> and /<skill-name> as explicit requests to activate that skill before handling the remaining prompt. Treat /skills as a request to list the currently advertised skills with concise descriptions."
-        }
-        if !configuration.workspaceRoot.isEmpty {
-            text += "\nThe current workspace is at: \(configuration.workspaceRoot)"
-            text += "\nAll file operations are restricted to the workspace directory."
-            text += "\nNEVER access files outside the workspace."
-            if !configuration.availableSkills.isEmpty, hasTool(.loadSkill) {
-                text += "\nActivate the appropriate skill below to access file and code tools."
-            }
-            if hasTool(.readFile) {
-                text += "\nUse read_file with startLine and endLine to inspect only the relevant numbered source range and preserve context."
-            }
-            if hasTool(.listWorkspace) {
-                text += "\nUse list_workspace whenever you need to list or visually inspect the files and folders in one workspace directory. Pass a workspace-relative path and use . for the root."
-            }
-            if hasTool(.git) {
-                text += "\nUse git for every Git operation, including init when the workspace is not yet a repository."
-            }
-            if hasTool(.xcodeProject) {
-                text += "\nUse xcode_project for Xcode discovery, builds, and tests."
-            }
-            if hasTool(.bash) {
-                text += "\nUse bash for builds, tests, and precise non-Git inspection. Bash can read the workspace but cannot write to it."
-            }
-            if hasTool(.swiftPackageInit) {
-                text += "\nUse swift_package_init instead of bash when creating a new Swift Package Manager scaffold. After it succeeds, use edit_file for source changes and bash for build or test verification."
-            }
-            if hasTool(.editFile) {
-                text += "\nUse edit_file for every source or text-file creation and modification. Read the relevant range immediately before editing, copy its Revision, and request one contiguous change per call. Never generate unified diff hunks."
-            }
-            if hasTool(.writeOnDevice) {
-                text += "\nWhen the user asks to create or replace a root-level text file, call write_ondevice immediately with the complete content. Call it exactly once, do not ask for confirmation, and after WRITE_COMPLETE respond with one short sentence without repeating the content."
-            }
-            if hasTool(.removeFile) {
-                text += "\nUse remove_file directly whenever the user asks to remove one file. Supply only its workspace path."
-            }
-            if hasTool(.editFile) || hasTool(.writeOnDevice) || hasTool(.fileSystem) {
-                text += "\nWhen writing articles, biographies, documentation, or other long-form prose, preserve readable paragraphs with a blank line between them. The tool content must contain real newline characters; never collapse the whole document into one long line."
-            }
-            if hasTool(.fileSystem) || hasTool(.git) {
-                let legacyDeletionScope = hasTool(.removeFile)
-                    ? "Directory deletion and destructive Git operations"
-                    : "File and directory deletion and destructive Git operations"
-                text += "\n\(legacyDeletionScope) require approval. If a tool output contains TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user. Never print that technical approval block in your response."
-            }
-        }
-        return text
-    }
-
-    private static func orchestratorInstructions(base: String, workspaceRoot: String) -> String {
-        base + """
-
-
-        === ORCHESTRATOR MODE ===
-        You are TurboCode Orchestrator. You are NOT an Apple model — you are part of the TurboCode app. Your name is TurboCode, and you delegate complex tasks to the powerful coding model via `call_powerful_model`. Use `list_workspace` to list directories for the user. Use `file_system` only for metadata, file discovery, and supported filesystem operations.
-
-        For explicit questions about the TurboCode product itself, use `turbocode_guide` directly and answer from the returned official documentation. Never use it for greetings or ordinary coding questions. For EVERYTHING else — reading files, writing or editing files, generating code, git operations, grep/searching, complex analysis, or any multi-step task — you MUST use `call_powerful_model` to delegate to the powerful coding model. The powerful model has all the tools it needs (read_file, grep, git, bash, file_system, and edit_file).
-
-        CRITICAL — Never trust your own knowledge:
-        - If you need to answer with file contents, always delegate reading to `call_powerful_model`.
-        - If you need to modify code, always delegate to `call_powerful_model`.
-        - Never rely on your training data for what a file contains or what code looks like in this project.
-        - Always use the tools — `list_workspace` for directory listings, `call_powerful_model` for actual file work.
-
-        Your role is:
-        1. Understand what the user wants.
-        2. For TurboCode product guidance: use `turbocode_guide` directly.
-        3. For directory listings: use `list_workspace` directly. For metadata or file discovery: use `file_system` directly.
-        4. For everything else: first output a brief acknowledgment to the user, then call `call_powerful_model` with a complete, self-contained task description that includes all relevant context (file paths, code snippets, error messages, requirements). Include full paths so the powerful model can navigate the workspace at: \(workspaceRoot).
-        5. Synthesise the powerful model's response into a clear, well-formatted answer for the user.
-
-        === APPROVAL REQUESTS ===
-        If the powerful model's response contains "TURBOCODE_APPROVAL_REQUIRED", stop and wait for the user. The app presents the approval UI; never expose the technical approval block in your response.
-        """
+    private static func systemPrompt(
+        for configuration: ModelSessionConfiguration,
+        role: TurboCodeSystemPromptRole,
+        backend: ModelBackend,
+        plan: ModelToolPlan?
+    ) -> String {
+        // Consume the resolved plan rather than the requested profile so the
+        // prompt never advertises a capability rejected by the model's tier.
+        let toolIDs = plan?.assignments
+            .filter(\.isRegistered)
+            .map(\.id) ?? []
+        return TurboCodeSystemPromptBuilder.build(
+            TurboCodeSystemPromptContext(
+                role: role,
+                backend: backend,
+                workspaceRoot: configuration.workspaceRoot,
+                agentTuning: configuration.agentTuning,
+                toolIDs: toolIDs,
+                toolNames: toolIDs.map(\.rawValue),
+                availableSkills: configuration.availableSkills,
+                workspaceInstructions: configuration.workspaceInstructions
+            )
+        )
     }
 }

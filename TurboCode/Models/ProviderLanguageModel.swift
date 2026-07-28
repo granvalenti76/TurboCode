@@ -564,7 +564,9 @@ nonisolated final class DeepSeekRequestAdapter: URLProtocol, URLSessionDataDeleg
         guard hitTokens != nil || missTokens != nil else { return }
         let record: [String: Any] = [
             "createdAt": ISO8601DateFormatter().string(from: Date()),
-            "profileVersion": "premium-deepseek-cache-v11",
+            // Version the intentionally changed system-prompt prefix so cache
+            // comparisons never mix the previous and unified prompt contracts.
+            "profileVersion": "premium-deepseek-cache-v12",
             "promptCacheHitTokens": hitTokens ?? 0,
             "promptCacheMissTokens": missTokens ?? 0,
             "promptTokens": promptTokens ?? 0,

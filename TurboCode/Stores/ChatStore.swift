@@ -646,6 +646,12 @@ public final class ChatStore {
 
     public func sendMessage(_ text: String) async {
         refreshSkillsIfNeeded()
+        if activeBackend != .codex,
+           modelRuntimeStore.workspaceInstructionsChanged(in: workspaceRoot) {
+            // LanguageModelSession instructions are immutable. Preserve visible
+            // history while replacing only the stale system-instruction prefix.
+            rebuildSession()
+        }
         guard let promptText = modelRuntimeStore.resolvedPrompt(
             for: text
         ) else { return }

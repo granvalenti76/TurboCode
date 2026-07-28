@@ -493,7 +493,8 @@ enum AgentProfileVersion {
         case .foundationServe: return "pcc-layout-guard-v6"
         case .foundationApple: return "ondevice-layout-guard-v6"
         case .llamaServer: return "llama-layout-guard-v6"
-        case .premium: return "premium-deepseek-cache-v11"
+        // DeepSeek cache metrics are comparable only within one prompt prefix.
+        case .premium: return "premium-deepseek-cache-v12"
         case .codex: return "codex-app-server-v1"
         }
     }
