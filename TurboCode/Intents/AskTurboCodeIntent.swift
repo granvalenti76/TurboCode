@@ -6,7 +6,6 @@ import Foundation
 /// An App Intent that sends a natural language request to TurboCode's AI model
 /// and returns the assistant's response. Works with both standalone Llama/Apple
 /// models and the orchestrator mode.
-@available(macOS 13.0, iOS 16.0, watchOS 9.0, *)
 struct AskTurboCodeIntent: AppIntent {
     static let title: LocalizedStringResource = "Ask TurboCode"
     static let description: IntentDescription = """
