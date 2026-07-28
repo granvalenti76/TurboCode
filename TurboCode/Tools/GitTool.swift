@@ -33,6 +33,7 @@ struct GitTool: Tool {
     let policy: GitPolicy
     let executionPolicy: ExecutionPolicy
     private let service = StructuredGitService()
+    private let statusService = GitDiffService()
 
     var name: String { "git" }
     var description: String {
@@ -93,8 +94,55 @@ struct GitTool: Tool {
            let receipt = await service.latestCommitReceipt(workspaceRoot: workspaceRoot) {
             await ChatStore.shared?.presentGitCommit(receipt)
         }
+        if operation == .status, result.succeeded {
+            // The model still receives the canonical `git status` text while
+            // the UI gets a richer, immutable snapshot from the same moment.
+            let status = await statusReceipt(statusOutput: result.stdout)
+            await ChatStore.shared?.presentGitStatus(status)
+        }
         await refreshGitUIIfNeeded(result: result, mutatesRepository: command.mutatesRepository)
         return result.rendered
+    }
+
+    private func statusReceipt(statusOutput: String) async -> GitStatusBlock {
+        let repositoryURL = URL(fileURLWithPath: workspaceRoot)
+        let branch = await statusService.currentBranch(at: repositoryURL) ?? "HEAD"
+        // `--short --branch` reserves `##` lines for branch metadata; every
+        // remaining nonempty row represents one changed status entry.
+        let changedStatusRows = statusOutput
+            .components(separatedBy: .newlines)
+            .filter { !$0.isEmpty && !$0.hasPrefix("##") }
+
+        do {
+            let files = try await statusService.fetchChangedFiles(at: repositoryURL)
+            return GitStatusBlock(
+                workspaceRoot: workspaceRoot,
+                branch: branch,
+                files: files.map {
+                    GitStatusFileChange(
+                        path: $0.path,
+                        additions: $0.added,
+                        deletions: $0.removed
+                    )
+                },
+                changedFilesCount: max(changedStatusRows.count, files.count),
+                isClean: changedStatusRows.isEmpty,
+                capturedAt: .now,
+                errorMessage: nil
+            )
+        } catch {
+            // A successful status command remains useful even if the optional
+            // numstat enrichment fails, so preserve the receipt with context.
+            return GitStatusBlock(
+                workspaceRoot: workspaceRoot,
+                branch: branch,
+                files: [],
+                changedFilesCount: changedStatusRows.count,
+                isClean: changedStatusRows.isEmpty,
+                capturedAt: .now,
+                errorMessage: error.localizedDescription
+            )
+        }
     }
 
     private func makeCommand(

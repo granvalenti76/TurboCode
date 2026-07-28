@@ -947,6 +947,12 @@ public final class ChatStore {
         reviewCoordinator.presentGitCommit(receipt)
     }
 
+    /// Publishes the immutable status snapshot produced by an explicit model
+    /// tool call; background workspace refreshes deliberately remain silent.
+    public func presentGitStatus(_ status: GitStatusBlock) {
+        timelineStore.presentGitStatus(status)
+    }
+
     public func reviewGitCommit(_ id: String) {
         reviewCoordinator.reviewGitCommit(id)
     }

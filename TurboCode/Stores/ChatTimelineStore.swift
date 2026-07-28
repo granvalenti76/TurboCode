@@ -182,6 +182,14 @@ final class ChatTimelineStore {
         )
     }
 
+    /// Places status snapshots ahead of the assistant prose generated from the
+    /// same tool result, matching other native tool receipts in the timeline.
+    func presentGitStatus(_ status: GitStatusBlock) {
+        insertBeforeActivePlaceholderOrAppend(
+            ChatBlock(kind: .gitStatus, text: "", gitStatus: status)
+        )
+    }
+
     func updateGitCommit(id: String, receipt: GitCommitBlock) {
         guard let index = blocks.firstIndex(where: { $0.id == id }) else { return }
         blocks[index].gitCommit = receipt

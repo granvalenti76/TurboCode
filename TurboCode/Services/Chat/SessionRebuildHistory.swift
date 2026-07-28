@@ -40,7 +40,7 @@ nonisolated enum SessionRebuildHistory {
                 }
                 return .response(Transcript.Response(assetIDs: [], segments: [segment]))
             case .reasoning, .tool, .approval, .review, .compaction,
-                    .diffPatch, .gitCommit, .workspaceListing:
+                    .diffPatch, .gitCommit, .gitStatus, .workspaceListing:
                 return nil
             }
         }

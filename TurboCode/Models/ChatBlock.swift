@@ -11,6 +11,7 @@ public struct ChatBlock: Identifiable, Sendable, Hashable {
     public var providerId: String?
     public var diffPatch: DiffPatchBlock?
     public var gitCommit: GitCommitBlock?
+    public var gitStatus: GitStatusBlock?
     public var productGuide: ProductGuideBlock?
     public var workspaceListing: WorkspaceListingBlock?
 
@@ -23,6 +24,7 @@ public struct ChatBlock: Identifiable, Sendable, Hashable {
         providerId: String? = nil,
         diffPatch: DiffPatchBlock? = nil,
         gitCommit: GitCommitBlock? = nil,
+        gitStatus: GitStatusBlock? = nil,
         productGuide: ProductGuideBlock? = nil,
         workspaceListing: WorkspaceListingBlock? = nil
     ) {
@@ -34,6 +36,7 @@ public struct ChatBlock: Identifiable, Sendable, Hashable {
         self.providerId = providerId
         self.diffPatch = diffPatch
         self.gitCommit = gitCommit
+        self.gitStatus = gitStatus
         self.productGuide = productGuide
         self.workspaceListing = workspaceListing
     }
@@ -49,8 +52,52 @@ public enum ChatBlockKind: String, Sendable, Hashable, CaseIterable {
     case compaction
     case diffPatch = "diff_patch"
     case gitCommit = "git_commit"
+    case gitStatus = "git_status"
     case productGuide = "product_guide"
     case workspaceListing = "workspace_listing"
+}
+
+// MARK: - Git Status Block
+
+/// Immutable working-tree statistics captured when the model explicitly asks
+/// Git for status. Persisting the snapshot keeps historical charts stable.
+nonisolated public struct GitStatusBlock: Sendable, Hashable, Codable {
+    public let workspaceRoot: String
+    public let branch: String
+    public let files: [GitStatusFileChange]
+    public let changedFilesCount: Int
+    public let isClean: Bool
+    public let capturedAt: Date
+    public let errorMessage: String?
+
+    public var additions: Int { files.reduce(0) { $0 + $1.additions } }
+    public var deletions: Int { files.reduce(0) { $0 + $1.deletions } }
+
+    /// Keeps the compact timeline chart deterministic: meaningful line
+    /// changes rank first, with paths breaking ties across repeated snapshots.
+    public func mostModifiedFiles(limit: Int = 5) -> [GitStatusFileChange] {
+        guard limit > 0 else { return [] }
+        return Array(
+            files
+                .filter { $0.totalChanges > 0 }
+                .sorted {
+                    if $0.totalChanges == $1.totalChanges {
+                        return $0.path < $1.path
+                    }
+                    return $0.totalChanges > $1.totalChanges
+                }
+                .prefix(limit)
+        )
+    }
+}
+
+nonisolated public struct GitStatusFileChange: Identifiable, Sendable, Hashable, Codable {
+    public let path: String
+    public let additions: Int
+    public let deletions: Int
+
+    public var id: String { path }
+    public var totalChanges: Int { additions + deletions }
 }
 
 // MARK: - Git Commit Block
