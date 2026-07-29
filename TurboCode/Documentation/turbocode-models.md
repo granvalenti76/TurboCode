@@ -10,6 +10,18 @@ The delegated model can be selected under **TurboCode > Settings > Agents > Orch
 
 TurboCode validates reasoning and tool-calling capabilities before building a model profile. This prevents unsupported options from reaching a model and provides a foundation for giving advanced tools only to models that can use them reliably.
 
+## Configure Codex
+
+The Codex profile uses the official Codex CLI and its local App Server. Install
+Codex, select the profile in TurboCode, and complete the ChatGPT sign-in flow if
+requested. TurboCode discovers the models available to the signed-in account
+and lets the user choose a supported reasoning level.
+
+Authentication remains owned by the Codex runtime: TurboCode neither reads nor
+copies Codex credentials. Codex keeps its own agent loop while TurboCode exposes
+the same bounded workspace, Swift Package Manager, review, and approval tools
+used by the other capable profiles.
+
 ## Configure Apple PCC
 
 Apple on-device and Apple Private Cloud Compute are two different backends. The on-device model is loaded directly by the Foundation Models framework and does not require a server. TurboCode reaches PCC through the local Chat Completions server supplied by Apple's `fm` command-line tool.
@@ -34,6 +46,6 @@ The map is cached incrementally under `~/.turbocode/cache/repository-maps/`. Tur
 
 ## Xcode validation tools
 
-Capable standalone and delegated models receive `xcode_project`. Its flat actions inspect the active `.xcworkspace` or `.xcodeproj`, build a scheme, or run its tests. Apple on-device does not receive this execution tool; in Orchestrator mode it delegates the operation to the selected Llama, PCC, or DeepSeek model.
+Capable standalone and delegated models receive `xcode_project`. Its flat actions inspect the active `.xcworkspace` or `.xcodeproj`, build a scheme, or run its tests. Apple on-device does not receive this execution tool; in Orchestrator mode it delegates the operation to the selected capable backend.
 
-Llama and Apple PCC receive compact compiler and test diagnostics suited to a conservative 32k context. DeepSeek can receive a larger diagnostic set, while still avoiding raw `xcodebuild` logs. Builds reuse the DerivedData normally managed by Xcode, including work already compiled from the application; temporary `.xcresult` bundles are removed after parsing.
+Llama and Apple PCC receive compact compiler and test diagnostics suited to a conservative 32k context. DeepSeek and Codex can receive richer project context while still avoiding unbounded raw `xcodebuild` logs. Builds reuse the DerivedData normally managed by Xcode, including work already compiled from the application; temporary `.xcresult` bundles are removed after parsing.
