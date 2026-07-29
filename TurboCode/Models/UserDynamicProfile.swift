@@ -83,7 +83,13 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     }
 
     var resolvedToolIDs: Set<ToolCapabilityID> {
-        var result = Set(toolIDs.compactMap(ToolCapabilityID.init(rawValue:)))
+        // Profiles saved before the unified SwiftPM wrapper keep their capability
+        // after upgrade instead of silently losing package initialization.
+        var result = Set(toolIDs.compactMap { rawID in
+            rawID == "swift_package_init"
+                ? ToolCapabilityID.swiftPackageManager
+                : ToolCapabilityID(rawValue: rawID)
+        })
         if !skillIDs.isEmpty {
             result.insert(.loadSkill)
         }

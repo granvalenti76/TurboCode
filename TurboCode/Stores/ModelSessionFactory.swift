@@ -341,8 +341,11 @@ enum ModelSessionFactory {
                     workspaceRoot: configuration.workspaceRoot,
                     executionPolicy: configuration.agentTuning.execution
                 )
-            case .swiftPackageInit:
-                return SwiftPackageInitTool(workspaceRoot: configuration.workspaceRoot)
+            case .swiftPackageManager:
+                return SwiftPackageManagerTool(
+                    workspaceRoot: configuration.workspaceRoot,
+                    executionPolicy: configuration.agentTuning.execution
+                )
             case .xcodeProject:
                 return XcodeProjectTool(
                     workspaceRoot: configuration.workspaceRoot,

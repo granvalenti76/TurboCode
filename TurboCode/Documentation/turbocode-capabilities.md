@@ -18,6 +18,14 @@ The agent can create and update source files through revision-bound editing oper
 
 TurboCode can inspect Xcode containers and schemes, run focused builds and tests with the selected Xcode toolchain, and reduce verbose result bundles to actionable file, line, error, warning, and test-failure summaries. It shares Xcode's normal incremental build state instead of creating a separate cold-build cache. TurboCode can also inspect Git changes, work with branches and commits, and summarize what changed. The goal is to complete a workflow without forcing the user to move between a chatbot, Terminal, Finder, and a browser-based IDE.
 
+For standalone Swift packages, the structured `swift_package_manager` tool
+initializes official templates, adds URL, registry, and workspace-relative path
+dependencies, updates target dependencies, resolves and updates versions, and
+runs build, test, run, cleanup, and inspection actions. Manifest changes use the
+same Review/Undo path as source edits. Package execution can write only
+`Package.resolved`, `.build`, and `.swiftpm`, while command time, output, and
+network access follow Agent Settings.
+
 ## Good use cases
 
 - Understand the architecture of an unfamiliar Swift project.

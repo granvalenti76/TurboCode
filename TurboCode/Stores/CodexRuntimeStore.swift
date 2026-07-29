@@ -304,7 +304,9 @@ final class CodexRuntimeStore {
                 tokenUsageByThread[request.turboThreadID] = usage
             case .completed(let status, let errorMessage):
                 if status == "failed" {
-                    throw CodexAppServerError.invalidResponse(
+                    // A failed turn is a valid App Server response and may be
+                    // transient (such as model capacity), not malformed JSON.
+                    throw CodexAppServerError.turnFailed(
                         errorMessage ?? "Codex turn failed."
                     )
                 }
@@ -396,7 +398,7 @@ final class CodexRuntimeStore {
                 tokenUsageByThread[turboThreadID] = usage
             case .completed(let status, let errorMessage):
                 if status == "failed" {
-                    throw CodexAppServerError.invalidResponse(
+                    throw CodexAppServerError.turnFailed(
                         errorMessage ?? "Codex context summary failed."
                     )
                 }

@@ -266,6 +266,19 @@ struct CodexProfileTests {
         )
     }
 
+    @Test("Codex runtime failures are not labeled malformed responses")
+    func codexRuntimeFailuresHaveAnOperationalErrorMessage() {
+        let error = CodexAppServerError.turnFailed(
+            "Selected model is at capacity. Please try a different model."
+        )
+
+        #expect(
+            error.localizedDescription
+                == "Codex turn failed: Selected model is at capacity. "
+                    + "Please try a different model."
+        )
+    }
+
     @Test("Codex command approvals retain the server request identifier")
     func commandApprovalRetainsRequestIdentifier() {
         let request = CodexAppServerClient.approvalRequest(
@@ -342,6 +355,7 @@ struct CodexProfileTests {
         #expect(names.contains("list_workspace"))
         #expect(names.contains("apply_edits"))
         #expect(names.contains("git"))
+        #expect(names.contains("swift_package_manager"))
         #expect(
             specs.allSatisfy {
                 $0.inputSchema["type"]?.stringValue == "object"
@@ -383,5 +397,42 @@ struct CodexProfileTests {
         #expect(listing.toolCallID == "call-9")
         #expect(listing.entries.map(\.name) == ["Example.txt"])
         #expect(listing.workspaceName == "Fixture")
+    }
+
+    @Test("Codex executes the shared Swift Package Manager wrapper")
+    func codexExecutesSwiftPackageManager() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        try """
+        // swift-tools-version: 6.0
+        import PackageDescription
+        let package = Package(name: "CodexFixture")
+        """.write(
+            to: root.appendingPathComponent("Package.swift"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let call = CodexDynamicToolCall(
+            rpcID: .integer(10),
+            callID: "call-10",
+            tool: "swift_package_manager",
+            arguments: .object(["action": .string("dumpPackage")])
+        )
+
+        let execution = try await CodexTurboCodeToolBridge.execute(
+            call,
+            workspaceRoot: root.path,
+            workspaceName: "CodexFixture",
+            agentTuning: .default
+        )
+
+        #expect(execution.result.succeeded)
+        #expect(execution.result.text.contains("Exit code: 0"))
+        #expect(execution.result.text.contains("CodexFixture"))
     }
 }

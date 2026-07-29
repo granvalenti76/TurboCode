@@ -146,10 +146,10 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             lines.append("- Use xcode_project for Xcode discovery, builds, and tests.")
         }
         if tools.contains(.bash) {
-            lines.append("- Use bash for bounded non-Git inspection and commands; it cannot write workspace files.")
+            lines.append("- Use bash only for bounded non-Git commands that have no dedicated structured tool; it cannot write workspace files.")
         }
-        if tools.contains(.swiftPackageInit) {
-            lines.append("- Use swift_package_init, not bash, to create a Swift Package Manager scaffold.")
+        if tools.contains(.swiftPackageManager) {
+            lines.append("- Use swift_package_manager, not bash, for supported Swift Package Manager initialization, dependency, build, test, run, resolution, cleanup, and inspection actions.")
         }
         if tools.contains(.writeOnDevice) {
             lines.append("- Use write_ondevice once with complete content for a requested root-level text file.")

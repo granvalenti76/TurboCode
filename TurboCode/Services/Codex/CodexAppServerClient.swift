@@ -97,6 +97,7 @@ nonisolated enum CodexAppServerError: LocalizedError, Sendable {
     case executableNotFound
     case serverStopped
     case invalidResponse(String)
+    case turnFailed(String)
     case rpc(code: Int, message: String)
     case requestTimedOut(method: String, serverDetail: String?)
     case chatGPTLoginRequired
@@ -112,6 +113,8 @@ nonisolated enum CodexAppServerError: LocalizedError, Sendable {
             "Codex App Server stopped unexpectedly."
         case .invalidResponse(let detail):
             "Codex App Server returned an invalid response: \(detail)"
+        case .turnFailed(let detail):
+            "Codex turn failed: \(detail)"
         case .rpc(_, let message):
             message
         case .requestTimedOut(let method, let serverDetail):
@@ -136,7 +139,9 @@ nonisolated enum CodexAppServerError: LocalizedError, Sendable {
         switch self {
         case .chatGPTLoginRequired:
             return true
-        case .rpc(_, let message), .invalidResponse(let message):
+        case .rpc(_, let message),
+                .invalidResponse(let message),
+                .turnFailed(let message):
             let normalized = message.lowercased()
             return normalized.contains("not logged in")
                 || normalized.contains("sign in")
@@ -749,8 +754,12 @@ actor CodexAppServerClient {
             let message = params["error"]?["message"]?.stringValue
                 ?? params["message"]?.stringValue
                 ?? "Codex turn failed."
+            // This notification reports a valid protocol message describing a
+            // runtime/model failure (for example temporary model capacity).
+            // Keep malformed JSON-RPC reserved for `invalidResponse` so the UI
+            // does not misdiagnose an operational failure as a bridge defect.
             finishActiveTurn(
-                throwing: CodexAppServerError.invalidResponse(message)
+                throwing: CodexAppServerError.turnFailed(message)
             )
         default:
             break

@@ -352,6 +352,9 @@ public final class TurboCodeConfig {
       remote Git workflows. Git writes are independent from the read-only bash
       sandbox. Destructive operations are presented for approval before execution.
     - `bash` runs bounded commands with read-only workspace access in a macOS process sandbox.
+    - `swift_package_manager` provides structured SwiftPM initialization, dependency
+      editing, resolution, builds, tests, runs, cleanup, and package inspection.
+      Prefer it over `bash` whenever it supports the requested SwiftPM action.
     - `xcode_project` inspects, builds, and tests Xcode containers with compact
       structured diagnostics for capable models.
     - Every model uses the flat single-change `edit_file` schema. TurboCode handles
