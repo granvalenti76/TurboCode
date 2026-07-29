@@ -52,6 +52,19 @@ struct WorkspaceListingPresentationTests {
         #expect(store.inspectedWorkspaceListing == listing)
     }
 
+    @Test("Activity receipt reuses the existing native inspector snapshot")
+    func activityReceiptSelectsInspectorSnapshot() {
+        let store = ChatStore(conversationRepository: ListingConversationRepository())
+        let listing = makeListing()
+        store.blocks = [listingBlock(listing)]
+
+        #expect(store.canOpenActivityReceipt(listing.toolCallID))
+        #expect(store.openActivityReceipt(listing.toolCallID))
+        #expect(store.rightPanelMode == .workspaceListing)
+        #expect(store.inspectedWorkspaceListing == listing)
+        #expect(!store.openActivityReceipt("missing-receipt"))
+    }
+
     @Test("Click-away dismissal closes only a workspace listing inspector")
     func workspaceListingDismissalIsScoped() {
         let store = ChatStore(conversationRepository: ListingConversationRepository())

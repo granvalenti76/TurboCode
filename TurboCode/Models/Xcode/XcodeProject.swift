@@ -85,6 +85,16 @@ nonisolated struct XcodeTestReport: Sendable {
     let environment: String
 }
 
+/// Typed build/test outcome consumed by deterministic agent verification.
+///
+/// The compact summary is presentation detail; callers decide success from the
+/// process fields rather than parsing rendered tool text.
+nonisolated struct XcodeVerificationExecution: Sendable {
+    let succeeded: Bool
+    let cancelled: Bool
+    let summary: String
+}
+
 nonisolated enum XcodeProjectError: LocalizedError, Sendable {
     case unsupportedAction(String)
     case noContainer

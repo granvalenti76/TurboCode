@@ -72,6 +72,57 @@ struct DynamicProfileTests {
         #expect(profile.skillIDs.isEmpty)
     }
 
+    @Test("Only DeepSeek with typed delegation is a coordinator profile")
+    func coordinatorProfileRequiresSupportedRoute() {
+        let coordinator = UserDynamicProfile(
+            name: "Custom Orchestrator",
+            baseModelID: .deepseek,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        let renamedOnDevice = UserDynamicProfile(
+            name: "Custom Orchestrator",
+            baseModelID: .onDevice,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        let directDeepSeek = UserDynamicProfile(
+            name: "DeepSeek Direct",
+            baseModelID: .deepseek
+        )
+
+        // Product semantics come from model plus capability, never the
+        // user-editable display name.
+        #expect(coordinator.isCoordinatorProfile)
+        #expect(!renamedOnDevice.isCoordinatorProfile)
+        #expect(!renamedOnDevice.resolvedToolIDs.contains(.delegateTask))
+        #expect(!directDeepSeek.isCoordinatorProfile)
+    }
+
+    @Test("Execution role manages coordinator invariants atomically")
+    func executionRoleOwnsManagedDelegationCapability() {
+        var profile = UserDynamicProfile(
+            name: "Focused Direct Profile",
+            baseModelID: .onDevice,
+            greedyMode: true,
+            toolIDs: [ToolCapabilityID.readFile.rawValue]
+        )
+
+        profile.setExecutionRole(.coordinatorWorker)
+
+        #expect(profile.executionRole == .coordinatorWorker)
+        #expect(profile.baseModelID == .deepseek)
+        #expect(!profile.greedyMode)
+        #expect(profile.resolvedToolIDs.contains(.delegateTask))
+        #expect(profile.resolvedToolIDs.contains(.readFile))
+
+        profile.setExecutionRole(.direct)
+
+        // Returning to direct execution removes only the system-managed route;
+        // the user's advanced capability composition remains intact.
+        #expect(profile.executionRole == .direct)
+        #expect(!profile.resolvedToolIDs.contains(.delegateTask))
+        #expect(profile.resolvedToolIDs.contains(.readFile))
+    }
+
     @Test("Selected skills implicitly expose only the skill loader")
     func skillsEnableLoader() {
         let profile = UserDynamicProfile(
@@ -154,8 +205,8 @@ struct DynamicProfileTests {
             ),
             history: [],
             events: ModelSessionEvents(
-                toolStarted: { _, _ in },
-                toolFinished: { _, _, _ in },
+                toolStarted: { _, _, _ in },
+                toolFinished: { _, _, _, _ in },
                 delegationChanged: { _ in }
             )
         )

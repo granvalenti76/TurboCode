@@ -43,6 +43,14 @@ struct WriteOnDeviceTool: Tool {
         guard isValidRootFileName(fileName) else {
             return "Error: fileName must be one file name in the workspace root, without '/', '\\', or '..'."
         }
+        do {
+            try OnDeviceCapabilityPolicy.validateGeneratedFile(
+                name: fileName,
+                content: arguments.content
+            )
+        } catch {
+            return "Error: \(error.localizedDescription)"
+        }
 
         let fileURL: URL
         do {

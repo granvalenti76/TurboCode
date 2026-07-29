@@ -2,46 +2,34 @@ import Foundation
 
 // MARK: - App Route
 
+/// Destinations with a complete, user-visible workflow in the current release.
+///
+/// Keep this list deliberately smaller than the long-term product map: adding a
+/// case makes it possible for shell navigation to expose that destination.
 public enum AppRoute: String, Sendable, Hashable, CaseIterable {
     case chat
-    case write
-    case settings
     case tools
-    case claw
     case skills
-    case workflow
 }
 
 // MARK: - Right Panel Mode
 
-public enum RightPanelMode: String, Sendable, Hashable {
-    case todo
+/// Inspector presentations backed by persisted data or a live service.
+public enum RightPanelMode: String, Sendable, Hashable, CaseIterable {
+    /// Transient operational state for the current delegated attempt.
+    case activity
     case changes
     case commit
     /// A persisted directory snapshot selected from the conversation timeline.
     case workspaceListing
-    case browser
-    case file
-    case plan
-    case sddAI = "sdd-ai"
-    case subagents
 }
 
 // MARK: - Settings Section
 
+/// Settings tabs whose controls are connected to persisted product behavior.
 public enum SettingsSection: String, Sendable, Hashable, CaseIterable {
     case general
     case providers
-    case write
-    case mediaGeneration = "media-generation"
-    case speechToText = "speech-to-text"
     case agents
-    case archives
-    case worktree
-    case memory
     case shortcuts
-    case claw
-    case updates
-    case terminal
-    case debug
 }

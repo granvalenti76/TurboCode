@@ -62,10 +62,16 @@ final class SkillsViewModel {
         name: String,
         summary: String,
         baseModelID: ProfileBaseModelID,
+        executionRole: ProfileExecutionRole = .direct,
         copyDefaults: Bool,
         settings: SettingsStore
     ) -> Bool {
-        let option = modelOption(for: baseModelID, settings: settings)
+        // Coordinator intent owns its supported model choice. Applying it
+        // before defaults prevents copying capabilities from an unrelated model.
+        let effectiveBaseModelID: ProfileBaseModelID = executionRole == .coordinatorWorker
+            ? .deepseek
+            : baseModelID
+        let option = modelOption(for: effectiveBaseModelID, settings: settings)
         let toolIDs = copyDefaults
             ? option.defaultToolIDs.subtracting([.loadSkill]).map(\.rawValue).sorted()
             : []
@@ -74,10 +80,11 @@ final class SkillsViewModel {
             var profile = UserDynamicProfile(
                 name: name,
                 summary: summary,
-                baseModelID: baseModelID,
+                baseModelID: effectiveBaseModelID,
                 toolIDs: toolIDs,
                 skillIDs: skillIDs
             )
+            profile.setExecutionRole(executionRole)
             profile = try profile.validated()
             try ensureUniqueName(profile.name, excluding: nil)
             profiles.append(profile)
@@ -149,6 +156,12 @@ final class SkillsViewModel {
                 value.toolIDs.removeAll { $0 == id.rawValue }
             }
         }
+    }
+
+    /// Changes product-level execution intent as one edit. The technical
+    /// `delegate_task` capability remains managed and out of the drag surface.
+    func setExecutionRole(_ role: ProfileExecutionRole) {
+        updateDraft { $0.setExecutionRole(role) }
     }
 
     func containsSkill(_ name: String) -> Bool {

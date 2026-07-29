@@ -261,15 +261,6 @@ struct DiffHeaderView: View {
                 .font(.system(size: 11, weight: .medium))
 
             Spacer()
-
-            Button {
-                // TODO: copy diff
-            } label: {
-                Image(systemName: "doc.on.doc")
-                    .font(.system(size: 10))
-            }
-            .buttonStyle(.borderless)
-            .help("Copy diff")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

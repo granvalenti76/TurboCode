@@ -21,12 +21,27 @@ struct GrepTool: Tool {
     typealias Output = String
 
     let workspaceRoot: String
+    let taskScope: AgentTaskPathScope?
+
+    init(workspaceRoot: String, taskScope: AgentTaskPathScope? = nil) {
+        self.workspaceRoot = workspaceRoot
+        self.taskScope = taskScope
+    }
+
+    func restricted(to scope: AgentTaskPathScope) -> Self {
+        Self(workspaceRoot: workspaceRoot, taskScope: scope)
+    }
 
     var name: String { "grep" }
     var description: String { "Search for a text pattern in a file or directory. Returns matching lines with line numbers." }
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: SearchArguments) async throws -> String {
+        do {
+            try taskScope?.validate(arguments.path)
+        } catch {
+            return "Error: \(error.localizedDescription)"
+        }
         let searchURL: URL
         do {
             searchURL = try WorkspacePathResolver.resolve(arguments.path, within: workspaceRoot)

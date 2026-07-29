@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - TurboCode App entry point
 
@@ -36,7 +37,11 @@ struct TurboCodeApp: App {
         .commands {
             // Application menu
             CommandGroup(replacing: .appInfo) {
-                Button("About TurboCode") {}
+                Button("About TurboCode") {
+                    // Use the system panel so version, keyboard behavior, and
+                    // accessibility remain owned by macOS.
+                    NSApplication.shared.orderFrontStandardAboutPanel()
+                }
             }
 
             // File menu
@@ -46,9 +51,6 @@ struct TurboCodeApp: App {
                 }
                 .keyboardShortcut("n", modifiers: [.command])
 
-                Button("New Conversation") {}
-                .keyboardShortcut("n", modifiers: [.command, .shift])
-
                 Divider()
 
                 Button("Choose Workspace…") {
@@ -57,32 +59,12 @@ struct TurboCodeApp: App {
                     .keyboardShortcut("o", modifiers: [.command, .shift])
             }
 
-            // Edit menu — standard
-            CommandGroup(replacing: .undoRedo) {
-                Button("Undo") {}
-                    .keyboardShortcut("z", modifiers: .command)
-                Button("Redo") {}
-                    .keyboardShortcut("z", modifiers: [.command, .shift])
-            }
-
             // View menu
             CommandMenu("View") {
                 Button("Toggle Sidebar") {
                     chatStore.toggleLeftSidebar()
                 }
                 .keyboardShortcut("s", modifiers: [.command])
-
-                Button("Toggle Terminal") {
-                    chatStore.toggleTerminal()
-                }
-                .keyboardShortcut("j", modifiers: .command)
-
-                Divider()
-
-                Button("Focus Mode") {
-                    // TODO
-                }
-                .keyboardShortcut("d", modifiers: [.command, .shift])
 
                 Divider()
 
@@ -98,14 +80,11 @@ struct TurboCodeApp: App {
                 Button("Chat") { chatStore.setRoute(.chat) }
                     .keyboardShortcut("1", modifiers: [.command])
 
-                Button("Write") { chatStore.setRoute(.write) }
+                Button("Custom Profiles") { chatStore.setRoute(.skills) }
                     .keyboardShortcut("2", modifiers: [.command])
 
-                Button("Custom Profiles") { chatStore.setRoute(.skills) }
+                Button("Tools") { chatStore.setRoute(.tools) }
                     .keyboardShortcut("3", modifiers: [.command])
-
-                Button("Workflow") { chatStore.setRoute(.workflow) }
-                    .keyboardShortcut("4", modifiers: [.command])
             }
 
 #if DEBUG

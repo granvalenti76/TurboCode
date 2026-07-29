@@ -146,16 +146,16 @@ Swift Package dependencies are resolved automatically by Xcode. Direct dependenc
 
 ## Tests and evaluations
 
-The `TurboCodeEvaluations` scheme contains deterministic Swift Testing coverage alongside experimental model-backed evaluations:
+The release gate runs deterministic Swift Testing coverage without starting
+Foundation Models:
 
 ```shell
-xcodebuild test \
-  -project TurboCode.xcodeproj \
-  -scheme TurboCodeEvaluations \
-  -destination 'platform=macOS'
+Scripts/test-deterministic.sh
 ```
 
-The deterministic tests cover workspace boundaries, file operations, Git behavior, session search, configuration, diagnostics, and dynamic profiles. Golden evaluations exercise model behavior and may vary with macOS 27 betas and changes to Foundation Models; they are experimental signals, not release gates.
+Golden evaluations use a separate, timeout-bounded command. They may vary with
+macOS 27 betas and Foundation Models changes, so they remain experimental
+signals rather than release gates. See [TESTING.md](TESTING.md) for both paths.
 
 ## Privacy and safety
 

@@ -53,6 +53,33 @@ struct WriteOnDeviceToolTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: workspace.path).isEmpty)
     }
 
+    @Test("Rejects Swift output beyond the measured microtask envelope")
+    func rejectsOversizedSwiftSnippet() async throws {
+        let workspace = try makeWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let tool = WriteOnDeviceTool(
+            workspaceRoot: workspace.path,
+            reportsChanges: false
+        )
+        let content = (1...31)
+            .map { "let value\($0) = \($0)" }
+            .joined(separator: "\n")
+
+        let result = try await tool.call(
+            arguments: WriteOnDeviceArguments(
+                fileName: "Snippet.swift",
+                content: content
+            )
+        )
+
+        #expect(result.contains("limited to 30 lines"))
+        #expect(
+            !FileManager.default.fileExists(
+                atPath: workspace.appendingPathComponent("Snippet.swift").path
+            )
+        )
+    }
+
     @Test("Stops repetitive empty Markdown without rejecting useful code")
     func detectsDegenerateStreamingOutput() {
         let repeatedFences = String(repeating: "```swift\n```\n\n", count: 14)

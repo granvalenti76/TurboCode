@@ -45,6 +45,7 @@ public final class ChatStore {
     let workspaceStore: WorkspaceStore
     let conversationStore: ConversationStore
     let toolInteractionStore: ToolInteractionStore
+    let agentActivityStore: AgentActivityStore
     let timelineStore: ChatTimelineStore
     let workbenchStore: WorkbenchStore
     let codexRuntimeStore: CodexRuntimeStore
@@ -88,6 +89,7 @@ public final class ChatStore {
         diffPatchService: any DiffPatchApplying = DiffPatchService()
     ) {
         let toolInteractions = ToolInteractionStore()
+        let agentActivity = AgentActivityStore()
         let timeline = ChatTimelineStore()
         let codexRuntime = CodexRuntimeStore()
         let nativeRunner = NativeResponseRunner()
@@ -96,6 +98,7 @@ public final class ChatStore {
         self.conversationStore = ConversationStore(repository: conversationRepository)
         self.workspaceStore = workspace
         self.toolInteractionStore = toolInteractions
+        self.agentActivityStore = agentActivity
         self.timelineStore = timeline
         self.workbenchStore = workbench
         self.codexRuntimeStore = codexRuntime
@@ -103,6 +106,7 @@ public final class ChatStore {
         self.responseCoordinator = ChatResponseCoordinator(
             timeline: timeline,
             toolInteractions: toolInteractions,
+            agentActivity: agentActivity,
             codexRuntime: codexRuntime,
             nativeRunner: nativeRunner
         )
@@ -117,8 +121,8 @@ public final class ChatStore {
 
     /// Switch inference backend and rebuild the session, preserving user and
     /// assistant turns while removing model-specific transport entries.
-    /// In orchestrator mode the backend is always Apple on-device;
-    /// calling this method has no effect.
+    /// In the experimental compatibility mode the backend is always Apple
+    /// on-device, so direct backend switching has no effect.
     public func switchBackend(to backend: ModelBackend) {
         guard !busy, orchestratorMode == .standalone else { return }
         if backend == .codex {
@@ -219,6 +223,40 @@ public final class ChatStore {
             return
         }
         guard modelRuntimeStore.selectDynamicProfile(id) else { return }
+        rebuildSession(discardingCapabilityContext: true)
+    }
+
+    /// Selects the supported coordinator route as one atomic runtime change.
+    ///
+    /// The historical global "orchestrator" mode is the on-device compatibility
+    /// path; production coordinator profiles run in standalone transport mode.
+    /// Centralizing this transition keeps that implementation detail out of UI.
+    func selectCoordinatorProfile(_ id: UUID) {
+        guard !busy,
+              let profile = dynamicProfiles.first(where: {
+                  $0.id == id && $0.isCoordinatorProfile
+              }) else {
+            return
+        }
+        modelRuntimeStore.setOrchestratorMode(.standalone)
+        guard modelRuntimeStore.selectDynamicProfile(profile.id) else { return }
+        rebuildSession(discardingCapabilityContext: true)
+    }
+
+    /// Leaves delegation while preserving the selected profile's base model.
+    /// This makes "Direct Model" a real execution choice rather than a label
+    /// that silently leaves `delegate_task` enabled.
+    func selectDirectExecution() {
+        guard !busy else { return }
+        guard orchestratorMode != .standalone
+                || activeDynamicProfile != nil else {
+            // Codex and ordinary base-model selections are already direct;
+            // choosing the checked menu item must not switch their backend.
+            return
+        }
+        let baseModel = activeDynamicProfile?.baseModelID ?? activeBaseModelID
+        modelRuntimeStore.setOrchestratorMode(.standalone)
+        guard modelRuntimeStore.selectBuiltInProfile(baseModel) else { return }
         rebuildSession(discardingCapabilityContext: true)
     }
 
@@ -329,18 +367,20 @@ public final class ChatStore {
             discardingCapabilityContext: discardingCapabilityContext,
             restoringHistory: restoringHistory,
             events: ModelSessionEvents(
-                toolStarted: { [weak self] call, backend in
+                toolStarted: { [weak self] call, backend, owner in
                     await self?.responseCoordinator.toolStarted(
                         call,
-                        backend: backend
+                        backend: backend,
+                        owner: owner
                     )
                 },
-                toolFinished: { [weak self] call, output, backend in
+                toolFinished: { [weak self] call, output, backend, owner in
                     guard let self else { return }
                     await self.responseCoordinator.toolFinished(
                         call,
                         output: output,
                         backend: backend,
+                        owner: owner,
                         workspaceName: self.workspaceRoot.isEmpty
                             ? nil
                             : self.workspaceLabel
@@ -350,12 +390,27 @@ public final class ChatStore {
                     await MainActor.run {
                         self?.responseCoordinator.delegationChanged(isDelegating)
                     }
+                },
+                agentActivityChanged: { [weak self] event in
+                    guard let self else { return }
+                    await self.handleAgentActivityEvent(event)
                 }
             )
         )
     }
 
     // MARK: - Actions
+
+    /// Applies a provider-neutral activity event on the UI actor.
+    ///
+    /// A new delegation opens the native inspector once. Later phase changes
+    /// never reopen a panel the user deliberately closed.
+    func handleAgentActivityEvent(_ event: AgentActivityRuntimeEvent) {
+        responseCoordinator.agentActivityChanged(event)
+        if case .started = event {
+            workbenchStore.rightPanelMode = .activity
+        }
+    }
 
     public func selectThread(_ id: String) async {
         if id != activeThreadId { dismissWorkspaceListingInspector() }
@@ -382,6 +437,7 @@ public final class ChatStore {
             mode: mode
         )
         timelineStore.reset()
+        resetAgentActivityForConversation()
         rebuildSession(keepingHistory: false)
     }
 
@@ -398,6 +454,7 @@ public final class ChatStore {
         guard created, !hasOrphanedBlocks else { return }
 
         timelineStore.reset()
+        resetAgentActivityForConversation()
         rebuildSession(keepingHistory: false)
     }
 
@@ -475,6 +532,7 @@ public final class ChatStore {
         dismissWorkspaceListingInspector()
         activeThreadId = id
         timelineStore.restore(snapshot.blocks)
+        resetAgentActivityForConversation()
         if let wp = snapshot.conversation.workspace, workspaceRoot != wp {
             workspaceRoot = wp
         }
@@ -566,6 +624,7 @@ public final class ChatStore {
 
         activeThreadId = nil
         timelineStore.reset()
+        resetAgentActivityForConversation()
 
         if let nextThreadID {
             await restoreSession(id: nextThreadID)
@@ -588,6 +647,7 @@ public final class ChatStore {
 
         if conversationRemoval.removedActiveThread {
             timelineStore.reset()
+            resetAgentActivityForConversation()
         }
 
         if removedActiveWorkspace {
@@ -645,6 +705,13 @@ public final class ChatStore {
     }
 
     public func sendMessage(_ text: String) async {
+        let assignment = composerTaskAssignment(for: text)
+        guard assignment.allowsOnDevice else {
+            // Programmatic sends receive the same fail-closed boundary as the
+            // composer. No conversation or model session is started.
+            error = assignment.guidance
+            return
+        }
         refreshSkillsIfNeeded()
         if activeBackend != .codex,
            modelRuntimeStore.workspaceInstructionsChanged(in: workspaceRoot) {
@@ -656,6 +723,23 @@ public final class ChatStore {
             for: text
         ) else { return }
         await sendMessage(text, promptText: promptText, visibleInTimeline: true)
+    }
+
+    /// Returns whether the selected profile may receive this composer task.
+    /// Only explicit multi-file and architectural signals are rejected; other
+    /// profiles and ambiguous prompts preserve the user's chosen route.
+    func composerTaskAssignment(
+        for text: String
+    ) -> OnDeviceTaskAssignment {
+        let routing = ModelRoutingPolicy.resolve(
+            backend: activeBackend,
+            mode: orchestratorMode,
+            activeProfile: activeDynamicProfile
+        )
+        guard routing.role == .microtaskOnDevice else {
+            return .eligibleMicrotask
+        }
+        return OnDeviceCapabilityPolicy.assignment(for: text)
     }
 
     func isIncompleteSkillCommand(_ text: String) -> Bool {
@@ -792,8 +876,29 @@ public final class ChatStore {
 
     public func interrupt() {
         responseTask?.cancel()
-        if activeBackend == .codex {
-            Task { await codexRuntimeStore.interrupt() }
+        let approvals = toolInteractionStore.takeAllApprovals()
+        toolInteractionStore.clearActivities()
+        Task {
+            if activeBackend == .codex {
+                await codexRuntimeStore.interrupt()
+            }
+            // Stop is terminal for the current response. Reject every approval
+            // removed from its transient UI so neither a native continuation
+            // nor a Codex server request remains orphaned.
+            for request in approvals {
+                do {
+                    if try await codexRuntimeStore.resolveApproval(
+                        id: request.id,
+                        approved: false
+                    ) {
+                        continue
+                    }
+                } catch {
+                    // The local registry remains the fallback when the request
+                    // did not originate from Codex or its turn already ended.
+                }
+                _ = await ToolApprovalRegistry.shared.reject(id: request.id)
+            }
         }
     }
 
@@ -963,6 +1068,34 @@ public final class ChatStore {
         reviewCoordinator.reviewWorkspaceListing(id)
     }
 
+    /// Returns whether a structured result references a receipt that still
+    /// exists in the current conversation timeline.
+    func canOpenActivityReceipt(_ receiptID: String) -> Bool {
+        activityReceiptBlock(for: receiptID) != nil
+    }
+
+    /// Opens an existing receipt through its native review surface. Activity
+    /// holds identifiers only and never copies receipt content into its state.
+    @discardableResult
+    func openActivityReceipt(_ receiptID: String) -> Bool {
+        guard let block = activityReceiptBlock(for: receiptID) else {
+            return false
+        }
+        if block.diffPatch != nil {
+            reviewDiffPatch(block.id)
+            return true
+        }
+        if block.gitCommit != nil {
+            reviewGitCommit(block.id)
+            return true
+        }
+        if block.workspaceListing != nil {
+            reviewWorkspaceListing(block.id)
+            return true
+        }
+        return false
+    }
+
     /// Dismisses only the transient workspace snapshot. Other inspectors are
     /// persistent workbench modes and must not close when the canvas is clicked.
     func dismissWorkspaceListingInspector() {
@@ -989,16 +1122,43 @@ public final class ChatStore {
         workbenchStore.setRoute(route)
     }
 
+    /// Starts the guided coordinator creation flow instead of dropping the user
+    /// into an unconfigured generic profile editor.
+    func requestCoordinatorProfileCreation() {
+        workbenchStore.requestProfileCreation(role: .coordinatorWorker)
+    }
+
+    func consumeProfileCreationRequest() -> ProfileExecutionRole? {
+        workbenchStore.consumeProfileCreationRequest()
+    }
+
     public func toggleRightPanel(_ mode: RightPanelMode) {
         workbenchStore.toggleRightPanel(mode)
     }
 
-    public func toggleTerminal() {
-        workbenchStore.toggleTerminal()
+    /// Closes the system inspector without discarding its conversation-local
+    /// data, allowing the user to reopen the completed Activity summary.
+    func closeRightPanel() {
+        workbenchStore.rightPanelMode = nil
     }
 
     public func toggleLeftSidebar() {
         workbenchStore.toggleLeftSidebar()
+    }
+
+    private func resetAgentActivityForConversation() {
+        agentActivityStore.reset()
+        if workbenchStore.rightPanelMode == .activity {
+            workbenchStore.rightPanelMode = nil
+        }
+    }
+
+    private func activityReceiptBlock(for receiptID: String) -> ChatBlock? {
+        blocks.first { block in
+            block.id == receiptID
+                || block.workspaceListing?.toolCallID == receiptID
+                || block.gitCommit?.hash == receiptID
+        }
     }
 
 }

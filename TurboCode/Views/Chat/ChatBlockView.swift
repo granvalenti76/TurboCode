@@ -8,8 +8,6 @@ import MarkdownUI
 struct ChatBlockView: View {
     let block: ChatBlock
     @Environment(\.chatFontSize) private var chatFontSize
-    @State private var isEditing = false
-    @State private var editText: String = ""
     @State private var didCopyAssistantResponse = false
     @State private var isHoveringAssistantResponse = false
 
@@ -61,32 +59,24 @@ struct ChatBlockView: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 4) {
-                if isEditing {
-                    editView
-                } else {
-                    Text(block.text)
-                        .font(AppTypography.chatBody(size: max(13, chatFontSize - 1)))
-                        .foregroundStyle(AppTypography.chatForeground)
-                        .textSelection(.enabled)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        // A softened rectangle distinguishes prompts from pills
-                        // while retaining the approachable native card treatment.
-                        .background(
-                            .regularMaterial,
-                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        )
-                        .contextMenu {
-                            Button("Edit") {
-                                editText = block.text
-                                isEditing = true
-                            }
-                            Button("Copy") {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(block.text, forType: .string)
-                            }
+                Text(block.text)
+                    .font(AppTypography.chatBody(size: max(13, chatFontSize - 1)))
+                    .foregroundStyle(AppTypography.chatForeground)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    // A softened rectangle distinguishes prompts from pills
+                    // while retaining the approachable native card treatment.
+                    .background(
+                        .regularMaterial,
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
+                    .contextMenu {
+                        Button("Copy") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(block.text, forType: .string)
                         }
-                }
+                    }
 
                 // Model badge
                 if let model = block.model {
@@ -95,38 +85,6 @@ struct ChatBlockView: View {
             }
             .frame(maxWidth: 600, alignment: .trailing)
         }
-    }
-
-    // MARK: - Edit View
-
-    private var editView: some View {
-        VStack(spacing: 8) {
-            TextEditor(text: $editText)
-                .font(.system(size: 14))
-                .frame(minHeight: 60)
-                .padding(8)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-
-            HStack {
-                Button("Cancel") { isEditing = false }
-                    .buttonStyle(.borderless)
-
-                Spacer()
-
-                Button("Resend") {
-                    // TODO: rewind & resend
-                    isEditing = false
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            }
-        }
-        .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(Color.accentColor.opacity(0.35), lineWidth: 1)
-        )
     }
 
     // MARK: - Assistant Bubble (left-aligned)
@@ -311,9 +269,11 @@ struct ChatBlockView: View {
             Text("Review changes")
                 .font(.system(size: 12))
             Spacer()
-            Button("Review") {}
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+            // Legacy review blocks have no immutable receipt to open. Modern
+            // edit and Git widgets expose their own functional Review actions.
+            Text("Legacy event")
+                .font(AppTypography.metadata)
+                .foregroundStyle(.secondary)
         }
         .padding(12)
         .background(.blue.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))

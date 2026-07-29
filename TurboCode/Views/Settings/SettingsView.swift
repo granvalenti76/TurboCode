@@ -16,10 +16,6 @@ struct SettingsTabView: View {
                 .tabItem { Label("Providers", systemImage: "network") }
                 .tag(SettingsSection.providers)
 
-            WriteSettingsView()
-                .tabItem { Label("Write", systemImage: "pencil") }
-                .tag(SettingsSection.write)
-
             AgentSettingsView()
                 .tabItem { Label("Agents", systemImage: "wand.and.stars") }
                 .tag(SettingsSection.agents)
@@ -28,9 +24,6 @@ struct SettingsTabView: View {
                 .tabItem { Label("Shortcuts", systemImage: "keyboard") }
                 .tag(SettingsSection.shortcuts)
 
-            DebugSettingsView()
-                .tabItem { Label("Debug", systemImage: "ladybug") }
-                .tag(SettingsSection.debug)
         }
         .tabViewStyle(.sidebarAdaptable)
         .frame(minWidth: 600, minHeight: 400)
@@ -62,12 +55,6 @@ struct GeneralSettingsView: View {
                 }
             }
 
-            Section("Language") {
-                Picker("Language", selection: s.language) {
-                    Text("English").tag("en")
-                }
-            }
-
             Section("Chat") {
                 HStack {
                     Text("Content width")
@@ -75,29 +62,6 @@ struct GeneralSettingsView: View {
                     Text("\(Int(settings.maxChatWidth))")
                         .font(.system(size: 11, design: .monospaced))
                         .frame(width: 40)
-                }
-
-                Toggle("Cursor spotlight", isOn: .constant(false))
-            }
-
-            Section("Workspace") {
-                ForEach(settings.workspacePaths, id: \.self) { path in
-                    HStack {
-                        Image(systemName: "folder")
-                            .foregroundStyle(.secondary)
-                        Text(path)
-                            .font(.system(size: 11, design: .monospaced))
-                        Spacer()
-                        Button("-") {
-                            settings.workspacePaths.removeAll { $0 == path }
-                        }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(.red)
-                    }
-                }
-
-                Button("Add workspace path...") {
-                    // TODO: NSOpenPanel
                 }
             }
         }
@@ -130,61 +94,6 @@ struct ProviderSettingsView: View {
                 }
             }
 
-            Section("OpenAI") {
-                SecureField("API Key", text: s.openaiAPIKey)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Base URL", text: s.openaiBaseURL)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11, design: .monospaced))
-            }
-
-            Section("Anthropic") {
-                SecureField("API Key", text: s.anthropicAPIKey)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Base URL", text: s.anthropicBaseURL)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 11, design: .monospaced))
-            }
-        }
-        .formStyle(.grouped)
-        .padding()
-    }
-}
-
-// MARK: - Write Settings
-
-struct WriteSettingsView: View {
-    @Environment(SettingsStore.self) private var settings
-
-    var body: some View {
-        let s = Bindable(settings)
-        return Form {
-            Section("Workspace") {
-                HStack {
-                    TextField("Workspace root", text: s.writeWorkspaceRoot)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 11, design: .monospaced))
-                    Button("Browse...") {}
-                        .controlSize(.small)
-                }
-            }
-
-            Section("Editing") {
-                Toggle("Inline AI completion", isOn: s.inlineCompletionEnabled)
-
-                Picker("Font", selection: .constant("SF Mono")) {
-                    Text("SF Mono").tag("SF Mono")
-                    Text("Menlo").tag("Menlo")
-                }
-            }
-
-            Section("Export") {
-                Picker("Default format", selection: .constant("docx")) {
-                    Text("DOCX").tag("docx")
-                    Text("PDF").tag("pdf")
-                    Text("Markdown").tag("md")
-                }
-            }
         }
         .formStyle(.grouped)
         .padding()
@@ -208,7 +117,7 @@ struct AgentSettingsView: View {
                 Toggle("Verify source changes", isOn: s.agentTuning.agent.verifiesChanges)
             }
 
-            Section("Orchestrator") {
+            Section("Delegated Worker") {
                 Picker(
                     "Powerful model",
                     selection: s.agentTuning.orchestrator.delegateModelID
@@ -224,7 +133,7 @@ struct AgentSettingsView: View {
                     }
                 }
 
-                Text("Used for delegated coding work while Apple on-device runs the orchestrator.")
+                Text("Used by structured coordinator profiles and experimental on-device delegation.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -299,21 +208,18 @@ struct ShortcutSettingsView: View {
         Form {
             Section("Navigation") {
                 ShortcutRow(label: "New Chat", shortcut: "⌘N")
-                ShortcutRow(label: "New Conversation", shortcut: "⇧⌘N")
                 ShortcutRow(label: "Toggle Sidebar", shortcut: "⌘S")
-                ShortcutRow(label: "Toggle Terminal", shortcut: "⌘J")
             }
 
             Section("Actions") {
-                ShortcutRow(label: "Send Message", shortcut: "⌘⏎")
-                ShortcutRow(label: "Interrupt", shortcut: "⎋")
-                ShortcutRow(label: "Toggle Plan Mode", shortcut: "⌘P")
                 ShortcutRow(label: "Choose Workspace", shortcut: "⇧⌘O")
             }
 
             Section("Views") {
                 ShortcutRow(label: "Settings", shortcut: "⌘,")
-                ShortcutRow(label: "Focus Mode", shortcut: "⇧⌘D")
+                ShortcutRow(label: "Chat", shortcut: "⌘1")
+                ShortcutRow(label: "Custom Profiles", shortcut: "⌘2")
+                ShortcutRow(label: "Tools", shortcut: "⌘3")
             }
         }
         .formStyle(.grouped)
@@ -336,33 +242,5 @@ private struct ShortcutRow: View {
                 .padding(.vertical, 2)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
         }
-    }
-}
-
-// MARK: - Debug Settings
-
-struct DebugSettingsView: View {
-    var body: some View {
-        Form {
-            Section("Runtime") {
-                Toggle("LLM debug log", isOn: .constant(false))
-
-                HStack {
-                    Text("Log path")
-                    Spacer()
-                    Text("~/Library/Application Support/TurboCode/logs")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Diagnostics") {
-                Button("View runtime logs...") {}
-                Button("Restart runtime...") {}
-                    .foregroundStyle(.red)
-            }
-        }
-        .formStyle(.grouped)
-        .padding()
     }
 }

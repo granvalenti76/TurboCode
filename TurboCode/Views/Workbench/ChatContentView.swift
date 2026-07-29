@@ -57,12 +57,6 @@ struct ChatContentView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            if chatStore.terminalOpen {
-                Divider()
-                TerminalPlaceholderView()
-                    .frame(height: chatStore.terminalHeight)
-            }
-
             InputFieldView()
                 .frame(maxWidth: CGFloat(settings.maxChatWidth))
                 .frame(maxWidth: .infinity)

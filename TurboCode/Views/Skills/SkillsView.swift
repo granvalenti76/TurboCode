@@ -4,9 +4,11 @@ import SwiftUI
 struct SkillsView: View {
     @Environment(ChatStore.self) private var chatStore
     @Environment(SettingsStore.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var viewModel = SkillsViewModel()
     @State private var newProfilePresented = false
     @State private var suggestedBaseModel: ProfileBaseModelID = .onDevice
+    @State private var suggestedExecutionRole: ProfileExecutionRole = .direct
     @State private var suggestedCopyDefaults = false
     @State private var deleteConfirmationPresented = false
     @State private var capabilityKind: CapabilityKind = .tools
@@ -33,6 +35,17 @@ struct SkillsView: View {
         .task {
             settings.reloadRemoteModels()
             viewModel.reload()
+            if let requestedRole = chatStore.consumeProfileCreationRequest() {
+                // Defer the nested sheet until the profile library itself has
+                // joined the presented hierarchy.
+                suggestedExecutionRole = requestedRole
+                suggestedBaseModel = requestedRole == .coordinatorWorker
+                    ? .deepseek
+                    : .onDevice
+                suggestedCopyDefaults = false
+                await Task.yield()
+                newProfilePresented = true
+            }
         }
         .onDisappear {
             pendingToolHover?.cancel()
@@ -40,13 +53,15 @@ struct SkillsView: View {
         .sheet(isPresented: $newProfilePresented) {
             NewDynamicProfileSheet(
                 initialBaseModel: suggestedBaseModel,
+                initialExecutionRole: suggestedExecutionRole,
                 initialCopyDefaults: suggestedCopyDefaults,
                 modelOptions: viewModel.modelOptions(settings: settings)
-            ) { name, summary, model, copyDefaults in
+            ) { name, summary, model, role, copyDefaults in
                 viewModel.create(
                     name: name,
                     summary: summary,
                     baseModelID: model,
+                    executionRole: role,
                     copyDefaults: copyDefaults,
                     settings: settings
                 )
@@ -79,6 +94,7 @@ struct SkillsView: View {
                 Spacer()
                 Button {
                     suggestedBaseModel = .onDevice
+                    suggestedExecutionRole = .direct
                     suggestedCopyDefaults = false
                     newProfilePresented = true
                 } label: {
@@ -306,6 +322,34 @@ struct SkillsView: View {
                     )
                 }
 
+                sectionCard(
+                    title: "Execution",
+                    subtitle: "Choose the profile’s responsibility before configuring advanced capabilities."
+                ) {
+                    Picker("Execution role", selection: executionRoleBinding) {
+                        ForEach(ProfileExecutionRole.allCases) { role in
+                            Text(role.displayName).tag(role)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 420)
+
+                    Text(draft.executionRole.summary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.opacity)
+
+                    if draft.executionRole == .coordinatorWorker {
+                        infoBanner(
+                            icon: "arrow.triangle.branch",
+                            title: "Structured delegation is managed automatically",
+                            text: "DeepSeek coordinates. Delegate Task sends a bounded goal, acceptance criteria, and verification request to the worker selected in Settings → Agents."
+                        )
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                }
+
                 sectionCard(title: "Profile", subtitle: "A recognizable name and the model this profile controls.") {
                     Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 12) {
                         GridRow {
@@ -329,12 +373,15 @@ struct SkillsView: View {
                                 }
                                 .labelsHidden()
                                 .frame(maxWidth: 280, alignment: .leading)
+                                .disabled(draft.executionRole == .coordinatorWorker)
                                 Toggle("Greedy mode", isOn: greedyModeBinding)
                                     .toggleStyle(.checkbox)
                                     .disabled(draft.baseModelID == .deepseek)
-                                Text(draft.baseModelID == .deepseek
-                                     ? "Unavailable with DeepSeek Thinking."
-                                     : "Always pick the most likely token.")
+                                Text(draft.executionRole == .coordinatorWorker
+                                     ? "DeepSeek is required for the coordinator route."
+                                     : (draft.baseModelID == .deepseek
+                                        ? "Unavailable with DeepSeek Thinking."
+                                        : "Always pick the most likely token."))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -450,7 +497,11 @@ struct SkillsView: View {
 
     private func availableTools(option: ProfileModelOption, search: String) -> [ToolCapabilityDescriptor] {
         ModelToolCatalog.descriptors.filter {
-            $0.id != .loadSkill && $0.id != .callPowerfulModel
+            // Delegation is owned by the Execution picker; hiding it here keeps
+            // the drag composer focused on optional advanced capabilities.
+            $0.id != .delegateTask
+                && $0.id != .loadSkill
+                && $0.id != .callPowerfulModel
                 && !viewModel.containsTool($0.id)
                 && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)
                     || $0.id.rawValue.localizedCaseInsensitiveContains(search))
@@ -458,7 +509,9 @@ struct SkillsView: View {
     }
 
     private func includedTools() -> [ToolCapabilityDescriptor] {
-        ModelToolCatalog.descriptors.filter { viewModel.containsTool($0.id) }
+        ModelToolCatalog.descriptors.filter {
+            $0.id != .delegateTask && viewModel.containsTool($0.id)
+        }
     }
 
     private func availableSkills(search: String) -> [TurboCodeSkillDefinition] {
@@ -485,7 +538,9 @@ struct SkillsView: View {
 
     private var includedCount: Int {
         capabilityKind == .tools
-            ? (viewModel.draft?.toolIDs.count ?? 0)
+            ? (viewModel.draft?.toolIDs.filter {
+                $0 != ToolCapabilityID.delegateTask.rawValue
+            }.count ?? 0)
             : (viewModel.draft?.skillIDs.count ?? 0)
     }
 
@@ -724,6 +779,21 @@ struct SkillsView: View {
         )
     }
 
+    private var executionRoleBinding: Binding<ProfileExecutionRole> {
+        Binding(
+            get: { viewModel.draft?.executionRole ?? .direct },
+            set: { role in
+                if reduceMotion {
+                    viewModel.setExecutionRole(role)
+                } else {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        viewModel.setExecutionRole(role)
+                    }
+                }
+            }
+        )
+    }
+
     private var baseModelBinding: Binding<ProfileBaseModelID> {
         Binding(
             get: { viewModel.draft?.baseModelID ?? .onDevice },
@@ -912,23 +982,39 @@ private struct ToolInformationCard: View {
 
 private struct NewDynamicProfileSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let modelOptions: [ProfileModelOption]
-    let onCreate: (String, String, ProfileBaseModelID, Bool) -> Bool
+    let onCreate: (
+        String,
+        String,
+        ProfileBaseModelID,
+        ProfileExecutionRole,
+        Bool
+    ) -> Bool
     @State private var name = ""
     @State private var summary = ""
     @State private var baseModelID: ProfileBaseModelID
+    @State private var executionRole: ProfileExecutionRole
     @State private var copyDefaults = false
     @FocusState private var nameFocused: Bool
 
     init(
         initialBaseModel: ProfileBaseModelID,
+        initialExecutionRole: ProfileExecutionRole,
         initialCopyDefaults: Bool,
         modelOptions: [ProfileModelOption],
-        onCreate: @escaping (String, String, ProfileBaseModelID, Bool) -> Bool
+        onCreate: @escaping (
+            String,
+            String,
+            ProfileBaseModelID,
+            ProfileExecutionRole,
+            Bool
+        ) -> Bool
     ) {
         self.modelOptions = modelOptions
         self.onCreate = onCreate
         _baseModelID = State(initialValue: initialBaseModel)
+        _executionRole = State(initialValue: initialExecutionRole)
         _copyDefaults = State(initialValue: initialCopyDefaults)
     }
 
@@ -936,7 +1022,7 @@ private struct NewDynamicProfileSheet: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("New Profile").font(.system(size: 21, weight: .semibold))
-                Text("Choose a model and a starting point. Capabilities can be composed next.")
+                Text("Choose what the profile does. Advanced capabilities can be composed next.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -954,13 +1040,34 @@ private struct NewDynamicProfileSheet: View {
                         .textFieldStyle(.roundedBorder)
                 }
                 GridRow {
-                    Text("Model")
-                    Picker("Model", selection: $baseModelID) {
-                        ForEach(modelOptions) { option in
-                            Text(option.id.displayName).tag(option.id)
+                    Text("Execution")
+                    Picker("Execution", selection: executionRoleBinding) {
+                        ForEach(ProfileExecutionRole.allCases) { role in
+                            Text(role.displayName).tag(role)
                         }
                     }
+                    .pickerStyle(.segmented)
                     .labelsHidden()
+                }
+                GridRow {
+                    Text("Model")
+                    if executionRole == .coordinatorWorker {
+                        HStack(spacing: 8) {
+                            Label(ProfileBaseModelID.deepseek.displayName, systemImage: "sparkles")
+                            Text("Required")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .transition(.opacity)
+                    } else {
+                        Picker("Model", selection: $baseModelID) {
+                            ForEach(modelOptions) { option in
+                                Text(option.id.displayName).tag(option.id)
+                            }
+                        }
+                        .labelsHidden()
+                        .transition(.opacity)
+                    }
                 }
                 GridRow {
                     Text("Start with")
@@ -973,18 +1080,29 @@ private struct NewDynamicProfileSheet: View {
                 }
             }
 
-            Text(copyDefaults
-                 ? "Copies the model's current tools and installed skills into an explicit list."
-                 : "Starts with no tools or skills, ideal for a focused workflow.")
+            Text(executionRole == .coordinatorWorker
+                 ? "DeepSeek will coordinate and Delegate Task will be managed automatically. Choose the worker in Settings → Agents."
+                 : (copyDefaults
+                    ? "Copies the model's current tools and installed skills into an explicit list."
+                    : "Starts with no tools or skills, ideal for a focused workflow."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .contentTransition(.opacity)
 
             HStack {
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Create") {
-                    if onCreate(name, summary, baseModelID, copyDefaults) { dismiss() }
+                    if onCreate(
+                        name,
+                        summary,
+                        baseModelID,
+                        executionRole,
+                        copyDefaults
+                    ) {
+                        dismiss()
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
@@ -994,5 +1112,23 @@ private struct NewDynamicProfileSheet: View {
         .padding(24)
         .frame(width: 510)
         .onAppear { nameFocused = true }
+        .animation(
+            reduceMotion ? nil : .easeInOut(duration: 0.16),
+            value: executionRole
+        )
+    }
+
+    private var executionRoleBinding: Binding<ProfileExecutionRole> {
+        Binding(
+            get: { executionRole },
+            set: { role in
+                executionRole = role
+                if role == .coordinatorWorker {
+                    // Keep the visible form consistent with the runtime
+                    // invariant before the user confirms creation.
+                    baseModelID = .deepseek
+                }
+            }
+        )
     }
 }

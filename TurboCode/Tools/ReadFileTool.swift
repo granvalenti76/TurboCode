@@ -23,6 +23,16 @@ struct ReadFileTool: Tool {
     typealias Output = String
 
     let workspaceRoot: String
+    let taskScope: AgentTaskPathScope?
+
+    init(workspaceRoot: String, taskScope: AgentTaskPathScope? = nil) {
+        self.workspaceRoot = workspaceRoot
+        self.taskScope = taskScope
+    }
+
+    func restricted(to scope: AgentTaskPathScope) -> Self {
+        Self(workspaceRoot: workspaceRoot, taskScope: scope)
+    }
 
     var name: String { "read_file" }
     var description: String {
@@ -36,6 +46,11 @@ struct ReadFileTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: ReadFileArguments) async throws -> String {
+        do {
+            try taskScope?.validate(arguments.filePath)
+        } catch {
+            return "Error: \(error.localizedDescription)"
+        }
         let fileURL: URL
         do {
             fileURL = try WorkspacePathResolver.resolve(arguments.filePath, within: workspaceRoot)

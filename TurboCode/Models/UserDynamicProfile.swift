@@ -31,6 +31,29 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
     }
 }
 
+nonisolated enum ProfileExecutionRole: String, CaseIterable, Identifiable, Sendable, Hashable {
+    case direct
+    case coordinatorWorker
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .direct: "Direct Model"
+        case .coordinatorWorker: "Coordinator → Worker"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .direct:
+            "The selected model handles requests with its included capabilities."
+        case .coordinatorWorker:
+            "DeepSeek plans the request and delegates bounded implementation tasks to the configured worker."
+        }
+    }
+}
+
 nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable {
     let id: UUID
     var name: String
@@ -93,7 +116,43 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         if !skillIDs.isEmpty {
             result.insert(.loadSkill)
         }
+        if baseModelID != .deepseek {
+            // Delegate Task is a managed production route, not a portable
+            // capability that arbitrary custom models may enable by stale data.
+            result.remove(.delegateTask)
+        }
         return result
+    }
+
+    /// Identifies the production coordinator route exposed in the composer.
+    ///
+    /// A profile name alone never changes runtime semantics: the 0.2.0 route is
+    /// intentionally limited to DeepSeek plus the typed delegation tool.
+    var isCoordinatorProfile: Bool {
+        baseModelID == .deepseek
+            && resolvedToolIDs.contains(.delegateTask)
+    }
+
+    /// Exposes product intent without persisting a second source of truth.
+    /// Existing profiles therefore migrate automatically from their model and
+    /// typed capability configuration.
+    var executionRole: ProfileExecutionRole {
+        isCoordinatorProfile ? .coordinatorWorker : .direct
+    }
+
+    /// Applies route intent atomically so the editor cannot save a coordinator
+    /// without the model and typed delegation capability required at runtime.
+    mutating func setExecutionRole(_ role: ProfileExecutionRole) {
+        switch role {
+        case .direct:
+            toolIDs.removeAll { $0 == ToolCapabilityID.delegateTask.rawValue }
+        case .coordinatorWorker:
+            baseModelID = .deepseek
+            greedyMode = false
+            if !toolIDs.contains(ToolCapabilityID.delegateTask.rawValue) {
+                toolIDs.append(ToolCapabilityID.delegateTask.rawValue)
+            }
+        }
     }
 
     func validated() throws -> UserDynamicProfile {

@@ -1,6 +1,7 @@
 import Foundation
 
 nonisolated enum TurboCodeSystemPromptRole: Sendable {
+    case microtask
     case standalone
     case orchestrator
     case delegate
@@ -54,7 +55,9 @@ nonisolated enum TurboCodeSystemPromptBuilder {
                 """)
         }
 
-        if context.role == .orchestrator {
+        if context.role == .microtask {
+            sections.append(microtaskSection)
+        } else if context.role == .orchestrator {
             sections.append(orchestratorSection(workspaceRoot: context.workspaceRoot))
         } else if context.role == .codex {
             sections.append("""
@@ -184,4 +187,15 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         workspace at \(workspaceRoot), then synthesize its result for the user.
         """
     }
+
+    private static let microtaskSection = """
+        On-device microtask role:
+        Handle only lightweight assistance, classification, short summaries, or
+        one already-delimited Swift function/snippet of at most 30 lines. A coding
+        snippet must arrive with its signature, target file context, and acceptance
+        criteria already provided. Do not plan architecture, explore a project,
+        claim multi-file completion, or claim correctness without deterministic
+        validation. If the request exceeds this boundary, explain that the user
+        should select a coding-worker or powerful-coordinator profile.
+        """
 }

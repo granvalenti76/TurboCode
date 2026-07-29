@@ -9,11 +9,6 @@ struct WorkbenchSplitView: View {
     private let sidebarWidth: Double = 268
     private let mainMinWidth: Double = 520
 
-    /// Keep the window's layout constraint stable while the inspector appears.
-    /// A changing root minimum makes NavigationSplitView rebalance its sidebar,
-    /// which causes the project labels to shift or become clipped.
-    private var workbenchMinWidth: Double { sidebarWidth + mainMinWidth }
-
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView()
@@ -23,45 +18,29 @@ struct WorkbenchSplitView: View {
                     max: sidebarWidth
                 )
         } detail: {
-            ZStack(alignment: .trailing) {
+            // HSplitView provides the native macOS divider and resizing
+            // behavior without the constraint-looping SwiftUI inspector path.
+            // Keeping both panes in one SwiftUI hierarchy also preserves every
+            // environment value and avoids a custom NSHostingController bridge.
+            HSplitView {
                 MainStageView()
-                    .frame(minWidth: mainMinWidth)
-
-                if chatStore.rightPanelMode == .workspaceListing {
-                    // The file snapshot behaves like a transient inspector: a
-                    // click anywhere outside it dismisses the panel. This layer
-                    // appears only after Show completes, so it cannot swallow
-                    // the receipt action that opens the inspector.
-                    Color.clear
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            chatStore.dismissWorkspaceListingInspector()
-                        }
-                        .accessibilityHidden(true)
-                        .zIndex(0.5)
-                }
+                    .frame(minWidth: mainMinWidth, maxWidth: .infinity)
+                    .layoutPriority(1)
+                    .background {
+                        Color(nsColor: .windowBackgroundColor)
+                            .ignoresSafeArea(edges: .top)
+                    }
 
                 if chatStore.rightPanelVisible {
                     InspectorPanelView()
-                        // Metadata columns need slightly more room than the diff
-                        // inspector; the panel remains tertiary and overlays the
-                        // canvas instead of forcing the sidebar to rebalance.
-                        .frame(width: chatStore.rightPanelMode == .workspaceListing ? 500 : 420)
-                        .background(.background)
-                        .overlay(alignment: .leading) {
-                            Divider()
-                        }
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                        .zIndex(1)
+                        .frame(
+                            minWidth: 320,
+                            idealWidth: 420,
+                            maxWidth: 600,
+                            maxHeight: .infinity
+                        )
                 }
             }
-            .background {
-                Color(nsColor: .windowBackgroundColor)
-                    .ignoresSafeArea(edges: .top)
-            }
-            .clipped()
-            .animation(.easeInOut(duration: 0.18), value: chatStore.rightPanelVisible)
         }
         .navigationSplitViewStyle(.balanced)
         .containerBackground(.regularMaterial, for: .window)
@@ -74,7 +53,6 @@ struct WorkbenchSplitView: View {
             .frame(height: 52)
             .ignoresSafeArea(edges: .top)
         }
-        .frame(minWidth: workbenchMinWidth)
         .sheet(isPresented: customProfilesPresented) {
             CustomProfilesSheet()
         }
@@ -92,12 +70,29 @@ struct WorkbenchSplitView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 WorkspaceToolbarMenu()
 
+                if chatStore.currentAgentActivity != nil {
+                    Button {
+                        chatStore.toggleRightPanel(.activity)
+                    } label: {
+                        Image(systemName: "point.3.connected.trianglepath.dotted")
+                    }
+                    .help(
+                        chatStore.rightPanelMode == .activity
+                            ? "Hide Activity"
+                            : "Show Activity"
+                    )
+                }
+
                 Button {
                     chatStore.toggleRightPanel(.changes)
                 } label: {
                     Image(systemName: "sidebar.right")
                 }
-                .help(chatStore.rightPanelVisible ? "Hide changes" : "Show changes")
+                .help(
+                    chatStore.rightPanelMode == .changes
+                        ? "Hide changes"
+                        : "Show changes"
+                )
             }
         }
     }
@@ -108,6 +103,7 @@ struct WorkbenchSplitView: View {
             set: { chatStore.isCustomProfilesPresented = $0 }
         )
     }
+
 }
 
 private struct CustomProfilesSheet: View {

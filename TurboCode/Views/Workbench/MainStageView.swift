@@ -10,16 +10,12 @@ struct MainStageView: View {
             switch chatStore.route {
             case .chat:
                 ChatContentView()
-            case .write:
-                WritePlaceholderView()
-            case .settings:
-                SettingsTabView()
             case .tools:
                 ToolsView()
             case .skills:
+                // Custom Profiles is presented modally over the current route;
+                // this fallback keeps restored legacy state on a working canvas.
                 ChatContentView()
-            default:
-                PlaceholderIcon(icon: "square.grid.2x2", label: "Workflow")
             }
         }
     }

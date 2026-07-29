@@ -279,8 +279,8 @@ public final class TurboCodeConfig {
     existing Swift, SwiftUI, Xcode, and Swift Package workspaces. Use its compact
     overview, symbol search, and related-declaration queries before reading large
     files. Then use `read_file` only for the focused line ranges needed by the
-    task. Apple on-device does not receive this tool; in orchestrator mode the
-    configured delegate maps the project.
+    task. Apple on-device does not receive this tool; in the experimental
+    delegation mode the configured worker maps the project.
     """
 
     private static let xcodeProjectSkillSection = """

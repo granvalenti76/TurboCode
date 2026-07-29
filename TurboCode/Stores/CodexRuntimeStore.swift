@@ -28,7 +28,7 @@ final class CodexRuntimeStore {
     struct TurnEvents {
         let liveAssistantChanged: (String) -> Void
         let liveReasoningChanged: (String) -> Void
-        let activityStarted: (String, String) -> Void
+        let activityStarted: (CodexDynamicToolCall, String) -> Void
         let activityEnded: (String) -> Void
         let presentationRequested: (CodexToolPresentation) -> Void
         let approvalRequested: (ApprovalRequest) -> Void
@@ -270,7 +270,7 @@ final class CodexRuntimeStore {
                 break
             case .toolCallRequested(let call):
                 events.activityStarted(
-                    call.callID,
+                    call,
                     CodexTurboCodeToolBridge.activitySummary(for: call.tool)
                 )
                 let result: CodexDynamicToolResult
