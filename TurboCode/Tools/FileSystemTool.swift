@@ -76,7 +76,8 @@ struct FileSystemTool: Tool {
         as one long line.
         Prefer read_file for numbered source ranges and the active structured editor
         for existing source and text files in Git workspaces. Use git for every Git
-        operation and bash for builds, tests, and other read-only inspection.
+        operation, swift_package_manager for Swift package work, and bash only for
+        builds, tests, or read-only inspection without a dedicated structured tool.
         All paths must be within the workspace root.
         """
     }

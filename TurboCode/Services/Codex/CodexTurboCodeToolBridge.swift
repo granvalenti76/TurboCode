@@ -91,6 +91,7 @@ nonisolated enum CodexTurboCodeToolBridge {
                     .readFile,
                     .searchWorkspace,
                     .editFile,
+                    .swiftPackageManager,
                     .xcodeProject,
                     .git
                 ],
@@ -114,6 +115,10 @@ nonisolated enum CodexTurboCodeToolBridge {
         let readTool = ReadFileTool(workspaceRoot: workspaceRoot)
         let grepTool = GrepTool(workspaceRoot: workspaceRoot)
         let editTool = ApplyEditsTool(workspaceRoot: workspaceRoot)
+        let swiftPackageTool = SwiftPackageManagerTool(
+            workspaceRoot: workspaceRoot,
+            executionPolicy: agentTuning.execution
+        )
         let xcodeTool = XcodeProjectTool(
             workspaceRoot: workspaceRoot,
             executionPolicy: agentTuning.execution,
@@ -181,6 +186,11 @@ nonisolated enum CodexTurboCodeToolBridge {
                 inputSchema: applyEditsSchema
             ),
             .init(
+                name: swiftPackageTool.name,
+                description: swiftPackageTool.description,
+                inputSchema: swiftPackageManagerSchema
+            ),
+            .init(
                 name: xcodeTool.name,
                 description: xcodeTool.description,
                 inputSchema: objectSchema(
@@ -210,6 +220,7 @@ nonisolated enum CodexTurboCodeToolBridge {
         case "read_file": "Reading file"
         case "grep": "Searching workspace"
         case "apply_edits": "Editing files"
+        case "swift_package_manager": "Working with Swift package"
         case "xcode_project": "Working with Xcode project"
         case "git": "Working with Git"
         default: "Running \(tool)"
@@ -269,6 +280,27 @@ nonisolated enum CodexTurboCodeToolBridge {
         case "apply_edits":
             let text = try await ApplyEditsTool(workspaceRoot: workspaceRoot)
                 .call(arguments: try applyEditsArguments(call))
+            return .init(result: .success(text), presentation: nil)
+        case "swift_package_manager":
+            let text = try await SwiftPackageManagerTool(
+                workspaceRoot: workspaceRoot,
+                executionPolicy: agentTuning.execution
+            ).call(arguments: SwiftPackageManagerArguments(
+                action: try requiredString("action", in: call),
+                packageName: optionalString("packageName", in: call),
+                packageType: optionalString("packageType", in: call),
+                dependency: optionalString("dependency", in: call),
+                dependencyType: optionalString("dependencyType", in: call),
+                requirement: optionalString("requirement", in: call),
+                requirementValue: optionalString("requirementValue", in: call),
+                dependencyName: optionalString("dependencyName", in: call),
+                target: optionalString("target", in: call),
+                package: optionalString("package", in: call),
+                configuration: optionalString("configuration", in: call),
+                product: optionalString("product", in: call),
+                filter: optionalString("filter", in: call),
+                timeoutSeconds: optionalInteger("timeoutSeconds", in: call)
+            ))
             return .init(result: .success(text), presentation: nil)
         case "xcode_project":
             let text = try await XcodeProjectTool(
@@ -458,6 +490,32 @@ nonisolated enum CodexTurboCodeToolBridge {
             ])
         ],
         required: ["files"]
+    )
+
+    /// Keep Codex's JSON schema aligned with the flat Foundation Models
+    /// arguments so every provider sees the same SwiftPM capability surface.
+    private static let swiftPackageManagerSchema = objectSchema(
+        properties: [
+            "action": enumSchema([
+                "initialize", "addDependency", "addTargetDependency", "resolve",
+                "update", "build", "test", "run", "clean", "reset", "describe",
+                "showDependencies", "dumpPackage"
+            ]),
+            "packageName": nullableStringSchema(),
+            "packageType": nullableStringSchema(),
+            "dependency": nullableStringSchema(),
+            "dependencyType": nullableStringSchema(),
+            "requirement": nullableStringSchema(),
+            "requirementValue": nullableStringSchema(),
+            "dependencyName": nullableStringSchema(),
+            "target": nullableStringSchema(),
+            "package": nullableStringSchema(),
+            "configuration": nullableStringSchema(),
+            "product": nullableStringSchema(),
+            "filter": nullableStringSchema(),
+            "timeoutSeconds": nullableIntegerSchema()
+        ],
+        required: ["action"]
     )
 
     private static let gitSchema = objectSchema(

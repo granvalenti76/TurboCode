@@ -168,6 +168,7 @@ struct DynamicProfileTests {
         let names = instructions.toolDefinitions.map { $0.name }
         #expect(names.contains("file_system"))
         #expect(names.contains("grep"))
+        #expect(names.contains("swift_package_manager"))
         #expect(!names.contains("toggle_skill"))
         // DeepSeek depends on a fixed direct tool surface; skill activation
         // would change the leading request prefix between otherwise equal turns.
@@ -201,12 +202,12 @@ struct DynamicProfileTests {
         #expect(tools.map(\.name) == ["remove_file"])
     }
 
-    @Test("A Swift package profile exposes exactly the initializer tool")
+    @Test("A Swift package profile exposes exactly the unified manager tool")
     func swiftPackageProfileCreatesOneInstance() {
         let profile = UserDynamicProfile(
-            name: "Swift package initializer",
+            name: "Swift package manager",
             baseModelID: .llama,
-            toolIDs: [ToolCapabilityID.swiftPackageInit.rawValue]
+            toolIDs: [ToolCapabilityID.swiftPackageManager.rawValue]
         )
         let plan = ModelToolCatalog.plan(
             profile: .standalone,
@@ -225,7 +226,37 @@ struct DynamicProfileTests {
             configuration: makeConfiguration(profile: profile)
         )
 
-        #expect(tools.map(\.name) == ["swift_package_init"])
+        #expect(tools.map(\.name) == ["swift_package_manager"])
+    }
+
+    @Test("Legacy Swift package initializer profiles migrate to the unified manager")
+    func legacySwiftPackageCapabilityMigrates() {
+        let profile = UserDynamicProfile(
+            name: "Legacy SwiftPM",
+            baseModelID: .pcc,
+            toolIDs: ["swift_package_init"]
+        )
+
+        #expect(profile.resolvedToolIDs == [.swiftPackageManager])
+    }
+
+    @Test("Every native and remote model tier receives Swift Package Manager")
+    func swiftPackageManagerIsAvailableAcrossModelTiers() {
+        let context = ToolAccessContext(
+            hasWorkspace: true,
+            hasSkills: false,
+            hasDelegateModel: false,
+            repositoryMapDetail: .compact
+        )
+
+        for tier in [ModelToolTier.onDevice, .standard, .enhanced] {
+            let plan = ModelToolCatalog.plan(
+                profile: .standalone,
+                tier: tier,
+                context: context
+            )
+            #expect(plan.contains(.swiftPackageManager))
+        }
     }
 
     @Test("File operations stay a direct tool in an exclusive profile")

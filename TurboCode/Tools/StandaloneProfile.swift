@@ -60,8 +60,11 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                     if toolPlan.contains(.bash) {
                         BashTool(workspaceRoot: workspaceRoot, executionPolicy: executionPolicy)
                     }
-                    if toolPlan.contains(.swiftPackageInit) {
-                        SwiftPackageInitTool(workspaceRoot: workspaceRoot)
+                    if toolPlan.contains(.swiftPackageManager) {
+                        SwiftPackageManagerTool(
+                            workspaceRoot: workspaceRoot,
+                            executionPolicy: executionPolicy
+                        )
                     }
                     if usesCacheStableToolDefinitions {
                         if toolPlan.contains(.fileSystem) {

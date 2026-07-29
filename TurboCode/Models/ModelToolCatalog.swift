@@ -22,7 +22,7 @@ nonisolated enum ToolCapabilityID: String, CaseIterable, Codable, Sendable, Hash
     case fileSystem = "file_system"
     case git
     case bash
-    case swiftPackageInit = "swift_package_init"
+    case swiftPackageManager = "swift_package_manager"
     case xcodeProject = "xcode_project"
     case editFile = "edit_file"
     case writeOnDevice = "write_ondevice"
@@ -160,10 +160,10 @@ nonisolated enum ModelToolCatalog {
             hasNativePresentation: false
         ),
         .init(
-            id: .swiftPackageInit,
-            name: "Initialize Swift Package",
-            summary: "Create an official SwiftPM scaffold without overwriting workspace files.",
-            category: .code,
+            id: .swiftPackageManager,
+            name: "Swift Package Manager",
+            summary: "Create, configure, resolve, build, test, and inspect Swift packages.",
+            category: .execution,
             systemImage: "shippingbox",
             hasNativePresentation: false
         ),
@@ -249,7 +249,7 @@ nonisolated enum ModelToolCatalog {
         switch id {
         case .turboCodeGuide: .always
         case .listWorkspace, .readFile, .searchWorkspace, .fileSystem, .git,
-             .bash, .swiftPackageInit, .editFile, .writeOnDevice, .removeFile: .workspace
+             .bash, .swiftPackageManager, .editFile, .writeOnDevice, .removeFile: .workspace
         case .swiftWorkspaceMap: .repositoryMap
         case .xcodeProject: .capableWorkspace
         case .loadSkill: .skills
@@ -271,7 +271,7 @@ nonisolated enum ModelToolCatalog {
                 (.fileSystem, .workspace),
                 (.git, .workspace),
                 (.bash, .workspace),
-                (.swiftPackageInit, .workspace),
+                (.swiftPackageManager, .workspace),
                 (.xcodeProject, .capableWorkspace),
                 (.editFile, .workspace),
                 (.removeFile, .workspace),
@@ -295,7 +295,7 @@ nonisolated enum ModelToolCatalog {
                 (.fileSystem, .workspace),
                 (.git, .workspace),
                 (.bash, .workspace),
-                (.swiftPackageInit, .workspace),
+                (.swiftPackageManager, .workspace),
                 (.xcodeProject, .capableWorkspace),
                 (.editFile, .workspace),
                 (.removeFile, .workspace),

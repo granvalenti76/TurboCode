@@ -30,11 +30,11 @@ struct BashTool: Tool {
     var name: String { "bash" }
     var description: String {
         """
-        Run a zsh command from the workspace root. Use this for Swift Package
-        commands, non-Xcode builds and tests, and precise inspection not covered
-        by structured tools. Use xcode_project for Xcode builds and tests when it
-        is available. Use git for every Git
-        operation. Prefer read_file for source ranges and
+        Run a zsh command from the workspace root. Use swift_package_manager for
+        supported Swift package operations, xcode_project for Xcode builds and
+        tests, and this tool only for non-Xcode commands or precise inspection not
+        covered by structured tools. Use git for every Git operation. Prefer
+        read_file for source ranges and
         the available structured editing tool for text changes. The macOS process
         sandbox keeps workspace sources read-only while allowing SwiftPM artifacts in
         .build and .swiftpm, plus compiler files in the per-user temporary directory.
