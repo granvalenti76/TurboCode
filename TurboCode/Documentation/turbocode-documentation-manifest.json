@@ -1,12 +1,12 @@
 {
-  "version": "1.3.0",
+  "version": "1.4.0",
   "documents": [
     {
       "id": "capabilities",
       "title": "What TurboCode Can Do",
-      "summary": "A practical overview of TurboCode's Swift development capabilities and best use cases.",
+      "summary": "A practical overview of TurboCode's Swift, Xcode, Swift Package Manager, and Git capabilities.",
       "file": "turbocode-capabilities.md",
-      "keywords": ["what can you do", "cosa sai fare", "capabilities", "features", "use cases", "Swift", "SwiftUI", "Xcode"]
+      "keywords": ["what can you do", "cosa sai fare", "capabilities", "features", "use cases", "Swift", "SwiftUI", "Xcode", "Swift Package Manager", "Git"]
     },
     {
       "id": "workflow",
@@ -18,9 +18,9 @@
     {
       "id": "models",
       "title": "Models and Orchestrator Mode",
-      "summary": "How to configure Apple PCC and when to use on-device, standalone, or delegated models.",
+      "summary": "How to configure Apple PCC and Codex, and when to use on-device, standalone, or delegated models.",
       "file": "turbocode-models.md",
-      "keywords": ["model", "Apple", "on-device", "orchestrator", "Llama", "PCC", "Private Cloud Compute", "DeepSeek", "delegate", "configure", "configuro", "setup", "fm serve", "terminal", "1976", "endpoint"]
+      "keywords": ["model", "Apple", "on-device", "orchestrator", "Llama", "PCC", "Private Cloud Compute", "Codex", "ChatGPT", "DeepSeek", "delegate", "configure", "configuro", "setup", "fm serve", "terminal", "1976", "endpoint"]
     },
     {
       "id": "xcode-tools",

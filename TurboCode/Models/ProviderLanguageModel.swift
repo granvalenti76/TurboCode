@@ -582,7 +582,9 @@ nonisolated final class DeepSeekRequestAdapter: URLProtocol, URLSessionDataDeleg
         if FileManager.default.fileExists(atPath: url.path),
            let handle = try? FileHandle(forWritingTo: url) {
             defer { try? handle.close() }
-            try? handle.seekToEnd()
+            // Cache telemetry is best-effort diagnostics and must never
+            // interrupt a model response when the log cannot be appended.
+            _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: data)
         } else {
             try? data.write(to: url, options: .atomic)

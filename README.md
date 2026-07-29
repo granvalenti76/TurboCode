@@ -6,10 +6,10 @@
 
 **A native macOS coding agent for Swift projects.**
 
-TurboCode is an open-source application for macOS 27 that lets you explore how different language models read, edit, build, test, and manage Git-backed Swift projects, all from a native workspace—with no bash, no browser, and no workarounds.
+TurboCode is an open-source application for macOS 27 that lets you explore how different language models read, edit, build, test, and manage Git-backed Swift projects without leaving a native workspace.
 
 > [!IMPORTANT]
-> TurboCode is a working prototype under active development. Current target: macOS 27, Xcode 27, Swift 6.
+> TurboCode 0.1.0 is an initial public preview under active development. Current target: macOS 27, Xcode 27, Swift 6.
 
 ![TurboCode conversation with a Swift composer and a local workspace selected](.github/assets/turbocode-conversation.png)
 
@@ -21,7 +21,7 @@ TurboCode uses **less than 70 MB** of memory when idle. For context: Codex uses 
 
 ### A precise scope, not an Xcode clone
 
-TurboCode does not try to replace Xcode. Its purpose is clearly defined: to be a **macOS coding agent** specialized in **SwiftUI and Swift Package Manager packages**. It uses Xcode's native tools (`xcrun`, `xcodebuild`, `xctest`) and a system of **tool calls written in Swift**—no bash, no shell, by design. The loop is clean, traceable, Swift from Swift.
+TurboCode does not try to replace Xcode. Its purpose is clearly defined: to be a **macOS coding agent** specialized in **SwiftUI and Swift Package Manager packages**. It uses structured Swift tools for Xcode, Swift Package Manager, Git, and workspace operations. A bounded bash runner is available for focused diagnostics, with workspace writes blocked by its macOS sandbox.
 
 ### A native interface that follows the HIG
 
@@ -34,7 +34,8 @@ Written in **SwiftUI** and aligned with Apple's **Human Interface Guidelines**. 
 The conversation with the agent is not purely textual. Some tools use the **`@Generable`** macro to present content in the most useful form—structured, navigable, and contextual. This includes:
 
 - An **integrated diff checker** for seeing changes line by line
-- A **visual representation of the Git loop** (commit, branch, merge, rebase) using the same structured rendering mechanism
+- A **visual Git status summary** that groups staged, modified, and untracked files
+- A traceable Git loop for commit, branch, merge, rebase, and remote operations
 - Revision-aware Undo and Review against the real working tree
 
 <table>
@@ -46,7 +47,7 @@ The conversation with the agent is not purely textual. Some tools use the **`@Ge
 
 ### 2. An intelligent repository map
 
-TurboCode maps the workspace through compact Swift declarations, relationships between files, imports, and source locations. The **map depth is adaptive**: lighter for local models, richer for powerful backends. Results are cached for fast reuse.
+TurboCode maps the workspace through compact Swift declarations, relationships between files, imports, and source locations. The **map depth is adaptive**: lighter for local models, richer for powerful backends. Results are cached for fast reuse. Repository-specific instructions in `AGENTS.md` are loaded into the session without exposing files outside the active workspace.
 
 ![TurboCode Workspace Files panel showing the contents of a Swift package](.github/assets/turbocode-workspace-files.png)
 
@@ -58,17 +59,18 @@ Every Git operation—branch, staging, commit, merge, rebase, remote, pull, push
 
 ### 4. Build, test, diagnostics
 
-TurboCode inspects the Xcode project, runs builds and unit tests, and reports compiler diagnostics directly in the conversation.
+TurboCode inspects the Xcode project, runs builds and unit tests, and reports compiler diagnostics directly in the conversation. For standalone packages, one structured Swift Package Manager tool handles initialization, dependencies, resolution, build, test, run, cleanup, and package inspection.
 
 ## Model profiles
 
-TurboCode comes with preconfigured profiles for four classes of backends.
+TurboCode comes with preconfigured profiles for several model runtimes.
 
 | Backend | Setup |
 | --- | --- |
 | **Apple Foundation Models (on-device)** | Runs locally through Apple's framework; no server or API key required. |
 | **Apple PCC** | Uses the local Foundation Models bridge while `fm serve --port 1976` is running. |
 | **Llama / OpenAI-compatible** | Connects to a local server such as `llama-server`; example endpoint: `http://127.0.0.1:8080/v1`. |
+| **Codex** | Uses the official Codex CLI App Server and its ChatGPT sign-in flow; TurboCode does not read Codex credentials. |
 | **DeepSeek** | Uses the configured remote API; credentials are entered in Settings and stored in macOS Keychain. |
 
 The profiles use the beta FoundationModels libraries—**`DynamicProfile`**, **`Summary`**, **dynamic tool calls**, **automatic removal of obsolete tool calls**, and **model switching without losing the session** or creating a new one.
@@ -107,6 +109,7 @@ The **Tools** view resolves model profiles, the selected workspace, installed Sk
 - Backend availability
 - Context requirements
 - Capability matrix
+- On-device latency, token, tool-call, and outcome statistics
 
 ![TurboCode Tools view comparing model profiles and their runtime capabilities](.github/assets/turbocode-tools.png)
 
@@ -175,7 +178,11 @@ Working now:
 - Built-in and custom model profiles
 - Reviewable, revision-bound edits
 - Repository maps and structured Git tools
-- Xcode project inspection, builds, and tests
+- Xcode and Swift Package Manager inspection, builds, and tests
+- Codex App Server integration and model handoff
+- Workspace `AGENTS.md` instructions
+- Git status visualization and on-device model statistics
+- Session Summary App Shortcut
 - Versioned configuration and Keychain-backed credentials
 
 Still to improve:
