@@ -55,12 +55,15 @@ struct SkillsView: View {
                 initialBaseModel: suggestedBaseModel,
                 initialExecutionRole: suggestedExecutionRole,
                 initialCopyDefaults: suggestedCopyDefaults,
-                modelOptions: viewModel.modelOptions(settings: settings)
-            ) { name, summary, model, role, copyDefaults in
+                modelOptions: viewModel.modelOptions(settings: settings),
+                coordinatorOptions: viewModel.coordinatorOptions(settings: settings),
+                workerOptions: viewModel.workerOptions(settings: settings)
+            ) { name, summary, model, worker, role, copyDefaults in
                 viewModel.create(
                     name: name,
                     summary: summary,
                     baseModelID: model,
+                    workerModelID: worker,
                     executionRole: role,
                     copyDefaults: copyDefaults,
                     settings: settings
@@ -111,7 +114,7 @@ struct SkillsView: View {
 
             List(selection: selectionBinding) {
                 Section("Default Profiles") {
-                    ForEach(ProfileBaseModelID.allCases) { modelID in
+                    ForEach(ProfileBaseModelID.builtInCases) { modelID in
                         profileRow(
                             title: modelID.displayName,
                             subtitle: "Built in",
@@ -283,6 +286,16 @@ struct SkillsView: View {
 
     private func customDetail(_ draft: UserDynamicProfile) -> some View {
         let option = viewModel.modelOption(for: draft.baseModelID, settings: settings)
+        let workerOption = viewModel.workerOptions(settings: settings).first {
+            $0.id.rawValue == draft.resolvedWorkerModelID(
+                fallback: ProfileBaseModelID.llama.rawValue
+            )
+        }
+        let routeIsAvailable = option.isAvailable
+            && (
+                draft.executionRole == .direct
+                    || workerOption?.isAvailable == true
+            )
         return ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 HStack(alignment: .top, spacing: 14) {
@@ -311,7 +324,7 @@ struct SkillsView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(!option.isAvailable || chatStore.busy)
+                    .disabled(!routeIsAvailable || chatStore.busy)
                 }
 
                 if !option.isAvailable {
@@ -319,6 +332,13 @@ struct SkillsView: View {
                         icon: "exclamationmark.triangle",
                         title: "Model unavailable",
                         text: "Enable and configure \(draft.baseModelID.displayName) before using this profile."
+                    )
+                } else if draft.executionRole == .coordinatorWorker,
+                          workerOption?.isAvailable != true {
+                    infoBanner(
+                        icon: "exclamationmark.triangle",
+                        title: "Worker unavailable",
+                        text: "Enable and configure the selected worker before using this coordinator profile."
                     )
                 }
 
@@ -341,10 +361,37 @@ struct SkillsView: View {
                         .contentTransition(.opacity)
 
                     if draft.executionRole == .coordinatorWorker {
+                        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 12) {
+                            GridRow {
+                                Text("Coordinator").foregroundStyle(.secondary)
+                                Picker("Coordinator", selection: baseModelBinding) {
+                                    ForEach(viewModel.coordinatorOptions(settings: settings)) { model in
+                                        Label(model.id.displayName, systemImage: model.id.systemImage)
+                                            .tag(model.id)
+                                            .disabled(!model.isAvailable)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(maxWidth: 280, alignment: .leading)
+                            }
+                            GridRow {
+                                Text("Worker").foregroundStyle(.secondary)
+                                Picker("Worker", selection: workerModelBinding) {
+                                    ForEach(viewModel.workerOptions(settings: settings)) { model in
+                                        Label(model.id.displayName, systemImage: model.id.systemImage)
+                                            .tag(model.id.rawValue)
+                                            .disabled(!model.isAvailable)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(maxWidth: 280, alignment: .leading)
+                            }
+                        }
+
                         infoBanner(
                             icon: "arrow.triangle.branch",
-                            title: "Structured delegation is managed automatically",
-                            text: "DeepSeek coordinates. Delegate Task sends a bounded goal, acceptance criteria, and verification request to the worker selected in Settings → Agents."
+                            title: "Structured delegation",
+                            text: "\(draft.baseModelID.displayName) plans the request. Delegate Task sends a bounded goal, acceptance criteria, and verification request to the selected worker."
                         )
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
@@ -362,28 +409,27 @@ struct SkillsView: View {
                             TextField("What is this profile for?", text: summaryBinding)
                                 .textFieldStyle(.roundedBorder)
                         }
-                        GridRow {
-                            Text("Model").foregroundStyle(.secondary)
-                            HStack(spacing: 14) {
-                                Picker("Model", selection: baseModelBinding) {
-                                    ForEach(viewModel.modelOptions(settings: settings)) { model in
-                                        Label(model.id.displayName, systemImage: model.id.systemImage)
-                                            .tag(model.id)
+                        if draft.executionRole == .direct {
+                            GridRow {
+                                Text("Model").foregroundStyle(.secondary)
+                                HStack(spacing: 14) {
+                                    Picker("Model", selection: baseModelBinding) {
+                                        ForEach(viewModel.modelOptions(settings: settings)) { model in
+                                            Label(model.id.displayName, systemImage: model.id.systemImage)
+                                                .tag(model.id)
+                                        }
                                     }
+                                    .labelsHidden()
+                                    .frame(maxWidth: 280, alignment: .leading)
+                                    Toggle("Greedy mode", isOn: greedyModeBinding)
+                                        .toggleStyle(.checkbox)
+                                        .disabled(draft.baseModelID == .deepseek)
+                                    Text(draft.baseModelID == .deepseek
+                                            ? "Unavailable with DeepSeek Thinking."
+                                            : "Always pick the most likely token.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
-                                .labelsHidden()
-                                .frame(maxWidth: 280, alignment: .leading)
-                                .disabled(draft.executionRole == .coordinatorWorker)
-                                Toggle("Greedy mode", isOn: greedyModeBinding)
-                                    .toggleStyle(.checkbox)
-                                    .disabled(draft.baseModelID == .deepseek)
-                                Text(draft.executionRole == .coordinatorWorker
-                                     ? "DeepSeek is required for the coordinator route."
-                                     : (draft.baseModelID == .deepseek
-                                        ? "Unavailable with DeepSeek Thinking."
-                                        : "Always pick the most likely token."))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -815,6 +861,19 @@ struct SkillsView: View {
         )
     }
 
+    private var workerModelBinding: Binding<String> {
+        Binding(
+            get: {
+                viewModel.draft?.resolvedWorkerModelID(
+                    fallback: ProfileBaseModelID.llama.rawValue
+                ) ?? ProfileBaseModelID.llama.rawValue
+            },
+            set: { value in
+                viewModel.updateDraft { $0.workerModelID = value }
+            }
+        )
+    }
+
     private var errorPresented: Binding<Bool> {
         Binding(
             get: { viewModel.errorMessage != nil },
@@ -984,16 +1043,20 @@ private struct NewDynamicProfileSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let modelOptions: [ProfileModelOption]
+    let coordinatorOptions: [ProfileModelOption]
+    let workerOptions: [ProfileModelOption]
     let onCreate: (
         String,
         String,
         ProfileBaseModelID,
+        String?,
         ProfileExecutionRole,
         Bool
     ) -> Bool
     @State private var name = ""
     @State private var summary = ""
     @State private var baseModelID: ProfileBaseModelID
+    @State private var workerModelID = ProfileBaseModelID.llama.rawValue
     @State private var executionRole: ProfileExecutionRole
     @State private var copyDefaults = false
     @FocusState private var nameFocused: Bool
@@ -1003,15 +1066,20 @@ private struct NewDynamicProfileSheet: View {
         initialExecutionRole: ProfileExecutionRole,
         initialCopyDefaults: Bool,
         modelOptions: [ProfileModelOption],
+        coordinatorOptions: [ProfileModelOption],
+        workerOptions: [ProfileModelOption],
         onCreate: @escaping (
             String,
             String,
             ProfileBaseModelID,
+            String?,
             ProfileExecutionRole,
             Bool
         ) -> Bool
     ) {
         self.modelOptions = modelOptions
+        self.coordinatorOptions = coordinatorOptions
+        self.workerOptions = workerOptions
         self.onCreate = onCreate
         _baseModelID = State(initialValue: initialBaseModel)
         _executionRole = State(initialValue: initialExecutionRole)
@@ -1050,14 +1118,16 @@ private struct NewDynamicProfileSheet: View {
                     .labelsHidden()
                 }
                 GridRow {
-                    Text("Model")
+                    Text(executionRole == .coordinatorWorker ? "Coordinator" : "Model")
                     if executionRole == .coordinatorWorker {
-                        HStack(spacing: 8) {
-                            Label(ProfileBaseModelID.deepseek.displayName, systemImage: "sparkles")
-                            Text("Required")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        Picker("Coordinator", selection: $baseModelID) {
+                            ForEach(coordinatorOptions) { option in
+                                Label(option.id.displayName, systemImage: option.id.systemImage)
+                                    .tag(option.id)
+                                    .disabled(!option.isAvailable)
+                            }
                         }
+                        .labelsHidden()
                         .transition(.opacity)
                     } else {
                         Picker("Model", selection: $baseModelID) {
@@ -1067,6 +1137,19 @@ private struct NewDynamicProfileSheet: View {
                         }
                         .labelsHidden()
                         .transition(.opacity)
+                    }
+                }
+                if executionRole == .coordinatorWorker {
+                    GridRow {
+                        Text("Worker")
+                        Picker("Worker", selection: $workerModelID) {
+                            ForEach(workerOptions) { option in
+                                Label(option.id.displayName, systemImage: option.id.systemImage)
+                                    .tag(option.id.rawValue)
+                                    .disabled(!option.isAvailable)
+                            }
+                        }
+                        .labelsHidden()
                     }
                 }
                 GridRow {
@@ -1081,7 +1164,7 @@ private struct NewDynamicProfileSheet: View {
             }
 
             Text(executionRole == .coordinatorWorker
-                 ? "DeepSeek will coordinate and Delegate Task will be managed automatically. Choose the worker in Settings → Agents."
+                 ? "\(baseModelID.displayName) will coordinate and Delegate Task will be managed automatically for the selected worker."
                  : (copyDefaults
                     ? "Copies the model's current tools and installed skills into an explicit list."
                     : "Starts with no tools or skills, ideal for a focused workflow."))
@@ -1098,6 +1181,7 @@ private struct NewDynamicProfileSheet: View {
                         name,
                         summary,
                         baseModelID,
+                        executionRole == .coordinatorWorker ? workerModelID : nil,
                         executionRole,
                         copyDefaults
                     ) {
@@ -1106,7 +1190,10 @@ private struct NewDynamicProfileSheet: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(
+                    name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || !selectionIsAvailable
+                )
             }
         }
         .padding(24)
@@ -1130,5 +1217,21 @@ private struct NewDynamicProfileSheet: View {
                 }
             }
         )
+    }
+
+    /// Prevents saving a route that cannot be run while still leaving every
+    /// configured choice visible in its contextual picker.
+    private var selectionIsAvailable: Bool {
+        if executionRole == .coordinatorWorker {
+            return coordinatorOptions.first(where: {
+                $0.id == baseModelID
+            })?.isAvailable == true
+                && workerOptions.first(where: {
+                    $0.id.rawValue == workerModelID
+                })?.isAvailable == true
+        }
+        return modelOptions.first(where: {
+            $0.id == baseModelID
+        })?.isAvailable == true
     }
 }

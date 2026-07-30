@@ -62,15 +62,14 @@ final class SkillsViewModel {
         name: String,
         summary: String,
         baseModelID: ProfileBaseModelID,
+        workerModelID: String? = nil,
         executionRole: ProfileExecutionRole = .direct,
         copyDefaults: Bool,
         settings: SettingsStore
     ) -> Bool {
-        // Coordinator intent owns its supported model choice. Applying it
-        // before defaults prevents copying capabilities from an unrelated model.
-        let effectiveBaseModelID: ProfileBaseModelID = executionRole == .coordinatorWorker
-            ? .deepseek
-            : baseModelID
+        // Resolve defaults from the visible coordinator or direct model before
+        // the execution role adds its managed delegation capability.
+        let effectiveBaseModelID = baseModelID
         let option = modelOption(for: effectiveBaseModelID, settings: settings)
         let toolIDs = copyDefaults
             ? option.defaultToolIDs.subtracting([.loadSkill]).map(\.rawValue).sorted()
@@ -81,6 +80,7 @@ final class SkillsViewModel {
                 name: name,
                 summary: summary,
                 baseModelID: effectiveBaseModelID,
+                workerModelID: workerModelID,
                 toolIDs: toolIDs,
                 skillIDs: skillIDs
             )
@@ -179,7 +179,21 @@ final class SkillsViewModel {
     }
 
     func modelOptions(settings: SettingsStore) -> [ProfileModelOption] {
-        ProfileBaseModelID.allCases.map { modelOption(for: $0, settings: settings) }
+        ProfileBaseModelID.builtInCases.map {
+            modelOption(for: $0, settings: settings)
+        }
+    }
+
+    func coordinatorOptions(settings: SettingsStore) -> [ProfileModelOption] {
+        ProfileBaseModelID.coordinatorCases.map {
+            modelOption(for: $0, settings: settings)
+        }
+    }
+
+    func workerOptions(settings: SettingsStore) -> [ProfileModelOption] {
+        ProfileBaseModelID.workerCases.map {
+            modelOption(for: $0, settings: settings)
+        }
     }
 
     func modelOption(for id: ProfileBaseModelID, settings: SettingsStore) -> ProfileModelOption {
@@ -211,6 +225,7 @@ final class SkillsViewModel {
         case .llama: subtitle = "Local OpenAI-compatible model"
         case .pcc: subtitle = "Private Cloud Compute"
         case .deepseek: subtitle = "Enhanced coding model"
+        case .codex: subtitle = "Codex App Server with ChatGPT"
         }
         return ProfileModelOption(
             id: id,
@@ -218,7 +233,11 @@ final class SkillsViewModel {
             tier: tier,
             defaultToolIDs: defaults,
             compatibleToolIDs: compatible,
-            isAvailable: id == .onDevice || (remote?.enabled == true && isConfigured(remote))
+            // Authentication remains a visible runtime state for Codex, so its
+            // coordinator option must stay selectable before ChatGPT sign-in.
+            isAvailable: id == .onDevice
+                || id == .codex
+                || (remote?.enabled == true && isConfigured(remote))
         )
     }
 

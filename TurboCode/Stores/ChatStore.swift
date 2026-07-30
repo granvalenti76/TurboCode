@@ -150,21 +150,36 @@ public final class ChatStore {
     /// Selects Codex immediately, then verifies ChatGPT authentication and
     /// Luna availability in the background. Connection failure is a runtime
     /// state, not a reason to silently revert the user's menu selection.
-    func selectCodexProfile(modelID: String? = nil) async {
+    func selectCodexProfile(
+        modelID: String? = nil,
+        dynamicProfileID: UUID? = nil
+    ) async {
         guard !busy, orchestratorMode == .standalone else { return }
         let isEnteringFromTurboCode = activeBackend != .codex
-        if isEnteringFromTurboCode, let turboThreadID = activeThreadId {
+        let routeChanged = activeDynamicProfileID != dynamicProfileID
+        if (isEnteringFromTurboCode || routeChanged),
+           let turboThreadID = activeThreadId {
             codexRuntimeStore.captureImportedContext(
                 turboThreadID: turboThreadID,
                 blocks: blocks
             )
+            if !isEnteringFromTurboCode {
+                // Dynamic tools are fixed when an App Server thread starts.
+                // Preserve visible context, then recreate only that hidden
+                // runtime boundary for a direct/coordinator route change.
+                codexRuntimeStore.resetThread(turboThreadID: turboThreadID)
+            }
         }
-        modelRuntimeStore.selectCodex(displayName: codexDisplayName)
+        modelRuntimeStore.selectCodex(
+            displayName: codexDisplayName,
+            profileID: dynamicProfileID
+        )
         error = nil
 
         do {
             try await codexRuntimeStore.select(modelID: modelID)
-            composerModel = "Codex · \(codexDisplayName)"
+            composerModel = activeDynamicProfile?.name
+                ?? "Codex · \(codexDisplayName)"
         } catch CodexAppServerError.chatGPTLoginRequired {
             codexRuntimeStore.markSignedOut()
         } catch let codexError as CodexAppServerError
@@ -181,7 +196,8 @@ public final class ChatStore {
     /// profile. This is used by the visible Retry action after runtime errors.
     func retryCodexConnection() {
         guard activeBackend == .codex else { return }
-        Task { await selectCodexProfile() }
+        let profileID = activeDynamicProfileID
+        Task { await selectCodexProfile(dynamicProfileID: profileID) }
     }
 
     /// Starts ChatGPT OAuth through App Server, opens the system default
@@ -208,6 +224,10 @@ public final class ChatStore {
 
     func selectBuiltInProfile(_ id: ProfileBaseModelID) {
         guard !busy, orchestratorMode == .standalone else { return }
+        if id == .codex {
+            Task { await selectCodexProfile() }
+            return
+        }
         if activeBackend == .codex {
             beginCodexHandoff(to: .builtIn(id))
             return
@@ -218,6 +238,10 @@ public final class ChatStore {
 
     func selectDynamicProfile(_ id: UUID) {
         guard !busy, orchestratorMode == .standalone else { return }
+        if dynamicProfiles.first(where: { $0.id == id })?.baseModelID == .codex {
+            Task { await selectCodexProfile(dynamicProfileID: id) }
+            return
+        }
         if activeBackend == .codex {
             beginCodexHandoff(to: .dynamic(id))
             return
@@ -239,6 +263,12 @@ public final class ChatStore {
             return
         }
         modelRuntimeStore.setOrchestratorMode(.standalone)
+        if profile.baseModelID == .codex {
+            Task {
+                await selectCodexProfile(dynamicProfileID: profile.id)
+            }
+            return
+        }
         guard modelRuntimeStore.selectDynamicProfile(profile.id) else { return }
         rebuildSession(discardingCapabilityContext: true)
     }
@@ -256,6 +286,10 @@ public final class ChatStore {
         }
         let baseModel = activeDynamicProfile?.baseModelID ?? activeBaseModelID
         modelRuntimeStore.setOrchestratorMode(.standalone)
+        if baseModel == .codex {
+            Task { await selectCodexProfile() }
+            return
+        }
         guard modelRuntimeStore.selectBuiltInProfile(baseModel) else { return }
         rebuildSession(discardingCapabilityContext: true)
     }
@@ -366,36 +400,42 @@ public final class ChatStore {
             keepingHistory: keepingHistory,
             discardingCapabilityContext: discardingCapabilityContext,
             restoringHistory: restoringHistory,
-            events: ModelSessionEvents(
-                toolStarted: { [weak self] call, backend, owner in
-                    await self?.responseCoordinator.toolStarted(
-                        call,
-                        backend: backend,
-                        owner: owner
-                    )
-                },
-                toolFinished: { [weak self] call, output, backend, owner in
-                    guard let self else { return }
-                    await self.responseCoordinator.toolFinished(
-                        call,
-                        output: output,
-                        backend: backend,
-                        owner: owner,
-                        workspaceName: self.workspaceRoot.isEmpty
-                            ? nil
-                            : self.workspaceLabel
-                    )
-                },
-                delegationChanged: { [weak self] isDelegating in
-                    await MainActor.run {
-                        self?.responseCoordinator.delegationChanged(isDelegating)
-                    }
-                },
-                agentActivityChanged: { [weak self] event in
-                    guard let self else { return }
-                    await self.handleAgentActivityEvent(event)
+            events: modelSessionEvents
+        )
+    }
+
+    /// Shares native tool and Activity presentation with every coordinator
+    /// transport, including Codex's dynamically advertised delegation tool.
+    private var modelSessionEvents: ModelSessionEvents {
+        ModelSessionEvents(
+            toolStarted: { [weak self] call, backend, owner in
+                await self?.responseCoordinator.toolStarted(
+                    call,
+                    backend: backend,
+                    owner: owner
+                )
+            },
+            toolFinished: { [weak self] call, output, backend, owner in
+                guard let self else { return }
+                await self.responseCoordinator.toolFinished(
+                    call,
+                    output: output,
+                    backend: backend,
+                    owner: owner,
+                    workspaceName: self.workspaceRoot.isEmpty
+                        ? nil
+                        : self.workspaceLabel
+                )
+            },
+            delegationChanged: { [weak self] isDelegating in
+                await MainActor.run {
+                    self?.responseCoordinator.delegationChanged(isDelegating)
                 }
-            )
+            },
+            agentActivityChanged: { [weak self] event in
+                guard let self else { return }
+                await self.handleAgentActivityEvent(event)
+            }
         )
     }
 
@@ -824,9 +864,14 @@ public final class ChatStore {
             workspaceRoot: workspaceRoot,
             workspaceName: workspaceRoot.isEmpty ? nil : workspaceLabel,
             agentTuning: agentTuning,
+            delegationInvoker: modelRuntimeStore.makeDelegateInvoker(
+                workspaceRoot: workspaceRoot,
+                events: modelSessionEvents
+            ),
             modelName: composerModel
         )
-        composerModel = "Codex · \(codexDisplayName)"
+        composerModel = activeDynamicProfile?.name
+            ?? "Codex · \(codexDisplayName)"
         error = result.errorMessage
         if result.touchedConversation {
             conversationStore.touchThread(id: turboThreadID)

@@ -72,11 +72,17 @@ struct DynamicProfileTests {
         #expect(profile.skillIDs.isEmpty)
     }
 
-    @Test("Only DeepSeek with typed delegation is a coordinator profile")
+    @Test("DeepSeek and Codex require typed delegation to coordinate")
     func coordinatorProfileRequiresSupportedRoute() {
-        let coordinator = UserDynamicProfile(
+        let deepSeekCoordinator = UserDynamicProfile(
             name: "Custom Orchestrator",
             baseModelID: .deepseek,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        let codexCoordinator = UserDynamicProfile(
+            name: "Codex Coordinator",
+            baseModelID: .codex,
+            workerModelID: ProfileBaseModelID.pcc.rawValue,
             toolIDs: [ToolCapabilityID.delegateTask.rawValue]
         )
         let renamedOnDevice = UserDynamicProfile(
@@ -91,10 +97,44 @@ struct DynamicProfileTests {
 
         // Product semantics come from model plus capability, never the
         // user-editable display name.
-        #expect(coordinator.isCoordinatorProfile)
+        #expect(deepSeekCoordinator.isCoordinatorProfile)
+        #expect(codexCoordinator.isCoordinatorProfile)
+        #expect(codexCoordinator.resolvedToolIDs.contains(.delegateTask))
         #expect(!renamedOnDevice.isCoordinatorProfile)
         #expect(!renamedOnDevice.resolvedToolIDs.contains(.delegateTask))
         #expect(!directDeepSeek.isCoordinatorProfile)
+    }
+
+    @Test("Coordinator workers are persisted and legacy routes keep their fallback")
+    func coordinatorWorkerSelectionMigrates() throws {
+        let route = UserDynamicProfile(
+            name: "Codex plus PCC",
+            baseModelID: .codex,
+            workerModelID: ProfileBaseModelID.pcc.rawValue,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        let decoded = try JSONDecoder().decode(
+            UserDynamicProfile.self,
+            from: JSONEncoder().encode(route)
+        )
+        #expect(
+            decoded.resolvedWorkerModelID(fallback: "llama")
+                == ProfileBaseModelID.pcc.rawValue
+        )
+
+        var object = try #require(
+            JSONSerialization.jsonObject(
+                with: JSONEncoder().encode(route)
+            ) as? [String: Any]
+        )
+        object.removeValue(forKey: "workerModelID")
+        let legacy = try JSONDecoder().decode(
+            UserDynamicProfile.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        #expect(legacy.workerModelID == nil)
+        #expect(legacy.resolvedWorkerModelID(fallback: "deepseek") == "deepseek")
     }
 
     @Test("Execution role manages coordinator invariants atomically")
@@ -110,6 +150,7 @@ struct DynamicProfileTests {
 
         #expect(profile.executionRole == .coordinatorWorker)
         #expect(profile.baseModelID == .deepseek)
+        #expect(profile.workerModelID == ProfileBaseModelID.llama.rawValue)
         #expect(!profile.greedyMode)
         #expect(profile.resolvedToolIDs.contains(.delegateTask))
         #expect(profile.resolvedToolIDs.contains(.readFile))
@@ -121,6 +162,69 @@ struct DynamicProfileTests {
         #expect(profile.executionRole == .direct)
         #expect(!profile.resolvedToolIDs.contains(.delegateTask))
         #expect(profile.resolvedToolIDs.contains(.readFile))
+    }
+
+    @Test("Execution role preserves an explicitly selected Codex coordinator")
+    func executionRolePreservesCodexCoordinator() {
+        var profile = UserDynamicProfile(
+            name: "Codex route",
+            baseModelID: .codex,
+            workerModelID: ProfileBaseModelID.deepseek.rawValue
+        )
+
+        profile.setExecutionRole(.coordinatorWorker)
+
+        #expect(profile.baseModelID == .codex)
+        #expect(profile.workerModelID == ProfileBaseModelID.deepseek.rawValue)
+        #expect(profile.isCoordinatorProfile)
+    }
+
+    @Test("Changing a worker does not perturb the DeepSeek coordinator tool prefix")
+    func deepSeekCoordinatorToolPrefixStaysCacheStable() {
+        let llamaRoute = UserDynamicProfile(
+            name: "DeepSeek Coordinator",
+            baseModelID: .deepseek,
+            workerModelID: ProfileBaseModelID.llama.rawValue,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        let pccRoute = UserDynamicProfile(
+            name: "DeepSeek Coordinator",
+            baseModelID: .deepseek,
+            workerModelID: ProfileBaseModelID.pcc.rawValue,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        let context = ToolAccessContext(
+            hasWorkspace: true,
+            hasSkills: false,
+            hasDelegateModel: true,
+            repositoryMapDetail: .enhanced
+        )
+
+        let llamaPlan = ModelToolCatalog.plan(
+            profile: .standalone,
+            tier: .enhanced,
+            context: context,
+            selectedIDs: llamaRoute.resolvedToolIDs
+        )
+        let pccPlan = ModelToolCatalog.plan(
+            profile: .standalone,
+            tier: .enhanced,
+            context: context,
+            selectedIDs: pccRoute.resolvedToolIDs
+        )
+
+        // Worker choice is runtime invocation state. It must not alter the
+        // DeepSeek coordinator's leading tool definition or trigger cache miss.
+        #expect(llamaPlan.registeredIDs == [.delegateTask])
+        #expect(pccPlan.registeredIDs == llamaPlan.registeredIDs)
+    }
+
+    @Test("Profile option families enforce supported coordinator routes")
+    func profileOptionFamiliesAreScoped() {
+        #expect(ProfileBaseModelID.builtInCases == [.onDevice, .llama, .pcc, .deepseek])
+        #expect(ProfileBaseModelID.coordinatorCases == [.deepseek, .codex])
+        #expect(ProfileBaseModelID.workerCases == [.pcc, .llama, .deepseek])
+        #expect(!ProfileBaseModelID.workerCases.contains(.codex))
     }
 
     @Test("Selected skills implicitly expose only the skill loader")

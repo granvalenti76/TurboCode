@@ -33,6 +33,19 @@ struct ModelRoutingPolicyTests {
         )
         #expect(powerful.role == .powerfulCoordinator)
         #expect(powerful.supportsStructuredDelegation)
+        let codexCoordinator = UserDynamicProfile(
+            name: "Codex Coordinator",
+            baseModelID: .codex,
+            workerModelID: ProfileBaseModelID.llama.rawValue,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        #expect(
+            ModelRoutingPolicy.resolve(
+                backend: .codex,
+                mode: .standalone,
+                activeProfile: codexCoordinator
+            ).role == .powerfulCoordinator
+        )
         #expect(
             ModelRoutingPolicy.resolve(
                 backend: .foundationApple,

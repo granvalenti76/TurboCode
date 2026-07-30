@@ -85,19 +85,19 @@ struct CoordinatorAdapterSpikeTests {
         #expect(await task.value.outcome == .cancelled)
     }
 
-    @Test("Codex bridge exposes the same opt-in tool and result contract")
+    @Test("Codex coordinator exposes the profile-scoped tool and shared result contract")
     func codexBridgeUsesSharedContract() async throws {
         let defaultNames = CodexTurboCodeToolBridge.specifications(
             workspaceRoot: "/workspace",
             agentTuning: .default
         ).map(\.name)
-        let spikeSpecs = CodexTurboCodeToolBridge.specifications(
+        let coordinatorSpecs = CodexTurboCodeToolBridge.specifications(
             workspaceRoot: "/workspace",
             agentTuning: .default,
             includesDelegation: true
         )
         let delegationSpec = try #require(
-            spikeSpecs.first(where: { $0.name == "delegate_task" })
+            coordinatorSpecs.first(where: { $0.name == "delegate_task" })
         )
         let call = CodexDynamicToolCall(
             rpcID: .integer(73),

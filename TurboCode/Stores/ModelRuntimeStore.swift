@@ -32,6 +32,7 @@ final class ModelRuntimeStore {
     }
 
     var activeBaseModelID: ProfileBaseModelID {
+        if activeBackend == .codex { return .codex }
         if activeBackend == .foundationApple { return .onDevice }
         return ProfileBaseModelID(rawValue: activeRemoteModelID) ?? .llama
     }
@@ -88,6 +89,7 @@ final class ModelRuntimeStore {
             $0.id == selectedID && Self.hasCredential(for: $0)
         } ?? RemoteModelConfig.fallbackLlama
         let restoredProfile = savedProfile.flatMap { profile in
+            if profile.baseModelID == .codex { return profile }
             if profile.baseModelID == .onDevice { return profile }
             return profile.baseModelID.remoteModelID == initialRemote.id
                 ? profile
@@ -99,8 +101,9 @@ final class ModelRuntimeStore {
         activeDynamicProfileID = mode == .standalone
             ? restoredProfile?.id
             : nil
-        activeBackend =
-            mode == .orchestrator || restoredProfile?.baseModelID == .onDevice
+        activeBackend = restoredProfile?.baseModelID == .codex
+            ? .codex
+            : mode == .orchestrator || restoredProfile?.baseModelID == .onDevice
             ? .foundationApple
             : Self.backend(for: initialRemote.role)
         orchestratorMode = mode
@@ -143,10 +146,22 @@ final class ModelRuntimeStore {
         }
     }
 
-    func selectCodex(displayName: String) {
+    func selectCodex(displayName: String, profileID: UUID? = nil) {
         clearDynamicProfileSelection()
+        if let profileID,
+           let profile = dynamicProfiles.first(where: {
+               $0.id == profileID && $0.baseModelID == .codex
+           }) {
+            activeDynamicProfileID = profile.id
+            UserDefaults.standard.set(
+                profile.id.uuidString,
+                forKey: "activeDynamicProfileID"
+            )
+            composerModel = profile.name
+        } else {
+            composerModel = "Codex · \(displayName)"
+        }
         activeBackend = .codex
-        composerModel = "Codex · \(displayName)"
     }
 
     @discardableResult
@@ -388,6 +403,11 @@ final class ModelRuntimeStore {
     }
 
     private func applyBaseModel(_ id: ProfileBaseModelID) -> Bool {
+        if id == .codex {
+            activeBackend = .codex
+            composerModel = id.displayName
+            return true
+        }
         if id == .onDevice {
             activeBackend = .foundationApple
             composerModel = id.displayName
@@ -421,8 +441,11 @@ final class ModelRuntimeStore {
     }
 
     private var delegateRemoteModel: RemoteModelConfig {
-        remoteModels.first(where: {
-            $0.id == agentTuning.orchestrator.delegateModelID
+        let requestedWorkerID = activeDynamicProfile?.resolvedWorkerModelID(
+            fallback: agentTuning.orchestrator.delegateModelID
+        ) ?? agentTuning.orchestrator.delegateModelID
+        return remoteModels.first(where: {
+            $0.id == requestedWorkerID
                 && $0.enabled && isConfigured($0)
         }) ?? remoteModels.first(where: {
             $0.enabled && $0.role == .local && isConfigured($0)
@@ -445,5 +468,49 @@ final class ModelRuntimeStore {
     private var shouldDropCompletedToolCalls: Bool {
         guard activeBackend != .foundationApple else { return true }
         return activeRemoteModel?.reasoningTransport != .deepseekThinking
+    }
+
+    /// Creates the same bounded worker adapter used by native coordinators.
+    /// Codex depends on this boundary so provider choice, tool policy, verifier,
+    /// and Activity events cannot drift between coordinator implementations.
+    func makeDelegateInvoker(
+        workspaceRoot: String,
+        events: ModelSessionEvents
+    ) -> ConfiguredAgentTaskInvoker? {
+        guard activeDynamicProfile?.isCoordinatorProfile == true else {
+            return nil
+        }
+        return ModelSessionFactory.makeDelegateInvoker(
+            configuration: sessionConfiguration(workspaceRoot: workspaceRoot),
+            events: events
+        )
+    }
+
+    private func sessionConfiguration(
+        workspaceRoot: String
+    ) -> ModelSessionConfiguration {
+        let delegateModel = delegateRemoteModel
+        return ModelSessionConfiguration(
+            backend: activeBackend,
+            activeRemoteModel: activeRemoteModel,
+            delegateRemoteModel: delegateModel,
+            orchestratorMode: orchestratorMode,
+            workspaceRoot: workspaceRoot,
+            agentTuning: agentTuning,
+            availableSkills: DynamicProfileRuntimeSelection.skills(
+                from: availableSkills,
+                profile: activeDynamicProfile
+            ),
+            activeDynamicProfile: activeDynamicProfile,
+            skillActivations: skillActivations,
+            reasoningLevel: reasoningLevel,
+            delegateReasoningLevel: reasoningLevel(for: delegateModel),
+            activeTemperature: temperature(for: activeRemoteModel),
+            delegateTemperature: temperature(for: delegateModel),
+            dropsCompletedToolCalls: shouldDropCompletedToolCalls,
+            workspaceInstructions: WorkspaceInstructionsLoader.load(
+                from: workspaceRoot
+            )
+        )
     }
 }

@@ -4,11 +4,11 @@ TurboCode presents one product experience while adapting its profile to the capa
 
 In Standalone mode, the selected profile determines the route. Apple on-device is a microtask profile for lightweight assistance, product guidance, and already-delimited Swift snippets of at most about 30 lines. It does not receive general Git, shell, project exploration, or multi-file editing capabilities. Configured coding models can handle broader work according to their declared capabilities.
 
-For the 0.2.0 structured route, a powerful profile such as DeepSeek coordinates the task and delegates a bounded envelope through `delegate_task` to the configured coding worker. The coordinator remains responsible for verification and the final answer.
+For the 0.2.0 structured route, a custom profile can use DeepSeek or Codex as coordinator and Apple PCC, Llama, or DeepSeek as its worker. The coordinator delegates a bounded envelope through `delegate_task` and remains responsible for verification and the final answer.
 
 The menu item **On-Device (Experimental)** preserves the older compatibility path. In that mode Apple on-device may send a free-text task through `call_powerful_model`; it is not the primary 0.2.0 release scenario.
 
-The delegated worker can be selected under **TurboCode > Settings > Agents > Delegated Worker**. Available choices come from `~/.turbocode/models.json`; secrets remain in the macOS Keychain.
+Choose **Coordinator → Worker** in **Custom Profiles** to reveal the coordinator and worker controls. Keeping those controls contextual follows progressive disclosure: direct profiles remain simple, while each structured route records its own worker. Provider availability still comes from `~/.turbocode/models.json`; secrets remain in the macOS Keychain. **TurboCode > Settings > Agents > Default Delegated Worker** remains the fallback for older profiles and experimental on-device delegation.
 
 TurboCode validates reasoning and tool-calling capabilities before building a model profile. This prevents unsupported options from reaching a model and provides a foundation for giving advanced tools only to models that can use them reliably.
 
@@ -22,7 +22,10 @@ and lets the user choose a supported reasoning level.
 Authentication remains owned by the Codex runtime: TurboCode neither reads nor
 copies Codex credentials. Codex keeps its own agent loop while TurboCode exposes
 the same bounded workspace, Swift Package Manager, review, and approval tools
-used by the other capable profiles.
+used by the other capable profiles. When a Codex coordinator profile is active,
+TurboCode also advertises `delegate_task` and routes it through the shared
+bounded worker, verification, and Activity pipeline. Direct Codex profiles do
+not receive that tool.
 
 ## Configure Apple PCC
 
@@ -34,7 +37,7 @@ Open Terminal and start the server on TurboCode's default port:
 fm serve
 ```
 
-Keep that Terminal process running while using PCC. TurboCode's default PCC entry points to `http://127.0.0.1:1976/v1` and selects the `pcc` model, so no endpoint editing or API key is required. Then choose **Apple PCC** as the standalone model, or as the delegated worker under **TurboCode > Settings > Agents > Delegated Worker**.
+Keep that Terminal process running while using PCC. TurboCode's default PCC entry points to `http://127.0.0.1:1976/v1` and selects the `pcc` model, so no endpoint editing or API key is required. Then choose **Apple PCC** as the standalone model, or reveal the route controls in a coordinator custom profile and choose it as the worker.
 
 If PCC is unavailable, first check that `fm serve` is still running. The server also exposes `http://127.0.0.1:1976/health` for a local health check. Availability of the PCC model itself is determined by Apple's Foundation Models service and the current system environment.
 

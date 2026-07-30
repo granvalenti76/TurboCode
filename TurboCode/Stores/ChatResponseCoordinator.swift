@@ -51,6 +51,7 @@ final class ChatResponseCoordinator {
         workspaceRoot: String,
         workspaceName: String?,
         agentTuning: AgentTuningConfig,
+        delegationInvoker: (any AgentTaskInvoking)?,
         modelName: String
     ) async -> Result {
         let placeholderID = UUID().uuidString
@@ -70,7 +71,8 @@ final class ChatResponseCoordinator {
                     prompt: promptText,
                     workspaceRoot: workspaceRoot,
                     workspaceName: workspaceName,
-                    agentTuning: agentTuning
+                    agentTuning: agentTuning,
+                    delegationInvoker: delegationInvoker
                 ),
                 events: CodexRuntimeStore.TurnEvents(
                     liveAssistantChanged: { [weak self] text in

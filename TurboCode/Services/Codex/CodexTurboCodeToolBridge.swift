@@ -94,7 +94,9 @@ nonisolated enum CodexTurboCodeToolBridge {
                     .swiftPackageManager,
                     .xcodeProject,
                     .git
-                ],
+                ] + (dynamicTools.contains(where: {
+                    $0.name == ToolCapabilityID.delegateTask.rawValue
+                }) ? [.delegateTask] : []),
                 toolNames: dynamicTools.map(\.name),
                 availableSkills: [],
                 workspaceInstructions: workspaceInstructions
@@ -213,8 +215,8 @@ nonisolated enum CodexTurboCodeToolBridge {
             )
         ]
         if includesDelegation {
-            // The Codex spike is opt-in until it becomes the selected adapter;
-            // no runtime should advertise a tool it cannot execute.
+            // Delegation is profile-scoped: direct Codex threads must not
+            // advertise a tool without a configured bounded worker invoker.
             specifications.append(delegateTaskSpecification)
         }
         return specifications

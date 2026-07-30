@@ -117,9 +117,9 @@ struct AgentSettingsView: View {
                 Toggle("Verify source changes", isOn: s.agentTuning.agent.verifiesChanges)
             }
 
-            Section("Delegated Worker") {
+            Section("Default Delegated Worker") {
                 Picker(
-                    "Powerful model",
+                    "Worker",
                     selection: s.agentTuning.orchestrator.delegateModelID
                 ) {
                     if settings.selectedOrchestratorModel == nil {
@@ -133,7 +133,7 @@ struct AgentSettingsView: View {
                     }
                 }
 
-                Text("Used by structured coordinator profiles and experimental on-device delegation.")
+                Text("Fallback for older profiles and experimental on-device delegation. New coordinator profiles store their worker in Custom Profiles.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

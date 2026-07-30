@@ -18,6 +18,9 @@ final class CodexRuntimeStore {
         let workspaceRoot: String
         let workspaceName: String?
         let agentTuning: AgentTuningConfig
+        /// Present only for an explicit coordinator profile. Direct Codex
+        /// threads therefore never advertise a delegation tool they cannot use.
+        let delegationInvoker: (any AgentTaskInvoking)?
     }
 
     struct TurnResult {
@@ -71,6 +74,7 @@ final class CodexRuntimeStore {
         UserDefaults.standard.string(forKey: "codexModelID")
             ?? CodexAppServerClient.lunaModelID
     private var threadIDs: [String: String] = [:]
+    private var threadIncludesDelegation: [String: Bool] = [:]
     private var tokenUsageByThread: [String: CodexTokenUsage] = [:]
     private var importedContexts: [String: String] = [:]
     private var handoffBoundaryBlockIDs: [String: String] = [:]
@@ -207,6 +211,15 @@ final class CodexRuntimeStore {
         importedContexts.removeValue(forKey: turboThreadID)
     }
 
+    /// App Server tool declarations are immutable for a thread. Changing from
+    /// direct Codex to a coordinator route (or back) must therefore start a new
+    /// server thread while the caller preserves the visible conversation.
+    func resetThread(turboThreadID: String) {
+        threadIDs.removeValue(forKey: turboThreadID)
+        threadIncludesDelegation.removeValue(forKey: turboThreadID)
+        tokenUsageByThread.removeValue(forKey: turboThreadID)
+    }
+
     func runTurn(
         request: TurnRequest,
         events: TurnEvents
@@ -216,13 +229,17 @@ final class CodexRuntimeStore {
         )
         apply(snapshot)
 
+        let includesDelegation = request.delegationInvoker != nil
         let threadID: String
-        if let existing = threadIDs[request.turboThreadID] {
+        if let existing = threadIDs[request.turboThreadID],
+           threadIncludesDelegation[request.turboThreadID]
+                == includesDelegation {
             threadID = existing
         } else {
             let dynamicTools = CodexTurboCodeToolBridge.specifications(
                 workspaceRoot: request.workspaceRoot,
-                agentTuning: request.agentTuning
+                agentTuning: request.agentTuning,
+                includesDelegation: includesDelegation
             )
             let workspaceInstructions = WorkspaceInstructionsLoader.load(
                 from: request.workspaceRoot
@@ -242,6 +259,8 @@ final class CodexRuntimeStore {
                 developerInstructions: developerInstructions
             )
             threadIDs[request.turboThreadID] = threadID
+            threadIncludesDelegation[request.turboThreadID] =
+                includesDelegation
         }
 
         let stream = try await client.startTurn(
@@ -279,7 +298,8 @@ final class CodexRuntimeStore {
                         call,
                         workspaceRoot: request.workspaceRoot,
                         workspaceName: request.workspaceName,
-                        agentTuning: request.agentTuning
+                        agentTuning: request.agentTuning,
+                        delegationInvoker: request.delegationInvoker
                     )
                     if let presentation = execution.presentation {
                         events.presentationRequested(presentation)
