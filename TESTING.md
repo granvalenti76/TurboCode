@@ -14,6 +14,13 @@ Scripts/test-deterministic.sh
 
 The command exits green or red without starting Foundation Models.
 
+The deterministic gate includes the three M4.2 vertical scenarios in
+`AgentEndToEndScenarioTests`: a revision-aware edit followed by verification, an
+empty worker result with a single recovery action, and cancellation while a
+worker tool is active. These scenarios inject a scripted response stream but
+retain the production chat coordinator, `delegate_task` adapter, bounded runner,
+editing service, Activity reducer, and timeline cleanup.
+
 ## Optional golden evaluations
 
 Run only the experimental on-device evaluation suite:

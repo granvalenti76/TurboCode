@@ -20,7 +20,7 @@ final class ChatResponseCoordinator {
     private let toolInteractions: ToolInteractionStore
     private let agentActivity: AgentActivityStore
     private let codexRuntime: CodexRuntimeStore
-    private let nativeRunner: NativeResponseRunner
+    private let nativeRunner: any NativeResponseRunning
 
     private(set) var isDelegating = false
     private(set) var activeEditGroupID: String?
@@ -34,7 +34,7 @@ final class ChatResponseCoordinator {
         toolInteractions: ToolInteractionStore,
         agentActivity: AgentActivityStore,
         codexRuntime: CodexRuntimeStore,
-        nativeRunner: NativeResponseRunner
+        nativeRunner: any NativeResponseRunning
     ) {
         self.timeline = timeline
         self.toolInteractions = toolInteractions

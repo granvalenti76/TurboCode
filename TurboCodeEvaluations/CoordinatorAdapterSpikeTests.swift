@@ -61,11 +61,12 @@ struct CoordinatorAdapterSpikeTests {
             )
         )
 
-        let completed = await invoker.invoke(try makeArguments().envelope())
+        let runtimeEnvelope = try makeRuntimeEnvelope()
+        let completed = await invoker.invoke(runtimeEnvelope)
         #expect(completed.outcome == .completed)
         #expect(await recorder.identifiers == [
-            "start:task-spike:attempt-spike",
-            "finish:task-spike:attempt-spike"
+            "start:task-spike-runtime:attempt-spike-runtime",
+            "finish:task-spike-runtime:attempt-spike-runtime"
         ])
 
         let suspendedInvoker = ConfiguredAgentTaskInvoker(
@@ -75,9 +76,8 @@ struct CoordinatorAdapterSpikeTests {
             context: makeContext(),
             events: .none
         )
-        let cancellationEnvelope = try makeArguments().envelope()
         let task = Task { @MainActor in
-            await suspendedInvoker.invoke(cancellationEnvelope)
+            await suspendedInvoker.invoke(runtimeEnvelope)
         }
         try await Task.sleep(for: .milliseconds(20))
         task.cancel()
@@ -142,6 +142,25 @@ struct CoordinatorAdapterSpikeTests {
             verificationDestination: "platform=macOS",
             timeoutSeconds: 5,
             maximumToolCalls: 2
+        )
+    }
+
+    private func makeRuntimeEnvelope() throws -> AgentTaskEnvelope {
+        // This spike isolates shared event and cancellation wiring. Requesting
+        // verification here would require a verifier and change the expected
+        // terminal outcome independently from the behavior under test.
+        try AgentTaskEnvelope(
+            taskID: "task-spike-runtime",
+            attemptID: "attempt-spike-runtime",
+            goal: "Inspect one Swift file.",
+            acceptanceCriteria: ["Return a focused technical result."],
+            suggestedScope: ["TurboCode/App.swift"],
+            allowedTools: [.readFile],
+            verificationRequest: .none,
+            budget: DelegationBudget(
+                timeoutSeconds: 5,
+                maximumToolCalls: 2
+            )
         )
     }
 
