@@ -63,12 +63,15 @@ final class SkillsViewModel {
         summary: String,
         baseModelID: ProfileBaseModelID,
         workerModelID: String? = nil,
+        codexModelID: String? = nil,
+        codexReasoningEffort: CodexReasoningEffort? = nil,
         executionRole: ProfileExecutionRole = .direct,
         copyDefaults: Bool,
         settings: SettingsStore
     ) -> Bool {
         // Resolve defaults from the visible coordinator or direct model before
-        // the execution role adds its managed delegation capability.
+        // the execution role adds its managed delegation capability. Codex
+        // route selections stay profile data rather than global settings.
         let effectiveBaseModelID = baseModelID
         let option = modelOption(for: effectiveBaseModelID, settings: settings)
         let toolIDs = copyDefaults
@@ -81,6 +84,8 @@ final class SkillsViewModel {
                 summary: summary,
                 baseModelID: effectiveBaseModelID,
                 workerModelID: workerModelID,
+                codexModelID: codexModelID,
+                codexReasoningEffort: codexReasoningEffort,
                 toolIDs: toolIDs,
                 skillIDs: skillIDs
             )

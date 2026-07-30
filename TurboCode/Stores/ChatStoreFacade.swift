@@ -203,6 +203,12 @@ extension ChatStore {
         codexRuntimeStore.model
     }
 
+    /// Exposes the direct-Codex default separately from a coordinator model
+    /// temporarily presented by the active runtime.
+    var codexPreferredModel: CodexModelDescriptor? {
+        codexRuntimeStore.preferredModel
+    }
+
     var codexModels: [CodexModelDescriptor] {
         codexRuntimeStore.models
     }

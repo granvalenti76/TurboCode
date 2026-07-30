@@ -137,6 +137,42 @@ struct DynamicProfileTests {
         #expect(legacy.resolvedWorkerModelID(fallback: "deepseek") == "deepseek")
     }
 
+    @Test("Codex coordinator configuration persists with legacy defaults")
+    func codexCoordinatorConfigurationMigrates() throws {
+        let route = UserDynamicProfile(
+            name: "Codex precise route",
+            baseModelID: .codex,
+            workerModelID: ProfileBaseModelID.pcc.rawValue,
+            codexModelID: "gpt-5.6-codex",
+            codexReasoningEffort: .high,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        let encoded = try JSONEncoder().encode(route)
+        let decoded = try JSONDecoder().decode(
+            UserDynamicProfile.self,
+            from: encoded
+        )
+
+        #expect(decoded.codexModelID == "gpt-5.6-codex")
+        #expect(decoded.codexReasoningEffort == .high)
+
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object.removeValue(forKey: "codexModelID")
+        object.removeValue(forKey: "codexReasoningEffort")
+        let legacy = try JSONDecoder().decode(
+            UserDynamicProfile.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        // Missing fields inherit the Codex composer defaults rather than
+        // making a previously valid route undecodable or unusable.
+        #expect(legacy.codexModelID == nil)
+        #expect(legacy.codexReasoningEffort == nil)
+        #expect(legacy.isCoordinatorProfile)
+    }
+
     @Test("Execution role manages coordinator invariants atomically")
     func executionRoleOwnsManagedDelegationCapability() {
         var profile = UserDynamicProfile(

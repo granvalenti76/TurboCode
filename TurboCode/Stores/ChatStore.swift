@@ -838,8 +838,9 @@ public final class ChatStore {
 
     /// Runs one turn through Codex App Server while preserving TurboCode's
     /// timeline contract. Visual file-change mapping is intentionally a later
-    /// adapter layer; this foundation handles text, reasoning and cancellation
-    /// without pretending Codex is a FoundationModels provider.
+    /// adapter layer; this foundation handles text, reasoning and cancellation.
+    /// Dynamic coordinator profiles also forward their isolated Codex choices
+    /// without changing the direct-Codex composer preference.
     private func performCodexSendMessage(
         displayText: String,
         promptText: String,
@@ -864,6 +865,9 @@ public final class ChatStore {
             workspaceRoot: workspaceRoot,
             workspaceName: workspaceRoot.isEmpty ? nil : workspaceLabel,
             agentTuning: agentTuning,
+            codexModelID: activeDynamicProfile?.codexModelID,
+            codexReasoningEffort:
+                activeDynamicProfile?.codexReasoningEffort,
             delegationInvoker: modelRuntimeStore.makeDelegateInvoker(
                 workspaceRoot: workspaceRoot,
                 events: modelSessionEvents

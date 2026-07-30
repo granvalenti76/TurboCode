@@ -43,6 +43,8 @@ final class ChatResponseCoordinator {
         self.nativeRunner = nativeRunner
     }
 
+    /// Carries profile-owned Codex choices across the timeline boundary while
+    /// leaving provider selection and persistence in their owning stores.
     func performCodex(
         displayText: String,
         promptText: String,
@@ -51,6 +53,8 @@ final class ChatResponseCoordinator {
         workspaceRoot: String,
         workspaceName: String?,
         agentTuning: AgentTuningConfig,
+        codexModelID: String?,
+        codexReasoningEffort: CodexReasoningEffort?,
         delegationInvoker: (any AgentTaskInvoking)?,
         modelName: String
     ) async -> Result {
@@ -72,6 +76,8 @@ final class ChatResponseCoordinator {
                     workspaceRoot: workspaceRoot,
                     workspaceName: workspaceName,
                     agentTuning: agentTuning,
+                    modelID: codexModelID,
+                    reasoningEffort: codexReasoningEffort,
                     delegationInvoker: delegationInvoker
                 ),
                 events: CodexRuntimeStore.TurnEvents(

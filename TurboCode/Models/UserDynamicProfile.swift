@@ -8,8 +8,8 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
     case codex
 
     /// Only provider-backed defaults belong in the profile library. Codex is
-    /// configured contextually as a coordinator because its direct model and
-    /// reasoning controls remain owned by the App Server composer menu.
+    /// configured contextually as a coordinator; direct Codex selection remains
+    /// owned by the composer while a coordinator route can pin its own model.
     static let builtInCases: [Self] = [.onDevice, .llama, .pcc, .deepseek]
     static let coordinatorCases: [Self] = [.deepseek, .codex]
     static let workerCases: [Self] = [.pcc, .llama, .deepseek]
@@ -77,6 +77,12 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     /// `nil` is retained for profiles written before M4.3 and resolves through
     /// the global worker preference, preserving their previous behavior.
     var workerModelID: String?
+    /// Optional App Server selections owned by a Codex coordinator route.
+    ///
+    /// Missing values deliberately mean "use the current Codex default", so
+    /// profiles written before this field existed remain valid and selectable.
+    var codexModelID: String?
+    var codexReasoningEffort: CodexReasoningEffort?
     var greedyMode: Bool
     var toolIDs: [String]
     var skillIDs: [String]
@@ -89,6 +95,8 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         summary: String = "",
         baseModelID: ProfileBaseModelID,
         workerModelID: String? = nil,
+        codexModelID: String? = nil,
+        codexReasoningEffort: CodexReasoningEffort? = nil,
         greedyMode: Bool = false,
         toolIDs: [String] = [],
         skillIDs: [String] = [],
@@ -100,6 +108,8 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         self.summary = summary
         self.baseModelID = baseModelID
         self.workerModelID = workerModelID
+        self.codexModelID = codexModelID
+        self.codexReasoningEffort = codexReasoningEffort
         self.greedyMode = greedyMode
         self.toolIDs = toolIDs.uniqued()
         self.skillIDs = skillIDs.uniqued()
@@ -108,7 +118,9 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, summary, baseModelID, workerModelID, greedyMode, toolIDs, skillIDs
+        case id, name, summary, baseModelID, workerModelID
+        case codexModelID, codexReasoningEffort
+        case greedyMode, toolIDs, skillIDs
         case createdAt, updatedAt
     }
 
@@ -119,6 +131,11 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         summary = try values.decodeIfPresent(String.self, forKey: .summary) ?? ""
         baseModelID = try values.decode(ProfileBaseModelID.self, forKey: .baseModelID)
         workerModelID = try values.decodeIfPresent(String.self, forKey: .workerModelID)
+        codexModelID = try values.decodeIfPresent(String.self, forKey: .codexModelID)
+        codexReasoningEffort = try values.decodeIfPresent(
+            CodexReasoningEffort.self,
+            forKey: .codexReasoningEffort
+        )
         greedyMode = try values.decodeIfPresent(Bool.self, forKey: .greedyMode) ?? false
         toolIDs = try values.decodeIfPresent([String].self, forKey: .toolIDs) ?? []
         skillIDs = try values.decodeIfPresent([String].self, forKey: .skillIDs) ?? []
@@ -195,6 +212,11 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         value.summary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
         value.workerModelID = workerModelID?
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        value.codexModelID = codexModelID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.codexModelID?.isEmpty == true {
+            value.codexModelID = nil
+        }
         guard !value.name.isEmpty else { throw UserDynamicProfileError.missingName }
         guard value.name.count <= 64 else { throw UserDynamicProfileError.nameTooLong }
         value.toolIDs = toolIDs.uniqued()
