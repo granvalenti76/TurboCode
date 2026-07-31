@@ -18,6 +18,7 @@ struct TurboCodeApp: App {
     var body: some Scene {
         WindowGroup(id: "main") {
             WorkbenchSplitView()
+                .navigationTitle("")
                 .environment(chatStore)
                 .environment(settingsStore)
                 .environment(\.chatFontSize, CGFloat(settingsStore.fontSize))
