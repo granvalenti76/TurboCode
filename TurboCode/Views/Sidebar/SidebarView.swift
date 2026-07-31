@@ -245,9 +245,10 @@ struct SidebarView: View {
 
         return Button {
             chatStore.setRoute(.chat)
-            // Browsing a collection must not silently retarget tools, Git, or a
-            // draft message. The toolbar remains the explicit workspace switcher.
-            chatStore.selectedProject = name
+            // Sidebar project selection is the single workspace navigation path.
+            // Reuse the established transition so model, Git, diffs, recency,
+            // and inspector state remain consistent with the former toolbar menu.
+            chatStore.switchToWorkspace(path)
             visibleChatLimit = SidebarConversationDisclosure.batchSize
         } label: {
             HStack(spacing: 8) {
@@ -259,6 +260,13 @@ struct SidebarView: View {
                     .font(AppTypography.sidebarLabel)
                     .lineLimit(1)
                 Spacer()
+                if isActiveWorkspace {
+                    // Color.accentColor follows the user's macOS accent choice.
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 8, height: 8)
+                        .accessibilityHidden(true)
+                }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 7)
@@ -271,6 +279,7 @@ struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .help(isActiveWorkspace ? "Active workspace" : "Show chats in \(name)")
+        .accessibilityValue(isActiveWorkspace ? "Selected workspace" : "")
         .listRowInsets(sidebarRowInsets)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)

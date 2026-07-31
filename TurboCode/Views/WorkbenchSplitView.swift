@@ -68,8 +68,6 @@ struct WorkbenchSplitView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                WorkspaceToolbarMenu()
-
                 if chatStore.currentAgentActivity != nil {
                     Button {
                         chatStore.toggleRightPanel(.activity)

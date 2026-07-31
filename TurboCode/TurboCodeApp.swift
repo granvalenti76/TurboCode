@@ -31,7 +31,9 @@ struct TurboCodeApp: App {
                 }
         }
         .windowStyle(.titleBar)
-        .windowToolbarStyle(.unified(showsTitle: true))
+        // The sidebar carries the product identity; the native window title
+        // would duplicate it above the workbench content.
+        .windowToolbarStyle(.unified(showsTitle: false))
         .windowResizability(.contentMinSize)
         .defaultSize(width: 1200, height: 650)
         .commands {
