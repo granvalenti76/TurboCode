@@ -91,7 +91,8 @@ struct ModelRoutingPolicyTests {
         )
 
         #expect(defaultPlan.registeredIDs == OnDeviceCapabilityPolicy.directToolIDs)
-        #expect(attemptedExpansion.registeredIDs == [.writeOnDevice])
+        #expect(attemptedExpansion.registeredIDs == [.readFile, .writeOnDevice])
+        #expect(defaultPlan.contains(.readFile))
         #expect(!defaultPlan.contains(.git))
         #expect(!defaultPlan.contains(.editFile))
         #expect(!defaultPlan.contains(.callPowerfulModel))

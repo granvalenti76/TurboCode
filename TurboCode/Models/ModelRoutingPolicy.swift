@@ -68,6 +68,9 @@ nonisolated enum OnDeviceCapabilityPolicy {
     static let directToolIDs: Set<ToolCapabilityID> = [
         .turboCodeGuide,
         .listWorkspace,
+        // Focused reads are bounded and read-only, so they remain safe for
+        // on-device microtasks without opening the broader project tools.
+        .readFile,
         .writeOnDevice
     ]
 
