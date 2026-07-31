@@ -22,7 +22,9 @@ struct SidebarView: View {
             .scrollContentBackground(.hidden)
             .frame(maxHeight: .infinity)
         }
-        .background(Color.clear)
+        // Keep the material scoped to the navigation column so the chat stage
+        // retains its existing dark-mode surface and contrast.
+        .background(.thinMaterial)
         .frame(minWidth: 240)
         .alert("Remove Workspace?", isPresented: workspaceRemovalPresented) {
             Button("Cancel", role: .cancel) {

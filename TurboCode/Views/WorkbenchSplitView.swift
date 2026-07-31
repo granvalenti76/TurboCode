@@ -43,7 +43,7 @@ struct WorkbenchSplitView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
-        .containerBackground(Color.white, for: .window)
+        //.containerBackground(Color.white, for: .window)
         .background(alignment: .top) {
             HStack(spacing: 0) {
                 Color.clear
