@@ -4,9 +4,13 @@
 
 # TurboCode
 
-**A native macOS coding agent for Swift projects.**
+**A native macOS agent harness for Swift and Xcode.**
 
-TurboCode is an open-source application for macOS 27 that lets you explore how different language models read, edit, build, test, and manage Git-backed Swift projects without leaving a native workspace.
+TurboCode is an open-source agent harness built in SwiftUI with Apple's
+Foundation Models framework. It provides a native runtime for model routing,
+typed tool calls, workspace safety, reviewable edits, builds, tests, and Git
+operations, specialized in agentic work on Swift, SwiftUI, Xcode projects, and
+Swift Package Manager packages.
 
 > [!IMPORTANT]
 > TurboCode 0.1.0 is an initial public preview under active development. Current target: macOS 27, Xcode 27, Swift 6.
@@ -19,9 +23,20 @@ TurboCode is an open-source application for macOS 27 that lets you explore how d
 
 TurboCode uses **less than 70 MB** of memory when idle. For context: Codex uses about 600 MB, Pi about 120 MB. This is not a secondary detail: it means TurboCode can sit comfortably in the background while Xcode, simulators, and browsers share the same machine.
 
-### A precise scope, not an Xcode clone
+### An agentic harness for Swift and Xcode
 
-TurboCode does not try to replace Xcode. Its purpose is clearly defined: to be a **macOS coding agent** specialized in **SwiftUI and Swift Package Manager packages**. It uses structured Swift tools for Xcode, Swift Package Manager, Git, and workspace operations. A bounded bash runner is available for focused diagnostics, with workspace writes blocked by its macOS sandbox.
+TurboCode is an **agent harness for Swift and Xcode workflows**. It brings
+local Llama, Apple on-device, Apple PCC, and state-of-the-art Codex and DeepSeek
+models behind one native SwiftUI runtime. The harness adapts to the runtimes
+available on the user's machine and account, without making the agentic loop
+depend on a single provider or subscription. Its goal is a high-performance
+agentic loop in which models plan and act through typed tools, while
+deterministic services enforce workspace boundaries, revision checks,
+approvals, review, verification, and recoverable Git state.
+
+The current release line is intentionally Apple-platform and Swift-first. A
+broader general-purpose coding environment may be evaluated in a future
+release line, but it is not a requirement or promise of the current product.
 
 ### A native interface that follows the HIG
 
@@ -60,6 +75,29 @@ Every Git operation—branch, staging, commit, merge, rebase, remote, pull, push
 ### 4. Build, test, diagnostics
 
 TurboCode inspects the Xcode project, runs builds and unit tests, and reports compiler diagnostics directly in the conversation. For standalone packages, one structured Swift Package Manager tool handles initialization, dependencies, resolution, build, test, run, cleanup, and package inspection.
+
+### Xcode is a runtime prerequisite
+
+The full Xcode suite is required even when the active workspace contains only
+a standalone Swift package. TurboCode's Xcode tool calls depend on Xcode
+project and scheme discovery, Apple SDKs, compiler and test destinations,
+xcrun, xcodebuild, and structured xcresult diagnostics. The Command Line Tools
+alone are not sufficient for the supported Xcode workflow.
+
+You do not need to keep the Xcode UI open while using TurboCode, but Xcode 27
+must be installed, launched once to accept its license and install requested
+platform components, and selected as the active developer directory. Verify
+the active toolchain with:
+
+~~~shell
+xcodebuild -version
+xcode-select -p
+~~~
+
+For an Xcode project or workspace, TurboCode discovers schemes and invokes the
+selected toolchain. For a standalone Swift package, TurboCode can perform the
+package workflow without opening Xcode, but the full Xcode installation remains
+the supported release prerequisite.
 
 ## Model profiles
 
@@ -120,7 +158,7 @@ Non-sensitive data such as endpoints and capabilities lives in `~/.turbocode/mod
 ## Requirements
 
 - macOS 27 or later
-- Xcode 27 or later
+- Xcode 27 or later, full suite installed and selected as the active developer directory
 - Swift 6
 - A Mac capable of running Apple Foundation Models for the on-device profile
 - An optional local model server or remote provider credential for other profiles
