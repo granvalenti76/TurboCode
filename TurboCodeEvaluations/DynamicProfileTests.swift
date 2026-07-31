@@ -72,8 +72,14 @@ struct DynamicProfileTests {
         #expect(profile.skillIDs.isEmpty)
     }
 
-    @Test("DeepSeek and Codex require typed delegation to coordinate")
+    @Test("Llama, DeepSeek, and Codex require typed delegation to coordinate")
     func coordinatorProfileRequiresSupportedRoute() {
+        let llamaCoordinator = UserDynamicProfile(
+            name: "Llama Coordinator",
+            baseModelID: .llama,
+            workerModelID: ProfileBaseModelID.pcc.rawValue,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
         let deepSeekCoordinator = UserDynamicProfile(
             name: "Custom Orchestrator",
             baseModelID: .deepseek,
@@ -97,6 +103,7 @@ struct DynamicProfileTests {
 
         // Product semantics come from model plus capability, never the
         // user-editable display name.
+        #expect(llamaCoordinator.isCoordinatorProfile)
         #expect(deepSeekCoordinator.isCoordinatorProfile)
         #expect(codexCoordinator.isCoordinatorProfile)
         #expect(codexCoordinator.resolvedToolIDs.contains(.delegateTask))
@@ -258,7 +265,7 @@ struct DynamicProfileTests {
     @Test("Profile option families enforce supported coordinator routes")
     func profileOptionFamiliesAreScoped() {
         #expect(ProfileBaseModelID.builtInCases == [.onDevice, .llama, .pcc, .deepseek])
-        #expect(ProfileBaseModelID.coordinatorCases == [.deepseek, .codex])
+        #expect(ProfileBaseModelID.coordinatorCases == [.llama, .deepseek, .codex])
         #expect(ProfileBaseModelID.workerCases == [.pcc, .llama, .deepseek])
         #expect(!ProfileBaseModelID.workerCases.contains(.codex))
     }

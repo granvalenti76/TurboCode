@@ -11,7 +11,10 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
     /// configured contextually as a coordinator; direct Codex selection remains
     /// owned by the composer while a coordinator route can pin its own model.
     static let builtInCases: [Self] = [.onDevice, .llama, .pcc, .deepseek]
-    static let coordinatorCases: [Self] = [.deepseek, .codex]
+    /// These providers expose the structured `delegate_task` route. Llama is
+    /// OpenAI-compatible, so it can coordinate through the same adapter used
+    /// by DeepSeek without a provider-specific transport workaround.
+    static let coordinatorCases: [Self] = [.llama, .deepseek, .codex]
     static let workerCases: [Self] = [.pcc, .llama, .deepseek]
 
     var id: String { rawValue }

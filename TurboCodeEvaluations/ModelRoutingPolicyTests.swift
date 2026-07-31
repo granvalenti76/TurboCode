@@ -33,6 +33,19 @@ struct ModelRoutingPolicyTests {
         )
         #expect(powerful.role == .powerfulCoordinator)
         #expect(powerful.supportsStructuredDelegation)
+        let llamaCoordinator = UserDynamicProfile(
+            name: "Llama Coordinator",
+            baseModelID: .llama,
+            workerModelID: ProfileBaseModelID.pcc.rawValue,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        let llamaPowerful = ModelRoutingPolicy.resolve(
+            backend: .llamaServer,
+            mode: .standalone,
+            activeProfile: llamaCoordinator
+        )
+        #expect(llamaPowerful.role == .powerfulCoordinator)
+        #expect(llamaPowerful.supportsStructuredDelegation)
         let codexCoordinator = UserDynamicProfile(
             name: "Codex Coordinator",
             baseModelID: .codex,

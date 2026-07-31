@@ -4,11 +4,11 @@ TurboCode presents one product experience while adapting its profile to the capa
 
 In Standalone mode, the selected profile determines the route. Apple on-device is a microtask profile for lightweight assistance, product guidance, and already-delimited Swift snippets of at most about 30 lines. It does not receive general Git, shell, project exploration, or multi-file editing capabilities. Configured coding models can handle broader work according to their declared capabilities.
 
-For the 0.2.0 structured route, a custom profile can use DeepSeek or Codex as coordinator and Apple PCC, Llama, or DeepSeek as its worker. The coordinator delegates a bounded envelope through `delegate_task` and remains responsible for verification and the final answer.
+For the 0.2.0 structured route, a custom profile can use Llama, DeepSeek, or Codex as coordinator and Apple PCC, Llama, or DeepSeek as its worker. The coordinator delegates a bounded envelope through `delegate_task` and remains responsible for verification and the final answer.
 
 The menu item **On-Device (Experimental)** preserves the older compatibility path. In that mode Apple on-device may send a free-text task through `call_powerful_model`; it is not the primary 0.2.0 release scenario.
 
-Choose **Coordinator → Worker** in **Custom Profiles** to reveal the route controls. Direct profiles remain simple. Selecting DeepSeek shows only its worker; selecting Codex additionally reveals **Codex model** and **Reasoning**, followed by the worker. A Codex route can pin both values, or keep **Codex Default** and **Model Default** to inherit the current direct-Codex preferences. Provider availability still comes from `~/.turbocode/models.json`; secrets remain in the macOS Keychain. **TurboCode > Settings > Agents > Default Delegated Worker** remains the fallback for older profiles and experimental on-device delegation.
+Choose **Coordinator → Worker** in **Custom Profiles** to reveal the route controls. Direct profiles remain simple. Llama and DeepSeek expose the selected worker; Codex additionally reveals **Codex model** and **Reasoning**, followed by the worker. A Codex route can pin both values, or keep **Codex Default** and **Model Default** to inherit the current direct-Codex preferences. Provider availability still comes from `~/.turbocode/models.json`; secrets remain in the macOS Keychain. **TurboCode > Settings > Agents > Default Delegated Worker** remains the fallback for older profiles and experimental on-device delegation.
 
 TurboCode validates reasoning and tool-calling capabilities before building a model profile. This prevents unsupported options from reaching a model and provides a foundation for giving advanced tools only to models that can use them reliably.
 

@@ -469,9 +469,7 @@ struct SkillsView: View {
                         infoBanner(
                             icon: "arrow.triangle.branch",
                             title: "Structured delegation",
-                            text: draft.baseModelID == .codex
-                                ? "The profile’s Codex configuration plans the request. Delegate Task sends a bounded goal, acceptance criteria, and verification request to the selected worker."
-                                : "DeepSeek plans the request. Delegate Task sends a bounded goal, acceptance criteria, and verification request to the selected worker."
+                            text: "\(draft.baseModelID.displayName) plans the request. Delegate Task sends a bounded goal, acceptance criteria, and verification request to the selected worker."
                         )
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
@@ -1392,7 +1390,7 @@ private struct NewDynamicProfileSheet: View {
             Text(executionRole == .coordinatorWorker
                  ? (baseModelID == .codex
                     ? "Codex model and reasoning are saved with this route; Delegate Task is managed automatically for the worker."
-                    : "DeepSeek will coordinate and Delegate Task will be managed automatically for the selected worker.")
+                    : "\(baseModelID.displayName) will coordinate and Delegate Task will be managed automatically for the selected worker.")
                  : (copyDefaults
                     ? "Copies the model's current tools and installed skills into an explicit list."
                     : "Starts with no tools or skills, ideal for a focused workflow."))
@@ -1482,7 +1480,9 @@ private struct NewDynamicProfileSheet: View {
                 executionRole = role
                 if role == .coordinatorWorker {
                     // Keep the visible form consistent with the runtime
-                    // invariant before the user confirms creation.
+                    // invariant before the user confirms creation. DeepSeek
+                    // remains the conservative default; Llama is selectable
+                    // from the coordinator picker.
                     baseModelID = .deepseek
                 }
             }
