@@ -14,9 +14,9 @@ struct SidebarView: View {
             headerView
             List {
                 primaryActionsSection
-                utilitiesSection
                 projectsSection
                 chatsSection
+                utilitiesSection
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
@@ -137,10 +137,10 @@ struct SidebarView: View {
         .sidebarSelectionBackground(isSelected)
     }
 
-    // MARK: - Utilities
+    // MARK: - Configuration
 
-    /// Secondary destinations stay in the same native source list but remain
-    /// visually separate from project and conversation navigation.
+    /// Configuration destinations follow workspace navigation while remaining
+    /// visually separate from project and conversation collections.
     private var utilitiesSection: some View {
         Section {
             ForEach(UtilityItem.allCases, id: \.self) { item in
@@ -159,7 +159,7 @@ struct SidebarView: View {
                 .listRowSeparator(.hidden)
             }
         } header: {
-            sectionHeader("Utilities")
+            sectionHeader("Configuration")
         }
     }
 
@@ -170,7 +170,7 @@ struct SidebarView: View {
         var label: String {
             switch self {
             case .tools: "Tools"
-            case .skills: "Custom Profiles"
+            case .skills: "Profiles"
             }
         }
         var icon: String {
