@@ -47,7 +47,7 @@ Individual result bundles are created in temporary storage and removed after
 TurboCode extracts diagnostics. Xcode operations use
 `execution.maximumCommandTimeoutSeconds`, up to the supported 600-second limit.
 
-## Schema Version 1
+## Agent Tuning Schema Version 1
 
 ```json
 {
@@ -75,6 +75,34 @@ TurboCode extracts diagnostics. Xcode operations use
   }
 }
 ```
+
+TurboCode also accepts the 0.1.0 form with `schemaVersion: 0`, or without a
+schema marker, when all values are valid. Onboarding normalizes that file to
+schema version 1. Unknown future schema versions and invalid values are left
+untouched so the original file can be corrected or restored.
+
+## Profile Schema Version 2
+
+`profiles.json` stores custom model profiles in a versioned envelope. Version 2
+adds the coordinator/worker route fields used by structured delegation while
+remaining compatible with version 1 profiles:
+
+```json
+{
+  "version": 2,
+  "profiles": [
+    {
+      "baseModelID": "codex",
+      "workerModelID": "llama",
+      "toolIDs": ["delegate_task"]
+    }
+  ]
+}
+```
+
+Version 1 profile envelopes remain readable and are upgraded atomically during
+onboarding. Missing worker or Codex selections retain their documented
+fallback behavior.
 
 ## Agent
 
@@ -135,7 +163,8 @@ Unknown additional fields are ignored.
 
 TurboCode does not overwrite a malformed file, unsupported future schema, or
 configuration containing invalid ranges. The Agents settings pane displays the
-validation error. Correct the file and choose **Reload Configuration**.
+validation error together with the affected configuration field. Correct the
+file and choose **Reload Configuration**.
 
 Settings writes use atomic replacement. Manual changes are loaded on app launch
 or when **Reload Configuration** is selected.

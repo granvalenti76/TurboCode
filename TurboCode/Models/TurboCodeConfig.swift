@@ -23,6 +23,7 @@ public final class TurboCodeConfig {
     private var modelsURL: URL { rootURL.appendingPathComponent("models.json") }
     public var modelsConfigurationURL: URL { modelsURL }
     public var dynamicProfilesURL: URL { rootURL.appendingPathComponent("profiles.json") }
+    public var agentTuningConfigurationURL: URL { agentTuningURL }
     private var agentTuningURL: URL { rootURL.appendingPathComponent("config.json") }
     private var sessionsDir: URL { rootURL.appendingPathComponent("sessions") }
     public var skillsDirectoryURL: URL { rootURL.appendingPathComponent("SKILLS", isDirectory: true) }
@@ -83,6 +84,7 @@ public final class TurboCodeConfig {
         )
         try migrateRemoteModels()
         try migrateAgentTuning()
+        try DynamicProfileStore(fileURL: dynamicProfilesURL).migrate()
         if !FileManager.default.fileExists(atPath: dynamicProfilesURL.path) {
             try DynamicProfileStore(fileURL: dynamicProfilesURL).save([])
         }
@@ -411,11 +413,20 @@ public final class TurboCodeConfig {
         guard FileManager.default.fileExists(atPath: agentTuningURL.path) else {
             return .default
         }
-        let value = try JSONDecoder().decode(
-            AgentTuningConfig.self,
-            from: Data(contentsOf: agentTuningURL)
-        )
-        return try value.validated()
+        do {
+            let value = try JSONDecoder().decode(
+                AgentTuningConfig.self,
+                from: Data(contentsOf: agentTuningURL)
+            )
+            return try value.validated()
+        } catch let error as AgentTuningError {
+            throw error
+        } catch let error as DecodingError {
+            throw AgentTuningError.malformed(
+                field: Self.decodingField(for: error),
+                message: Self.decodingMessage(for: error)
+            )
+        }
     }
 
     public func saveAgentTuning(_ value: AgentTuningConfig) throws {
@@ -425,9 +436,46 @@ public final class TurboCodeConfig {
 
     private func migrateAgentTuning() throws {
         if FileManager.default.fileExists(atPath: agentTuningURL.path) {
-            _ = try loadAgentTuning()
+            let value = try loadAgentTuning()
+            let rawData = try Data(contentsOf: agentTuningURL)
+            let object = try? JSONSerialization.jsonObject(with: rawData)
+                as? [String: Any]
+            let hasCurrentSchema = object?["schemaVersion"] as? Int
+                == AgentTuningConfig.currentSchemaVersion
+            if !hasCurrentSchema {
+                // Only a successfully decoded and validated configuration is
+                // rewritten. Invalid files remain byte-for-byte recoverable.
+                try saveAgentTuning(value)
+            }
         } else {
             try saveAgentTuning(.default)
+        }
+    }
+
+    private static func decodingField(for error: DecodingError) -> String {
+        let codingPath: [CodingKey]
+        switch error {
+        case .keyNotFound(_, let context),
+             .typeMismatch(_, let context),
+             .valueNotFound(_, let context),
+             .dataCorrupted(let context):
+            codingPath = context.codingPath
+        @unknown default:
+            codingPath = []
+        }
+        let path = codingPath.map { $0.stringValue }.joined(separator: ".")
+        return path.isEmpty ? "config.json" : path
+    }
+
+    private static func decodingMessage(for error: DecodingError) -> String {
+        switch error {
+        case .keyNotFound(_, let context),
+             .typeMismatch(_, let context),
+             .valueNotFound(_, let context),
+             .dataCorrupted(let context):
+            return context.debugDescription
+        @unknown default:
+            return "The value could not be decoded."
         }
     }
 
