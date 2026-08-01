@@ -6,11 +6,33 @@
 
 **A native macOS agent harness for Swift and Xcode.**
 
-TurboCode is an open-source agent harness built in SwiftUI with Apple's
-Foundation Models framework. It provides a native runtime for model routing,
-typed tool calls, workspace safety, reviewable edits, builds, tests, and Git
-operations, specialized in agentic work on Swift, SwiftUI, Xcode projects, and
-Swift Package Manager packages.
+TurboCode is an open-source agent harness written entirely in Swift for native
+Apple development. It is built around SwiftUI, AppKit, and Apple's Foundation
+Models framework on macOS 27. The agent toolchain has no JavaScript or
+TypeScript runtime: model interaction, typed tool calls, routing, context
+management, and safety boundaries are implemented in Swift.
+
+TurboCode is designed to work across Apple on-device models, local Llama
+servers, Codex, DeepSeek, and Apple Private Cloud Compute through `fm serve`.
+The current release also includes experimental support for a complete agent
+loop on local models, using Foundation Models capabilities such as
+`DynamicProfile`, summarization, context compaction, removal of obsolete tool
+calls, and on-demand activation of tools and Skills.
+
+The central workflow is **Coordinator → Worker**. A capable model such as
+Codex or DeepSeek can plan a task and delegate implementation or subtasks to a
+smaller model, while TurboCode tracks progress, enforces task boundaries, and
+verifies the result. The system is specialized for Swift, SwiftUI, Xcode
+projects, and Swift Package Manager packages, with structured tools for
+workspace inspection, editing, building, testing, diagnostics, and Git. These
+operations run within explicit safety boundaries rather than relying on an
+unrestricted or opaque shell workflow.
+
+The interface is native macOS software, built with SwiftUI and AppKit and
+aligned with Apple's Human Interface Guidelines. TurboCode also supports
+workspace-specific `AGENTS.md` instructions and reusable Skills, allowing the
+harness to adapt its behavior to the project while keeping consequential work
+reviewable.
 
 > [!IMPORTANT]
 > TurboCode 0.2.0 is a structured agent-loop release under active development. It targets macOS 27, Xcode 27, and Swift 6.
@@ -23,30 +45,29 @@ Swift Package Manager packages.
 
 TurboCode uses **less than 70 MB** of memory when idle. For context: Codex uses about 600 MB, Pi about 120 MB. This is not a secondary detail: it means TurboCode can sit comfortably in the background while Xcode, simulators, and browsers share the same machine.
 
-### An agentic harness for Swift and Xcode
+### A Swift-first product boundary
 
-TurboCode is an **agent harness for Swift and Xcode workflows**. It brings
-local Llama, Apple on-device, Apple PCC, and state-of-the-art Codex and DeepSeek
-models behind one native SwiftUI runtime. The harness adapts to the runtimes
-available on the user's machine and account, without making the agentic loop
-depend on a single provider or subscription. Its goal is a high-performance
-agentic loop in which models plan and act through typed tools, while
-deterministic services enforce workspace boundaries, revision checks,
-approvals, review, verification, and recoverable Git state.
-
-The current release line is intentionally Apple-platform and Swift-first. A
-broader general-purpose coding environment may be evaluated in a future
-release line, but it is not a requirement or promise of the current product.
+TurboCode is intentionally focused on Apple-platform development. Its tools,
+model profiles, Skills, and safety policies are designed for Swift, SwiftUI,
+Xcode projects, Swift Package Manager packages, and local Git workflows. It is
+not intended to become a general-purpose, multi-language IDE or an opaque
+desktop automation agent.
 
 ### A native interface that follows the HIG
 
-Written in **SwiftUI** and aligned with Apple's **Human Interface Guidelines**. The UI follows the principle of **progressive disclosure**: the main elements—workspaces, past sessions, tools—are easily accessible in their respective areas through **collapsible lists**. No bloat, no buried menus.
+TurboCode follows Apple's **Human Interface Guidelines** using native SwiftUI
+and AppKit behavior for windows, sidebars, inspectors, settings, focus, and
+accessibility. Progressive disclosure keeps workspaces, past sessions, and
+tools visible without overwhelming the main conversation.
 
 ## What it does
 
 ### 1. A structured conversation, not just text
 
-The conversation with the agent is not purely textual. Some tools use the **`@Generable`** macro to present content in the most useful form—structured, navigable, and contextual. This includes:
+The conversation with the agent is not purely textual. Structured tools render
+diffs, Git status, file listings, and diagnostics as native, navigable views.
+TurboCode uses Apple's **`@Generable`** macro to describe and decode some of
+these structured results. This includes:
 
 - An **integrated diff checker** for seeing changes line by line
 - A **visual Git status summary** that groups staged, modified, and untracked files
@@ -68,7 +89,12 @@ TurboCode maps the workspace through compact Swift declarations, relationships b
 
 ### 3. Visible and traceable Git
 
-Every Git operation—branch, staging, commit, merge, rebase, remote, pull, push—is exposed as a tool call in the conversation flow. No invisible commands running in the background. Every action is reviewed before it is applied.
+Git operations—branch, staging, commit, merge, rebase, remote, pull, and
+push—are exposed through structured tools in the conversation flow. Git
+changes remain reviewable before they are applied. Where shell access is
+available for non-Git inspection or commands not covered by a structured tool,
+it is bounded by the active workspace, execution policy, timeout, and output
+limits.
 
 ![TurboCode conversation showing a branch creation and completed Git commit](.github/assets/turbocode-git-commit.png)
 
@@ -111,6 +137,11 @@ TurboCode comes with preconfigured profiles for several model runtimes.
 | **Codex** | Uses the official Codex CLI App Server and its ChatGPT sign-in flow; TurboCode does not read Codex credentials. |
 | **DeepSeek** | Uses the configured remote API; credentials are entered in Settings and stored in macOS Keychain. |
 
+Apple PCC currently has limited tool-call support through `fm serve` because of
+an OpenAI-compatible protocol regression in the current Apple release. PCC
+remains available for fast, medium-complexity tasks, but tool-driven workflows
+may be affected until Apple stabilizes the protocol.
+
 The profiles use the beta FoundationModels libraries—**`DynamicProfile`**, **`Summary`**, **dynamic tool calls**, **automatic removal of obsolete tool calls**, and **model switching without losing the session** or creating a new one.
 
 ### User-customizable profiles
@@ -132,13 +163,19 @@ Custom profiles and reusable Skills live in versioned configurations.
 
 ## Experimental features
 
-### A rudimentary orchestrator
+### On-device orchestration
 
-An experimental orchestrator lets you use the **on-device model as an entry point**: it receives the request, analyzes it, and delegates complex operations to more powerful models. The result returns to the orchestrator, which presents it to the user. This provides local responsiveness with remote power.
+An experimental orchestrator lets the **on-device model act as the entry point**:
+it receives the request, analyzes it, and delegates complex operations to a
+configured worker model. The result returns to the orchestrator, which presents
+it to the user. This provides local responsiveness with additional model
+capability when needed.
 
-### A standalone support profile
+### Automatic conversation titles
 
-For each session, the on-device model can automatically generate the **conversation title** by analyzing the initial context—instead of using the user's prompt as the title. A small automation that keeps conversation history navigable without effort.
+For each session, the on-device model can automatically generate a
+**conversation title** by analyzing the initial context instead of using the
+user's prompt as the title. This keeps conversation history easier to scan.
 
 ## Tools and diagnostics
 
@@ -225,8 +262,8 @@ Working now:
 
 Still to improve:
 
-- Some composer and secondary controls are incomplete
-- Approval flows need broader testing
+- Some secondary controls and advanced approval flows remain under active
+  development
 - Model behavior varies considerably between backends
 - Setup assumes familiarity with Swift tooling
 - Compatibility is limited to recent development releases
