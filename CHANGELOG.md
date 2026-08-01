@@ -13,24 +13,63 @@ formats continue to evolve before 1.0.
   verification, cancellation, recovery, and revision-aware results.
 - Native Activity inspection for coordinator, worker, tool, verification, and
   terminal task state.
-- Production coordinator routes for DeepSeek and Codex, with configurable
-  Apple PCC, Llama, and DeepSeek workers.
-- Deterministic release coverage for routing, delegation, approvals,
-  cancellation, revision conflicts, verification, and on-device capability
-  boundaries.
+- Coordinator routes for Codex, DeepSeek, and Llama, with configurable Apple
+  PCC, Llama, and DeepSeek workers.
+- Codex coordinator routes with Luna, Terra, and Sol model selection,
+  configurable reasoning, and TurboCode tool bridging.
+- On-device file reading and workspace `AGENTS.md` instruction discovery.
+- Progressive disclosure for workspace file listings and conversation history.
+- A native AppKit Inspector with responsive resizing and improved workspace
+  navigation.
 
-### Changed
+### Improved
 
-- On-device work is restricted to a measured microtask capability envelope;
-  broader coding requests remain with a capable worker or coordinator.
+- Reorganized the sidebar so conversations are grouped inside their workspace.
+- Workspace removal from the sidebar no longer removes the underlying
+  directory.
+- The sidebar initially shows the five most recent sessions, with the
+  remaining sessions available through **More**.
+- Refined chat typography and Markdown rendering with SF Pro for prose and
+  SF Mono for inline and fenced code.
+- Improved paragraph spacing, headings, lists, blockquotes, code blocks, and
+  progressive disclosure in the main conversation view.
+- Refined `@Generable` data widgets, dark-mode sidebar materials, and
+  workspace listing presentation.
+- Broadened the coordinator-to-worker workflow so delegation can be automatic
+  or explicitly requested, with visible progress and verification results.
 - Configuration and dynamic profiles migrate compatibly from the 0.1.0
   schema.
 
-### Notes
+### Fixed
 
-- Apple PCC, at the moment, does not expose tool calls correctly through
-  `fm serve`. PCC tool calling is deferred until Apple stabilizes the API
-  contract; this limitation does not invalidate the rest of the release.
+- Provider credentials are no longer read from the Keychain during startup;
+  they are accessed only when the provider is used or its settings are opened.
+- Hardened configuration migration and profile restoration from 0.1.0.
+- Improved consistency between sidebar, workspace, and Inspector navigation.
+- Corrected workspace listing disclosure and Inspector presentation.
+- Corrected the sidebar appearance in dark mode.
+- Restored the native macOS window-title layout and reduced resize-related
+  Inspector glitches.
+
+### Backend notes
+
+- Apple PCC currently does not expose OpenAI-compatible tool calls correctly
+  through `fm serve`. PCC tool calling is deferred until Apple stabilizes the
+  protocol; PCC remains fast and suitable for medium-complexity tasks within
+  its approximately 32K context window.
+
+### Distribution
+
+- An ad-hoc signed binary is available for users who want to try TurboCode
+  without building it from Xcode.
+- Because the binary is not notarized by Apple, Gatekeeper may require manual
+  approval before the application can be opened.
+
+### Release direction
+
+- This alpha establishes TurboCode's core priorities: a clean user experience,
+  low-latency interaction, local-model support, and transparent orchestration
+  across models with different capabilities.
 
 ## [0.1.0] - 2026-07-29
 
