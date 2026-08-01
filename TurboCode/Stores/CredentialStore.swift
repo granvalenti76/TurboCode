@@ -3,9 +3,9 @@ import LocalAuthentication
 import Security
 
 enum CredentialStore {
-    private static let service = Bundle.main.bundleIdentifier ?? "art.granvalenti.turbocode"
+    nonisolated private static let service = "art.granvalenti.turbocode"
 
-    static func value(for account: String) -> String? {
+    nonisolated static func value(for account: String) -> String? {
         let authenticationContext = LAContext()
         authenticationContext.interactionNotAllowed = true
         let query: [String: Any] = [

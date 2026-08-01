@@ -8,7 +8,7 @@ import FoundationModelsUtilities
 /// does not know about conversations, timeline blocks, workspace mutations, or
 /// navigation; ChatStore decides how the returned outcome is presented.
 @MainActor
-final class NativeResponseRunner {
+final class NativeResponseRunner: NativeResponseRunning {
     struct Request {
         let prompt: String
         let backend: ModelBackend
@@ -162,4 +162,18 @@ final class NativeResponseRunner {
         events.diagnosticsChanged(nil)
         return result
     }
+}
+
+/// Injectable boundary for one native response lifecycle.
+///
+/// Production uses ``NativeResponseRunner``. Keeping the coordinator dependent
+/// on this narrow protocol lets release scenarios exercise the complete chat,
+/// delegation, and cancellation path without starting a variable model stream.
+@MainActor
+protocol NativeResponseRunning {
+    func run(
+        session: LanguageModelSession,
+        request: NativeResponseRunner.Request,
+        events: NativeResponseRunner.Events
+    ) async -> NativeResponseRunner.Outcome
 }

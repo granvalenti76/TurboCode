@@ -61,6 +61,16 @@ final class ToolInteractionStore {
         activities.removeAll()
     }
 
+    /// Removes and returns every unresolved approval when an outer response is
+    /// stopped. The caller still owns provider-specific rejection so no hidden
+    /// continuation survives after the presentation is cleared.
+    func takeAllApprovals() -> [ApprovalRequest] {
+        let requests = [pendingApproval].compactMap { $0 } + queuedApprovals
+        pendingApproval = nil
+        queuedApprovals.removeAll()
+        return requests
+    }
+
     private func advanceApprovalQueue() {
         pendingApproval = queuedApprovals.isEmpty ? nil : queuedApprovals.removeFirst()
     }

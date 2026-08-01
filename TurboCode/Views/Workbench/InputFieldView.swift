@@ -13,7 +13,6 @@ enum ReasoningEffort: String, CaseIterable {
 struct InputFieldView: View {
     @Environment(ChatStore.self) private var chatStore
     @Environment(\.chatFontSize) private var chatFontSize
-    @State private var viewModel = ComposerViewModel()
     @FocusState private var isFocused: Bool
 
     let compact: Bool
@@ -71,8 +70,18 @@ struct InputFieldView: View {
     // MARK: - Text Field
 
     private var textField: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            TextField("Describe a Swift or SwiftUI task…", text: $viewModel.messageText, axis: .vertical)
+        let assignment = chatStore.composerTaskAssignment(
+            for: chatStore.composerInput
+        )
+        return VStack(alignment: .leading, spacing: 8) {
+            TextField(
+                "Describe a Swift or SwiftUI task…",
+                text: Binding(
+                    get: { chatStore.composerInput },
+                    set: { chatStore.composerInput = $0 }
+                ),
+                axis: .vertical
+            )
                 .textFieldStyle(.plain)
                 .font(AppTypography.chatBody(size: chatFontSize))
                 .lineLimit(1...10)
@@ -86,6 +95,25 @@ struct InputFieldView: View {
                         isFocused = true
                     }
                 )
+                .onChange(of: chatStore.composerInput) { oldValue, newValue in
+                    // Inspector recovery actions prepare a reviewable draft
+                    // rather than executing work immediately. Focus only when
+                    // text is inserted externally, not while the user types.
+                    if oldValue.isEmpty && !newValue.isEmpty && !isFocused {
+                        isFocused = true
+                    }
+                }
+
+            if let guidance = assignment.guidance,
+               !chatStore.composerInput
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty {
+                Label(guidance, systemImage: "person.2.badge.gearshape")
+                    .font(AppTypography.metadata)
+                    .foregroundStyle(.orange)
+                    .transition(.opacity)
+                    .accessibilityLabel("Model routing: \(guidance)")
+            }
 
             if isFocused && !slashSuggestions.isEmpty {
                 slashCommandMenu
@@ -102,7 +130,7 @@ struct InputFieldView: View {
                 }
 
                 Button {
-                    viewModel.messageText = suggestion.insertion
+                    chatStore.composerInput = suggestion.insertion
                     isFocused = true
                 } label: {
                     HStack(spacing: 10) {
@@ -138,7 +166,7 @@ struct InputFieldView: View {
     }
 
     private var slashSuggestions: [SlashCommandSuggestion] {
-        let input = viewModel.messageText
+        let input = chatStore.composerInput
         guard input.hasPrefix("/"), !input.contains("\n") else { return [] }
 
         if input.hasPrefix("/skill ") {
@@ -225,8 +253,7 @@ struct InputFieldView: View {
                                     Text(model.name)
                                 }
                             }
-                            .disabled(!chatStore.isConfigured(model))
-                        }
+                    }
                     }
 
                     if !chatStore.dynamicProfiles.isEmpty {
@@ -377,14 +404,16 @@ struct InputFieldView: View {
                 chatStore.interrupt()
                 return
             }
-            let text = viewModel.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = chatStore.composerInput.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return }
             if chatStore.isIncompleteSkillCommand(text) {
-                viewModel.messageText = "/skill "
+                chatStore.composerInput = "/skill "
                 isFocused = true
                 return
             }
-            viewModel.reset()
+            // Clear the shared draft before starting inference so recovery
+            // drafts and ordinary composer input follow the same lifecycle.
+            chatStore.composerInput = ""
             Task { await chatStore.sendMessage(text) }
         } label: {
             Image(systemName: chatStore.busy ? "stop.fill" : "arrow.up")
@@ -395,8 +424,13 @@ struct InputFieldView: View {
         .disabled(
             !chatStore.busy
                 && (
-                    !viewModel.canSend
-                    || chatStore.isIncompleteSkillCommand(viewModel.messageText)
+                    chatStore.composerInput
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
+                    || chatStore.isIncompleteSkillCommand(chatStore.composerInput)
+                    || !chatStore.composerTaskAssignment(
+                        for: chatStore.composerInput
+                    ).allowsOnDevice
                     || !chatStore.activeProfileCanSend
                 )
         )
@@ -406,6 +440,11 @@ struct InputFieldView: View {
 
     private var sendButtonHelp: String {
         if chatStore.busy { return "Stop response" }
+        if let guidance = chatStore.composerTaskAssignment(
+            for: chatStore.composerInput
+        ).guidance {
+            return guidance
+        }
         if !chatStore.activeProfileCanSend {
             return "Wait for Codex to connect or sign in first"
         }
@@ -416,7 +455,7 @@ struct InputFieldView: View {
 
     private var bottomInfoBar: some View {
         HStack(spacing: 16) {
-            orchestratorModeMenu
+            executionRouteMenu
             branchMenu
 
             Spacer()
@@ -427,21 +466,108 @@ struct InputFieldView: View {
         .padding(.vertical, compact ? 7 : 8)
     }
 
-    private var orchestratorModeMenu: some View {
+    /// Presents execution semantics instead of the historical storage enum.
+    /// Users choose a route here; whether that route is internally represented
+    /// by standalone transport mode is not product-facing information.
+    private var executionRouteMenu: some View {
         Menu {
-            ForEach(OrchestratorMode.allCases, id: \.self) { mode in
-                Button(mode.rawValue) {
-                    chatStore.orchestratorMode = mode
+            Section("Execution Route") {
+                Button {
+                    chatStore.selectDirectExecution()
+                } label: {
+                    if isDirectExecution {
+                        Label("Direct Model", systemImage: "checkmark")
+                    } else {
+                        Text("Direct Model")
+                    }
+                }
+            }
+
+            Section("Coordinator → Worker") {
+                if coordinatorProfiles.isEmpty {
+                    Button("Create Coordinator Profile…") {
+                        chatStore.requestCoordinatorProfileCreation()
+                    }
+                } else {
+                    ForEach(coordinatorProfiles) { profile in
+                        Button {
+                            chatStore.selectCoordinatorProfile(profile.id)
+                        } label: {
+                            if chatStore.activeDynamicProfileID == profile.id,
+                               chatStore.orchestratorMode == .standalone {
+                                Label(profile.name, systemImage: "checkmark")
+                            } else {
+                                Text(profile.name)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Section("Compatibility") {
+                Button {
+                    chatStore.orchestratorMode = .orchestrator
+                } label: {
+                    if chatStore.orchestratorMode == .orchestrator {
+                        Label(
+                            "On-Device Delegation (Experimental)",
+                            systemImage: "checkmark"
+                        )
+                    } else {
+                        Text("On-Device Delegation (Experimental)")
+                    }
                 }
             }
         } label: {
-            let icon: String = chatStore.orchestratorMode == .orchestrator
-                ? "square.2.layers.3d"
-                : "laptopcomputer"
-            Label(chatStore.orchestratorMode.rawValue, systemImage: icon)
+            Label(executionRouteLabel, systemImage: executionRouteIcon)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .disabled(chatStore.busy)
+        .help(executionRouteHelp)
+    }
+
+    private var coordinatorProfiles: [UserDynamicProfile] {
+        chatStore.dynamicProfiles.filter(\.isCoordinatorProfile)
+    }
+
+    private var isCoordinatorExecution: Bool {
+        chatStore.orchestratorMode == .standalone
+            && chatStore.activeDynamicProfile?.isCoordinatorProfile == true
+    }
+
+    private var isDirectExecution: Bool {
+        chatStore.orchestratorMode == .standalone && !isCoordinatorExecution
+    }
+
+    private var executionRouteLabel: String {
+        if chatStore.orchestratorMode == .orchestrator {
+            return "On-Device Delegation"
+        }
+        if isCoordinatorExecution {
+            return "Coordinator → Worker"
+        }
+        return "Direct Model"
+    }
+
+    private var executionRouteIcon: String {
+        if isCoordinatorExecution {
+            return "arrow.triangle.branch"
+        }
+        return chatStore.orchestratorMode == .orchestrator
+            ? "square.2.layers.3d"
+            : "laptopcomputer"
+    }
+
+    private var executionRouteHelp: String {
+        if let profile = chatStore.activeDynamicProfile,
+           isCoordinatorExecution {
+            return "\(profile.name) coordinates and delegates bounded tasks to the configured worker"
+        }
+        if chatStore.orchestratorMode == .orchestrator {
+            return "Apple on-device coordinates through the experimental compatibility route"
+        }
+        return "The selected model handles the request directly"
     }
 
     @ViewBuilder

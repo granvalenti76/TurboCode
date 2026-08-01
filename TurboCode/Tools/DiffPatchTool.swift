@@ -658,6 +658,7 @@ actor DiffPatchService: DiffPatchApplying {
 enum DiffPatchError: LocalizedError {
     case invalidPatch(String)
     case invalidEdit(String)
+    case revisionConflict(String)
     case unsafePath(String)
     case gitUnavailable(String)
     case notGitRepository
@@ -670,6 +671,8 @@ enum DiffPatchError: LocalizedError {
         switch self {
         case .invalidPatch(let reason): return reason
         case .invalidEdit(let reason): return reason
+        case .revisionConflict(let path):
+            return "Revision mismatch for '\(path)'."
         case .unsafePath(let path): return "Patch path '\(path)' is outside the workspace."
         case .gitUnavailable(let reason): return "Git is unavailable: \(reason)"
         case .notGitRepository: return "diff_patch requires a Git workspace."

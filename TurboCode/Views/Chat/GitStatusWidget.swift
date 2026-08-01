@@ -98,7 +98,8 @@ struct GitStatusWidget: View {
             }
         }
         .padding(10)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+        // Keep Git status as an inline result so the chart does not become a
+        // competing gray panel inside the conversation.
         .overlay {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(.separator.opacity(0.55), lineWidth: 0.5)

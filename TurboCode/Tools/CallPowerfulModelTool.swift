@@ -14,13 +14,9 @@ struct CallPowerfulModelArguments {
 /// A tool that lets the Apple on-device model delegate a task to a powerful
 /// remote model via a `ChatCompletionsLanguageModel` (OpenAI-compatible API).
 ///
-/// When the Apple orchestrator invokes this tool, it creates a temporary
-/// `LanguageModelSession` backed by `ChatCompletionsLanguageModel`, streams the
-/// response, and returns the accumulated text as tool output. The Apple model
-/// then synthesises the final answer for the user.
-///
-/// Because `LanguageModelSession` is `@MainActor`-isolated, the tool bridges
-/// to the main actor inside its `call()` method via a `Task`.
+/// This remains the compatibility surface for the on-device orchestrator. Its
+/// free-text argument is converted immediately into the same structured task
+/// contract used by future coordinator adapters.
 struct CallPowerfulModelTool: Tool {
     typealias Arguments = CallPowerfulModelArguments
     typealias Output = String
@@ -47,65 +43,142 @@ struct CallPowerfulModelTool: Tool {
     private let model: any LanguageModel
     private let temperature: Double?
     private let reasoningLevel: ContextOptions.ReasoningLevel?
+    private let delegatePlan: ModelToolPlan
     /// Tools registered with the delegate session (e.g. read_file, grep, file_system).
     private let delegateTools: [any Tool]
     /// System instructions for the delegate session (workspace context, rules, etc.).
     private let delegateInstructions: String
     private let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     private let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
+    private let runner: any AgentTaskRunning
+    private let coordinator: AgentActivityAgent?
+    private let worker: AgentActivityAgent?
+    private let activityChanged: @Sendable (
+        AgentActivityRuntimeEvent
+    ) async -> Void
 
     init(
         model: any LanguageModel,
         temperature: Double?,
         reasoningLevel: ContextOptions.ReasoningLevel?,
+        delegatePlan: ModelToolPlan,
         delegateTools: [any Tool],
         delegateInstructions: String,
         onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)? = nil,
-        onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)? = nil
+        onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)? = nil,
+        runner: any AgentTaskRunning = BoundedAgentTaskRunner(),
+        coordinator: AgentActivityAgent? = nil,
+        worker: AgentActivityAgent? = nil,
+        activityChanged: @escaping @Sendable (
+            AgentActivityRuntimeEvent
+        ) async -> Void = { _ in }
     ) {
         self.model = model
         self.temperature = temperature
         self.reasoningLevel = reasoningLevel
+        self.delegatePlan = delegatePlan
         self.delegateTools = delegateTools
         self.delegateInstructions = delegateInstructions
         self.onToolStart = onToolStart
         self.onToolEnd = onToolEnd
+        self.runner = runner
+        self.coordinator = coordinator
+        self.worker = worker
+        self.activityChanged = activityChanged
     }
 
     func call(arguments: CallPowerfulModelArguments) async throws -> String {
-        let task = arguments.task
-        let tools = delegateTools
-        let instructions = delegateInstructions
-        let model = model
-        let temperature = temperature
-        let reasoningLevel = reasoningLevel
-        let toolStart = onToolStart
-        let toolEnd = onToolEnd
-
         return try await Task { @MainActor in
-            let heavySession = LanguageModelSession(
-                profile: DelegateProfile(
-                    instructions: instructions,
-                    tools: tools,
-                    model: model,
-                    temperature: temperature,
-                    reasoningLevel: reasoningLevel,
-                    onToolStart: toolStart,
-                    onToolEnd: toolEnd
-                ),
-                history: []
+            let taskID = UUID().uuidString
+            let envelope = try AgentTaskEnvelope(
+                taskID: taskID,
+                attemptID: UUID().uuidString,
+                goal: arguments.task,
+                acceptanceCriteria: [
+                    "Return a complete, technically actionable response to the delegated task."
+                ],
+                allowedTools: delegatePlan.registeredIDs.sorted {
+                    $0.rawValue < $1.rawValue
+                },
+                budget: .default
             )
-            var result = ""
-
-            for try await snapshot in heavySession.streamResponse(to: task) {
-                if !snapshot.content.isEmpty {
-                    result = snapshot.content
-                }
+            if let coordinator, let worker {
+                await activityChanged(
+                    .started(
+                        envelope: envelope,
+                        coordinator: coordinator,
+                        worker: worker,
+                        startedAt: .now
+                    )
+                )
+                await activityChanged(
+                    .phaseChanged(
+                        taskID: envelope.taskID,
+                        attemptID: envelope.attemptID,
+                        phase: .delegating
+                    )
+                )
+                await activityChanged(
+                    .phaseChanged(
+                        taskID: envelope.taskID,
+                        attemptID: envelope.attemptID,
+                        phase: .workerRunning
+                    )
+                )
             }
-
-            return result.isEmpty
-                ? "The powerful model returned an empty response."
-                : result
+            let result = await runner.run(
+                envelope: envelope,
+                context: AgentTaskRunContext(
+                    model: model,
+                    toolPlan: delegatePlan,
+                    tools: delegateTools,
+                    instructions: delegateInstructions,
+                    temperature: temperature,
+                    reasoningLevel: reasoningLevel
+                ),
+                events: AgentTaskRunnerEvents(
+                    toolStarted: { event in
+                        await activityChanged(
+                            .toolStarted(
+                                taskID: event.taskID,
+                                attemptID: event.attemptID,
+                                tool: AgentActivityRuntimeMapping.tool(
+                                    from: event.call,
+                                    owner: .worker
+                                )
+                            )
+                        )
+                        if let onToolStart {
+                            await onToolStart(event.call)
+                        }
+                    },
+                    toolFinished: { event in
+                        await activityChanged(
+                            .toolFinished(
+                                taskID: event.taskID,
+                                attemptID: event.attemptID,
+                                callID: event.call.id
+                            )
+                        )
+                        if let onToolEnd {
+                            await onToolEnd(event.call, event.output)
+                        }
+                    },
+                    verificationStarted: { taskID, attemptID, _ in
+                        await activityChanged(
+                            .phaseChanged(
+                                taskID: taskID,
+                                attemptID: attemptID,
+                                phase: .verifying
+                            )
+                        )
+                    }
+                )
+            )
+            if coordinator != nil, worker != nil {
+                await activityChanged(.finished(result))
+            }
+            return result.technicalSummary
         }.value
     }
 }

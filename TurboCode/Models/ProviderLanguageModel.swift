@@ -4,7 +4,14 @@ import FoundationModelsUtilities
 
 struct ProviderLanguageModel: LanguageModel {
     let configuration: RemoteModelConfig
-    let apiKey: String?
+    /// Keeps only the Keychain account reference in the session. The secret is
+    /// resolved when a request is sent so app startup never touches Keychain.
+    let credential: String?
+
+    init(configuration: RemoteModelConfig, credential: String? = nil) {
+        self.configuration = configuration
+        self.credential = credential ?? configuration.credential
+    }
 
     var capabilities: LanguageModelCapabilities {
         if configuration.supportsGuidedGeneration && configuration.supportsReasoning {
@@ -19,7 +26,7 @@ struct ProviderLanguageModel: LanguageModel {
     }
 
     var executorConfiguration: Executor.Configuration {
-        Executor.Configuration(model: configuration, apiKey: apiKey)
+        Executor.Configuration(model: configuration, credential: credential)
     }
 
     struct Executor: LanguageModelExecutor {
@@ -32,7 +39,7 @@ struct ProviderLanguageModel: LanguageModel {
 
         struct Configuration: Hashable, Sendable {
             let model: RemoteModelConfig
-            let apiKey: String?
+            let credential: String?
         }
 
         func respond(
@@ -45,7 +52,12 @@ struct ProviderLanguageModel: LanguageModel {
             }
 
             var headers: [String: String] = [:]
-            if let apiKey = configuration.apiKey, !apiKey.isEmpty {
+            // Provider authentication is intentionally request-scoped. This
+            // keeps constructing/restoring an idle session free of Keychain
+            // access while preserving authentication for an actual turn.
+            if let apiKey = configuration.credential
+                .flatMap(CredentialStore.value(for:)),
+               !apiKey.isEmpty {
                 headers["Authorization"] = "Bearer \(apiKey)"
             }
 

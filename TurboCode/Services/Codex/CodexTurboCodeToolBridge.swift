@@ -94,7 +94,9 @@ nonisolated enum CodexTurboCodeToolBridge {
                     .swiftPackageManager,
                     .xcodeProject,
                     .git
-                ],
+                ] + (dynamicTools.contains(where: {
+                    $0.name == ToolCapabilityID.delegateTask.rawValue
+                }) ? [.delegateTask] : []),
                 toolNames: dynamicTools.map(\.name),
                 availableSkills: [],
                 workspaceInstructions: workspaceInstructions
@@ -104,7 +106,8 @@ nonisolated enum CodexTurboCodeToolBridge {
 
     static func specifications(
         workspaceRoot: String,
-        agentTuning: AgentTuningConfig
+        agentTuning: AgentTuningConfig,
+        includesDelegation: Bool = false
     ) -> [CodexDynamicToolSpec] {
         let listTool = ListWorkspaceTool(workspaceRoot: workspaceRoot)
         let mapTool = SwiftWorkspaceMapTool(
@@ -130,7 +133,7 @@ nonisolated enum CodexTurboCodeToolBridge {
             executionPolicy: agentTuning.execution
         )
 
-        return [
+        var specifications: [CodexDynamicToolSpec] = [
             .init(
                 name: listTool.name,
                 description: listTool.description,
@@ -211,6 +214,12 @@ nonisolated enum CodexTurboCodeToolBridge {
                 inputSchema: gitSchema
             )
         ]
+        if includesDelegation {
+            // Delegation is profile-scoped: direct Codex threads must not
+            // advertise a tool without a configured bounded worker invoker.
+            specifications.append(delegateTaskSpecification)
+        }
+        return specifications
     }
 
     static func activitySummary(for tool: String) -> String {
@@ -223,6 +232,7 @@ nonisolated enum CodexTurboCodeToolBridge {
         case "swift_package_manager": "Working with Swift package"
         case "xcode_project": "Working with Xcode project"
         case "git": "Working with Git"
+        case "delegate_task": "Delegating task to worker"
         default: "Running \(tool)"
         }
     }
@@ -231,7 +241,8 @@ nonisolated enum CodexTurboCodeToolBridge {
         _ call: CodexDynamicToolCall,
         workspaceRoot: String,
         workspaceName: String?,
-        agentTuning: AgentTuningConfig
+        agentTuning: AgentTuningConfig,
+        delegationInvoker: (any AgentTaskInvoking)? = nil
     ) async throws -> CodexToolExecution {
         switch call.tool {
         case "list_workspace":
@@ -330,6 +341,17 @@ nonisolated enum CodexTurboCodeToolBridge {
                 limit: optionalInteger("limit", in: call)
             ))
             return .init(result: .success(text), presentation: nil)
+        case "delegate_task":
+            guard let delegationInvoker else {
+                throw CodexToolBridgeError.unsupportedTool(call.tool)
+            }
+            let arguments = try delegateTaskArguments(call)
+            let result = await delegationInvoker.invoke(try arguments.envelope())
+            let data = try JSONEncoder().encode(result)
+            guard let json = String(data: data, encoding: .utf8) else {
+                throw AgentTaskWorkerError.invalidEnvelopeEncoding
+            }
+            return .init(result: .success(json), presentation: nil)
         default:
             throw CodexToolBridgeError.unsupportedTool(call.tool)
         }
@@ -373,6 +395,48 @@ nonisolated enum CodexTurboCodeToolBridge {
             )
         }
         return ApplyEditsArguments(files: requests)
+    }
+
+    private static func delegateTaskArguments(
+        _ call: CodexDynamicToolCall
+    ) throws -> DelegateTaskArguments {
+        func requiredStrings(_ key: String) throws -> [String] {
+            guard let values = call.arguments[key]?.arrayValue,
+                  values.allSatisfy({ $0.stringValue != nil }) else {
+                throw invalid(call, "'\(key)' must be an array of strings")
+            }
+            return values.compactMap(\.stringValue)
+        }
+        guard let timeoutSeconds = call.arguments["timeoutSeconds"]?.integerValue else {
+            throw invalid(call, "'timeoutSeconds' must be an integer")
+        }
+        guard let maximumToolCalls = call.arguments["maximumToolCalls"]?.integerValue else {
+            throw invalid(call, "'maximumToolCalls' must be an integer")
+        }
+        return DelegateTaskArguments(
+            taskID: try requiredString("taskID", in: call),
+            attemptID: try requiredString("attemptID", in: call),
+            goal: try requiredString("goal", in: call),
+            acceptanceCriteria: try requiredStrings("acceptanceCriteria"),
+            suggestedScope: try requiredStrings("suggestedScope"),
+            allowedTools: try requiredStrings("allowedTools"),
+            verificationRequest: try requiredString("verificationRequest", in: call),
+            verificationContainerPath: optionalString(
+                "verificationContainerPath",
+                in: call
+            ),
+            verificationScheme: optionalString("verificationScheme", in: call),
+            verificationConfiguration: optionalString(
+                "verificationConfiguration",
+                in: call
+            ),
+            verificationDestination: optionalString(
+                "verificationDestination",
+                in: call
+            ),
+            timeoutSeconds: timeoutSeconds,
+            maximumToolCalls: maximumToolCalls
+        )
     }
 
     private static func requiredString(
@@ -539,6 +603,40 @@ nonisolated enum CodexTurboCodeToolBridge {
         ],
         required: ["operation"]
     )
+
+    /// Mirrors DelegateTaskArguments exactly so Codex and Foundation Models
+    /// coordinators produce one provider-independent contract.
+    private static let delegateTaskSpecification = CodexDynamicToolSpec(
+        name: "delegate_task",
+        description: "Delegate one bounded coding task to the configured worker.",
+        inputSchema: objectSchema(
+            properties: [
+                "taskID": stringSchema("Stable logical task identifier."),
+                "attemptID": stringSchema("Unique execution attempt identifier."),
+                "goal": stringSchema("Concrete worker outcome."),
+                "acceptanceCriteria": stringArraySchema,
+                "suggestedScope": stringArraySchema,
+                "allowedTools": stringArraySchema,
+                "verificationRequest": enumSchema(["none", "build", "test"]),
+                "verificationContainerPath": nullableStringSchema(),
+                "verificationScheme": nullableStringSchema(),
+                "verificationConfiguration": nullableStringSchema(),
+                "verificationDestination": nullableStringSchema(),
+                "timeoutSeconds": .object(["type": .string("integer")]),
+                "maximumToolCalls": .object(["type": .string("integer")])
+            ],
+            required: [
+                "taskID", "attemptID", "goal", "acceptanceCriteria",
+                "suggestedScope", "allowedTools", "verificationRequest",
+                "timeoutSeconds", "maximumToolCalls"
+            ]
+        )
+    )
+
+    private static let stringArraySchema = CodexJSONValue.object([
+        "type": .string("array"),
+        "items": .object(["type": .string("string")])
+    ])
 
     private static func objectSchema(
         properties: [String: CodexJSONValue],

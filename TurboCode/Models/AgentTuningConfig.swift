@@ -29,31 +29,39 @@ nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
     public static var `default`: AgentTuningConfig { AgentTuningConfig() }
 
     public func validated() throws -> AgentTuningConfig {
-        guard schemaVersion == Self.currentSchemaVersion else {
+        var value = self
+        guard schemaVersion == Self.currentSchemaVersion || schemaVersion == 0 else {
             throw AgentTuningError.unsupportedSchemaVersion(schemaVersion)
         }
+        // Schema 0 represents the 0.1.0 shape, which did not always persist a
+        // schema marker. Normalize it only after all values pass validation.
+        value.schemaVersion = Self.currentSchemaVersion
         guard (5...600).contains(execution.defaultCommandTimeoutSeconds) else {
             throw AgentTuningError.invalidValue(
+                field: "execution.defaultCommandTimeoutSeconds",
                 "execution.defaultCommandTimeoutSeconds must be between 5 and 600"
             )
         }
         guard (5...600).contains(execution.maximumCommandTimeoutSeconds),
               execution.maximumCommandTimeoutSeconds >= execution.defaultCommandTimeoutSeconds else {
             throw AgentTuningError.invalidValue(
+                field: "execution.maximumCommandTimeoutSeconds",
                 "execution.maximumCommandTimeoutSeconds must be between the default timeout and 600"
             )
         }
         guard (1_000...30_000).contains(execution.maximumToolOutputCharacters) else {
             throw AgentTuningError.invalidValue(
+                field: "execution.maximumToolOutputCharacters",
                 "execution.maximumToolOutputCharacters must be between 1000 and 30000"
             )
         }
         guard !orchestrator.delegateModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw AgentTuningError.invalidValue(
+                field: "orchestrator.delegateModelID",
                 "orchestrator.delegateModelID must identify a model from models.json"
             )
         }
-        return self
+        return value
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -211,14 +219,26 @@ nonisolated public struct GitPolicy: Codable, Hashable, Sendable {
 
 nonisolated public enum AgentTuningError: LocalizedError, Sendable {
     case unsupportedSchemaVersion(Int)
-    case invalidValue(String)
+    case invalidValue(field: String, String)
+    case malformed(field: String, message: String)
+
+    public var field: String {
+        switch self {
+        case .unsupportedSchemaVersion:
+            "schemaVersion"
+        case .invalidValue(let field, _), .malformed(let field, _):
+            field
+        }
+    }
 
     public var errorDescription: String? {
         switch self {
         case .unsupportedSchemaVersion(let version):
             "Unsupported Agent Tuning schema version: \(version)"
-        case .invalidValue(let message):
-            "Invalid Agent Tuning value: \(message)"
+        case .invalidValue(let field, let message):
+            "Invalid Agent Tuning value at \(field): \(message)"
+        case .malformed(let field, let message):
+            "Invalid Agent Tuning configuration at \(field): \(message)"
         }
     }
 }

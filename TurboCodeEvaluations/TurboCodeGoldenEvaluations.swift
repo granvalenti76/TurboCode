@@ -143,30 +143,35 @@ private func canonicalFileContent(_ content: String) -> Substring {
 struct TurboCodeAgentEvaluationTests {
     @Test(
         "Read a Swift package",
+        .timeLimit(.minutes(2)),
         .evaluates(TurboCodeGoldenEvaluation(sample: GoldenFixtures.samples[0]), info: evaluationInfo)
     )
     func readSwiftPackage() throws { try verifyCurrentEvaluation() }
 
     @Test(
         "Exact prose edit",
+        .timeLimit(.minutes(2)),
         .evaluates(TurboCodeGoldenEvaluation(sample: GoldenFixtures.samples[1]), info: evaluationInfo)
     )
     func exactProseEdit() throws { try verifyCurrentEvaluation() }
 
     @Test(
         "Create a SwiftUI view",
+        .timeLimit(.minutes(2)),
         .evaluates(TurboCodeGoldenEvaluation(sample: GoldenFixtures.samples[2]), info: evaluationInfo)
     )
     func createSwiftUIView() throws { try verifyCurrentEvaluation() }
 
     @Test(
         "Initialize Git",
+        .timeLimit(.minutes(2)),
         .evaluates(TurboCodeGoldenEvaluation(sample: GoldenFixtures.samples[3]), info: evaluationInfo)
     )
     func initializeGit() throws { try verifyCurrentEvaluation() }
 
     @Test(
         "Commit a change",
+        .timeLimit(.minutes(2)),
         .evaluates(TurboCodeGoldenEvaluation(sample: GoldenFixtures.samples[4]), info: evaluationInfo)
     )
     func commitChange() throws { try verifyCurrentEvaluation() }

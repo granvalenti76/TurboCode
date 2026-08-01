@@ -18,27 +18,33 @@ final class ChatResponseCoordinator {
 
     private let timeline: ChatTimelineStore
     private let toolInteractions: ToolInteractionStore
+    private let agentActivity: AgentActivityStore
     private let codexRuntime: CodexRuntimeStore
-    private let nativeRunner: NativeResponseRunner
+    private let nativeRunner: any NativeResponseRunning
 
     private(set) var isDelegating = false
     private(set) var activeEditGroupID: String?
     private var activeDiagnosticsRunID: String?
     private var productGuidePresentation: ProductGuideBlock?
     private var completedRootWrite: String?
+    private var pendingCoordinatorTool: AgentActivityTool?
 
     init(
         timeline: ChatTimelineStore,
         toolInteractions: ToolInteractionStore,
+        agentActivity: AgentActivityStore,
         codexRuntime: CodexRuntimeStore,
-        nativeRunner: NativeResponseRunner
+        nativeRunner: any NativeResponseRunning
     ) {
         self.timeline = timeline
         self.toolInteractions = toolInteractions
+        self.agentActivity = agentActivity
         self.codexRuntime = codexRuntime
         self.nativeRunner = nativeRunner
     }
 
+    /// Carries profile-owned Codex choices across the timeline boundary while
+    /// leaving provider selection and persistence in their owning stores.
     func performCodex(
         displayText: String,
         promptText: String,
@@ -47,6 +53,9 @@ final class ChatResponseCoordinator {
         workspaceRoot: String,
         workspaceName: String?,
         agentTuning: AgentTuningConfig,
+        codexModelID: String?,
+        codexReasoningEffort: CodexReasoningEffort?,
+        delegationInvoker: (any AgentTaskInvoking)?,
         modelName: String
     ) async -> Result {
         let placeholderID = UUID().uuidString
@@ -66,7 +75,10 @@ final class ChatResponseCoordinator {
                     prompt: promptText,
                     workspaceRoot: workspaceRoot,
                     workspaceName: workspaceName,
-                    agentTuning: agentTuning
+                    agentTuning: agentTuning,
+                    modelID: codexModelID,
+                    reasoningEffort: codexReasoningEffort,
+                    delegationInvoker: delegationInvoker
                 ),
                 events: CodexRuntimeStore.TurnEvents(
                     liveAssistantChanged: { [weak self] text in
@@ -77,14 +89,26 @@ final class ChatResponseCoordinator {
                         reasoningText = text
                         self?.timeline.liveReasoning = text
                     },
-                    activityStarted: { [weak self] id, summary in
-                        self?.toolInteractions.beginActivity(
-                            id: id,
-                            summary: summary
+                    activityStarted: { [weak self] call, summary in
+                        guard let self else { return }
+                        self.toolInteractions.beginActivity(
+                            id: call.callID,
+                            summary: self.routedToolSummary(
+                                summary,
+                                toolName: call.tool,
+                                owner: .coordinator
+                            )
+                        )
+                        self.coordinatorToolStarted(
+                            AgentActivityRuntimeMapping.tool(
+                                from: call,
+                                owner: .coordinator
+                            )
                         )
                     },
                     activityEnded: { [weak self] id in
                         self?.toolInteractions.endActivity(id: id)
+                        self?.coordinatorToolFinished(callID: id)
                     },
                     presentationRequested: { [weak self] presentation in
                         self?.present(presentation)
@@ -303,7 +327,11 @@ final class ChatResponseCoordinator {
         return result
     }
 
-    func toolStarted(_ call: Transcript.ToolCall, backend: ModelBackend) async {
+    func toolStarted(
+        _ call: Transcript.ToolCall,
+        backend: ModelBackend,
+        owner: AgentActivityToolOwner
+    ) async {
         if let activeDiagnosticsRunID {
             await AgentDiagnosticsRecorder.shared.toolStarted(
                 runID: activeDiagnosticsRunID,
@@ -311,12 +339,21 @@ final class ChatResponseCoordinator {
                 backend: backend
             )
         }
+        if owner == .coordinator {
+            coordinatorToolStarted(
+                AgentActivityRuntimeMapping.tool(from: call, owner: owner)
+            )
+        }
         guard call.toolName != "diff_patch",
               call.toolName != "apply_edits",
               call.toolName != "edit_file" else { return }
         toolInteractions.beginActivity(
             id: call.id,
-            summary: Self.toolSummary(for: call)
+            summary: routedToolSummary(
+                Self.toolSummary(for: call),
+                toolName: call.toolName,
+                owner: owner
+            )
         )
     }
 
@@ -324,6 +361,7 @@ final class ChatResponseCoordinator {
         _ call: Transcript.ToolCall,
         output: Transcript.ToolOutput,
         backend: ModelBackend,
+        owner: AgentActivityToolOwner,
         workspaceName: String?
     ) async {
         if let activeDiagnosticsRunID {
@@ -353,11 +391,83 @@ final class ChatResponseCoordinator {
         ) {
             present(presentation)
         }
+        if owner == .coordinator {
+            coordinatorToolFinished(callID: call.id)
+        }
         toolInteractions.endActivity(id: call.id)
+    }
+
+    /// Applies the provider-neutral delegation event stream and attaches a
+    /// coordinator's pending delegate tool once the envelope supplies stable
+    /// task and attempt identifiers.
+    func agentActivityChanged(_ event: AgentActivityRuntimeEvent) {
+        guard agentActivity.apply(event) else { return }
+        switch event {
+        case .started:
+            if let pendingCoordinatorTool,
+               let current = agentActivity.current {
+                _ = agentActivity.beginTool(
+                    pendingCoordinatorTool,
+                    taskID: current.taskID,
+                    attemptID: current.attemptID
+                )
+            }
+        case .finished:
+            pendingCoordinatorTool = nil
+        case .phaseChanged, .toolStarted, .toolFinished:
+            break
+        }
     }
 
     func delegationChanged(_ value: Bool) {
         isDelegating = value
+    }
+
+    /// Coordinator callbacks are uncorrelated until `delegate_task` decodes its
+    /// envelope. Other coordinator tools can attach directly to an active
+    /// attempt, including future verification tools.
+    private func coordinatorToolStarted(_ tool: AgentActivityTool) {
+        if let current = agentActivity.current,
+           !current.phase.isTerminal {
+            _ = agentActivity.beginTool(
+                tool,
+                taskID: current.taskID,
+                attemptID: current.attemptID
+            )
+        } else if tool.name == "delegate_task"
+                    || tool.name == "call_powerful_model" {
+            pendingCoordinatorTool = tool
+        }
+    }
+
+    private func coordinatorToolFinished(callID: String) {
+        if pendingCoordinatorTool?.callID == callID {
+            pendingCoordinatorTool = nil
+        }
+        guard let current = agentActivity.current else { return }
+        _ = agentActivity.finishTool(
+            callID: callID,
+            taskID: current.taskID,
+            attemptID: current.attemptID
+        )
+    }
+
+    /// Reuses the existing transient tool presentation while making route
+    /// ownership readable before M2.3 introduces the dedicated Agent Route.
+    /// Ordinary non-delegated tool calls retain their concise legacy summary.
+    private func routedToolSummary(
+        _ summary: String,
+        toolName: String,
+        owner: AgentActivityToolOwner
+    ) -> String {
+        let isDelegationBoundary = toolName == "delegate_task"
+            || toolName == "call_powerful_model"
+        guard agentActivity.current?.phase.isTerminal == false
+                || isDelegationBoundary else {
+            return summary
+        }
+        let label = owner == .coordinator ? "Coordinator" : "Worker"
+        return "\(label) · \(summary)"
     }
 
     private func present(_ presentation: ToolPresentation) {

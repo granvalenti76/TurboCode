@@ -10,6 +10,7 @@ import SwiftUI
 final class WorkbenchStore {
     var route: AppRoute = .chat
     var isCustomProfilesPresented = false
+    private(set) var requestedProfileCreationRole: ProfileExecutionRole?
     var settingsSection: SettingsSection = .general
     var leftSidebarCollapsed = false
     var leftSidebarWidth: CGFloat = 304
@@ -17,8 +18,6 @@ final class WorkbenchStore {
     var rightSidebarWidth: CGFloat = 360
     var inspectedGitCommit: GitCommitBlock?
     var inspectedWorkspaceListingID: String?
-    var terminalOpen = false
-    var terminalHeight: CGFloat = 360
 
     var rightPanelVisible: Bool { rightPanelMode != nil }
 
@@ -33,12 +32,20 @@ final class WorkbenchStore {
         if route != .chat { rightPanelMode = nil }
     }
 
-    func toggleRightPanel(_ mode: RightPanelMode) {
-        rightPanelMode = rightPanelMode == mode ? nil : mode
+    /// Opens profile management with a specific creation intent. The request is
+    /// consumed once by the modal so ordinary later openings stay neutral.
+    func requestProfileCreation(role: ProfileExecutionRole) {
+        requestedProfileCreationRole = role
+        isCustomProfilesPresented = true
     }
 
-    func toggleTerminal() {
-        terminalOpen.toggle()
+    func consumeProfileCreationRequest() -> ProfileExecutionRole? {
+        defer { requestedProfileCreationRole = nil }
+        return requestedProfileCreationRole
+    }
+
+    func toggleRightPanel(_ mode: RightPanelMode) {
+        rightPanelMode = rightPanelMode == mode ? nil : mode
     }
 
     func toggleLeftSidebar() {

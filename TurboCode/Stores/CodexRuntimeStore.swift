@@ -18,6 +18,13 @@ final class CodexRuntimeStore {
         let workspaceRoot: String
         let workspaceName: String?
         let agentTuning: AgentTuningConfig
+        /// A profile-owned selection overrides the composer preference for this
+        /// route without replacing that global direct-Codex preference.
+        let modelID: String?
+        let reasoningEffort: CodexReasoningEffort?
+        /// Present only for an explicit coordinator profile. Direct Codex
+        /// threads therefore never advertise a delegation tool they cannot use.
+        let delegationInvoker: (any AgentTaskInvoking)?
     }
 
     struct TurnResult {
@@ -28,7 +35,7 @@ final class CodexRuntimeStore {
     struct TurnEvents {
         let liveAssistantChanged: (String) -> Void
         let liveReasoningChanged: (String) -> Void
-        let activityStarted: (String, String) -> Void
+        let activityStarted: (CodexDynamicToolCall, String) -> Void
         let activityEnded: (String) -> Void
         let presentationRequested: (CodexToolPresentation) -> Void
         let approvalRequested: (ApprovalRequest) -> Void
@@ -55,6 +62,12 @@ final class CodexRuntimeStore {
             }
     }
 
+    /// The direct-Codex preference remains stable while a coordinator route
+    /// temporarily exposes its own selected model through `model`.
+    var preferredModel: CodexModelDescriptor? {
+        models.first { $0.id == preferredModelID }
+    }
+
     var displayName: String {
         model?.displayName
             ?? UserDefaults.standard.string(forKey: "codexModelDisplayName")
@@ -71,6 +84,12 @@ final class CodexRuntimeStore {
         UserDefaults.standard.string(forKey: "codexModelID")
             ?? CodexAppServerClient.lunaModelID
     private var threadIDs: [String: String] = [:]
+    private struct ThreadConfiguration: Equatable {
+        let includesDelegation: Bool
+        let modelID: String
+    }
+
+    private var threadConfigurations: [String: ThreadConfiguration] = [:]
     private var tokenUsageByThread: [String: CodexTokenUsage] = [:]
     private var importedContexts: [String: String] = [:]
     private var handoffBoundaryBlockIDs: [String: String] = [:]
@@ -89,7 +108,7 @@ final class CodexRuntimeStore {
         let snapshot = try await client.prepareCodex(
             selectedModelID: preferredModelID
         )
-        apply(snapshot)
+        apply(snapshot, persistsPreference: true)
     }
 
     func markSignedOut() {
@@ -114,7 +133,7 @@ final class CodexRuntimeStore {
         let snapshot = try await client.prepareCodex(
             selectedModelID: preferredModelID
         )
-        apply(snapshot)
+        apply(snapshot, persistsPreference: true)
         loginURL = nil
     }
 
@@ -207,22 +226,42 @@ final class CodexRuntimeStore {
         importedContexts.removeValue(forKey: turboThreadID)
     }
 
+    /// App Server tool declarations are immutable for a thread. Changing from
+    /// direct Codex to a coordinator route (or back) must therefore start a new
+    /// server thread while the caller preserves the visible conversation.
+    func resetThread(turboThreadID: String) {
+        threadIDs.removeValue(forKey: turboThreadID)
+        threadConfigurations.removeValue(forKey: turboThreadID)
+        tokenUsageByThread.removeValue(forKey: turboThreadID)
+    }
+
     func runTurn(
         request: TurnRequest,
         events: TurnEvents
     ) async throws -> TurnResult {
+        let requestedModelID = request.modelID ?? preferredModelID
         let snapshot = try await client.prepareCodex(
-            selectedModelID: preferredModelID
+            selectedModelID: requestedModelID
         )
-        apply(snapshot)
+        apply(
+            snapshot,
+            persistsPreference: request.modelID == nil
+        )
 
+        let includesDelegation = request.delegationInvoker != nil
+        let configuration = ThreadConfiguration(
+            includesDelegation: includesDelegation,
+            modelID: snapshot.selectedModel.id
+        )
         let threadID: String
-        if let existing = threadIDs[request.turboThreadID] {
+        if let existing = threadIDs[request.turboThreadID],
+           threadConfigurations[request.turboThreadID] == configuration {
             threadID = existing
         } else {
             let dynamicTools = CodexTurboCodeToolBridge.specifications(
                 workspaceRoot: request.workspaceRoot,
-                agentTuning: request.agentTuning
+                agentTuning: request.agentTuning,
+                includesDelegation: includesDelegation
             )
             let workspaceInstructions = WorkspaceInstructionsLoader.load(
                 from: request.workspaceRoot
@@ -242,14 +281,21 @@ final class CodexRuntimeStore {
                 developerInstructions: developerInstructions
             )
             threadIDs[request.turboThreadID] = threadID
+            threadConfigurations[request.turboThreadID] = configuration
         }
 
+        let requestedEffort = request.reasoningEffort
+            ?? reasoningEffort
+        let effectiveEffort = snapshot.selectedModel.supportedReasoningEfforts
+            .contains(where: { $0.reasoningEffort == requestedEffort })
+            ? requestedEffort
+            : snapshot.selectedModel.defaultReasoningEffort
         let stream = try await client.startTurn(
             threadID: threadID,
             text: request.prompt,
             workspaceRoot: request.workspaceRoot,
             modelID: snapshot.selectedModel.model,
-            effort: reasoningEffort,
+            effort: effectiveEffort,
             additionalApplicationContext:
                 importedContexts[request.turboThreadID]
         )
@@ -270,7 +316,7 @@ final class CodexRuntimeStore {
                 break
             case .toolCallRequested(let call):
                 events.activityStarted(
-                    call.callID,
+                    call,
                     CodexTurboCodeToolBridge.activitySummary(for: call.tool)
                 )
                 let result: CodexDynamicToolResult
@@ -279,7 +325,8 @@ final class CodexRuntimeStore {
                         call,
                         workspaceRoot: request.workspaceRoot,
                         workspaceName: request.workspaceName,
-                        agentTuning: request.agentTuning
+                        agentTuning: request.agentTuning,
+                        delegationInvoker: request.delegationInvoker
                     )
                     if let presentation = execution.presentation {
                         events.presentationRequested(presentation)
@@ -331,21 +378,27 @@ final class CodexRuntimeStore {
         await client.interruptActiveTurn()
     }
 
-    private func apply(_ snapshot: CodexRuntimeSnapshot) {
+    private func apply(
+        _ snapshot: CodexRuntimeSnapshot,
+        persistsPreference: Bool
+    ) {
         models = snapshot.models
         model = snapshot.selectedModel
-        preferredModelID = snapshot.selectedModel.id
-        UserDefaults.standard.set(
-            snapshot.selectedModel.id,
-            forKey: "codexModelID"
-        )
-        UserDefaults.standard.set(
-            snapshot.selectedModel.displayName,
-            forKey: "codexModelDisplayName"
-        )
-        if !snapshot.selectedModel.supportedReasoningEfforts.contains(where: {
-            $0.reasoningEffort == reasoningEffort
-        }) {
+        if persistsPreference {
+            preferredModelID = snapshot.selectedModel.id
+            UserDefaults.standard.set(
+                snapshot.selectedModel.id,
+                forKey: "codexModelID"
+            )
+            UserDefaults.standard.set(
+                snapshot.selectedModel.displayName,
+                forKey: "codexModelDisplayName"
+            )
+        }
+        if persistsPreference,
+           !snapshot.selectedModel.supportedReasoningEfforts.contains(where: {
+               $0.reasoningEffort == reasoningEffort
+           }) {
             reasoningEffort = snapshot.selectedModel.defaultReasoningEffort
             UserDefaults.standard.set(
                 reasoningEffort.rawValue,

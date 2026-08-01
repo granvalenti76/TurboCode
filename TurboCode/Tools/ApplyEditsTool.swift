@@ -59,12 +59,18 @@ struct ApplyEditsTool: Tool {
 
     let workspaceRoot: String
     let reportsChanges: Bool
+    let taskScope: AgentTaskPathScope?
     private let editService = ApplyEditsService()
     private let patchService = DiffPatchService()
 
-    init(workspaceRoot: String, reportsChanges: Bool = true) {
+    init(
+        workspaceRoot: String,
+        reportsChanges: Bool = true,
+        taskScope: AgentTaskPathScope? = nil
+    ) {
         self.workspaceRoot = workspaceRoot
         self.reportsChanges = reportsChanges
+        self.taskScope = taskScope
     }
 
     var name: String { "apply_edits" }
@@ -87,9 +93,24 @@ struct ApplyEditsTool: Tool {
         let transactionID = UUID().uuidString
         let prepared: PreparedChangeTransaction
         do {
+            // Validate the complete atomic transaction before preparing a diff;
+            // one out-of-scope file rejects the whole edit.
+            for request in arguments.files {
+                try taskScope?.validate(request.filePath)
+            }
             prepared = try await editService.prepare(arguments: arguments, workspaceRoot: workspaceRoot)
             try await patchService.check(patch: prepared.patch, workspaceRoot: workspaceRoot)
         } catch {
+            if case DiffPatchError.revisionConflict(let path) = error {
+                // A stable machine prefix lets the bounded runner classify the
+                // safety failure independently from any model-authored prose.
+                return """
+                TURBOCODE_REVISION_CONFLICT
+                path: \(path)
+                Edit transaction rejected: \(error.localizedDescription) \
+                Re-read the affected ranges before editing again.
+                """
+            }
             return "Edit transaction rejected: \(error.localizedDescription) Re-read the affected ranges and retry using the new revision."
         }
 
@@ -136,10 +157,24 @@ struct EditFileTool: Tool {
 
     let workspaceRoot: String
     let reportsChanges: Bool
+    let taskScope: AgentTaskPathScope?
 
-    init(workspaceRoot: String, reportsChanges: Bool = true) {
+    init(
+        workspaceRoot: String,
+        reportsChanges: Bool = true,
+        taskScope: AgentTaskPathScope? = nil
+    ) {
         self.workspaceRoot = workspaceRoot
         self.reportsChanges = reportsChanges
+        self.taskScope = taskScope
+    }
+
+    func restricted(to scope: AgentTaskPathScope) -> Self {
+        Self(
+            workspaceRoot: workspaceRoot,
+            reportsChanges: reportsChanges,
+            taskScope: scope
+        )
     }
 
     var name: String { "edit_file" }
@@ -161,6 +196,11 @@ struct EditFileTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: EditFileArguments) async throws -> String {
+        do {
+            try taskScope?.validate(arguments.filePath)
+        } catch {
+            return "Edit transaction rejected: \(error.localizedDescription)"
+        }
         let usesLineRange = !["create", "replace_file"].contains(arguments.operation)
         let operation = LineEditOperation(
             operation: arguments.operation,
@@ -175,7 +215,8 @@ struct EditFileTool: Tool {
         )
         return try await ApplyEditsTool(
             workspaceRoot: workspaceRoot,
-            reportsChanges: reportsChanges
+            reportsChanges: reportsChanges,
+            taskScope: taskScope
         ).call(
             arguments: ApplyEditsArguments(files: [request])
         )
@@ -238,7 +279,7 @@ actor ApplyEditsService {
             }
             let original = try String(contentsOf: url, encoding: .utf8)
             guard let revision = request.revision, revision == FileRevision.hash(original) else {
-                throw DiffPatchError.invalidEdit("Revision mismatch for '\(relativePath)'.")
+                throw DiffPatchError.revisionConflict(relativePath)
             }
             let updated = try apply(request.operations, to: original, path: relativePath)
             guard updated != original else {

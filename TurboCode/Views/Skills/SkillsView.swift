@@ -4,9 +4,11 @@ import SwiftUI
 struct SkillsView: View {
     @Environment(ChatStore.self) private var chatStore
     @Environment(SettingsStore.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var viewModel = SkillsViewModel()
     @State private var newProfilePresented = false
     @State private var suggestedBaseModel: ProfileBaseModelID = .onDevice
+    @State private var suggestedExecutionRole: ProfileExecutionRole = .direct
     @State private var suggestedCopyDefaults = false
     @State private var deleteConfirmationPresented = false
     @State private var capabilityKind: CapabilityKind = .tools
@@ -33,6 +35,17 @@ struct SkillsView: View {
         .task {
             settings.reloadRemoteModels()
             viewModel.reload()
+            if let requestedRole = chatStore.consumeProfileCreationRequest() {
+                // Defer the nested sheet until the profile library itself has
+                // joined the presented hierarchy.
+                suggestedExecutionRole = requestedRole
+                suggestedBaseModel = requestedRole == .coordinatorWorker
+                    ? .deepseek
+                    : .onDevice
+                suggestedCopyDefaults = false
+                await Task.yield()
+                newProfilePresented = true
+            }
         }
         .onDisappear {
             pendingToolHover?.cancel()
@@ -40,13 +53,32 @@ struct SkillsView: View {
         .sheet(isPresented: $newProfilePresented) {
             NewDynamicProfileSheet(
                 initialBaseModel: suggestedBaseModel,
+                initialExecutionRole: suggestedExecutionRole,
                 initialCopyDefaults: suggestedCopyDefaults,
-                modelOptions: viewModel.modelOptions(settings: settings)
-            ) { name, summary, model, copyDefaults in
+                modelOptions: viewModel.modelOptions(settings: settings),
+                coordinatorOptions: viewModel.coordinatorOptions(settings: settings),
+                workerOptions: viewModel.workerOptions(settings: settings),
+                codexModels: chatStore.codexModels,
+                codexDefaultReasoningOptions: chatStore.codexReasoningOptions,
+                initialCodexModelID: chatStore.codexPreferredModel?.id,
+                initialCodexReasoningEffort: chatStore.codexReasoningEffort
+            ) {
+                name,
+                summary,
+                model,
+                worker,
+                codexModel,
+                codexReasoning,
+                role,
+                copyDefaults in
                 viewModel.create(
                     name: name,
                     summary: summary,
                     baseModelID: model,
+                    workerModelID: worker,
+                    codexModelID: codexModel,
+                    codexReasoningEffort: codexReasoning,
+                    executionRole: role,
                     copyDefaults: copyDefaults,
                     settings: settings
                 )
@@ -79,6 +111,7 @@ struct SkillsView: View {
                 Spacer()
                 Button {
                     suggestedBaseModel = .onDevice
+                    suggestedExecutionRole = .direct
                     suggestedCopyDefaults = false
                     newProfilePresented = true
                 } label: {
@@ -95,7 +128,7 @@ struct SkillsView: View {
 
             List(selection: selectionBinding) {
                 Section("Default Profiles") {
-                    ForEach(ProfileBaseModelID.allCases) { modelID in
+                    ForEach(ProfileBaseModelID.builtInCases) { modelID in
                         profileRow(
                             title: modelID.displayName,
                             subtitle: "Built in",
@@ -267,6 +300,17 @@ struct SkillsView: View {
 
     private func customDetail(_ draft: UserDynamicProfile) -> some View {
         let option = viewModel.modelOption(for: draft.baseModelID, settings: settings)
+        let workerOption = viewModel.workerOptions(settings: settings).first {
+            $0.id.rawValue == draft.resolvedWorkerModelID(
+                fallback: ProfileBaseModelID.llama.rawValue
+            )
+        }
+        let routeIsAvailable = option.isAvailable
+            && (
+                draft.executionRole == .direct
+                    || workerOption?.isAvailable == true
+            )
+            && codexConfigurationIsAvailable(for: draft)
         return ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 HStack(alignment: .top, spacing: 14) {
@@ -295,7 +339,7 @@ struct SkillsView: View {
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(!option.isAvailable || chatStore.busy)
+                    .disabled(!routeIsAvailable || chatStore.busy)
                 }
 
                 if !option.isAvailable {
@@ -304,6 +348,131 @@ struct SkillsView: View {
                         title: "Model unavailable",
                         text: "Enable and configure \(draft.baseModelID.displayName) before using this profile."
                     )
+                } else if draft.executionRole == .coordinatorWorker,
+                          workerOption?.isAvailable != true {
+                    infoBanner(
+                        icon: "exclamationmark.triangle",
+                        title: "Worker unavailable",
+                        text: "Enable and configure the selected worker before using this coordinator profile."
+                    )
+                } else if !codexConfigurationIsAvailable(for: draft) {
+                    infoBanner(
+                        icon: "exclamationmark.triangle",
+                        title: "Codex configuration unavailable",
+                        text: "Choose a Codex model and reasoning level that are available to the signed-in account."
+                    )
+                }
+
+                sectionCard(
+                    title: "Execution",
+                    subtitle: "Choose the profile’s responsibility before configuring advanced capabilities."
+                ) {
+                    Picker("Execution role", selection: executionRoleBinding) {
+                        ForEach(ProfileExecutionRole.allCases) { role in
+                            Text(role.displayName).tag(role)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 420)
+
+                    Text(draft.executionRole.summary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.opacity)
+
+                    if draft.executionRole == .coordinatorWorker {
+                        Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 12) {
+                            GridRow {
+                                Text("Coordinator").foregroundStyle(.secondary)
+                                Picker("Coordinator", selection: baseModelBinding) {
+                                    ForEach(viewModel.coordinatorOptions(settings: settings)) { model in
+                                        Label(model.id.displayName, systemImage: model.id.systemImage)
+                                            .tag(model.id)
+                                            .disabled(!model.isAvailable)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(maxWidth: 280, alignment: .leading)
+                            }
+                            if draft.baseModelID == .codex {
+                                GridRow {
+                                    Text("Codex model").foregroundStyle(.secondary)
+                                    Picker("Codex model", selection: codexModelBinding) {
+                                        Text("Codex Default").tag("")
+                                        if let savedID = draft.codexModelID,
+                                           !chatStore.codexModels.contains(where: {
+                                               $0.id == savedID
+                                           }) {
+                                            Text(savedID).tag(savedID)
+                                        }
+                                        ForEach(chatStore.codexModels) { model in
+                                            Text(model.displayName).tag(model.id)
+                                        }
+                                    }
+                                    .labelsHidden()
+                                    .frame(maxWidth: 280, alignment: .leading)
+                                }
+                                GridRow {
+                                    Text("Reasoning").foregroundStyle(.secondary)
+                                    Picker("Reasoning", selection: codexReasoningBinding) {
+                                        Text("Model Default").tag("")
+                                        if let savedEffort =
+                                            draft.codexReasoningEffort,
+                                           !codexReasoningOptions(
+                                               for: draft.codexModelID
+                                           ).contains(where: {
+                                               $0.reasoningEffort
+                                                   == savedEffort
+                                           }) {
+                                            Text(
+                                                "\(savedEffort.displayName) (Unavailable)"
+                                            )
+                                            .tag(savedEffort.rawValue)
+                                            .disabled(true)
+                                        }
+                                        ForEach(
+                                            codexReasoningOptions(
+                                                for: draft.codexModelID
+                                            ),
+                                            id: \.reasoningEffort.rawValue
+                                        ) { option in
+                                            Text(option.reasoningEffort.displayName)
+                                                .tag(option.reasoningEffort.rawValue)
+                                        }
+                                    }
+                                    .labelsHidden()
+                                    .frame(maxWidth: 280, alignment: .leading)
+                                }
+                            }
+                            GridRow {
+                                Text("Worker").foregroundStyle(.secondary)
+                                Picker("Worker", selection: workerModelBinding) {
+                                    ForEach(viewModel.workerOptions(settings: settings)) { model in
+                                        Label(model.id.displayName, systemImage: model.id.systemImage)
+                                            .tag(model.id.rawValue)
+                                            .disabled(!model.isAvailable)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(maxWidth: 280, alignment: .leading)
+                            }
+                        }
+
+                        if draft.baseModelID == .codex {
+                            Text("Codex Default and Model Default follow the direct Codex preferences. Explicit choices are stored with this profile.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .transition(.opacity)
+                        }
+
+                        infoBanner(
+                            icon: "arrow.triangle.branch",
+                            title: "Structured delegation",
+                            text: "\(draft.baseModelID.displayName) plans the request. Delegate Task sends a bounded goal, acceptance criteria, and verification request to the selected worker."
+                        )
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
 
                 sectionCard(title: "Profile", subtitle: "A recognizable name and the model this profile controls.") {
@@ -318,25 +487,27 @@ struct SkillsView: View {
                             TextField("What is this profile for?", text: summaryBinding)
                                 .textFieldStyle(.roundedBorder)
                         }
-                        GridRow {
-                            Text("Model").foregroundStyle(.secondary)
-                            HStack(spacing: 14) {
-                                Picker("Model", selection: baseModelBinding) {
-                                    ForEach(viewModel.modelOptions(settings: settings)) { model in
-                                        Label(model.id.displayName, systemImage: model.id.systemImage)
-                                            .tag(model.id)
+                        if draft.executionRole == .direct {
+                            GridRow {
+                                Text("Model").foregroundStyle(.secondary)
+                                HStack(spacing: 14) {
+                                    Picker("Model", selection: baseModelBinding) {
+                                        ForEach(viewModel.modelOptions(settings: settings)) { model in
+                                            Label(model.id.displayName, systemImage: model.id.systemImage)
+                                                .tag(model.id)
+                                        }
                                     }
+                                    .labelsHidden()
+                                    .frame(maxWidth: 280, alignment: .leading)
+                                    Toggle("Greedy mode", isOn: greedyModeBinding)
+                                        .toggleStyle(.checkbox)
+                                        .disabled(draft.baseModelID == .deepseek)
+                                    Text(draft.baseModelID == .deepseek
+                                            ? "Unavailable with DeepSeek Thinking."
+                                            : "Always pick the most likely token.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
-                                .labelsHidden()
-                                .frame(maxWidth: 280, alignment: .leading)
-                                Toggle("Greedy mode", isOn: greedyModeBinding)
-                                    .toggleStyle(.checkbox)
-                                    .disabled(draft.baseModelID == .deepseek)
-                                Text(draft.baseModelID == .deepseek
-                                     ? "Unavailable with DeepSeek Thinking."
-                                     : "Always pick the most likely token.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -450,7 +621,11 @@ struct SkillsView: View {
 
     private func availableTools(option: ProfileModelOption, search: String) -> [ToolCapabilityDescriptor] {
         ModelToolCatalog.descriptors.filter {
-            $0.id != .loadSkill && $0.id != .callPowerfulModel
+            // Delegation is owned by the Execution picker; hiding it here keeps
+            // the drag composer focused on optional advanced capabilities.
+            $0.id != .delegateTask
+                && $0.id != .loadSkill
+                && $0.id != .callPowerfulModel
                 && !viewModel.containsTool($0.id)
                 && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)
                     || $0.id.rawValue.localizedCaseInsensitiveContains(search))
@@ -458,7 +633,9 @@ struct SkillsView: View {
     }
 
     private func includedTools() -> [ToolCapabilityDescriptor] {
-        ModelToolCatalog.descriptors.filter { viewModel.containsTool($0.id) }
+        ModelToolCatalog.descriptors.filter {
+            $0.id != .delegateTask && viewModel.containsTool($0.id)
+        }
     }
 
     private func availableSkills(search: String) -> [TurboCodeSkillDefinition] {
@@ -485,7 +662,9 @@ struct SkillsView: View {
 
     private var includedCount: Int {
         capabilityKind == .tools
-            ? (viewModel.draft?.toolIDs.count ?? 0)
+            ? (viewModel.draft?.toolIDs.filter {
+                $0 != ToolCapabilityID.delegateTask.rawValue
+            }.count ?? 0)
             : (viewModel.draft?.skillIDs.count ?? 0)
     }
 
@@ -724,14 +903,48 @@ struct SkillsView: View {
         )
     }
 
+    private var executionRoleBinding: Binding<ProfileExecutionRole> {
+        Binding(
+            get: { viewModel.draft?.executionRole ?? .direct },
+            set: { role in
+                if reduceMotion {
+                    viewModel.setExecutionRole(role)
+                } else {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        viewModel.setExecutionRole(role)
+                    }
+                }
+            }
+        )
+    }
+
     private var baseModelBinding: Binding<ProfileBaseModelID> {
         Binding(
             get: { viewModel.draft?.baseModelID ?? .onDevice },
             set: { value in
-                viewModel.updateDraft {
-                    $0.baseModelID = value
-                    if value == .deepseek {
-                        $0.greedyMode = false
+                let update = {
+                    viewModel.updateDraft {
+                        $0.baseModelID = value
+                        if value == .deepseek {
+                            $0.greedyMode = false
+                        } else if value == .codex {
+                            // Seed a reproducible route when the App Server
+                            // catalog is known; otherwise Default remains a
+                            // valid login-independent fallback.
+                            $0.codexModelID =
+                                $0.codexModelID
+                                    ?? chatStore.codexPreferredModel?.id
+                            $0.codexReasoningEffort =
+                                $0.codexReasoningEffort
+                                    ?? chatStore.codexReasoningEffort
+                        }
+                    }
+                }
+                if reduceMotion {
+                    update()
+                } else {
+                    withAnimation(.easeInOut(duration: 0.16)) {
+                        update()
                     }
                 }
             }
@@ -743,6 +956,88 @@ struct SkillsView: View {
             get: { viewModel.draft?.greedyMode ?? false },
             set: { value in viewModel.updateDraft { $0.greedyMode = value } }
         )
+    }
+
+    private var workerModelBinding: Binding<String> {
+        Binding(
+            get: {
+                viewModel.draft?.resolvedWorkerModelID(
+                    fallback: ProfileBaseModelID.llama.rawValue
+                ) ?? ProfileBaseModelID.llama.rawValue
+            },
+            set: { value in
+                viewModel.updateDraft { $0.workerModelID = value }
+            }
+        )
+    }
+
+    private var codexModelBinding: Binding<String> {
+        Binding(
+            get: { viewModel.draft?.codexModelID ?? "" },
+            set: { value in
+                viewModel.updateDraft {
+                    $0.codexModelID = value.isEmpty ? nil : value
+                    guard let effort = $0.codexReasoningEffort else { return }
+                    if !codexReasoningOptions(for: $0.codexModelID).contains(
+                        where: { $0.reasoningEffort == effort }
+                    ) {
+                        // A model change cannot retain an effort that the App
+                        // Server says is unsupported.
+                        $0.codexReasoningEffort = nil
+                    }
+                }
+            }
+        )
+    }
+
+    private var codexReasoningBinding: Binding<String> {
+        Binding(
+            get: {
+                viewModel.draft?.codexReasoningEffort?.rawValue ?? ""
+            },
+            set: { value in
+                viewModel.updateDraft {
+                    $0.codexReasoningEffort = value.isEmpty
+                        ? nil
+                        : CodexReasoningEffort(rawValue: value)
+                }
+            }
+        )
+    }
+
+    private func codexReasoningOptions(
+        for modelID: String?
+    ) -> [CodexReasoningOption] {
+        chatStore.codexModels.first(where: { $0.id == modelID })?
+            .supportedReasoningEfforts
+            ?? chatStore.codexReasoningOptions
+    }
+
+    /// An unloaded catalog is not an error because authentication can happen
+    /// after selection. Once loaded, stale explicit values fail visibly instead
+    /// of silently running a different profile configuration.
+    private func codexConfigurationIsAvailable(
+        for profile: UserDynamicProfile
+    ) -> Bool {
+        guard profile.baseModelID == .codex,
+              !chatStore.codexModels.isEmpty else {
+            return true
+        }
+        let selectedModel: CodexModelDescriptor?
+        if let modelID = profile.codexModelID {
+            selectedModel = chatStore.codexModels.first {
+                $0.id == modelID
+            }
+            guard selectedModel != nil else { return false }
+        } else {
+            selectedModel = chatStore.codexPreferredModel
+        }
+        guard let effort = profile.codexReasoningEffort else {
+            return true
+        }
+        return selectedModel?.supportedReasoningEfforts.contains {
+            $0.reasoningEffort == effort
+        } == true
     }
 
     private var errorPresented: Binding<Bool> {
@@ -912,31 +1207,82 @@ private struct ToolInformationCard: View {
 
 private struct NewDynamicProfileSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let modelOptions: [ProfileModelOption]
-    let onCreate: (String, String, ProfileBaseModelID, Bool) -> Bool
+    let coordinatorOptions: [ProfileModelOption]
+    let workerOptions: [ProfileModelOption]
+    let codexModels: [CodexModelDescriptor]
+    let codexDefaultReasoningOptions: [CodexReasoningOption]
+    let onCreate: (
+        String,
+        String,
+        ProfileBaseModelID,
+        String?,
+        String?,
+        CodexReasoningEffort?,
+        ProfileExecutionRole,
+        Bool
+    ) -> Bool
     @State private var name = ""
     @State private var summary = ""
     @State private var baseModelID: ProfileBaseModelID
+    @State private var workerModelID = ProfileBaseModelID.llama.rawValue
+    @State private var codexModelID: String
+    @State private var codexReasoningEffort: String
+    @State private var executionRole: ProfileExecutionRole
     @State private var copyDefaults = false
     @FocusState private var nameFocused: Bool
 
     init(
         initialBaseModel: ProfileBaseModelID,
+        initialExecutionRole: ProfileExecutionRole,
         initialCopyDefaults: Bool,
         modelOptions: [ProfileModelOption],
-        onCreate: @escaping (String, String, ProfileBaseModelID, Bool) -> Bool
+        coordinatorOptions: [ProfileModelOption],
+        workerOptions: [ProfileModelOption],
+        codexModels: [CodexModelDescriptor],
+        codexDefaultReasoningOptions: [CodexReasoningOption],
+        initialCodexModelID: String?,
+        initialCodexReasoningEffort: CodexReasoningEffort?,
+        onCreate: @escaping (
+            String,
+            String,
+            ProfileBaseModelID,
+            String?,
+            String?,
+            CodexReasoningEffort?,
+            ProfileExecutionRole,
+            Bool
+        ) -> Bool
     ) {
         self.modelOptions = modelOptions
+        self.coordinatorOptions = coordinatorOptions
+        self.workerOptions = workerOptions
+        self.codexModels = codexModels
+        self.codexDefaultReasoningOptions = codexDefaultReasoningOptions
         self.onCreate = onCreate
         _baseModelID = State(initialValue: initialBaseModel)
+        _executionRole = State(initialValue: initialExecutionRole)
         _copyDefaults = State(initialValue: initialCopyDefaults)
+        _codexModelID = State(initialValue: initialCodexModelID ?? "")
+        let initialModel = codexModels.first {
+            $0.id == initialCodexModelID
+        }
+        let initialEffort = initialCodexReasoningEffort.flatMap { effort in
+            initialModel?.supportedReasoningEfforts.contains(where: {
+                $0.reasoningEffort == effort
+            }) == false ? initialModel?.defaultReasoningEffort : effort
+        }
+        _codexReasoningEffort = State(
+            initialValue: initialEffort?.rawValue ?? ""
+        )
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 4) {
                 Text("New Profile").font(.system(size: 21, weight: .semibold))
-                Text("Choose a model and a starting point. Capabilities can be composed next.")
+                Text("Choose what the profile does. Advanced capabilities can be composed next.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -954,13 +1300,81 @@ private struct NewDynamicProfileSheet: View {
                         .textFieldStyle(.roundedBorder)
                 }
                 GridRow {
-                    Text("Model")
-                    Picker("Model", selection: $baseModelID) {
-                        ForEach(modelOptions) { option in
-                            Text(option.id.displayName).tag(option.id)
+                    Text("Execution")
+                    Picker("Execution", selection: executionRoleBinding) {
+                        ForEach(ProfileExecutionRole.allCases) { role in
+                            Text(role.displayName).tag(role)
                         }
                     }
+                    .pickerStyle(.segmented)
                     .labelsHidden()
+                }
+                GridRow {
+                    Text(executionRole == .coordinatorWorker ? "Coordinator" : "Model")
+                    if executionRole == .coordinatorWorker {
+                        Picker("Coordinator", selection: $baseModelID) {
+                            ForEach(coordinatorOptions) { option in
+                                Label(option.id.displayName, systemImage: option.id.systemImage)
+                                    .tag(option.id)
+                                    .disabled(!option.isAvailable)
+                            }
+                        }
+                        .labelsHidden()
+                        .transition(.opacity)
+                    } else {
+                        Picker("Model", selection: $baseModelID) {
+                            ForEach(modelOptions) { option in
+                                Text(option.id.displayName).tag(option.id)
+                            }
+                        }
+                        .labelsHidden()
+                        .transition(.opacity)
+                    }
+                }
+                if executionRole == .coordinatorWorker {
+                    if baseModelID == .codex {
+                        GridRow {
+                            Text("Codex model")
+                            Picker("Codex model", selection: codexModelBinding) {
+                                Text("Codex Default").tag("")
+                                if !codexModelID.isEmpty,
+                                   !codexModels.contains(where: {
+                                       $0.id == codexModelID
+                                   }) {
+                                    Text(codexModelID).tag(codexModelID)
+                                }
+                                ForEach(codexModels) { model in
+                                    Text(model.displayName).tag(model.id)
+                                }
+                            }
+                            .labelsHidden()
+                        }
+                        GridRow {
+                            Text("Reasoning")
+                            Picker("Reasoning", selection: codexReasoningBinding) {
+                                Text("Model Default").tag("")
+                                ForEach(
+                                    codexReasoningOptions,
+                                    id: \.reasoningEffort.rawValue
+                                ) { option in
+                                    Text(option.reasoningEffort.displayName)
+                                        .tag(option.reasoningEffort.rawValue)
+                                }
+                            }
+                            .labelsHidden()
+                        }
+                    }
+                    GridRow {
+                        Text("Worker")
+                        Picker("Worker", selection: $workerModelID) {
+                            ForEach(workerOptions) { option in
+                                Label(option.id.displayName, systemImage: option.id.systemImage)
+                                    .tag(option.id.rawValue)
+                                    .disabled(!option.isAvailable)
+                            }
+                        }
+                        .labelsHidden()
+                    }
                 }
                 GridRow {
                     Text("Start with")
@@ -973,26 +1387,121 @@ private struct NewDynamicProfileSheet: View {
                 }
             }
 
-            Text(copyDefaults
-                 ? "Copies the model's current tools and installed skills into an explicit list."
-                 : "Starts with no tools or skills, ideal for a focused workflow.")
+            Text(executionRole == .coordinatorWorker
+                 ? (baseModelID == .codex
+                    ? "Codex model and reasoning are saved with this route; Delegate Task is managed automatically for the worker."
+                    : "\(baseModelID.displayName) will coordinate and Delegate Task will be managed automatically for the selected worker.")
+                 : (copyDefaults
+                    ? "Copies the model's current tools and installed skills into an explicit list."
+                    : "Starts with no tools or skills, ideal for a focused workflow."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .contentTransition(.opacity)
 
             HStack {
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Create") {
-                    if onCreate(name, summary, baseModelID, copyDefaults) { dismiss() }
+                    if onCreate(
+                        name,
+                        summary,
+                        baseModelID,
+                        executionRole == .coordinatorWorker ? workerModelID : nil,
+                        baseModelID == .codex && !codexModelID.isEmpty
+                            ? codexModelID
+                            : nil,
+                        baseModelID == .codex
+                            ? CodexReasoningEffort(
+                                rawValue: codexReasoningEffort
+                            )
+                            : nil,
+                        executionRole,
+                        copyDefaults
+                    ) {
+                        dismiss()
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(
+                    name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        || !selectionIsAvailable
+                )
             }
         }
         .padding(24)
         .frame(width: 510)
         .onAppear { nameFocused = true }
+        .animation(
+            reduceMotion ? nil : .easeInOut(duration: 0.16),
+            value: executionRole
+        )
+        .animation(
+            reduceMotion ? nil : .easeInOut(duration: 0.16),
+            value: baseModelID
+        )
+    }
+
+    private var codexReasoningOptions: [CodexReasoningOption] {
+        codexModels.first(where: { $0.id == codexModelID })?
+            .supportedReasoningEfforts
+            ?? codexDefaultReasoningOptions
+    }
+
+    private var codexReasoningBinding: Binding<String> {
+        Binding(
+            get: { codexReasoningEffort },
+            set: { codexReasoningEffort = $0 }
+        )
+    }
+
+    private var codexModelBinding: Binding<String> {
+        Binding(
+            get: { codexModelID },
+            set: { value in
+                codexModelID = value
+                guard let effort = CodexReasoningEffort(
+                    rawValue: codexReasoningEffort
+                ) else { return }
+                if !codexReasoningOptions.contains(where: {
+                    $0.reasoningEffort == effort
+                }) {
+                    codexReasoningEffort = ""
+                }
+            }
+        )
+    }
+
+    private var executionRoleBinding: Binding<ProfileExecutionRole> {
+        Binding(
+            get: { executionRole },
+            set: { role in
+                executionRole = role
+                if role == .coordinatorWorker {
+                    // Keep the visible form consistent with the runtime
+                    // invariant before the user confirms creation. DeepSeek
+                    // remains the conservative default; Llama is selectable
+                    // from the coordinator picker.
+                    baseModelID = .deepseek
+                }
+            }
+        )
+    }
+
+    /// Prevents saving a route that cannot be run while still leaving every
+    /// configured choice visible in its contextual picker.
+    private var selectionIsAvailable: Bool {
+        if executionRole == .coordinatorWorker {
+            return coordinatorOptions.first(where: {
+                $0.id == baseModelID
+            })?.isAvailable == true
+                && workerOptions.first(where: {
+                    $0.id.rawValue == workerModelID
+                })?.isAvailable == true
+        }
+        return modelOptions.first(where: {
+            $0.id == baseModelID
+        })?.isAvailable == true
     }
 }

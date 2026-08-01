@@ -54,6 +54,12 @@ extension ChatStore {
         toolInteractionStore.activeActivity
     }
 
+    /// Activity is conversation-local and intentionally excluded from session
+    /// persistence until a later release defines a durable task ledger.
+    var currentAgentActivity: AgentActivity? {
+        agentActivityStore.current
+    }
+
     public var isFirstMessage: Bool {
         get { timelineStore.isFirstMessage }
         set { timelineStore.isFirstMessage = newValue }
@@ -122,16 +128,6 @@ extension ChatStore {
         guard let inspectedWorkspaceListingID else { return nil }
         return timelineStore.block(id: inspectedWorkspaceListingID)?
             .workspaceListing
-    }
-
-    public var terminalOpen: Bool {
-        get { workbenchStore.terminalOpen }
-        set { workbenchStore.terminalOpen = newValue }
-    }
-
-    public var terminalHeight: CGFloat {
-        get { workbenchStore.terminalHeight }
-        set { workbenchStore.terminalHeight = newValue }
     }
 
     public var workspaceRoot: String {
@@ -205,6 +201,12 @@ extension ChatStore {
 
     var codexModel: CodexModelDescriptor? {
         codexRuntimeStore.model
+    }
+
+    /// Exposes the direct-Codex default separately from a coordinator model
+    /// temporarily presented by the active runtime.
+    var codexPreferredModel: CodexModelDescriptor? {
+        codexRuntimeStore.preferredModel
     }
 
     var codexModels: [CodexModelDescriptor] {

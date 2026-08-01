@@ -11,7 +11,7 @@ public final class SettingsStore {
         didSet { UserDefaults.standard.set(theme.rawValue, forKey: "theme") }
     }
     public var language: String = "en"
-    public var fontSize: Double = 16.0 {
+    public var fontSize: Double = 17.0 {
         didSet { UserDefaults.standard.set(fontSize, forKey: "fontSize") }
     }
     public var maxChatWidth: Double = 1440.0 {
@@ -80,16 +80,20 @@ public final class SettingsStore {
         language = defaults.string(forKey: "language") ?? "en"
         let savedFontSize = defaults.double(forKey: "fontSize")
         let typographyVersion = defaults.integer(forKey: "chatTypographyVersion")
-        if typographyVersion < 2 {
-            // Version 2 adopts a denser conversation scale. Preserve explicit
-            // non-default choices while migrating the previous 17 pt default.
-            fontSize = savedFontSize == 0 || savedFontSize == 15 || savedFontSize == 17
-                ? 16
+        if typographyVersion < 3 {
+            // Version 3 restores the reference reading scale. The values 15,
+            // 16, and 17 were defaults across earlier typography revisions;
+            // other slider values remain explicit user choices.
+            fontSize = savedFontSize == 0
+                || savedFontSize == 15
+                || savedFontSize == 16
+                || savedFontSize == 17
+                ? 17
                 : savedFontSize
             defaults.set(fontSize, forKey: "fontSize")
-            defaults.set(2, forKey: "chatTypographyVersion")
+            defaults.set(3, forKey: "chatTypographyVersion")
         } else {
-            fontSize = savedFontSize == 0 ? 16 : savedFontSize
+            fontSize = savedFontSize == 0 ? 17 : savedFontSize
         }
         let savedMaxWidth = defaults.double(forKey: "maxChatWidth")
         let layoutWidthVersion = defaults.integer(forKey: "chatLayoutWidthVersion")
@@ -104,16 +108,30 @@ public final class SettingsStore {
         }
         reloadAgentTuning()
         reloadRemoteModels()
+        // Do not read provider secrets while restoring general settings. The
+        // Provider pane loads this value only when the user opens it.
+        ChatStore.shared?.reloadRemoteModels()
+    }
+
+    /// Loads the existing provider secret for deliberate credential
+    /// management in Settings, keeping normal application launch lazy.
+    public func loadDeepSeekCredentialForSettings() {
+        guard !isLoadingCredentials else { return }
         isLoadingCredentials = true
+        let defaults = UserDefaults.standard
         if let stored = CredentialStore.value(for: "deepseek") {
             deepseekAPIKey = stored
         } else if let legacy = defaults.string(forKey: "deepseekAPIKey"), !legacy.isEmpty {
+            // Migrate the pre-Keychain value only after the user explicitly
+            // opens provider settings, keeping launch free of secret access.
             deepseekAPIKey = legacy
             try? CredentialStore.set(legacy, for: "deepseek")
             defaults.removeObject(forKey: "deepseekAPIKey")
+        } else {
+            deepseekAPIKey = ""
         }
         isLoadingCredentials = false
-        ChatStore.shared?.reloadRemoteModels()
+        credentialError = nil
     }
 
     public func reloadRemoteModels() {

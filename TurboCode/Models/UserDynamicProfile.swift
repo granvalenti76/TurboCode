@@ -5,6 +5,17 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
     case llama
     case pcc = "apple-pcc"
     case deepseek
+    case codex
+
+    /// Only provider-backed defaults belong in the profile library. Codex is
+    /// configured contextually as a coordinator; direct Codex selection remains
+    /// owned by the composer while a coordinator route can pin its own model.
+    static let builtInCases: [Self] = [.onDevice, .llama, .pcc, .deepseek]
+    /// These providers expose the structured `delegate_task` route. Llama is
+    /// OpenAI-compatible, so it can coordinate through the same adapter used
+    /// by DeepSeek without a provider-specific transport workaround.
+    static let coordinatorCases: [Self] = [.llama, .deepseek, .codex]
+    static let workerCases: [Self] = [.pcc, .llama, .deepseek]
 
     var id: String { rawValue }
 
@@ -14,6 +25,7 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
         case .llama: "Llama"
         case .pcc: "Apple PCC"
         case .deepseek: "DeepSeek"
+        case .codex: "Codex"
         }
     }
 
@@ -23,11 +35,38 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
         case .llama: "desktopcomputer"
         case .pcc: "cloud"
         case .deepseek: "sparkles"
+        case .codex: "chevron.left.forwardslash.chevron.right"
         }
     }
 
     var remoteModelID: String? {
-        self == .onDevice ? nil : rawValue
+        switch self {
+        case .onDevice, .codex: nil
+        case .llama, .pcc, .deepseek: rawValue
+        }
+    }
+}
+
+nonisolated enum ProfileExecutionRole: String, CaseIterable, Identifiable, Sendable, Hashable {
+    case direct
+    case coordinatorWorker
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .direct: "Direct Model"
+        case .coordinatorWorker: "Coordinator → Worker"
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .direct:
+            "The selected model handles requests with its included capabilities."
+        case .coordinatorWorker:
+            "The coordinator plans the request and delegates bounded implementation tasks to the selected worker."
+        }
     }
 }
 
@@ -36,6 +75,17 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     var name: String
     var summary: String
     var baseModelID: ProfileBaseModelID
+    /// The provider-backed worker used only when this is a coordinator route.
+    ///
+    /// `nil` is retained for profiles written before M4.3 and resolves through
+    /// the global worker preference, preserving their previous behavior.
+    var workerModelID: String?
+    /// Optional App Server selections owned by a Codex coordinator route.
+    ///
+    /// Missing values deliberately mean "use the current Codex default", so
+    /// profiles written before this field existed remain valid and selectable.
+    var codexModelID: String?
+    var codexReasoningEffort: CodexReasoningEffort?
     var greedyMode: Bool
     var toolIDs: [String]
     var skillIDs: [String]
@@ -47,6 +97,9 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         name: String,
         summary: String = "",
         baseModelID: ProfileBaseModelID,
+        workerModelID: String? = nil,
+        codexModelID: String? = nil,
+        codexReasoningEffort: CodexReasoningEffort? = nil,
         greedyMode: Bool = false,
         toolIDs: [String] = [],
         skillIDs: [String] = [],
@@ -57,6 +110,9 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         self.name = name
         self.summary = summary
         self.baseModelID = baseModelID
+        self.workerModelID = workerModelID
+        self.codexModelID = codexModelID
+        self.codexReasoningEffort = codexReasoningEffort
         self.greedyMode = greedyMode
         self.toolIDs = toolIDs.uniqued()
         self.skillIDs = skillIDs.uniqued()
@@ -65,7 +121,9 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, summary, baseModelID, greedyMode, toolIDs, skillIDs
+        case id, name, summary, baseModelID, workerModelID
+        case codexModelID, codexReasoningEffort
+        case greedyMode, toolIDs, skillIDs
         case createdAt, updatedAt
     }
 
@@ -75,6 +133,12 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         name = try values.decode(String.self, forKey: .name)
         summary = try values.decodeIfPresent(String.self, forKey: .summary) ?? ""
         baseModelID = try values.decode(ProfileBaseModelID.self, forKey: .baseModelID)
+        workerModelID = try values.decodeIfPresent(String.self, forKey: .workerModelID)
+        codexModelID = try values.decodeIfPresent(String.self, forKey: .codexModelID)
+        codexReasoningEffort = try values.decodeIfPresent(
+            CodexReasoningEffort.self,
+            forKey: .codexReasoningEffort
+        )
         greedyMode = try values.decodeIfPresent(Bool.self, forKey: .greedyMode) ?? false
         toolIDs = try values.decodeIfPresent([String].self, forKey: .toolIDs) ?? []
         skillIDs = try values.decodeIfPresent([String].self, forKey: .skillIDs) ?? []
@@ -93,18 +157,86 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         if !skillIDs.isEmpty {
             result.insert(.loadSkill)
         }
+        if !ProfileBaseModelID.coordinatorCases.contains(baseModelID) {
+            // Delegate Task is a managed production route, not a portable
+            // capability that arbitrary custom models may enable by stale data.
+            result.remove(.delegateTask)
+        }
         return result
+    }
+
+    /// Identifies the production coordinator route exposed in the composer.
+    ///
+    /// A profile name alone never changes runtime semantics: the 0.2.0 route is
+    /// intentionally limited to supported coordinators plus typed delegation.
+    var isCoordinatorProfile: Bool {
+        ProfileBaseModelID.coordinatorCases.contains(baseModelID)
+            && resolvedToolIDs.contains(.delegateTask)
+    }
+
+    /// Exposes product intent without persisting a second source of truth.
+    /// Existing profiles therefore migrate automatically from their model and
+    /// typed capability configuration.
+    var executionRole: ProfileExecutionRole {
+        isCoordinatorProfile ? .coordinatorWorker : .direct
+    }
+
+    /// Applies route intent atomically so the editor cannot save a coordinator
+    /// without the model and typed delegation capability required at runtime.
+    mutating func setExecutionRole(_ role: ProfileExecutionRole) {
+        switch role {
+        case .direct:
+            toolIDs.removeAll { $0 == ToolCapabilityID.delegateTask.rawValue }
+            if baseModelID == .codex {
+                // Codex custom profiles are currently route definitions; its
+                // direct model/reasoning surface remains in the composer.
+                // Returning to direct execution therefore selects the existing
+                // customizable powerful-model profile instead of showing a
+                // model that this editor cannot truthfully customize.
+                baseModelID = .deepseek
+            }
+        case .coordinatorWorker:
+            if !ProfileBaseModelID.coordinatorCases.contains(baseModelID) {
+                baseModelID = .deepseek
+            }
+            // New routes are self-contained. Older routes may still carry nil
+            // until edited, at which point the visible default becomes explicit.
+            workerModelID = workerModelID ?? ProfileBaseModelID.llama.rawValue
+            greedyMode = false
+            if !toolIDs.contains(ToolCapabilityID.delegateTask.rawValue) {
+                toolIDs.append(ToolCapabilityID.delegateTask.rawValue)
+            }
+        }
     }
 
     func validated() throws -> UserDynamicProfile {
         var value = self
         value.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         value.summary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        value.workerModelID = workerModelID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        value.codexModelID = codexModelID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.codexModelID?.isEmpty == true {
+            value.codexModelID = nil
+        }
         guard !value.name.isEmpty else { throw UserDynamicProfileError.missingName }
         guard value.name.count <= 64 else { throw UserDynamicProfileError.nameTooLong }
         value.toolIDs = toolIDs.uniqued()
         value.skillIDs = skillIDs.uniqued()
         return value
+    }
+
+    /// Resolves legacy profiles through the prior global preference while new
+    /// profiles keep the route reproducible in their persisted definition.
+    func resolvedWorkerModelID(fallback: String) -> String {
+        guard let workerModelID,
+              ProfileBaseModelID.workerCases.contains(where: {
+                  $0.rawValue == workerModelID
+              }) else {
+            return fallback
+        }
+        return workerModelID
     }
 }
 

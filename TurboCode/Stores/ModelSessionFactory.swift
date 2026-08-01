@@ -21,9 +21,44 @@ struct ModelSessionConfiguration {
 }
 
 struct ModelSessionEvents {
-    let toolStarted: @Sendable (Transcript.ToolCall, ModelBackend) async -> Void
-    let toolFinished: @Sendable (Transcript.ToolCall, Transcript.ToolOutput, ModelBackend) async -> Void
+    let toolStarted: @Sendable (
+        Transcript.ToolCall,
+        ModelBackend,
+        AgentActivityToolOwner
+    ) async -> Void
+    let toolFinished: @Sendable (
+        Transcript.ToolCall,
+        Transcript.ToolOutput,
+        ModelBackend,
+        AgentActivityToolOwner
+    ) async -> Void
     let delegationChanged: @Sendable (Bool) async -> Void
+    let agentActivityChanged: @Sendable (
+        AgentActivityRuntimeEvent
+    ) async -> Void
+
+    init(
+        toolStarted: @escaping @Sendable (
+            Transcript.ToolCall,
+            ModelBackend,
+            AgentActivityToolOwner
+        ) async -> Void,
+        toolFinished: @escaping @Sendable (
+            Transcript.ToolCall,
+            Transcript.ToolOutput,
+            ModelBackend,
+            AgentActivityToolOwner
+        ) async -> Void,
+        delegationChanged: @escaping @Sendable (Bool) async -> Void,
+        agentActivityChanged: @escaping @Sendable (
+            AgentActivityRuntimeEvent
+        ) async -> Void = { _ in }
+    ) {
+        self.toolStarted = toolStarted
+        self.toolFinished = toolFinished
+        self.delegationChanged = delegationChanged
+        self.agentActivityChanged = agentActivityChanged
+    }
 }
 
 struct ResolvedModelCapabilities {
@@ -92,8 +127,13 @@ enum ModelSessionFactory {
         )
         let samplingMode = profileSamplingMode(configuration.activeDynamicProfile)
         let temperature = samplingMode == nil ? configuration.activeTemperature : nil
+        let routing = ModelRoutingPolicy.resolve(
+            backend: configuration.backend,
+            mode: configuration.orchestratorMode,
+            activeProfile: configuration.activeDynamicProfile
+        )
 
-        if configuration.orchestratorMode == .orchestrator,
+        if routing.role == .experimentalOnDeviceCoordinator,
            activeCapabilities.toolAccess != .none {
             return makeOrchestratorSession(
                 configuration: configuration,
@@ -108,7 +148,9 @@ enum ModelSessionFactory {
             return makeToollessSession(
                 instructions: systemPrompt(
                     for: configuration,
-                    role: .standalone,
+                    role: routing.role == .microtaskOnDevice
+                        ? .microtask
+                        : .standalone,
                     backend: configuration.backend,
                     plan: nil
                 ),
@@ -121,7 +163,7 @@ enum ModelSessionFactory {
         }
 
         let standalonePlan = ModelToolCatalog.plan(
-            profile: .standalone,
+            profile: routing.profile,
             tier: activeCapabilities.toolAccess,
             context: toolContext(
                 for: configuration,
@@ -132,10 +174,36 @@ enum ModelSessionFactory {
         let usesExclusiveToolSelection = configuration.activeDynamicProfile != nil
         let instructions = systemPrompt(
             for: configuration,
-            role: .standalone,
+            role: routing.role == .microtaskOnDevice ? .microtask : .standalone,
             backend: configuration.backend,
             plan: standalonePlan
         )
+        var standaloneTools = toolInstances(
+            for: standalonePlan,
+            configuration: configuration,
+            including: usesExclusiveToolSelection ? nil : [
+                    .turboCodeGuide,
+                    .listWorkspace,
+                    .swiftWorkspaceMap,
+                    .xcodeProject,
+                    .writeOnDevice,
+                    .removeFile
+                ],
+            repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
+                ?? 32_768
+        )
+        if standalonePlan.contains(.delegateTask) {
+            // Dynamic powerful-model profiles receive the production structured
+            // coordinator adapter; ordinary standalone profiles do not gain it.
+            standaloneTools.append(
+                DelegateTaskTool(
+                    invoker: makeDelegateInvoker(
+                        configuration: configuration,
+                        events: events
+                    )
+                )
+            )
+        }
 
         return LanguageModelSession(
             profile: StandaloneProfile(
@@ -154,25 +222,21 @@ enum ModelSessionFactory {
                 gitPolicy: configuration.agentTuning.git,
                 toolPlan: standalonePlan,
                 usesExclusiveToolSelection: usesExclusiveToolSelection,
-                supplementalTools: toolInstances(
-                    for: standalonePlan,
-                    configuration: configuration,
-                    including: usesExclusiveToolSelection ? nil : [
-                            .turboCodeGuide,
-                            .listWorkspace,
-                            .swiftWorkspaceMap,
-                            .xcodeProject,
-                            .writeOnDevice,
-                            .removeFile
-                        ],
-                    repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
-                        ?? 32_768
-                ),
+                supplementalTools: standaloneTools,
                 onToolStart: { call in
-                    await events.toolStarted(call, configuration.backend)
+                    await events.toolStarted(
+                        call,
+                        configuration.backend,
+                        .coordinator
+                    )
                 },
                 onToolEnd: { call, output in
-                    await events.toolFinished(call, output, configuration.backend)
+                    await events.toolFinished(
+                        call,
+                        output,
+                        configuration.backend,
+                        .coordinator
+                    )
                 }
             ),
             history: history
@@ -223,6 +287,7 @@ enum ModelSessionFactory {
             model: delegateModel,
             temperature: configuration.delegateTemperature,
             reasoningLevel: delegateCapabilities.reasoningLevel,
+            delegatePlan: delegatePlan,
             delegateTools: toolInstances(
                 for: delegatePlan,
                 configuration: configuration,
@@ -230,11 +295,25 @@ enum ModelSessionFactory {
             ),
             delegateInstructions: delegateInstructions,
             onToolStart: { call in
-                await events.toolStarted(call, delegateBackend)
+                await events.toolStarted(call, delegateBackend, .worker)
             },
             onToolEnd: { call, output in
-                await events.toolFinished(call, output, delegateBackend)
-            }
+                await events.toolFinished(
+                    call,
+                    output,
+                    delegateBackend,
+                    .worker
+                )
+            },
+            coordinator: AgentActivityAgent(
+                modelName: "Apple On-Device",
+                role: .experimentalOnDeviceCoordinator
+            ),
+            worker: AgentActivityAgent(
+                modelName: configuration.delegateRemoteModel.name,
+                role: .codingWorker
+            ),
+            activityChanged: events.agentActivityChanged
         )
 
         let orchestratorPlan = ModelToolCatalog.plan(
@@ -262,10 +341,19 @@ enum ModelSessionFactory {
                 tools: orchestratorTools,
                 model: activeModel,
                 onToolStart: { call in
-                    await events.toolStarted(call, .foundationApple)
+                    await events.toolStarted(
+                        call,
+                        .foundationApple,
+                        .coordinator
+                    )
                 },
                 onToolEnd: { call, output in
-                    await events.toolFinished(call, output, .foundationApple)
+                    await events.toolFinished(
+                        call,
+                        output,
+                        .foundationApple,
+                        .coordinator
+                    )
                 },
                 onDelegationStart: {
                     await events.delegationChanged(true)
@@ -353,18 +441,132 @@ enum ModelSessionFactory {
                     enhancedOutput: plan.tier == .enhanced
                 )
             case .editFile:
+                // Keep revision-bound edits on their dedicated implementation;
+                // coordinator routing must not change workspace safety semantics.
                 return EditFileTool(workspaceRoot: configuration.workspaceRoot)
             case .writeOnDevice:
+                // The constrained on-device writer remains distinct from the
+                // broader edit tool so its intentionally small schema survives.
                 return WriteOnDeviceTool(workspaceRoot: configuration.workspaceRoot)
             case .removeFile:
                 return RemoveFileTool(workspaceRoot: configuration.workspaceRoot)
             case .loadSkill:
                 guard !configuration.availableSkills.isEmpty else { return nil }
                 return LoadSkillTool(skills: configuration.availableSkills)
-            case .callPowerfulModel:
+            case .delegateTask, .callPowerfulModel:
                 return nil
             }
         }
+    }
+
+    /// Builds the shared worker invocation used by every coordinator adapter.
+    /// Provider bridges should depend on this boundary instead of recreating
+    /// worker model, tool-plan, or event wiring.
+    static func makeDelegateInvoker(
+        configuration: ModelSessionConfiguration,
+        events: ModelSessionEvents,
+        runner: (any AgentTaskRunning)? = nil
+    ) -> ConfiguredAgentTaskInvoker {
+        let delegateModel = providerModel(for: configuration.delegateRemoteModel)
+        let delegateBackend = backend(for: configuration.delegateRemoteModel.role)
+        let capabilities = ModelCapabilityPolicy.resolve(
+            for: delegateModel,
+            requestedReasoningLevel: configuration.delegateReasoningLevel,
+            preferredToolAccess: preferredToolTier(
+                backend: delegateBackend,
+                remoteModel: configuration.delegateRemoteModel
+            )
+        )
+        let plan = ModelToolCatalog.plan(
+            profile: .delegate,
+            tier: capabilities.toolAccess,
+            context: toolContext(
+                for: configuration,
+                repositoryMap: configuration.delegateRemoteModel.repositoryMap
+            )
+        )
+        let resolvedRunner = runner ?? BoundedAgentTaskRunner(
+            verifier: XcodeAgentTaskVerifier(
+                executionPolicy: configuration.agentTuning.execution,
+                enhancedOutput: capabilities.toolAccess == .enhanced
+            )
+        )
+        return ConfiguredAgentTaskInvoker(
+            runner: resolvedRunner,
+            context: AgentTaskRunContext(
+                model: delegateModel,
+                toolPlan: plan,
+                tools: toolInstances(
+                    for: plan,
+                    configuration: configuration,
+                    repositoryMapContextTokens:
+                        configuration.delegateRemoteModel.contextWindowTokens
+                ),
+                workspaceRoot: configuration.workspaceRoot,
+                instructions: systemPrompt(
+                    for: configuration,
+                    role: .delegate,
+                    backend: delegateBackend,
+                    plan: plan
+                ),
+                temperature: configuration.delegateTemperature,
+                reasoningLevel: capabilities.reasoningLevel
+            ),
+            events: AgentTaskRunnerEvents(
+                toolStarted: { event in
+                    await events.agentActivityChanged(
+                        .toolStarted(
+                            taskID: event.taskID,
+                            attemptID: event.attemptID,
+                            tool: AgentActivityRuntimeMapping.tool(
+                                from: event.call,
+                                owner: .worker
+                            )
+                        )
+                    )
+                    await events.toolStarted(
+                        event.call,
+                        delegateBackend,
+                        .worker
+                    )
+                },
+                toolFinished: { event in
+                    await events.agentActivityChanged(
+                        .toolFinished(
+                            taskID: event.taskID,
+                            attemptID: event.attemptID,
+                            callID: event.call.id
+                        )
+                    )
+                    await events.toolFinished(
+                        event.call,
+                        event.output,
+                        delegateBackend,
+                        .worker
+                    )
+                },
+                verificationStarted: { taskID, attemptID, _ in
+                    await events.agentActivityChanged(
+                        .phaseChanged(
+                            taskID: taskID,
+                            attemptID: attemptID,
+                            phase: .verifying
+                        )
+                    )
+                }
+            ),
+            coordinator: AgentActivityAgent(
+                modelName: configuration.activeDynamicProfile?.name
+                    ?? configuration.activeRemoteModel?.name
+                    ?? "Coordinator",
+                role: .powerfulCoordinator
+            ),
+            worker: AgentActivityAgent(
+                modelName: configuration.delegateRemoteModel.name,
+                role: .codingWorker
+            ),
+            activityChanged: events.agentActivityChanged
+        )
     }
 
     private static func toolContext(
@@ -410,7 +612,7 @@ enum ModelSessionFactory {
     private static func providerModel(for model: RemoteModelConfig) -> ProviderLanguageModel {
         ProviderLanguageModel(
             configuration: model,
-            apiKey: model.credential.flatMap(CredentialStore.value(for:))
+            credential: model.credential
         )
     }
 

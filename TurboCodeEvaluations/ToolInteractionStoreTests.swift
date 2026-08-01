@@ -34,6 +34,19 @@ struct ToolInteractionStoreTests {
         #expect(store.pendingApproval == nil)
     }
 
+    @Test("Stopping drains visible and queued approvals together")
+    func stoppingDrainsEveryApproval() {
+        let store = ToolInteractionStore()
+        store.enqueueApproval(approval(id: "visible"))
+        store.enqueueApproval(approval(id: "queued"))
+
+        let stopped = store.takeAllApprovals()
+
+        #expect(stopped.map(\.id) == ["visible", "queued"])
+        #expect(store.pendingApproval == nil)
+        #expect(store.takePendingApproval() == nil)
+    }
+
     @Test("Beginning an existing activity replaces and promotes it")
     func beginningExistingActivityReplacesAndPromotesIt() {
         let store = ToolInteractionStore()

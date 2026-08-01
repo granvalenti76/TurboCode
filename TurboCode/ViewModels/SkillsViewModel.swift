@@ -62,10 +62,18 @@ final class SkillsViewModel {
         name: String,
         summary: String,
         baseModelID: ProfileBaseModelID,
+        workerModelID: String? = nil,
+        codexModelID: String? = nil,
+        codexReasoningEffort: CodexReasoningEffort? = nil,
+        executionRole: ProfileExecutionRole = .direct,
         copyDefaults: Bool,
         settings: SettingsStore
     ) -> Bool {
-        let option = modelOption(for: baseModelID, settings: settings)
+        // Resolve defaults from the visible coordinator or direct model before
+        // the execution role adds its managed delegation capability. Codex
+        // route selections stay profile data rather than global settings.
+        let effectiveBaseModelID = baseModelID
+        let option = modelOption(for: effectiveBaseModelID, settings: settings)
         let toolIDs = copyDefaults
             ? option.defaultToolIDs.subtracting([.loadSkill]).map(\.rawValue).sorted()
             : []
@@ -74,10 +82,14 @@ final class SkillsViewModel {
             var profile = UserDynamicProfile(
                 name: name,
                 summary: summary,
-                baseModelID: baseModelID,
+                baseModelID: effectiveBaseModelID,
+                workerModelID: workerModelID,
+                codexModelID: codexModelID,
+                codexReasoningEffort: codexReasoningEffort,
                 toolIDs: toolIDs,
                 skillIDs: skillIDs
             )
+            profile.setExecutionRole(executionRole)
             profile = try profile.validated()
             try ensureUniqueName(profile.name, excluding: nil)
             profiles.append(profile)
@@ -151,6 +163,12 @@ final class SkillsViewModel {
         }
     }
 
+    /// Changes product-level execution intent as one edit. The technical
+    /// `delegate_task` capability remains managed and out of the drag surface.
+    func setExecutionRole(_ role: ProfileExecutionRole) {
+        updateDraft { $0.setExecutionRole(role) }
+    }
+
     func containsSkill(_ name: String) -> Bool {
         draft?.skillIDs.contains(name) == true
     }
@@ -166,7 +184,21 @@ final class SkillsViewModel {
     }
 
     func modelOptions(settings: SettingsStore) -> [ProfileModelOption] {
-        ProfileBaseModelID.allCases.map { modelOption(for: $0, settings: settings) }
+        ProfileBaseModelID.builtInCases.map {
+            modelOption(for: $0, settings: settings)
+        }
+    }
+
+    func coordinatorOptions(settings: SettingsStore) -> [ProfileModelOption] {
+        ProfileBaseModelID.coordinatorCases.map {
+            modelOption(for: $0, settings: settings)
+        }
+    }
+
+    func workerOptions(settings: SettingsStore) -> [ProfileModelOption] {
+        ProfileBaseModelID.workerCases.map {
+            modelOption(for: $0, settings: settings)
+        }
     }
 
     func modelOption(for id: ProfileBaseModelID, settings: SettingsStore) -> ProfileModelOption {
@@ -198,6 +230,7 @@ final class SkillsViewModel {
         case .llama: subtitle = "Local OpenAI-compatible model"
         case .pcc: subtitle = "Private Cloud Compute"
         case .deepseek: subtitle = "Enhanced coding model"
+        case .codex: subtitle = "Codex App Server with ChatGPT"
         }
         return ProfileModelOption(
             id: id,
@@ -205,7 +238,11 @@ final class SkillsViewModel {
             tier: tier,
             defaultToolIDs: defaults,
             compatibleToolIDs: compatible,
-            isAvailable: id == .onDevice || (remote?.enabled == true && isConfigured(remote))
+            // Authentication remains a visible runtime state for Codex, so its
+            // coordinator option must stay selectable before ChatGPT sign-in.
+            isAvailable: id == .onDevice
+                || id == .codex
+                || (remote?.enabled == true && isConfigured(remote))
         )
     }
 

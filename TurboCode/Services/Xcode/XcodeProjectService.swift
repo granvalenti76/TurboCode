@@ -36,8 +36,40 @@ struct XcodeProjectService: Sendable {
                 configuration: normalized(configuration),
                 destination: normalized(destination),
                 timeoutSeconds: timeout
-            )
+            ).summary
         }
+    }
+
+    /// Executes a build or test and exposes a typed outcome for orchestration.
+    /// Tool UI continues to consume `response`, while verification never parses
+    /// the human-readable Xcode summary to decide whether work is verified.
+    func verification(
+        request: VerificationRequest,
+        parameters: AgentVerificationParameters?,
+        timeoutSeconds: Int?
+    ) async throws -> XcodeVerificationExecution {
+        let action: XcodeProjectAction = switch request {
+        case .build: .build
+        case .test: .test
+        case .none:
+            throw XcodeProjectError.unsupportedAction(request.rawValue)
+        }
+        let container = try XcodeProjectDiscoveryService(workspaceRoot: workspaceRoot)
+            .resolveContainer(path: parameters?.containerPath)
+        let timeout = boundedTimeout(timeoutSeconds)
+        let description = try await inspect(
+            container: container,
+            timeoutSeconds: min(timeout, 45)
+        )
+        let scheme = try resolvedScheme(parameters?.scheme, in: description)
+        return try await execute(
+            action: action,
+            description: description,
+            scheme: scheme,
+            configuration: normalized(parameters?.configuration),
+            destination: normalized(parameters?.destination),
+            timeoutSeconds: timeout
+        )
     }
 
     private func inspect(
@@ -81,7 +113,7 @@ struct XcodeProjectService: Sendable {
         configuration: String?,
         destination: String?,
         timeoutSeconds: Int
-    ) async throws -> String {
+    ) async throws -> XcodeVerificationExecution {
         let runDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("TurboCode-Xcode-\(UUID().uuidString)", isDirectory: true)
         let resultBundleURL = runDirectory.appendingPathComponent("Result.xcresult", isDirectory: true)
@@ -114,7 +146,7 @@ struct XcodeProjectService: Sendable {
             ? await extractTestReport(at: resultBundleURL, parser: parser)
             : nil
 
-        return renderExecution(
+        let summary = renderExecution(
             action: action,
             description: description,
             scheme: scheme,
@@ -124,6 +156,13 @@ struct XcodeProjectService: Sendable {
             buildReport: buildReport,
             testReport: testReport,
             parser: parser
+        )
+        return XcodeVerificationExecution(
+            succeeded: command.exitCode == 0
+                && !command.timedOut
+                && !command.cancelled,
+            cancelled: command.cancelled,
+            summary: summary
         )
     }
 

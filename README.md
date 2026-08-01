@@ -4,12 +4,38 @@
 
 # TurboCode
 
-**A native macOS coding agent for Swift projects.**
+**A native macOS agent harness for Swift and Xcode.**
 
-TurboCode is an open-source application for macOS 27 that lets you explore how different language models read, edit, build, test, and manage Git-backed Swift projects without leaving a native workspace.
+TurboCode is an open-source agent harness written entirely in Swift for native
+Apple development. It is built around SwiftUI, AppKit, and Apple's Foundation
+Models framework on macOS 27. The agent toolchain has no JavaScript or
+TypeScript runtime: model interaction, typed tool calls, routing, context
+management, and safety boundaries are implemented in Swift.
+
+TurboCode is designed to work across Apple on-device models, local Llama
+servers, Codex, DeepSeek, and Apple Private Cloud Compute through `fm serve`.
+The current release also includes experimental support for a complete agent
+loop on local models, using Foundation Models capabilities such as
+`DynamicProfile`, summarization, context compaction, removal of obsolete tool
+calls, and on-demand activation of tools and Skills.
+
+The central workflow is **Coordinator → Worker**. A capable model such as
+Codex or DeepSeek can plan a task and delegate implementation or subtasks to a
+smaller model, while TurboCode tracks progress, enforces task boundaries, and
+verifies the result. The system is specialized for Swift, SwiftUI, Xcode
+projects, and Swift Package Manager packages, with structured tools for
+workspace inspection, editing, building, testing, diagnostics, and Git. These
+operations run within explicit safety boundaries rather than relying on an
+unrestricted or opaque shell workflow.
+
+The interface is native macOS software, built with SwiftUI and AppKit and
+aligned with Apple's Human Interface Guidelines. TurboCode also supports
+workspace-specific `AGENTS.md` instructions and reusable Skills, allowing the
+harness to adapt its behavior to the project while keeping consequential work
+reviewable.
 
 > [!IMPORTANT]
-> TurboCode 0.1.0 is an initial public preview under active development. Current target: macOS 27, Xcode 27, Swift 6.
+> TurboCode 0.2.0 is a structured agent-loop release under active development. It targets macOS 27, Xcode 27, and Swift 6.
 
 ![TurboCode conversation with a Swift composer and a local workspace selected](.github/assets/turbocode-conversation.png)
 
@@ -19,19 +45,29 @@ TurboCode is an open-source application for macOS 27 that lets you explore how d
 
 TurboCode uses **less than 70 MB** of memory when idle. For context: Codex uses about 600 MB, Pi about 120 MB. This is not a secondary detail: it means TurboCode can sit comfortably in the background while Xcode, simulators, and browsers share the same machine.
 
-### A precise scope, not an Xcode clone
+### A Swift-first product boundary
 
-TurboCode does not try to replace Xcode. Its purpose is clearly defined: to be a **macOS coding agent** specialized in **SwiftUI and Swift Package Manager packages**. It uses structured Swift tools for Xcode, Swift Package Manager, Git, and workspace operations. A bounded bash runner is available for focused diagnostics, with workspace writes blocked by its macOS sandbox.
+TurboCode is intentionally focused on Apple-platform development. Its tools,
+model profiles, Skills, and safety policies are designed for Swift, SwiftUI,
+Xcode projects, Swift Package Manager packages, and local Git workflows. It is
+not intended to become a general-purpose, multi-language IDE or an opaque
+desktop automation agent.
 
 ### A native interface that follows the HIG
 
-Written in **SwiftUI** and aligned with Apple's **Human Interface Guidelines**. The UI follows the principle of **progressive disclosure**: the main elements—workspaces, past sessions, tools—are easily accessible in their respective areas through **collapsible lists**. No bloat, no buried menus.
+TurboCode follows Apple's **Human Interface Guidelines** using native SwiftUI
+and AppKit behavior for windows, sidebars, inspectors, settings, focus, and
+accessibility. Progressive disclosure keeps workspaces, past sessions, and
+tools visible without overwhelming the main conversation.
 
 ## What it does
 
 ### 1. A structured conversation, not just text
 
-The conversation with the agent is not purely textual. Some tools use the **`@Generable`** macro to present content in the most useful form—structured, navigable, and contextual. This includes:
+The conversation with the agent is not purely textual. Structured tools render
+diffs, Git status, file listings, and diagnostics as native, navigable views.
+TurboCode uses Apple's **`@Generable`** macro to describe and decode some of
+these structured results. This includes:
 
 - An **integrated diff checker** for seeing changes line by line
 - A **visual Git status summary** that groups staged, modified, and untracked files
@@ -53,13 +89,41 @@ TurboCode maps the workspace through compact Swift declarations, relationships b
 
 ### 3. Visible and traceable Git
 
-Every Git operation—branch, staging, commit, merge, rebase, remote, pull, push—is exposed as a tool call in the conversation flow. No invisible commands running in the background. Every action is reviewed before it is applied.
+Git operations—branch, staging, commit, merge, rebase, remote, pull, and
+push—are exposed through structured tools in the conversation flow. Git
+changes remain reviewable before they are applied. Where shell access is
+available for non-Git inspection or commands not covered by a structured tool,
+it is bounded by the active workspace, execution policy, timeout, and output
+limits.
 
 ![TurboCode conversation showing a branch creation and completed Git commit](.github/assets/turbocode-git-commit.png)
 
 ### 4. Build, test, diagnostics
 
 TurboCode inspects the Xcode project, runs builds and unit tests, and reports compiler diagnostics directly in the conversation. For standalone packages, one structured Swift Package Manager tool handles initialization, dependencies, resolution, build, test, run, cleanup, and package inspection.
+
+### Xcode is a runtime prerequisite
+
+The full Xcode suite is required even when the active workspace contains only
+a standalone Swift package. TurboCode's Xcode tool calls depend on Xcode
+project and scheme discovery, Apple SDKs, compiler and test destinations,
+xcrun, xcodebuild, and structured xcresult diagnostics. The Command Line Tools
+alone are not sufficient for the supported Xcode workflow.
+
+You do not need to keep the Xcode UI open while using TurboCode, but Xcode 27
+must be installed, launched once to accept its license and install requested
+platform components, and selected as the active developer directory. Verify
+the active toolchain with:
+
+~~~shell
+xcodebuild -version
+xcode-select -p
+~~~
+
+For an Xcode project or workspace, TurboCode discovers schemes and invokes the
+selected toolchain. For a standalone Swift package, TurboCode can perform the
+package workflow without opening Xcode, but the full Xcode installation remains
+the supported release prerequisite.
 
 ## Model profiles
 
@@ -72,6 +136,11 @@ TurboCode comes with preconfigured profiles for several model runtimes.
 | **Llama / OpenAI-compatible** | Connects to a local server such as `llama-server`; example endpoint: `http://127.0.0.1:8080/v1`. |
 | **Codex** | Uses the official Codex CLI App Server and its ChatGPT sign-in flow; TurboCode does not read Codex credentials. |
 | **DeepSeek** | Uses the configured remote API; credentials are entered in Settings and stored in macOS Keychain. |
+
+Apple PCC currently has limited tool-call support through `fm serve` because of
+an OpenAI-compatible protocol regression in the current Apple release. PCC
+remains available for fast, medium-complexity tasks, but tool-driven workflows
+may be affected until Apple stabilizes the protocol.
 
 The profiles use the beta FoundationModels libraries—**`DynamicProfile`**, **`Summary`**, **dynamic tool calls**, **automatic removal of obsolete tool calls**, and **model switching without losing the session** or creating a new one.
 
@@ -94,13 +163,19 @@ Custom profiles and reusable Skills live in versioned configurations.
 
 ## Experimental features
 
-### A rudimentary orchestrator
+### On-device orchestration
 
-An experimental orchestrator lets you use the **on-device model as an entry point**: it receives the request, analyzes it, and delegates complex operations to more powerful models. The result returns to the orchestrator, which presents it to the user. This provides local responsiveness with remote power.
+An experimental orchestrator lets the **on-device model act as the entry point**:
+it receives the request, analyzes it, and delegates complex operations to a
+configured worker model. The result returns to the orchestrator, which presents
+it to the user. This provides local responsiveness with additional model
+capability when needed.
 
-### A standalone support profile
+### Automatic conversation titles
 
-For each session, the on-device model can automatically generate the **conversation title** by analyzing the initial context—instead of using the user's prompt as the title. A small automation that keeps conversation history navigable without effort.
+For each session, the on-device model can automatically generate a
+**conversation title** by analyzing the initial context instead of using the
+user's prompt as the title. This keeps conversation history easier to scan.
 
 ## Tools and diagnostics
 
@@ -120,7 +195,7 @@ Non-sensitive data such as endpoints and capabilities lives in `~/.turbocode/mod
 ## Requirements
 
 - macOS 27 or later
-- Xcode 27 or later
+- Xcode 27 or later, full suite installed and selected as the active developer directory
 - Swift 6
 - A Mac capable of running Apple Foundation Models for the on-device profile
 - An optional local model server or remote provider credential for other profiles
@@ -146,16 +221,16 @@ Swift Package dependencies are resolved automatically by Xcode. Direct dependenc
 
 ## Tests and evaluations
 
-The `TurboCodeEvaluations` scheme contains deterministic Swift Testing coverage alongside experimental model-backed evaluations:
+The release gate runs deterministic Swift Testing coverage without starting
+Foundation Models:
 
 ```shell
-xcodebuild test \
-  -project TurboCode.xcodeproj \
-  -scheme TurboCodeEvaluations \
-  -destination 'platform=macOS'
+Scripts/test-deterministic.sh
 ```
 
-The deterministic tests cover workspace boundaries, file operations, Git behavior, session search, configuration, diagnostics, and dynamic profiles. Golden evaluations exercise model behavior and may vary with macOS 27 betas and changes to Foundation Models; they are experimental signals, not release gates.
+Golden evaluations use a separate, timeout-bounded command. They may vary with
+macOS 27 betas and Foundation Models changes, so they remain experimental
+signals rather than release gates. See [TESTING.md](TESTING.md) for both paths.
 
 ## Privacy and safety
 
@@ -187,8 +262,8 @@ Working now:
 
 Still to improve:
 
-- Some composer and secondary controls are incomplete
-- Approval flows need broader testing
+- Some secondary controls and advanced approval flows remain under active
+  development
 - Model behavior varies considerably between backends
 - Setup assumes familiarity with Swift tooling
 - Compatibility is limited to recent development releases

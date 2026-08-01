@@ -5,6 +5,10 @@ import MarkdownUI
 
 /// A semantic type scale based on SF Pro and SF Mono.
 enum AppTypography {
+    /// Conversation typography follows the native macOS reading scale used by
+    /// the reference response: SF Pro, 17 pt, generous Markdown rhythm, and a
+    /// softened primary color that remains legible in both appearance modes.
+    static let chatDefaultFontSize: CGFloat = 17
     static let chatForeground = Color.primary.opacity(0.84)
     static let sidebarHeader = Font.system(size: 17, weight: .semibold)
     static let sidebarLabel = Font.system(size: 14)
@@ -31,12 +35,12 @@ enum AppTypography {
                 ForegroundColor(chatForeground)
             }
             .strong {
-                FontWeight(.medium)
+                FontWeight(.semibold)
             }
             .code {
                 FontFamilyVariant(.monospaced)
                 FontSize(.em(0.9))
-                BackgroundColor(Color.primary.opacity(0.045))
+                BackgroundColor(Color.primary.opacity(0.06))
             }
             .heading1 { configuration in
                 chatHeading(configuration.label, size: 1.5, top: 22, bottom: 12)
@@ -59,8 +63,8 @@ enum AppTypography {
             .paragraph { configuration in
                 configuration.label
                     .fixedSize(horizontal: false, vertical: true)
-                    .relativeLineSpacing(.em(0.22))
-                    .markdownMargin(top: 0, bottom: 10)
+                    .relativeLineSpacing(.em(0.28))
+                    .markdownMargin(top: 0, bottom: 14)
             }
             .blockquote { configuration in
                 HStack(spacing: 0) {
@@ -92,8 +96,8 @@ enum AppTypography {
             }
             .listItem { configuration in
                 configuration.label
-                    .relativeLineSpacing(.em(0.2))
-                    .markdownMargin(top: .em(0.12))
+                    .relativeLineSpacing(.em(0.28))
+                    .markdownMargin(top: .em(0.18))
             }
     }
 
@@ -114,7 +118,7 @@ enum AppTypography {
 }
 
 private struct ChatFontSizeKey: EnvironmentKey {
-    static let defaultValue: CGFloat = 16
+    static let defaultValue: CGFloat = AppTypography.chatDefaultFontSize
 }
 
 extension EnvironmentValues {

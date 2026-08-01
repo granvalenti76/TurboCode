@@ -8,6 +8,7 @@ nonisolated enum ModelToolTier: String, Sendable, Hashable {
 }
 
 nonisolated enum ModelRuntimeProfile: String, Sendable, Hashable {
+    case microtask
     case standalone
     case orchestrator
     case delegate
@@ -28,6 +29,7 @@ nonisolated enum ToolCapabilityID: String, CaseIterable, Codable, Sendable, Hash
     case writeOnDevice = "write_ondevice"
     case removeFile = "remove_file"
     case loadSkill = "load_skill"
+    case delegateTask = "delegate_task"
     case callPowerfulModel = "call_powerful_model"
 
     var id: String { rawValue }
@@ -208,9 +210,17 @@ nonisolated enum ModelToolCatalog {
             hasNativePresentation: false
         ),
         .init(
-            id: .callPowerfulModel,
+            id: .delegateTask,
             name: "Delegate Task",
-            summary: "Send complex work to the configured orchestrator model.",
+            summary: "Assign a bounded structured task to the configured worker.",
+            category: .orchestration,
+            systemImage: "arrow.triangle.branch",
+            hasNativePresentation: false
+        ),
+        .init(
+            id: .callPowerfulModel,
+            name: "Legacy Delegation",
+            summary: "Send a free-text task through the compatibility coordinator path.",
             category: .orchestration,
             systemImage: "point.3.connected.trianglepath.dotted",
             hasNativePresentation: false
@@ -227,11 +237,18 @@ nonisolated enum ModelToolCatalog {
         context: ToolAccessContext,
         selectedIDs: Set<ToolCapabilityID>? = nil
     ) -> ModelToolPlan {
+        let profileMembership = membership(for: profile)
         let memberships = selectedIDs.map { ids in
-            ToolCapabilityID.allCases
-                .filter(ids.contains)
+            // A custom microtask profile may narrow its role but cannot add
+            // capabilities outside that role's product policy. Other custom
+            // profiles retain their explicit catalog-backed selection.
+            let permittedIDs = profile == .microtask
+                ? Set(profileMembership.map(\.0))
+                : Set(ToolCapabilityID.allCases)
+            return ToolCapabilityID.allCases
+                .filter { ids.contains($0) && permittedIDs.contains($0) }
                 .map { ($0, requirement(for: $0)) }
-        } ?? membership(for: profile)
+        } ?? profileMembership
         let assignments = memberships.compactMap { id, requirement -> ModelToolAssignment? in
             if requirement == .repositoryMap,
                (tier == .onDevice || context.repositoryMapDetail == nil) {
@@ -253,7 +270,7 @@ nonisolated enum ModelToolCatalog {
         case .swiftWorkspaceMap: .repositoryMap
         case .xcodeProject: .capableWorkspace
         case .loadSkill: .skills
-        case .callPowerfulModel: .delegateModel
+        case .delegateTask, .callPowerfulModel: .delegateModel
         }
     }
 
@@ -261,6 +278,10 @@ nonisolated enum ModelToolCatalog {
         for profile: ModelRuntimeProfile
     ) -> [(ToolCapabilityID, ToolAvailabilityRequirement)] {
         switch profile {
+        case .microtask:
+            return OnDeviceCapabilityPolicy.directToolIDs
+                .sorted { $0.rawValue < $1.rawValue }
+                .map { ($0, requirement(for: $0)) }
         case .standalone:
             return [
                 (.turboCodeGuide, .always),
