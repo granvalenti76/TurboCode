@@ -13,7 +13,7 @@ operations, specialized in agentic work on Swift, SwiftUI, Xcode projects, and
 Swift Package Manager packages.
 
 > [!IMPORTANT]
-> TurboCode 0.1.0 is an initial public preview under active development. Current target: macOS 27, Xcode 27, Swift 6.
+> TurboCode 0.2.0 is a structured agent-loop release under active development. It targets macOS 27, Xcode 27, and Swift 6.
 
 ![TurboCode conversation with a Swift composer and a local workspace selected](.github/assets/turbocode-conversation.png)
 

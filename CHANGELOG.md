@@ -5,6 +5,33 @@ All notable changes to TurboCode are documented in this file.
 The project follows Semantic Versioning while its public API and persisted
 formats continue to evolve before 1.0.
 
+## [0.2.0] - 2026-08-01
+
+### Added
+
+- Structured coordinator-to-worker task envelopes with bounded tools,
+  verification, cancellation, recovery, and revision-aware results.
+- Native Activity inspection for coordinator, worker, tool, verification, and
+  terminal task state.
+- Production coordinator routes for DeepSeek and Codex, with configurable
+  Apple PCC, Llama, and DeepSeek workers.
+- Deterministic release coverage for routing, delegation, approvals,
+  cancellation, revision conflicts, verification, and on-device capability
+  boundaries.
+
+### Changed
+
+- On-device work is restricted to a measured microtask capability envelope;
+  broader coding requests remain with a capable worker or coordinator.
+- Configuration and dynamic profiles migrate compatibly from the 0.1.0
+  schema.
+
+### Notes
+
+- Apple PCC, at the moment, does not expose tool calls correctly through
+  `fm serve`. PCC tool calling is deferred until Apple stabilizes the API
+  contract; this limitation does not invalidate the rest of the release.
+
 ## [0.1.0] - 2026-07-29
 
 Initial public preview.
