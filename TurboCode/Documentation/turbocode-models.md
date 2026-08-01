@@ -4,7 +4,12 @@ TurboCode presents one product experience while adapting its profile to the capa
 
 In Standalone mode, the selected profile determines the route. Apple on-device is a microtask profile for lightweight assistance, product guidance, focused read-only file inspection, and already-delimited Swift snippets of at most about 30 lines. It does not receive general Git, shell, repository-map, or multi-file editing capabilities. Configured coding models can handle broader work according to their declared capabilities.
 
-For the 0.2.0 structured route, a custom profile can use Llama, DeepSeek, or Codex as coordinator and Apple PCC, Llama, or DeepSeek as its worker. The coordinator delegates a bounded envelope through `delegate_task` and remains responsible for verification and the final answer.
+For the 0.2.0 structured route, DeepSeek and Codex are the integrated
+production-ready coordinators. A custom profile can use them, while the
+existing Llama-compatible route remains available where configured, with Apple
+PCC, Llama, or DeepSeek as its worker. The coordinator delegates a bounded
+envelope through `delegate_task` and remains responsible for verification and
+the final answer.
 
 The menu item **On-Device (Experimental)** preserves the older compatibility path. In that mode Apple on-device may send a free-text task through `call_powerful_model`; it is not the primary 0.2.0 release scenario.
 
