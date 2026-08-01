@@ -612,7 +612,7 @@ enum ModelSessionFactory {
     private static func providerModel(for model: RemoteModelConfig) -> ProviderLanguageModel {
         ProviderLanguageModel(
             configuration: model,
-            apiKey: model.credential.flatMap(CredentialStore.value(for:))
+            credential: model.credential
         )
     }
 

@@ -97,6 +97,9 @@ struct ProviderSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+        .task {
+            settings.loadDeepSeekCredentialForSettings()
+        }
     }
 }
 

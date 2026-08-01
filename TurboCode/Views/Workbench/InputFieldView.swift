@@ -253,8 +253,7 @@ struct InputFieldView: View {
                                     Text(model.name)
                                 }
                             }
-                            .disabled(!chatStore.isConfigured(model))
-                        }
+                    }
                     }
 
                     if !chatStore.dynamicProfiles.isEmpty {

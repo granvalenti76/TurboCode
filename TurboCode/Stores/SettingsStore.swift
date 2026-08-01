@@ -108,16 +108,30 @@ public final class SettingsStore {
         }
         reloadAgentTuning()
         reloadRemoteModels()
+        // Do not read provider secrets while restoring general settings. The
+        // Provider pane loads this value only when the user opens it.
+        ChatStore.shared?.reloadRemoteModels()
+    }
+
+    /// Loads the existing provider secret for deliberate credential
+    /// management in Settings, keeping normal application launch lazy.
+    public func loadDeepSeekCredentialForSettings() {
+        guard !isLoadingCredentials else { return }
         isLoadingCredentials = true
+        let defaults = UserDefaults.standard
         if let stored = CredentialStore.value(for: "deepseek") {
             deepseekAPIKey = stored
         } else if let legacy = defaults.string(forKey: "deepseekAPIKey"), !legacy.isEmpty {
+            // Migrate the pre-Keychain value only after the user explicitly
+            // opens provider settings, keeping launch free of secret access.
             deepseekAPIKey = legacy
             try? CredentialStore.set(legacy, for: "deepseek")
             defaults.removeObject(forKey: "deepseekAPIKey")
+        } else {
+            deepseekAPIKey = ""
         }
         isLoadingCredentials = false
-        ChatStore.shared?.reloadRemoteModels()
+        credentialError = nil
     }
 
     public func reloadRemoteModels() {

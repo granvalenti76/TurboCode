@@ -85,8 +85,11 @@ final class ModelRuntimeStore {
         let selectedID = savedProfile?.baseModelID.remoteModelID
             ?? UserDefaults.standard.string(forKey: "activeRemoteModelID")
             ?? "llama"
+        // Restore the selected provider from configuration only. Credential
+        // availability is checked when the user selects the model or sends a
+        // request, never while the application is bootstrapping.
         let initialRemote = RemoteModelConfig.defaults.first {
-            $0.id == selectedID && Self.hasCredential(for: $0)
+            $0.id == selectedID
         } ?? RemoteModelConfig.fallbackLlama
         let restoredProfile = savedProfile.flatMap { profile in
             if profile.baseModelID == .codex { return profile }
@@ -116,9 +119,7 @@ final class ModelRuntimeStore {
             ? SystemLanguageModel.default
             : ProviderLanguageModel(
                 configuration: initialRemote,
-                apiKey: initialRemote.credential.flatMap(
-                    CredentialStore.value(for:)
-                )
+                credential: initialRemote.credential
             )
         session = LanguageModelSession(model: initialModel)
 
@@ -228,13 +229,13 @@ final class ModelRuntimeStore {
         guard let loaded = try? TurboCodeConfig.shared.loadRemoteModels(),
               !loaded.isEmpty else { return false }
         remoteModels = loaded
+        // Loading model metadata is safe at startup; credential validation is
+        // deliberately deferred to an explicit model selection or request.
         let selected = loaded.first(where: {
-            $0.id == activeRemoteModelID && $0.enabled && isConfigured($0)
+            $0.id == activeRemoteModelID && $0.enabled
         }) ?? loaded.first(where: {
-            $0.enabled && $0.role == .local && isConfigured($0)
-        }) ?? loaded.first(where: {
-            $0.enabled && isConfigured($0)
-        })
+            $0.enabled && $0.role == .local
+        }) ?? loaded.first(where: { $0.enabled })
         if let selected {
             activeRemoteModelID = selected.id
             if orchestratorMode == .standalone,
@@ -309,12 +310,19 @@ final class ModelRuntimeStore {
         Self.hasCredential(for: model)
     }
 
+    /// Credential checks are reserved for explicit model selection and
+    /// provider-management UI; bootstrap paths do not call this helper.
+    private static func hasCredential(for model: RemoteModelConfig) -> Bool {
+        guard let credential = model.credential else { return true }
+        return !(CredentialStore.value(for: credential) ?? "").isEmpty
+    }
+
     func languageModel(
         for model: RemoteModelConfig
     ) -> ProviderLanguageModel {
         ProviderLanguageModel(
             configuration: model,
-            apiKey: model.credential.flatMap(CredentialStore.value(for:))
+            credential: model.credential
         )
     }
 
@@ -380,11 +388,6 @@ final class ModelRuntimeStore {
         }
         let builtInNames: Set<String> = ["turbocode", "skill-creator"]
         return discovered.filter { builtInNames.contains($0.name) }
-    }
-
-    private static func hasCredential(for model: RemoteModelConfig) -> Bool {
-        guard let credential = model.credential else { return true }
-        return !(CredentialStore.value(for: credential) ?? "").isEmpty
     }
 
     private static func backend(for role: RemoteModelRole) -> ModelBackend {
