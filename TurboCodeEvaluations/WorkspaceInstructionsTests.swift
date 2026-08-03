@@ -105,6 +105,23 @@ struct WorkspaceInstructionsTests {
         #expect(!prompt.contains("write_ondevice"))
     }
 
+    @Test("Prompt includes the shared personality exactly once")
+    func promptUsesSharedPersonality() {
+        let prompt = TurboCodeSystemPromptBuilder.build(
+            makePromptContext(
+                toolIDs: [],
+                toolNames: []
+            )
+        )
+
+        #expect(prompt.contains("Be a calm, perceptive editor of ideas and actions."))
+        #expect(
+            prompt.components(
+                separatedBy: "Be a calm, perceptive editor of ideas and actions."
+            ).count == 2
+        )
+    }
+
     @Test("Codex keeps workspace operations on TurboCode dynamic tools")
     func codexPromptPreservesToolBoundary() {
         var context = makePromptContext(

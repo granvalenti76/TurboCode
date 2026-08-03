@@ -239,14 +239,8 @@ nonisolated enum ModelToolCatalog {
     ) -> ModelToolPlan {
         let profileMembership = membership(for: profile)
         let memberships = selectedIDs.map { ids in
-            // A custom microtask profile may narrow its role but cannot add
-            // capabilities outside that role's product policy. Other custom
-            // profiles retain their explicit catalog-backed selection.
-            let permittedIDs = profile == .microtask
-                ? Set(profileMembership.map(\.0))
-                : Set(ToolCapabilityID.allCases)
             return ToolCapabilityID.allCases
-                .filter { ids.contains($0) && permittedIDs.contains($0) }
+                .filter { ids.contains($0) }
                 .map { ($0, requirement(for: $0)) }
         } ?? profileMembership
         let assignments = memberships.compactMap { id, requirement -> ModelToolAssignment? in
@@ -279,7 +273,15 @@ nonisolated enum ModelToolCatalog {
     ) -> [(ToolCapabilityID, ToolAvailabilityRequirement)] {
         switch profile {
         case .microtask:
-            return OnDeviceCapabilityPolicy.directToolIDs
+            // This is the default native on-device surface, not a competence
+            // judgment. Explicit profile selections may widen it as supported
+            // by the resolved tool tier and workspace context.
+            return [
+                .turboCodeGuide,
+                .listWorkspace,
+                .readFile,
+                .writeOnDevice
+            ]
                 .sorted { $0.rawValue < $1.rawValue }
                 .map { ($0, requirement(for: $0)) }
         case .standalone:

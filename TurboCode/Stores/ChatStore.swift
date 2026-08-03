@@ -745,13 +745,6 @@ public final class ChatStore {
     }
 
     public func sendMessage(_ text: String) async {
-        let assignment = composerTaskAssignment(for: text)
-        guard assignment.allowsOnDevice else {
-            // Programmatic sends receive the same fail-closed boundary as the
-            // composer. No conversation or model session is started.
-            error = assignment.guidance
-            return
-        }
         refreshSkillsIfNeeded()
         if activeBackend != .codex,
            modelRuntimeStore.workspaceInstructionsChanged(in: workspaceRoot) {
@@ -763,23 +756,6 @@ public final class ChatStore {
             for: text
         ) else { return }
         await sendMessage(text, promptText: promptText, visibleInTimeline: true)
-    }
-
-    /// Returns whether the selected profile may receive this composer task.
-    /// Only explicit multi-file and architectural signals are rejected; other
-    /// profiles and ambiguous prompts preserve the user's chosen route.
-    func composerTaskAssignment(
-        for text: String
-    ) -> OnDeviceTaskAssignment {
-        let routing = ModelRoutingPolicy.resolve(
-            backend: activeBackend,
-            mode: orchestratorMode,
-            activeProfile: activeDynamicProfile
-        )
-        guard routing.role == .microtaskOnDevice else {
-            return .eligibleMicrotask
-        }
-        return OnDeviceCapabilityPolicy.assignment(for: text)
     }
 
     func isIncompleteSkillCommand(_ text: String) -> Bool {

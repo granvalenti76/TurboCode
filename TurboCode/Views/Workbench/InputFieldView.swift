@@ -70,9 +70,6 @@ struct InputFieldView: View {
     // MARK: - Text Field
 
     private var textField: some View {
-        let assignment = chatStore.composerTaskAssignment(
-            for: chatStore.composerInput
-        )
         return VStack(alignment: .leading, spacing: 8) {
             TextField(
                 "Describe a Swift or SwiftUI task…",
@@ -103,17 +100,6 @@ struct InputFieldView: View {
                         isFocused = true
                     }
                 }
-
-            if let guidance = assignment.guidance,
-               !chatStore.composerInput
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .isEmpty {
-                Label(guidance, systemImage: "person.2.badge.gearshape")
-                    .font(AppTypography.metadata)
-                    .foregroundStyle(.orange)
-                    .transition(.opacity)
-                    .accessibilityLabel("Model routing: \(guidance)")
-            }
 
             if isFocused && !slashSuggestions.isEmpty {
                 slashCommandMenu
@@ -428,9 +414,6 @@ struct InputFieldView: View {
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .isEmpty
                     || chatStore.isIncompleteSkillCommand(chatStore.composerInput)
-                    || !chatStore.composerTaskAssignment(
-                        for: chatStore.composerInput
-                    ).allowsOnDevice
                     || !chatStore.activeProfileCanSend
                 )
         )
@@ -440,11 +423,6 @@ struct InputFieldView: View {
 
     private var sendButtonHelp: String {
         if chatStore.busy { return "Stop response" }
-        if let guidance = chatStore.composerTaskAssignment(
-            for: chatStore.composerInput
-        ).guidance {
-            return guidance
-        }
         if !chatStore.activeProfileCanSend {
             return "Wait for Codex to connect or sign in first"
         }

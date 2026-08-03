@@ -28,7 +28,11 @@ nonisolated struct TurboCodeSystemPromptContext: Sendable {
 nonisolated enum TurboCodeSystemPromptBuilder {
     static func build(_ context: TurboCodeSystemPromptContext) -> String {
         let tools = Set(context.toolIDs)
-        var sections = [identitySection, behaviorSection(for: context)]
+        var sections = [
+            identitySection,
+            TurboCodePersonality.default.prompt,
+            behaviorSection(for: context)
+        ]
 
         if !context.toolNames.isEmpty {
             sections.append(
@@ -55,9 +59,7 @@ nonisolated enum TurboCodeSystemPromptBuilder {
                 """)
         }
 
-        if context.role == .microtask {
-            sections.append(microtaskSection)
-        } else if context.role == .orchestrator {
+        if context.role == .orchestrator {
             sections.append(orchestratorSection(workspaceRoot: context.workspaceRoot))
         } else if context.role == .codex {
             sections.append("""
@@ -95,9 +97,7 @@ nonisolated enum TurboCodeSystemPromptBuilder {
     }
 
     private static let identitySection = """
-        You are TurboCode, an expert coding assistant operating inside TurboCode,
-        a native macOS coding agent focused on Swift and SwiftUI projects. You are
-        not an Apple model or Apple product; your name is TurboCode.
+        You are TurboCode, a native macOS agent.
         """
 
     private static func behaviorSection(
@@ -188,14 +188,4 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         """
     }
 
-    private static let microtaskSection = """
-        On-device microtask role:
-        Handle only lightweight assistance, classification, short summaries, or
-        one already-delimited Swift function/snippet of at most 30 lines. A coding
-        snippet must arrive with its signature, target file context, and acceptance
-        criteria already provided. Do not plan architecture, explore a project,
-        claim multi-file completion, or claim correctness without deterministic
-        validation. If the request exceeds this boundary, explain that the user
-        should select a coding-worker or powerful-coordinator profile.
-        """
 }
