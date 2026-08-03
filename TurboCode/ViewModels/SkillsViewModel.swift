@@ -273,6 +273,6 @@ final class SkillsViewModel {
     private func isConfigured(_ model: RemoteModelConfig?) -> Bool {
         guard let model else { return false }
         guard let credential = model.credential else { return true }
-        return !(CredentialStore.value(for: credential) ?? "").isEmpty
+        return CredentialStore.contains(account: credential)
     }
 }

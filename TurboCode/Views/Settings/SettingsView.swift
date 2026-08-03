@@ -83,10 +83,18 @@ struct ProviderSettingsView: View {
                     .textFieldStyle(.roundedBorder)
 
                 Label(
-                    settings.deepseekAPIKey.isEmpty ? "Not configured" : "Configured",
-                    systemImage: settings.deepseekAPIKey.isEmpty ? "key.slash" : "checkmark.circle"
+                    settings.deepSeekCredentialConfigured || !settings.deepseekAPIKey.isEmpty
+                        ? "Configured"
+                        : "Not configured",
+                    systemImage: settings.deepSeekCredentialConfigured || !settings.deepseekAPIKey.isEmpty
+                        ? "checkmark.circle"
+                        : "key.slash"
                 )
-                .foregroundStyle(settings.deepseekAPIKey.isEmpty ? Color.secondary : Color.green)
+                .foregroundStyle(
+                    settings.deepSeekCredentialConfigured || !settings.deepseekAPIKey.isEmpty
+                        ? Color.green
+                        : Color.secondary
+                )
 
                 if let error = settings.credentialError {
                     Label(error, systemImage: "exclamationmark.triangle")

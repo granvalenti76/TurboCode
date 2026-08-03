@@ -314,7 +314,7 @@ final class ModelRuntimeStore {
     /// provider-management UI; bootstrap paths do not call this helper.
     private static func hasCredential(for model: RemoteModelConfig) -> Bool {
         guard let credential = model.credential else { return true }
-        return !(CredentialStore.value(for: credential) ?? "").isEmpty
+        return CredentialStore.contains(account: credential)
     }
 
     func languageModel(
@@ -449,13 +449,13 @@ final class ModelRuntimeStore {
         ) ?? agentTuning.orchestrator.delegateModelID
         return remoteModels.first(where: {
             $0.id == requestedWorkerID
-                && $0.enabled && isConfigured($0)
+                && $0.enabled
         }) ?? remoteModels.first(where: {
-            $0.enabled && $0.role == .local && isConfigured($0)
+            $0.enabled && $0.role == .local
         }) ?? activeRemoteModel.flatMap {
-            $0.enabled && isConfigured($0) ? $0 : nil
+            $0.enabled ? $0 : nil
         } ?? remoteModels.first(where: {
-            $0.enabled && isConfigured($0)
+            $0.enabled
         }) ?? RemoteModelConfig.fallbackLlama
     }
 
