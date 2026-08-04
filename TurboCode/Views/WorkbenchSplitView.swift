@@ -56,6 +56,11 @@ struct WorkbenchSplitView: View {
         .sheet(isPresented: customProfilesPresented) {
             CustomProfilesSheet()
         }
+        // Keep this sheet on the stable workbench root. A receipt row lives in
+        // a LazyVStack and may be rebuilt while a response or session changes.
+        .sheet(item: diffPatchReviewBinding) { presentation in
+            DiffPatchReviewSheet(patch: presentation.patch)
+        }
         .onChange(of: chatStore.leftSidebarCollapsed, initial: true) { _, collapsed in
             let target: NavigationSplitViewVisibility = collapsed ? .detailOnly : .all
             guard columnVisibility != target else { return }
@@ -99,6 +104,19 @@ struct WorkbenchSplitView: View {
         Binding(
             get: { chatStore.isCustomProfilesPresented },
             set: { chatStore.isCustomProfilesPresented = $0 }
+        )
+    }
+
+    private var diffPatchReviewBinding: Binding<DiffPatchReviewPresentation?> {
+        Binding(
+            get: { chatStore.diffPatchReviewPresentation },
+            set: { newValue in
+                if newValue == nil {
+                    chatStore.dismissDiffPatchReview()
+                } else {
+                    chatStore.diffPatchReviewPresentation = newValue
+                }
+            }
         )
     }
 

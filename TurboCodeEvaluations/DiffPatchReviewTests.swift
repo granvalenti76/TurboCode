@@ -96,6 +96,32 @@ struct DiffPatchReviewTests {
         #expect(review?.first?.modifiedText == "after")
     }
 
+    @Test("Native review presentation resolves the live receipt by stable block ID")
+    func nativeReviewPresentationIsAvailableBeforeSessionRestore() {
+        let store = ChatStore(conversationRepository: DiffReviewConversationRepository())
+        store.beginDiffPatchBlock(
+            id: "live-edit",
+            patch: "patch",
+            files: [DiffPatchFileChange(path: "Notes.txt", additions: 1, deletions: 0)],
+            reviewFiles: [
+                DiffReviewFileSnapshot(
+                    path: "Notes.txt",
+                    originalText: "before\n",
+                    modifiedText: "after\n"
+                )
+            ],
+            status: .applied
+        )
+
+        store.presentDiffPatchReview("live-edit")
+
+        #expect(store.diffPatchReviewPresentation?.id == "live-edit")
+        #expect(
+            store.diffPatchReviewPresentation?.patch.reviewFiles?.first?.modifiedText
+                == "after\n"
+        )
+    }
+
     @Test("Saved receipts without snapshots remain decodable")
     func legacyReceiptDecodesWithoutReviewSnapshots() throws {
         let data = try #require(

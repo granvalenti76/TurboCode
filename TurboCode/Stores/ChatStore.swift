@@ -453,7 +453,10 @@ public final class ChatStore {
     }
 
     public func selectThread(_ id: String) async {
-        if id != activeThreadId { dismissWorkspaceListingInspector() }
+        if id != activeThreadId {
+            dismissWorkspaceListingInspector()
+            workbenchStore.dismissDiffPatchReview()
+        }
         activeThreadId = id
     }
 
@@ -471,6 +474,7 @@ public final class ChatStore {
 
     public func createThread(title: String = "New Chat", mode: ConversationMode = .agent) async {
         dismissWorkspaceListingInspector()
+        workbenchStore.dismissDiffPatchReview()
         conversationStore.createThread(
             title: title,
             workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
@@ -570,6 +574,7 @@ public final class ChatStore {
         guard let snapshot = try? conversationStore.snapshot(id: id),
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
         dismissWorkspaceListingInspector()
+        workbenchStore.dismissDiffPatchReview()
         activeThreadId = id
         timelineStore.restore(snapshot.blocks)
         resetAgentActivityForConversation()
@@ -1073,6 +1078,12 @@ public final class ChatStore {
         reviewCoordinator.reviewDiffPatch(id)
     }
 
+    /// Opens a native full-file review from stable workbench state. The
+    /// timeline fallback remains available through `reviewDiffPatch(_:)`.
+    func presentDiffPatchReview(_ id: String) {
+        reviewCoordinator.presentDiffPatchReview(id)
+    }
+
     public func presentGitCommit(_ receipt: GitCommitBlock) {
         reviewCoordinator.presentGitCommit(receipt)
     }
@@ -1165,6 +1176,15 @@ public final class ChatStore {
     /// data, allowing the user to reopen the completed Activity summary.
     func closeRightPanel() {
         workbenchStore.rightPanelMode = nil
+    }
+
+    var diffPatchReviewPresentation: DiffPatchReviewPresentation? {
+        get { workbenchStore.inspectedDiffPatchReview }
+        set { workbenchStore.inspectedDiffPatchReview = newValue }
+    }
+
+    func dismissDiffPatchReview() {
+        workbenchStore.dismissDiffPatchReview()
     }
 
     public func toggleLeftSidebar() {

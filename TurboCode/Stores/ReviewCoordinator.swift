@@ -66,6 +66,16 @@ final class ReviewCoordinator {
         Task { await workspace.reloadDiffs() }
     }
 
+    /// Presents the immutable receipt from stable workbench state rather than
+    /// from the lazy timeline row that originated the button action.
+    func presentDiffPatchReview(_ id: String) {
+        guard let patch = timeline.block(id: id)?.diffPatch else { return }
+        workbench.inspectedDiffPatchReview = DiffPatchReviewPresentation(
+            id: id,
+            patch: patch
+        )
+    }
+
     func presentGitCommit(_ receipt: GitCommitBlock) {
         timeline.presentGitCommit(receipt)
     }

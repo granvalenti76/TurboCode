@@ -6,7 +6,6 @@ struct DiffPatchWidget: View {
 
     @Environment(ChatStore.self) private var chatStore
     @State private var showsAllFiles = false
-    @State private var showsNativeReview = false
     @State private var displayedAdditions = 0
     @State private var displayedDeletions = 0
 
@@ -58,9 +57,6 @@ struct DiffPatchWidget: View {
         .task(id: patch.status) {
             await animateCountsIfNeeded()
         }
-        .sheet(isPresented: $showsNativeReview) {
-            DiffPatchReviewSheet(patch: patch)
-        }
     }
 
     private var header: some View {
@@ -111,7 +107,7 @@ struct DiffPatchWidget: View {
                hasNativeReview || canReviewInGitInspector {
                 Button("Review") {
                     if hasNativeReview {
-                        showsNativeReview = true
+                        chatStore.presentDiffPatchReview(blockID)
                     } else {
                         // Legacy and raw-patch receipts have no immutable full
                         // text snapshot, so retain the previous Git fallback.
