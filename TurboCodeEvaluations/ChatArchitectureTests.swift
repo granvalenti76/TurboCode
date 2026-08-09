@@ -124,6 +124,18 @@ struct ChatArchitectureTests {
         #expect(store.rightPanelMode == .activity)
     }
 
+    @Test("Delegated activity entry point remains available without an active task")
+    func activityInspectorCanOpenItsEmptyState() {
+        let store = ChatStore(
+            conversationRepository: ArchitectureConversationRepository()
+        )
+
+        store.toggleRightPanel(.activity)
+
+        #expect(store.currentAgentActivity == nil)
+        #expect(store.rightPanelMode == .activity)
+    }
+
     @Test("Native split panel keeps AppKit constraints stable")
     func nativeSplitPanelDoesNotEnterAConstraintLoop() async {
         let store = ChatStore(

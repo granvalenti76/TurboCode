@@ -73,18 +73,17 @@ struct WorkbenchSplitView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                if chatStore.currentAgentActivity != nil {
-                    Button {
-                        chatStore.toggleRightPanel(.activity)
-                    } label: {
-                        Image(systemName: "point.3.connected.trianglepath.dotted")
-                    }
-                    .help(
-                        chatStore.rightPanelMode == .activity
-                            ? "Hide Activity"
-                            : "Show Activity"
-                    )
+                Button {
+                    chatStore.toggleRightPanel(.activity)
+                } label: {
+                    Image(systemName: "person.2")
                 }
+                .help(
+                    chatStore.rightPanelMode == .activity
+                        ? "Hide delegated task activity"
+                        : "Show delegated task activity"
+                )
+                .accessibilityLabel("Delegated task activity")
 
                 Button {
                     chatStore.toggleRightPanel(.changes)

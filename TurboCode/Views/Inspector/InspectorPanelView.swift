@@ -7,9 +7,12 @@ struct InspectorPanelView: View {
 
     var body: some View {
         Group {
-            if chatStore.rightPanelMode == .activity,
-               let activity = chatStore.currentAgentActivity {
-                AgentActivityInspectorView(activity: activity)
+            if chatStore.rightPanelMode == .activity {
+                if let activity = chatStore.currentAgentActivity {
+                    AgentActivityInspectorView(activity: activity)
+                } else {
+                    DelegatedActivityEmptyStateView()
+                }
             } else if chatStore.rightPanelMode == .workspaceListing,
                let listing = chatStore.inspectedWorkspaceListing {
                 WorkspaceListingInspectorView(listing: listing)
@@ -67,6 +70,20 @@ struct InspectorPanelView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
+    }
+}
+
+/// Keeps the persistent delegated-activity entry point useful between runs
+/// without inventing historical task data that the current store does not own.
+private struct DelegatedActivityEmptyStateView: View {
+    var body: some View {
+        ContentUnavailableView(
+            "No delegated task",
+            systemImage: "person.2",
+            description: Text(
+                "Activity from a delegated subagent will appear here when a task is running."
+            )
+        )
     }
 }
 
