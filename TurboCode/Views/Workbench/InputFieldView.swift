@@ -104,6 +104,13 @@ struct InputFieldView: View {
                         isFocused = true
                     }
                 }
+                .onChange(of: chatStore.busy) { _, isBusy in
+                    guard !isBusy else { return }
+                    // Responses disable the field while they stream. Restore
+                    // the insertion point as soon as the response reaches a
+                    // terminal state so the next prompt needs no extra click.
+                    isFocused = true
+                }
                 .onKeyPress(keys: [.upArrow, .downArrow, .return]) { press in
                     handleComposerKeyPress(press)
                 }
