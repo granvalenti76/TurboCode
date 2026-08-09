@@ -14,6 +14,7 @@ struct InputFieldView: View {
     @Environment(ChatStore.self) private var chatStore
     @Environment(\.chatFontSize) private var chatFontSize
     @FocusState private var isFocused: Bool
+    @State private var selectedSlashCommandIndex = 0
 
     let compact: Bool
 
@@ -93,6 +94,9 @@ struct InputFieldView: View {
                     }
                 )
                 .onChange(of: chatStore.composerInput) { oldValue, newValue in
+                    // A changed query describes a new result set; keeping the
+                    // previous row selected could execute the wrong command.
+                    selectedSlashCommandIndex = 0
                     // Inspector recovery actions prepare a reviewable draft
                     // rather than executing work immediately. Focus only when
                     // text is inserted externally, not while the user types.
@@ -100,8 +104,11 @@ struct InputFieldView: View {
                         isFocused = true
                     }
                 }
+                .onKeyPress(keys: [.upArrow, .downArrow, .return]) { press in
+                    handleComposerKeyPress(press)
+                }
 
-            if isFocused && !slashSuggestions.isEmpty {
+            if isFocused && !chatStore.busy && !slashSuggestions.isEmpty {
                 slashCommandMenu
             }
         }
@@ -136,11 +143,19 @@ struct InputFieldView: View {
 
                         Spacer(minLength: 0)
                     }
+                    .background(
+                        index == selectedSlashCommandIndex
+                            ? Color.accentColor.opacity(0.14)
+                            : .clear
+                    )
                     .padding(.horizontal, 9)
                     .frame(height: 30)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(
+                    index == selectedSlashCommandIndex ? .isSelected : []
+                )
             }
         }
         .background(.regularMaterial)
@@ -149,6 +164,48 @@ struct InputFieldView: View {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(.separator, lineWidth: 0.5)
         }
+    }
+
+    private func handleComposerKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        guard !slashSuggestions.isEmpty, !chatStore.busy else { return .ignored }
+
+        switch press.key {
+        case .upArrow:
+            moveSlashSelection(by: -1)
+            return .handled
+        case .downArrow:
+            moveSlashSelection(by: 1)
+            return .handled
+        case .return:
+            executeSelectedSlashCommand()
+            return .handled
+        default:
+            return .ignored
+        }
+    }
+
+    private func moveSlashSelection(by offset: Int) {
+        guard !slashSuggestions.isEmpty else { return }
+        let count = slashSuggestions.count
+        selectedSlashCommandIndex = (selectedSlashCommandIndex + offset + count) % count
+    }
+
+    /// Executes a selected complete slash command. `/skill` itself remains an
+    /// insertion step because it needs a skill name before it can be resolved.
+    private func executeSelectedSlashCommand() {
+        let suggestion = slashSuggestions[
+            min(max(selectedSlashCommandIndex, 0), slashSuggestions.count - 1)
+        ]
+        guard suggestion.command != "/skill" else {
+            chatStore.composerInput = suggestion.insertion
+            isFocused = true
+            return
+        }
+
+        let command = suggestion.command
+        chatStore.composerInput = ""
+        isFocused = false
+        Task { await chatStore.sendMessage(command) }
     }
 
     private var slashSuggestions: [SlashCommandSuggestion] {
@@ -386,21 +443,7 @@ struct InputFieldView: View {
 
     private var sendButton: some View {
         Button {
-            if chatStore.busy {
-                chatStore.interrupt()
-                return
-            }
-            let text = chatStore.composerInput.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { return }
-            if chatStore.isIncompleteSkillCommand(text) {
-                chatStore.composerInput = "/skill "
-                isFocused = true
-                return
-            }
-            // Clear the shared draft before starting inference so recovery
-            // drafts and ordinary composer input follow the same lifecycle.
-            chatStore.composerInput = ""
-            Task { await chatStore.sendMessage(text) }
+            sendComposerInput()
         } label: {
             Image(systemName: chatStore.busy ? "stop.fill" : "arrow.up")
         }
@@ -419,6 +462,24 @@ struct InputFieldView: View {
         )
         .keyboardShortcut(.return, modifiers: [])
         .help(sendButtonHelp)
+    }
+
+    private func sendComposerInput() {
+        if chatStore.busy {
+            chatStore.interrupt()
+            return
+        }
+        let text = chatStore.composerInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        if chatStore.isIncompleteSkillCommand(text) {
+            chatStore.composerInput = "/skill "
+            isFocused = true
+            return
+        }
+        // Clear the shared draft before starting inference so recovery drafts
+        // and ordinary composer input follow the same lifecycle.
+        chatStore.composerInput = ""
+        Task { await chatStore.sendMessage(text) }
     }
 
     private var sendButtonHelp: String {
