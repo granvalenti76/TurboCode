@@ -372,14 +372,22 @@ nonisolated struct FoundationModelsTaskWorker: AgentTaskWorkerExecuting {
         context: AgentTaskRunContext,
         events: AgentTaskRunnerEvents
     ) async throws -> String {
-        let permittedNames = AgentTaskToolPolicy.permittedNames(
-            envelope: envelope,
-            plan: context.toolPlan
-        )
         let pathScope = AgentTaskPathScope(
             workspaceRoot: context.workspaceRoot,
             suggestedPaths: envelope.suggestedScope
         )
+        let permittedNames = AgentTaskToolPolicy.permittedNames(
+            envelope: envelope,
+            plan: context.toolPlan,
+            scope: pathScope
+        )
+        let requestedNames = Set(envelope.allowedTools.map(\.rawValue))
+            .intersection(context.toolPlan.registeredIDs.map(\.rawValue))
+        if let incompatibleName = requestedNames.subtracting(permittedNames).sorted().first {
+            // Fail before creating a model session: silently removing a broad
+            // tool can make the model claim completion without doing the work.
+            throw AgentTaskWorkerError.toolNotAllowed(incompatibleName)
+        }
         let tools = context.tools.compactMap { tool -> (any Tool)? in
             guard permittedNames.contains(tool.name) else { return nil }
             // The worker receives scoped instances; direct tool validation is
@@ -392,6 +400,33 @@ nonisolated struct FoundationModelsTaskWorker: AgentTaskWorkerExecuting {
             }
             if let edit = tool as? EditFileTool {
                 return edit.restricted(to: pathScope)
+            }
+            if let list = tool as? ListWorkspaceTool {
+                return list.restricted(to: pathScope)
+            }
+            if let map = tool as? SwiftWorkspaceMapTool {
+                return map.restricted(to: pathScope)
+            }
+            if let fileSystem = tool as? FileSystemTool {
+                return fileSystem.restricted(to: pathScope)
+            }
+            if let writer = tool as? WriteOnDeviceTool {
+                return writer.restricted(to: pathScope)
+            }
+            if let remover = tool as? RemoveFileTool {
+                return remover.restricted(to: pathScope)
+            }
+            if let git = tool as? GitTool {
+                return git.restricted(to: pathScope)
+            }
+            if let bash = tool as? BashTool {
+                return bash.restricted(to: pathScope)
+            }
+            if let xcode = tool as? XcodeProjectTool {
+                return xcode.restricted(to: pathScope)
+            }
+            if let swiftPM = tool as? SwiftPackageManagerTool {
+                return swiftPM.restricted(to: pathScope)
             }
             return tool
         }
@@ -487,10 +522,29 @@ nonisolated struct FoundationModelsTaskWorker: AgentTaskWorkerExecuting {
 nonisolated enum AgentTaskToolPolicy {
     static func permittedNames(
         envelope: AgentTaskEnvelope,
-        plan: ModelToolPlan
+        plan: ModelToolPlan,
+        scope: AgentTaskPathScope? = nil
     ) -> Set<String> {
-        Set(envelope.allowedTools.map(\.rawValue))
+        let names = Set(envelope.allowedTools.map(\.rawValue))
             .intersection(plan.registeredIDs.map(\.rawValue))
+        guard let scope, !scope.isWorkspaceWide else { return names }
+
+        // These tools can validate every path-bearing argument against the
+        // delegated boundary. Repository/build/shell tools remain workspace
+        // wide because their operations inherently span more than one path.
+        let scopeCompatible: Set<String> = [
+            ToolCapabilityID.turboCodeGuide.rawValue,
+            ToolCapabilityID.listWorkspace.rawValue,
+            ToolCapabilityID.swiftWorkspaceMap.rawValue,
+            ToolCapabilityID.readFile.rawValue,
+            ToolCapabilityID.searchWorkspace.rawValue,
+            ToolCapabilityID.fileSystem.rawValue,
+            ToolCapabilityID.editFile.rawValue,
+            ToolCapabilityID.writeOnDevice.rawValue,
+            ToolCapabilityID.removeFile.rawValue,
+            ToolCapabilityID.loadSkill.rawValue
+        ]
+        return names.intersection(scopeCompatible)
     }
 }
 
@@ -558,7 +612,13 @@ actor AgentTaskExecutionGate {
         switch call.toolName {
         case "read_file", "edit_file":
             property = "filePath"
-        case "grep":
+        case "write_ondevice":
+            property = "fileName"
+        case "remove_file", "grep", "list_workspace":
+            property = "path"
+        case "swift_workspace_map":
+            property = "path"
+        case "file_system":
             property = "path"
         default:
             return nil

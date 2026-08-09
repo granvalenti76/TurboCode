@@ -453,6 +453,7 @@ public final class ChatStore {
     }
 
     public func selectThread(_ id: String) async {
+        await finishActiveResponseBeforeTransition()
         if id != activeThreadId {
             dismissWorkspaceListingInspector()
             workbenchStore.dismissDiffPatchReview()
@@ -464,6 +465,7 @@ public final class ChatStore {
     /// SwiftUI from building the previous, potentially large timeline merely to
     /// replace it one run-loop later when leaving a utility destination.
     public func openThread(_ id: String) async {
+        await finishActiveResponseBeforeTransition()
         if blocks.isEmpty || activeThreadId != id {
             await restoreSession(id: id)
         } else {
@@ -473,6 +475,7 @@ public final class ChatStore {
     }
 
     public func createThread(title: String = "New Chat", mode: ConversationMode = .agent) async {
+        await finishActiveResponseBeforeTransition()
         dismissWorkspaceListingInspector()
         workbenchStore.dismissDiffPatchReview()
         conversationStore.createThread(
@@ -564,6 +567,21 @@ public final class ChatStore {
         }
     }
 
+    /// Persists catalog-only changes without replacing a non-active thread's
+    /// timeline. Active drafts use the full session snapshot; older threads
+    /// retain their durable blocks and transcript while only metadata changes.
+    private func persistConversationMetadata(for threadID: String) async {
+        if threadID == activeThreadId {
+            await persistSession(for: threadID)
+            return
+        }
+        do {
+            try conversationStore.persistMetadata(id: threadID)
+        } catch {
+            print("[TurboCode] Failed to persist conversation metadata: \(error.localizedDescription)")
+        }
+    }
+
     /// Loads all session files and populates the thread list.
     public func restoreSessions() async {
         try? conversationStore.restoreCatalog()
@@ -571,6 +589,7 @@ public final class ChatStore {
 
     /// Fully restores a past session with its blocks.
     public func restoreSession(id: String) async {
+        await finishActiveResponseBeforeTransition()
         guard let snapshot = try? conversationStore.snapshot(id: id),
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
         dismissWorkspaceListingInspector()
@@ -632,14 +651,17 @@ public final class ChatStore {
 
     public func renameThread(id: String, title: String) async {
         conversationStore.renameThread(id: id, title: title)
+        await persistConversationMetadata(for: id)
     }
 
     public func pinThread(id: String, pinned: Bool) async {
         conversationStore.pinThread(id: id, pinned: pinned)
+        await persistConversationMetadata(for: id)
     }
 
     public func archiveThread(id: String) async {
         conversationStore.archiveThread(id: id)
+        await persistConversationMetadata(for: id)
     }
 
     public func deleteThread(id: String) async {
@@ -687,6 +709,7 @@ public final class ChatStore {
     /// Removes a workspace from TurboCode and deletes only its persisted chats.
     /// The workspace directory and all project files are left untouched.
     public func removeWorkspace(_ path: String) async {
+        await finishActiveResponseBeforeTransition()
         let conversationRemoval = conversationStore.removeWorkspace(path)
         let removedActiveWorkspace = workspaceStore.removeWorkspace(path)
 
@@ -696,7 +719,6 @@ public final class ChatStore {
         }
 
         if removedActiveWorkspace {
-            responseTask?.cancel()
             rightPanelMode = nil
             rebuildSession(keepingHistory: false)
         }
@@ -709,6 +731,7 @@ public final class ChatStore {
 
     public func restoreThread(id: String) async {
         conversationStore.restoreThread(id: id)
+        await persistConversationMetadata(for: id)
     }
 
     /// Open a folder picker and set workspaceRoot.
@@ -723,16 +746,17 @@ public final class ChatStore {
             panel.directoryURL = URL(fileURLWithPath: workspaceRoot)
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        setWorkspace(url.path)
+        Task { await setWorkspace(url.path) }
     }
 
     /// Switch to a previously opened workspace by path.
     public func switchToWorkspace(_ path: String) {
-        setWorkspace(path)
+        Task { await setWorkspace(path) }
     }
 
     /// Internal: configure workspace, rebuild session, refresh git state.
-    private func setWorkspace(_ path: String) {
+    private func setWorkspace(_ path: String) async {
+        await finishActiveResponseBeforeTransition()
         workspaceStore.selectWorkspace(path)
 
         rebuildSession(discardingCapabilityContext: true)
@@ -744,9 +768,12 @@ public final class ChatStore {
 
     /// Clear the workspace selection.
     public func clearWorkspace() {
-        workspaceStore.clearWorkspace()
-        rebuildSession(discardingCapabilityContext: true)
-        rightPanelMode = nil
+        Task {
+            await finishActiveResponseBeforeTransition()
+            workspaceStore.clearWorkspace()
+            rebuildSession(discardingCapabilityContext: true)
+            rightPanelMode = nil
+        }
     }
 
     public func sendMessage(_ text: String) async {
@@ -872,7 +899,8 @@ public final class ChatStore {
         promptText: String,
         visibleInTimeline: Bool
     ) async {
-        let titleThreadID = activeThreadId
+        let conversationID = activeThreadId
+        let titleThreadID = conversationID
         let titleTask: Task<Void, Never>? = visibleInTimeline ? Task { [weak self] in
             guard let self else { return }
             await self.generateTitle(from: displayText, for: titleThreadID)
@@ -891,16 +919,16 @@ public final class ChatStore {
             modelName: composerModel
         )
         error = result.errorMessage
-        if result.touchedConversation, let activeThreadId {
-            conversationStore.touchThread(id: activeThreadId)
+        if result.touchedConversation, let conversationID {
+            conversationStore.touchThread(id: conversationID)
         }
         // Persist after the title task finishes so the JSON never races with
         // the Apple on-device title generator and stores a stale "New Chat".
         if let titleTask {
             await titleTask.value
         }
-        if let tid = activeThreadId {
-            await persistSession(for: tid)
+        if let conversationID, activeThreadId == conversationID {
+            await persistSession(for: conversationID)
         }
     }
 
@@ -1195,6 +1223,20 @@ public final class ChatStore {
         agentActivityStore.reset()
         if workbenchStore.rightPanelMode == .activity {
             workbenchStore.rightPanelMode = nil
+        }
+    }
+
+    /// Navigation and workspace changes are transaction boundaries for a live
+    /// response. Waiting for the cancelled task to finish lets its final
+    /// persistence pass target the old conversation before the new timeline or
+    /// workspace is installed.
+    private func finishActiveResponseBeforeTransition() async {
+        guard let responseTask else { return }
+        responseTask.cancel()
+        await responseTask.value
+        if self.responseTask != nil {
+            self.responseTask = nil
+            busy = false
         }
     }
 

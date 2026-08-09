@@ -68,6 +68,39 @@ struct ModelSwitchRegressionTests {
         #expect(restored.contains { if case .response = $0 { true } else { false } })
     }
 
+    @Test("Conversation metadata round-trips and legacy sessions receive safe defaults")
+    func conversationMetadataRoundTripsAndMigrates() throws {
+        let stored = StoredSession(
+            title: "Pinned plan",
+            projectName: "TurboCode",
+            isPinned: true,
+            isArchived: true,
+            mode: .plan
+        )
+        let data = try JSONEncoder().encode(stored)
+        let decoded = try JSONDecoder().decode(StoredSession.self, from: data)
+
+        #expect(decoded.schemaVersion == StoredSession.currentSchemaVersion)
+        #expect(decoded.isPinned)
+        #expect(decoded.isArchived)
+        #expect(decoded.mode == .plan)
+
+        var legacy = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        legacy.removeValue(forKey: "schemaVersion")
+        legacy.removeValue(forKey: "isPinned")
+        legacy.removeValue(forKey: "isArchived")
+        legacy.removeValue(forKey: "mode")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+        let migrated = try JSONDecoder().decode(StoredSession.self, from: legacyData)
+
+        #expect(migrated.schemaVersion == StoredSession.currentSchemaVersion)
+        #expect(!migrated.isPinned)
+        #expect(!migrated.isArchived)
+        #expect(migrated.mode == .agent)
+    }
+
     @Test("Legacy visible blocks recover user and assistant turns")
     func legacyBlocksRecoverConversationTurns() {
         let result = SessionRebuildHistory.fromVisibleBlocks([

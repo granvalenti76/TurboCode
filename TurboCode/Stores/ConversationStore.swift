@@ -64,6 +64,21 @@ final class ConversationStore {
         try repository.save(snapshot)
     }
 
+    /// Updates durable catalog metadata without loading the thread's timeline
+    /// into the active UI. This keeps rename, pin, and archive actions safe for
+    /// inactive conversations while preserving their original runtime state.
+    func persistMetadata(id: String) throws {
+        guard let conversation = threads.first(where: { $0.id == id }) else { return }
+        let existing = try repository.load(id: id)
+        let snapshot = ConversationSnapshot(
+            conversation: conversation,
+            modelBackend: existing?.modelBackend ?? ModelBackend.foundationApple.rawValue,
+            blocks: existing?.blocks ?? [],
+            transcript: existing?.transcript
+        )
+        try repository.save(snapshot)
+    }
+
     /// Merges durable sessions without duplicating drafts already present in
     /// memory, such as a thread created during application startup.
     func restoreCatalog() throws {

@@ -93,16 +93,28 @@ struct SwiftPackageManagerTool: Tool {
     let workspaceRoot: String
     let executionPolicy: ExecutionPolicy
     let reportsChanges: Bool
+    let taskScope: AgentTaskPathScope?
     private let service = SwiftPackageManagerService()
 
     init(
         workspaceRoot: String,
         executionPolicy: ExecutionPolicy = ExecutionPolicy(),
-        reportsChanges: Bool = true
+        reportsChanges: Bool = true,
+        taskScope: AgentTaskPathScope? = nil
     ) {
         self.workspaceRoot = workspaceRoot
         self.executionPolicy = executionPolicy
         self.reportsChanges = reportsChanges
+        self.taskScope = taskScope
+    }
+
+    func restricted(to scope: AgentTaskPathScope) -> Self {
+        Self(
+            workspaceRoot: workspaceRoot,
+            executionPolicy: executionPolicy,
+            reportsChanges: reportsChanges,
+            taskScope: scope
+        )
     }
 
     var name: String { "swift_package_manager" }
@@ -121,6 +133,9 @@ struct SwiftPackageManagerTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: SwiftPackageManagerArguments) async throws -> String {
+        if let taskScope, !taskScope.isWorkspaceWide {
+            return "Error: swift_package_manager requires an entire-workspace task scope because package manifests and build state span the package."
+        }
         switch arguments.action {
         case "initialize":
             return try await initialize(arguments)

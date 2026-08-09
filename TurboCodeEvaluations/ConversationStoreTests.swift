@@ -70,6 +70,47 @@ struct ConversationStoreTests {
         #expect(store.threads.first?.isArchived == false)
     }
 
+    @Test("Metadata persistence preserves an inactive thread timeline")
+    func metadataPersistencePreservesInactiveTimeline() throws {
+        let originalConversation = Conversation(
+            id: "thread",
+            title: "Original",
+            workspace: "/Work/TurboCode"
+        )
+        let originalBlock = ChatBlock(kind: .assistant, text: "Keep this transcript")
+        let repository = RecordingConversationStoreRepository(
+            snapshots: [
+                ConversationSnapshot(
+                    conversation: originalConversation,
+                    modelBackend: ModelBackend.foundationApple.rawValue,
+                    blocks: [originalBlock],
+                    transcript: nil
+                )
+            ]
+        )
+        let store = ConversationStore(repository: repository)
+        store.threads = [
+            Conversation(
+                id: "thread",
+                title: "Renamed",
+                isPinned: true,
+                isArchived: true,
+                workspace: "/Work/TurboCode",
+                mode: .plan
+            )
+        ]
+
+        try store.persistMetadata(id: "thread")
+        let saved = try #require(repository.snapshots["thread"])
+
+        #expect(saved.conversation.title == "Renamed")
+        #expect(saved.conversation.isPinned)
+        #expect(saved.conversation.isArchived)
+        #expect(saved.conversation.mode == .plan)
+        #expect(saved.modelBackend == ModelBackend.foundationApple.rawValue)
+        #expect(saved.blocks == [originalBlock])
+    }
+
     @Test("ChatStore conversation forwarding remains observable")
     func chatStoreForwardingRemainsObservable() async {
         let store = ChatStore(conversationRepository: ConversationStoreRepository())
@@ -95,4 +136,30 @@ private struct ConversationStoreRepository: ConversationRepository {
     func load(id: String) throws -> ConversationSnapshot? { nil }
     func list() throws -> [ConversationSnapshot] { [] }
     func delete(id: String) throws {}
+}
+
+/// A synchronous recording repository verifies catalog-only writes without
+/// touching the user's on-disk session directory.
+private final class RecordingConversationStoreRepository: ConversationRepository, @unchecked Sendable {
+    var snapshots: [String: ConversationSnapshot]
+
+    init(snapshots: [ConversationSnapshot]) {
+        self.snapshots = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.conversation.id, $0) })
+    }
+
+    func save(_ snapshot: ConversationSnapshot) throws {
+        snapshots[snapshot.conversation.id] = snapshot
+    }
+
+    func load(id: String) throws -> ConversationSnapshot? {
+        snapshots[id]
+    }
+
+    func list() throws -> [ConversationSnapshot] {
+        Array(snapshots.values)
+    }
+
+    func delete(id: String) throws {
+        snapshots.removeValue(forKey: id)
+    }
 }

@@ -158,6 +158,60 @@ struct AgentTaskScopeTests {
         }
     }
 
+    @Test("Filesystem and listing tools reject paths outside delegated scope")
+    func filesystemAndListingRejectOutsideScope() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let scope = AgentTaskPathScope(
+            workspaceRoot: fixture.root.path,
+            suggestedPaths: ["Sources"]
+        )
+        let fileSystem = FileSystemTool(workspaceRoot: fixture.root.path, taskScope: scope)
+        let listing = ListWorkspaceTool(workspaceRoot: fixture.root.path, taskScope: scope)
+
+        let fileResult = try await fileSystem.call(
+            arguments: FileSystemArguments(
+                operation: "info",
+                path: "Outside.swift",
+                destination: nil,
+                pattern: nil,
+                content: nil
+            )
+        )
+        let listingResult = try await listing.call(
+            arguments: ListWorkspaceArguments(path: ".")
+        )
+
+        #expect(fileResult.contains("outside the delegated task scope"))
+        #expect(listingResult.errorMessage?.contains("outside the delegated task scope") == true)
+    }
+
+    @Test("Workspace-wide execution tools refuse narrow delegated scopes")
+    func workspaceWideToolsRefuseNarrowScope() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let scope = AgentTaskPathScope(
+            workspaceRoot: fixture.root.path,
+            suggestedPaths: ["Sources"]
+        )
+
+        let bash = BashTool(workspaceRoot: fixture.root.path, taskScope: scope)
+        let git = GitTool(
+            workspaceRoot: fixture.root.path,
+            policy: GitPolicy(),
+            executionPolicy: ExecutionPolicy(),
+            taskScope: scope
+        )
+
+        let bashResult = try await bash.call(arguments: BashArguments(command: "pwd"))
+        let gitResult = try await git.call(
+            arguments: GitArguments(operation: "status", paths: nil, branch: nil, message: nil, remote: nil, limit: nil)
+        )
+
+        #expect(bashResult.contains("entire-workspace task scope"))
+        #expect(gitResult.contains("entire-workspace task scope"))
+    }
+
     private func makeFixture() throws -> (root: URL, source: URL) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("TurboCode-AgentScope-\(UUID().uuidString)", isDirectory: true)

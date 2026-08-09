@@ -216,6 +216,25 @@ struct AgentTaskRunnerTests {
             AgentTaskToolPolicy.permittedNames(envelope: envelope, plan: plan)
                 == ["read_file"]
         )
+
+        let narrowScope = AgentTaskPathScope(
+            workspaceRoot: "/workspace",
+            suggestedPaths: ["Sources"]
+        )
+        #expect(
+            AgentTaskToolPolicy.permittedNames(
+                envelope: envelope,
+                plan: ModelToolPlan(
+                    profile: .delegate,
+                    tier: .standard,
+                    assignments: [
+                        .init(id: .readFile, isRegistered: true, unavailableReason: nil),
+                        .init(id: .git, isRegistered: true, unavailableReason: nil)
+                    ]
+                ),
+                scope: narrowScope
+            ) == ["read_file"]
+        )
     }
 
     @Test("Compatibility tool converts free text into a correlated envelope")

@@ -6,6 +6,12 @@ nonisolated struct AgentTaskPathScope: Sendable, Hashable {
     let workspaceRoot: String
     let suggestedPaths: [String]
 
+    /// Empty scope preserves the legacy workspace-wide contract; an explicit
+    /// dot has the same meaning for a reviewed "entire workspace" choice.
+    var isWorkspaceWide: Bool {
+        suggestedPaths.isEmpty || suggestedPaths.contains(".")
+    }
+
     /// An empty task scope intentionally inherits the existing workspace-wide
     /// policy. A non-empty scope allows an exact path or any descendant.
     func validate(_ requestedPath: String) throws {

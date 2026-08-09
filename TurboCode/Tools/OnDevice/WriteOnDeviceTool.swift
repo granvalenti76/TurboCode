@@ -20,10 +20,24 @@ struct WriteOnDeviceTool: Tool {
 
     let workspaceRoot: String
     let reportsChanges: Bool
+    let taskScope: AgentTaskPathScope?
 
-    init(workspaceRoot: String, reportsChanges: Bool = true) {
+    init(
+        workspaceRoot: String,
+        reportsChanges: Bool = true,
+        taskScope: AgentTaskPathScope? = nil
+    ) {
         self.workspaceRoot = workspaceRoot
         self.reportsChanges = reportsChanges
+        self.taskScope = taskScope
+    }
+
+    func restricted(to scope: AgentTaskPathScope) -> Self {
+        Self(
+            workspaceRoot: workspaceRoot,
+            reportsChanges: reportsChanges,
+            taskScope: scope
+        )
     }
 
     var name: String { "write_ondevice" }
@@ -42,6 +56,11 @@ struct WriteOnDeviceTool: Tool {
         let fileName = arguments.fileName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard isValidRootFileName(fileName) else {
             return "Error: fileName must be one file name in the workspace root, without '/', '\\', or '..'."
+        }
+        do {
+            try taskScope?.validate(fileName)
+        } catch {
+            return "Error: \(error.localizedDescription)"
         }
         let fileURL: URL
         do {
@@ -74,7 +93,8 @@ struct WriteOnDeviceTool: Tool {
 
         let result = try await ApplyEditsTool(
             workspaceRoot: workspaceRoot,
-            reportsChanges: reportsChanges
+            reportsChanges: reportsChanges,
+            taskScope: taskScope
         ).call(
             arguments: ApplyEditsArguments(
                 files: [
