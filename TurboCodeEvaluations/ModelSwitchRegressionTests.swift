@@ -118,6 +118,35 @@ struct ModelSwitchRegressionTests {
         #expect(!result.contains { if case .toolOutput = $0 { true } else { false } })
     }
 
+    @Test("On-device compaction keeps durable outcomes and drops tool chatter")
+    func onDeviceCompactionKeepsEssentialContext() throws {
+        let transcript = Transcript(entries: fixtureTranscript())
+        #expect(SessionRebuildHistory.userTurnCount(in: transcript) == 1)
+
+        let compaction = try #require(
+            SessionRebuildHistory.onDeviceCompaction(from: [
+                ChatBlock(kind: .user, text: "Inspect the repository"),
+                ChatBlock(kind: .tool, text: "raw tool output: secret noise"),
+                ChatBlock(kind: .assistant, text: "The repository is clean.")
+            ])
+        )
+
+        #expect(compaction.summary.contains("The repository is clean."))
+        #expect(!compaction.summary.contains("secret noise"))
+        #expect(compaction.history.count == 2)
+        #expect(
+            SessionRebuildHistory.userTurnCount(
+                in: Transcript(entries: compaction.history)
+            ) == 0
+        )
+        #expect(
+            compaction.history.contains {
+                if case .response = $0 { return true }
+                return false
+            }
+        )
+    }
+
     @Test("A dynamic profile receives only its selected disk skills")
     func dynamicProfileFiltersSkills() throws {
         let root = FileManager.default.temporaryDirectory

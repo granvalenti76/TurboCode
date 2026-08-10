@@ -821,6 +821,7 @@ public final class ChatStore {
               !busy,
               activeProfileCanSend else { return }
 
+        compactOnDeviceContextIfNeeded()
         let effectivePrompt = promptText ?? text
         ensureActiveThread()
         busy = true
@@ -844,6 +845,26 @@ public final class ChatStore {
         await task.value
         responseTask = nil
         busy = false
+    }
+
+    /// Compacts only at a turn boundary, when the previous on-device context
+    /// has reached eight question/answer turns. The active session is rebuilt
+    /// from a concise handoff so the ninth question starts with usable context.
+    private func compactOnDeviceContextIfNeeded() {
+        guard activeBackend == .foundationApple else { return }
+        let turnCount = SessionRebuildHistory.userTurnCount(in: session.transcript)
+        guard turnCount >= SessionRebuildHistory.onDeviceCompactionThreshold,
+              let compaction = SessionRebuildHistory.onDeviceCompaction(from: blocks)
+        else { return }
+
+        timelineStore.presentCompaction(compaction.summary)
+        rebuildSession(restoringHistory: compaction.history)
+        Task {
+            await AgentDiagnosticsRecorder.shared.recordCompaction(
+                turnCount: turnCount,
+                retainedCharacters: compaction.summary.count
+            )
+        }
     }
 
     /// Runs one turn through Codex App Server while preserving TurboCode's

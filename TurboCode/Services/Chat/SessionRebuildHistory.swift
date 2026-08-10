@@ -4,6 +4,49 @@ import FoundationModels
 /// Prepares conversation history for a newly constructed model session. The
 /// destination profile always supplies fresh instructions and tool definitions.
 nonisolated enum SessionRebuildHistory {
+    /// Apple on-device remains reliable for roughly eight conversational turns.
+    /// Before the ninth question, rebuild the context from durable outcomes
+    /// instead of carrying every completed call and raw output forward.
+    static let onDeviceCompactionThreshold = 8
+
+    static func userTurnCount(in transcript: Transcript) -> Int {
+        transcript.reduce(into: 0) { count, entry in
+            guard case .prompt(let prompt) = entry else { return }
+            let isCompactionHandoff = prompt.segments.contains { segment in
+                guard case .text(let text) = segment else { return false }
+                return text.content == RuntimeContextHandoff.summaryTransferPrompt
+            }
+            if !isCompactionHandoff {
+                count += 1
+            }
+        }
+    }
+
+    /// Produces a compact, model-readable handoff that keeps user requests,
+    /// assistant decisions, and native receipts while dropping tool chatter.
+    static func onDeviceCompaction(
+        from blocks: [ChatBlock]
+    ) -> (summary: String, history: [Transcript.Entry])? {
+        let rendered = RuntimeContextHandoff.render(
+            blocks: blocks,
+            maximumCharacters: 7_000
+        )
+        guard !rendered.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        let summary = """
+        Context compacted by TurboCode before the next on-device turn.
+        Preserve the user's goals, accepted decisions, and completed workspace outcomes.
+        Completed tool calls and their raw output were omitted.
+
+        \(rendered)
+        """
+        return (
+            summary,
+            RuntimeContextHandoff.transcript(fromSummary: summary)
+        )
+    }
+
     static func prepare(
         _ transcript: Transcript,
         keepingHistory: Bool,

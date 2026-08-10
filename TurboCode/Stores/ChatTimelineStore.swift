@@ -195,6 +195,15 @@ final class ChatTimelineStore {
         blocks[index].gitCommit = receipt
     }
 
+    /// Presents an intentional context boundary without hiding the durable
+    /// conversation. The chat view renders this as a quiet HIG-style status
+    /// card between the previous work and the next model turn.
+    func presentCompaction(_ text: String) {
+        insertBeforeActivePlaceholderOrAppend(
+            ChatBlock(kind: .compaction, text: text)
+        )
+    }
+
     private func insertBeforeActivePlaceholderOrAppend(_ block: ChatBlock) {
         if let activeAssistantPlaceholderID,
            let index = blocks.firstIndex(where: { $0.id == activeAssistantPlaceholderID }) {

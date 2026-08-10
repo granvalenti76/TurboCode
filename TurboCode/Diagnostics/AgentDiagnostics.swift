@@ -79,6 +79,15 @@ nonisolated struct AgentRunMetric: Codable, Sendable {
     var contextSize: Int?
 }
 
+/// A persisted on-device context boundary, shown separately from inference
+/// runs so diagnostics can distinguish summarization from model failures.
+nonisolated struct OnDeviceCompactionMetric: Codable, Sendable, Identifiable {
+    let id: String
+    let createdAt: Date
+    let turnCount: Int
+    let retainedCharacters: Int
+}
+
 nonisolated private struct ToolFailureKey: Hashable {
     let backend: String
     let tool: String
@@ -307,6 +316,38 @@ actor AgentDiagnosticsRecorder {
             .sorted { $0.startedAt > $1.startedAt }
     }
 
+    func recordCompaction(turnCount: Int, retainedCharacters: Int) {
+        let metric = OnDeviceCompactionMetric(
+            id: UUID().uuidString,
+            createdAt: .now,
+            turnCount: turnCount,
+            retainedCharacters: retainedCharacters
+        )
+        do {
+            let directory = Self.diagnosticsDirectoryURL
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let url = directory.appendingPathComponent("compactions.jsonl")
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            var data = try encoder.encode(metric)
+            data.append(0x0A)
+            if FileManager.default.fileExists(atPath: url.path) {
+                let handle = try FileHandle(forWritingTo: url)
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+                try handle.close()
+            } else {
+                try data.write(to: url, options: .atomic)
+            }
+        } catch {
+            print("[Diagnostics] Failed to persist compaction: \(error.localizedDescription)")
+        }
+    }
+
+    func onDeviceCompactions() -> [OnDeviceCompactionMetric] {
+        Self.persistedCompactions().sorted { $0.createdAt > $1.createdAt }
+    }
+
     private func milliseconds(since date: Date) -> Int {
         Int(Date().timeIntervalSince(date) * 1_000)
     }
@@ -471,6 +512,16 @@ actor AgentDiagnosticsRecorder {
         decoder.dateDecodingStrategy = .iso8601
         return contents.split(whereSeparator: \.isNewline).compactMap { line in
             try? decoder.decode(AgentRunMetric.self, from: Data(line.utf8))
+        }
+    }
+
+    nonisolated private static func persistedCompactions() -> [OnDeviceCompactionMetric] {
+        let url = diagnosticsDirectoryURL.appendingPathComponent("compactions.jsonl")
+        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return contents.split(whereSeparator: \.isNewline).compactMap { line in
+            try? decoder.decode(OnDeviceCompactionMetric.self, from: Data(line.utf8))
         }
     }
 
