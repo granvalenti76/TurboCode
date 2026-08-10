@@ -16,6 +16,13 @@ formats continue to evolve before 1.0.
   delegation settings. The built-in On-device profile remains direct.
 - Codex as a selectable model for custom profiles, including its model and
   reasoning configuration.
+- `/documentation` as an application-owned command that opens the native
+  TurboCode documentation widget without requiring a model tool call.
+- `/task <instructions>` as an application-owned command that runs the
+  configured independent coding worker and writes its result into the current
+  conversation.
+- Per-override worker tool selection with an **All tools** default and an
+  explicit empty selection for text-only workers.
 - Versioned TurboCode tool-call documentation covering the available tools,
   profile availability, delegation behavior, and safety boundaries.
 
@@ -34,6 +41,14 @@ formats continue to evolve before 1.0.
 - Delegation envelopes use schema version 2 with backward decoding for schema
   version 1, and the Foundation Models and Codex adapters share the same
   coding/text contract.
+- On-device context is compacted before the ninth user turn for the on-device
+  model and its overrides. The transcript keeps a concise handoff, shows a
+  native compaction notice, and records the event in On-Device Statistics.
+- Worker tool configuration is progressively disclosed beside the worker
+  picker, grouped by category, and kept independent from coordinator tools.
+- Local commands use the existing timeline, persistence, activity, and
+  cancellation paths, so they remain useful even when the corresponding
+  model-facing capability is excluded from the active override.
 - Profile, skill, routing, and delegation evaluations were expanded to cover
   the new capability and compatibility rules.
 
