@@ -77,7 +77,8 @@ nonisolated struct DelegationBudget: Codable, Sendable, Hashable {
 
 /// Coarse worker capability mode selected by the coordinator.
 ///
-/// A coding worker receives the complete catalog-backed default tool bundle;
+/// A coding worker receives the complete catalog-backed tool bundle configured
+/// by the active profile;
 /// a text worker receives no session tools. Keeping this as one mode avoids a
 /// fragile model-facing per-tool allowlist while preserving a clear contract.
 nonisolated enum DelegatedWorkerMode: String, Codable, Sendable, Hashable {

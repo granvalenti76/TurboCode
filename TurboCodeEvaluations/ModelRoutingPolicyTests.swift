@@ -46,6 +46,19 @@ struct ModelRoutingPolicyTests {
         )
         #expect(llamaPowerful.role == .powerfulCoordinator)
         #expect(llamaPowerful.supportsStructuredDelegation)
+        let onDeviceCoordinator = UserDynamicProfile(
+            name: "On-device Coordinator",
+            baseModelID: .onDevice,
+            workerModelID: ProfileBaseModelID.llama.rawValue,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        let onDeviceRouting = ModelRoutingPolicy.resolve(
+            backend: .foundationApple,
+            mode: .standalone,
+            activeProfile: onDeviceCoordinator
+        )
+        #expect(onDeviceRouting.role == .powerfulCoordinator)
+        #expect(onDeviceRouting.supportsStructuredDelegation)
         let codexCoordinator = UserDynamicProfile(
             name: "Codex Coordinator",
             baseModelID: .codex,
@@ -96,6 +109,7 @@ struct ModelRoutingPolicyTests {
         #expect(defaultPlan.contains(.readFile))
         #expect(!defaultPlan.contains(.git))
         #expect(!defaultPlan.contains(.editFile))
+        #expect(!defaultPlan.contains(.delegateTask))
         #expect(!defaultPlan.contains(.callPowerfulModel))
     }
 
@@ -118,6 +132,25 @@ struct ModelRoutingPolicyTests {
         #expect(!prompt.contains("Do not plan architecture"))
         #expect(!prompt.contains("select a coding-worker or powerful-coordinator profile"))
         #expect(prompt.contains("Use write_ondevice once with complete content"))
+    }
+
+    @Test("Prompt explains how an explicit delegate task capability is used")
+    func promptGuidesExplicitDelegation() {
+        let prompt = TurboCodeSystemPromptBuilder.build(
+            TurboCodeSystemPromptContext(
+                role: .standalone,
+                backend: .foundationApple,
+                workspaceRoot: "/workspace",
+                agentTuning: .default,
+                toolIDs: [.delegateTask],
+                toolNames: ["delegate_task"],
+                availableSkills: [],
+                workspaceInstructions: nil
+            )
+        )
+
+        #expect(prompt.contains("delegate_task is available"))
+        #expect(prompt.contains("Do not claim the tool is unavailable"))
     }
 
     @Test("Legacy on-device coordinator is visibly experimental")

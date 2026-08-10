@@ -9,8 +9,10 @@ the current configuration.
 Custom profile overrides keep one model selection and one explicit capability
 list. Including `delegate_task` is the profile's only orchestration signal: it
 enables delegation to the configured worker and progressively reveals the
-worker settings in the profile editor. Llama, DeepSeek, and Codex can act as
-coordinators; Apple PCC, Llama, and DeepSeek can act as workers.
+worker settings in the profile editor. Custom On-device, Llama, DeepSeek, and
+Codex profiles can act as coordinators; Apple PCC, Llama, and DeepSeek can act
+as workers. The built-in On-device profile remains direct and does not include
+the capability by default.
 
 ## Product and discovery
 

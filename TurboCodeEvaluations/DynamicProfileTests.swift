@@ -72,7 +72,7 @@ struct DynamicProfileTests {
         #expect(profile.skillIDs.isEmpty)
     }
 
-    @Test("Delegate Task enables delegation only for supported profiles")
+    @Test("Delegate Task enables delegation for supported custom profiles")
     func delegationProfileRequiresSupportedRoute() {
         let llamaCoordinator = UserDynamicProfile(
             name: "Llama Coordinator",
@@ -107,8 +107,8 @@ struct DynamicProfileTests {
         #expect(deepSeekCoordinator.usesDelegation)
         #expect(codexCoordinator.usesDelegation)
         #expect(codexCoordinator.resolvedToolIDs.contains(.delegateTask))
-        #expect(!renamedOnDevice.usesDelegation)
-        #expect(!renamedOnDevice.resolvedToolIDs.contains(.delegateTask))
+        #expect(renamedOnDevice.usesDelegation)
+        #expect(renamedOnDevice.resolvedToolIDs.contains(.delegateTask))
         #expect(!directDeepSeek.usesDelegation)
     }
 
@@ -201,7 +201,7 @@ struct DynamicProfileTests {
         profile.setExecutionRole(.coordinatorWorker)
 
         #expect(profile.executionRole == .coordinatorWorker)
-        #expect(profile.baseModelID == .deepseek)
+        #expect(profile.baseModelID == .onDevice)
         #expect(profile.workerModelID == ProfileBaseModelID.llama.rawValue)
         #expect(!profile.greedyMode)
         #expect(profile.resolvedToolIDs.contains(.delegateTask))
@@ -231,7 +231,7 @@ struct DynamicProfileTests {
         #expect(profile.isCoordinatorProfile)
     }
 
-    @Test("Capability overrides expose delegation only to supported coordinators")
+    @Test("Capability overrides expose delegation to supported coordinator models")
     func overrideOptionsScopeDelegationToCoordinatorModels() {
         let viewModel = SkillsViewModel()
         let settings = SettingsStore()
@@ -249,7 +249,7 @@ struct DynamicProfileTests {
                 .compatibleToolIDs.contains(.delegateTask)
         )
         #expect(
-            !viewModel.modelOption(for: .onDevice, settings: settings)
+            viewModel.modelOption(for: .onDevice, settings: settings)
                 .compatibleToolIDs.contains(.delegateTask)
         )
         #expect(
@@ -333,7 +333,7 @@ struct DynamicProfileTests {
     @Test("Profile option families enforce supported coordinator routes")
     func profileOptionFamiliesAreScoped() {
         #expect(ProfileBaseModelID.builtInCases == [.onDevice, .llama, .pcc, .deepseek])
-        #expect(ProfileBaseModelID.coordinatorCases == [.llama, .deepseek, .codex])
+        #expect(ProfileBaseModelID.coordinatorCases == [.onDevice, .llama, .deepseek, .codex])
         #expect(ProfileBaseModelID.workerCases == [.pcc, .llama, .deepseek])
         #expect(!ProfileBaseModelID.workerCases.contains(.codex))
     }

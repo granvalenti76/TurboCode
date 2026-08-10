@@ -630,7 +630,7 @@ nonisolated enum CodexTurboCodeToolBridge {
     /// text-only worker. Runtime policy remains application-owned.
     private static let delegateTaskSpecification = CodexDynamicToolSpec(
         name: "delegate_task",
-        description: "Delegate one goal to the configured worker. Use coding for workspace work with the default worker tools, or text for a tool-free prose response.",
+        description: "Delegate one goal to the configured worker. Use coding for workspace work with the profile-configured worker tools, or text for a tool-free prose response.",
         inputSchema: objectSchema(
             properties: [
                 "mode": enumSchema(["coding", "text"]),

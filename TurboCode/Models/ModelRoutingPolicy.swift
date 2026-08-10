@@ -16,7 +16,7 @@ nonisolated struct ModelRoutingDecision: Sendable, Hashable {
     let supportsStructuredDelegation: Bool
 }
 
-/// Deterministic 0.2.0 routing policy.
+/// Deterministic profile routing policy for the 0.3.0 capability model.
 ///
 /// The user-selected profile is authoritative: TurboCode does not ask the
 /// on-device model to decide whether a task deserves a stronger model.
@@ -33,8 +33,7 @@ nonisolated enum ModelRoutingPolicy {
                 supportsStructuredDelegation: false
             )
         }
-        if backend != .foundationApple,
-           activeProfile?.resolvedToolIDs.contains(.delegateTask) == true {
+        if activeProfile?.resolvedToolIDs.contains(.delegateTask) == true {
             return ModelRoutingDecision(
                 role: .powerfulCoordinator,
                 profile: .standalone,

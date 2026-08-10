@@ -160,6 +160,9 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         if tools.contains(.removeFile) {
             lines.append("- Use remove_file when the user asks to remove one file.")
         }
+        if tools.contains(.delegateTask) {
+            lines.append("- delegate_task is available: use it when the user asks to delegate work, or when a bounded workspace task is better handled by the configured worker; choose coding for workspace work and text for prose-only output. Do not claim the tool is unavailable.")
+        }
         if tools.contains(.editFile)
             || tools.contains(.writeOnDevice)
             || tools.contains(.fileSystem) {

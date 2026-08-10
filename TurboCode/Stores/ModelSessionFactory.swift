@@ -194,8 +194,8 @@ enum ModelSessionFactory {
                 ?? 32_768
         )
         if standalonePlan.contains(.delegateTask) {
-            // Dynamic powerful-model profiles receive the production structured
-            // coordinator adapter; ordinary standalone profiles do not gain it.
+            // Profiles that explicitly include delegate_task receive the
+            // production structured coordinator adapter; direct profiles do not.
             standaloneTools.append(
                 DelegateTaskTool(
                     invoker: makeDelegateInvoker(

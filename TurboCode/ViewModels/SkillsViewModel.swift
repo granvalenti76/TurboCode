@@ -254,8 +254,9 @@ final class SkillsViewModel {
         compatible.remove(.callPowerfulModel)
         compatible.remove(.loadSkill)
         if !ProfileBaseModelID.delegationCases.contains(id) {
-            // Only provider adapters in delegationCases implement
-            // delegate_task; other models can still be used directly.
+            // Only models in delegationCases expose structured delegate_task
+            // for custom profiles; the built-in on-device profile remains
+            // direct because it has no explicit capability selection.
             compatible.remove(.delegateTask)
         }
         let subtitle: String

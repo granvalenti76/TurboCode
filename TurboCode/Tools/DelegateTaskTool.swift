@@ -8,7 +8,7 @@ import FoundationModels
 /// inventing invalid policy values instead of describing the work itself.
 @Generable
 struct DelegateTaskArguments {
-    /// Coarse worker mode: coding gets the default tool bundle, text gets none.
+    /// Coarse worker mode: coding gets the configured tool bundle, text gets none.
     @Guide(.anyOf(["coding", "text"]))
     var mode: String = "coding"
     /// Concrete outcome the worker must produce.
@@ -134,8 +134,8 @@ struct DelegateTaskTool: Tool {
     var description: String {
         """
         Delegate one goal to the configured worker. Use coding when the worker
-        must inspect or change the workspace: it receives TurboCode's complete
-        default worker tool bundle. Use text when the worker only needs to
+        must inspect or change the workspace: it receives the complete worker
+        tool bundle configured by the active profile. Use text when the worker only needs to
         return prose: it receives no tools.
         TurboCode returns a JSON AgentTaskResult; inspect its outcome and remain
         responsible for the final response.

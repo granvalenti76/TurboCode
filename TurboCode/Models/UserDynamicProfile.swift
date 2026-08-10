@@ -11,10 +11,10 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
     /// configured contextually for delegated profiles; direct Codex selection
     /// remains owned by the composer.
     static let builtInCases: [Self] = [.onDevice, .llama, .pcc, .deepseek]
-    /// These providers expose the structured `delegate_task` route. Llama is
-    /// OpenAI-compatible, so it can coordinate through the same adapter used
-    /// by DeepSeek without a provider-specific transport workaround.
-    static let delegationCases: [Self] = [.llama, .deepseek, .codex]
+    /// These models expose the structured `delegate_task` route when selected
+    /// in a custom profile. The built-in on-device profile remains direct;
+    /// opting into this capability is an explicit override choice.
+    static let delegationCases: [Self] = [.onDevice, .llama, .deepseek, .codex]
     /// Models available when creating or editing a custom profile. Codex is
     /// intentionally not a built-in standalone profile, but it is a valid
     /// override model with its own App Server and reasoning configuration.

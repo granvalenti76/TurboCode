@@ -8,12 +8,16 @@ For the structured route, delegation is a capability rather than a separate
 profile type. When a custom profile includes `delegate_task`, its selected
 model sends a goal to the configured worker and remains responsible for the
 final answer. The coordinator chooses only between a coding worker with the
-default workspace tools and a text-only worker with no tools; TurboCode owns
-runtime identifiers, workspace safety, and the timeout. DeepSeek, Codex, and the
-configured Llama-compatible route support this capability; Apple PCC, Llama,
-or DeepSeek can be selected as the worker.
+worker tool bundle configured by the profile and a text-only worker with no
+tools; TurboCode owns runtime identifiers, workspace safety, approval,
+cancellation, and verification when applicable. Custom on-device profiles can
+also include `delegate_task`; the built-in On-device profile remains direct by
+default. DeepSeek, Codex, and Llama support this capability, while Apple PCC,
+Llama, or DeepSeek can be selected as the worker.
 
-The menu item **On-Device (Experimental)** preserves the older compatibility path. In that mode Apple on-device may send a free-text task through `call_powerful_model`; it is not the primary 0.2.0 release scenario.
+The menu item **On-Device (Experimental)** preserves the older compatibility
+path. In that mode Apple on-device may send a free-text task through
+`call_powerful_model`; it is not the primary 0.3.0 structured delegation path.
 
 In **Custom Profiles**, add **Delegate Task** under **Included Capabilities**.
 Only then does the **Delegation** section appear, revealing the worker picker;
@@ -37,10 +41,10 @@ copies Codex credentials. Codex keeps its own agent loop while TurboCode exposes
 the same bounded workspace, Swift Package Manager, review, and approval tools
 used by the other capable profiles. A Codex coordinator profile applies its
 saved model and reasoning per turn without replacing the direct-Codex composer
-preferences. When a Codex coordinator profile is active,
-TurboCode also advertises `delegate_task` and routes it through the shared
-bounded worker, verification, and Activity pipeline. Direct Codex profiles do
-not receive that tool.
+preferences. When a Codex coordinator profile is active, TurboCode also
+advertises `delegate_task` and routes it through the shared worker and Activity
+pipeline; coding tasks use the applicable verification path. Direct Codex
+profiles do not receive that tool.
 
 ## Configure Apple PCC
 
