@@ -20,11 +20,25 @@ struct BashTool: Tool {
 
     let workspaceRoot: String
     let executionPolicy: ExecutionPolicy
+    let taskScope: AgentTaskPathScope?
     private let service = BashService()
 
-    init(workspaceRoot: String, executionPolicy: ExecutionPolicy = ExecutionPolicy()) {
+    init(
+        workspaceRoot: String,
+        executionPolicy: ExecutionPolicy = ExecutionPolicy(),
+        taskScope: AgentTaskPathScope? = nil
+    ) {
         self.workspaceRoot = workspaceRoot
         self.executionPolicy = executionPolicy
+        self.taskScope = taskScope
+    }
+
+    func restricted(to scope: AgentTaskPathScope) -> Self {
+        Self(
+            workspaceRoot: workspaceRoot,
+            executionPolicy: executionPolicy,
+            taskScope: scope
+        )
     }
 
     var name: String { "bash" }
@@ -44,6 +58,9 @@ struct BashTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: BashArguments) async throws -> String {
+        if let taskScope, !taskScope.isWorkspaceWide {
+            return "Error: bash requires an entire-workspace task scope because command paths cannot be safely narrowed."
+        }
         let command = arguments.command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !command.isEmpty else {
             return "Error: command cannot be empty."

@@ -26,6 +26,28 @@ struct XcodeProjectTool: Tool {
     let workspaceRoot: String
     let executionPolicy: ExecutionPolicy
     let enhancedOutput: Bool
+    let taskScope: AgentTaskPathScope?
+
+    init(
+        workspaceRoot: String,
+        executionPolicy: ExecutionPolicy,
+        enhancedOutput: Bool,
+        taskScope: AgentTaskPathScope? = nil
+    ) {
+        self.workspaceRoot = workspaceRoot
+        self.executionPolicy = executionPolicy
+        self.enhancedOutput = enhancedOutput
+        self.taskScope = taskScope
+    }
+
+    func restricted(to scope: AgentTaskPathScope) -> Self {
+        Self(
+            workspaceRoot: workspaceRoot,
+            executionPolicy: executionPolicy,
+            enhancedOutput: enhancedOutput,
+            taskScope: scope
+        )
+    }
 
     var name: String { "xcode_project" }
     var description: String {
@@ -43,6 +65,9 @@ struct XcodeProjectTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: XcodeProjectArguments) async throws -> String {
+        if let taskScope, !taskScope.isWorkspaceWide {
+            return "Error: xcode_project requires an entire-workspace task scope because project discovery and builds are workspace-wide."
+        }
         do {
             return try await XcodeProjectService(
                 workspaceRoot: workspaceRoot,

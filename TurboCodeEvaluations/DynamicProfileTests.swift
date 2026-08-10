@@ -72,8 +72,8 @@ struct DynamicProfileTests {
         #expect(profile.skillIDs.isEmpty)
     }
 
-    @Test("Llama, DeepSeek, and Codex require typed delegation to coordinate")
-    func coordinatorProfileRequiresSupportedRoute() {
+    @Test("Delegate Task enables delegation for supported custom profiles")
+    func delegationProfileRequiresSupportedRoute() {
         let llamaCoordinator = UserDynamicProfile(
             name: "Llama Coordinator",
             baseModelID: .llama,
@@ -103,13 +103,22 @@ struct DynamicProfileTests {
 
         // Product semantics come from model plus capability, never the
         // user-editable display name.
-        #expect(llamaCoordinator.isCoordinatorProfile)
-        #expect(deepSeekCoordinator.isCoordinatorProfile)
-        #expect(codexCoordinator.isCoordinatorProfile)
+        #expect(llamaCoordinator.usesDelegation)
+        #expect(deepSeekCoordinator.usesDelegation)
+        #expect(codexCoordinator.usesDelegation)
         #expect(codexCoordinator.resolvedToolIDs.contains(.delegateTask))
-        #expect(!renamedOnDevice.isCoordinatorProfile)
-        #expect(!renamedOnDevice.resolvedToolIDs.contains(.delegateTask))
-        #expect(!directDeepSeek.isCoordinatorProfile)
+        #expect(renamedOnDevice.usesDelegation)
+        #expect(renamedOnDevice.resolvedToolIDs.contains(.delegateTask))
+        #expect(!directDeepSeek.usesDelegation)
+    }
+
+    @Test("Custom profile model options include Codex")
+    func customProfileModelsIncludeCodex() {
+        let viewModel = SkillsViewModel()
+        let options = viewModel.profileModelOptions(settings: SettingsStore())
+
+        #expect(options.map(\.id) == ProfileBaseModelID.profileCases)
+        #expect(options.contains(where: { $0.id == .codex && $0.isAvailable }))
     }
 
     @Test("Coordinator workers are persisted and legacy routes keep their fallback")
@@ -142,6 +151,60 @@ struct DynamicProfileTests {
 
         #expect(legacy.workerModelID == nil)
         #expect(legacy.resolvedWorkerModelID(fallback: "deepseek") == "deepseek")
+    }
+
+    @Test("Worker tool overrides persist and distinguish all from none")
+    func workerToolSelectionRoundTrips() throws {
+        let selected = UserDynamicProfile(
+            name: "Focused worker",
+            baseModelID: .onDevice,
+            workerModelID: ProfileBaseModelID.llama.rawValue,
+            workerToolIDs: [
+                ToolCapabilityID.git.rawValue,
+                ToolCapabilityID.readFile.rawValue,
+                ToolCapabilityID.git.rawValue
+            ],
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        let decoded = try JSONDecoder().decode(
+            UserDynamicProfile.self,
+            from: JSONEncoder().encode(selected)
+        )
+
+        #expect(decoded.workerToolIDs == [
+            ToolCapabilityID.git.rawValue,
+            ToolCapabilityID.readFile.rawValue
+        ])
+        #expect(decoded.resolvedWorkerToolIDs == [.git, .readFile])
+
+        let none = UserDynamicProfile(
+            name: "Text-only worker",
+            baseModelID: .onDevice,
+            workerToolIDs: [],
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        #expect(none.resolvedWorkerToolIDs?.isEmpty == true)
+        #expect(UserDynamicProfile(name: "Default worker", baseModelID: .onDevice)
+            .resolvedWorkerToolIDs == nil)
+    }
+
+    @Test("Delegate tool plans honor an explicit worker allowlist")
+    func delegateToolPlanUsesSelectedWorkerTools() {
+        let context = ToolAccessContext(
+            hasWorkspace: true,
+            hasSkills: true,
+            hasDelegateModel: true,
+            repositoryMapDetail: .compact
+        )
+        let plan = ModelToolCatalog.plan(
+            profile: .delegate,
+            tier: .standard,
+            context: context,
+            selectedIDs: [.git, .readFile]
+        )
+
+        #expect(plan.registeredIDs == [.git, .readFile])
+        #expect(plan.assignment(for: .bash) == nil)
     }
 
     @Test("Codex coordinator configuration persists with legacy defaults")
@@ -192,7 +255,7 @@ struct DynamicProfileTests {
         profile.setExecutionRole(.coordinatorWorker)
 
         #expect(profile.executionRole == .coordinatorWorker)
-        #expect(profile.baseModelID == .deepseek)
+        #expect(profile.baseModelID == .onDevice)
         #expect(profile.workerModelID == ProfileBaseModelID.llama.rawValue)
         #expect(!profile.greedyMode)
         #expect(profile.resolvedToolIDs.contains(.delegateTask))
@@ -220,6 +283,65 @@ struct DynamicProfileTests {
         #expect(profile.baseModelID == .codex)
         #expect(profile.workerModelID == ProfileBaseModelID.deepseek.rawValue)
         #expect(profile.isCoordinatorProfile)
+    }
+
+    @Test("Capability overrides expose delegation to supported coordinator models")
+    func overrideOptionsScopeDelegationToCoordinatorModels() {
+        let viewModel = SkillsViewModel()
+        let settings = SettingsStore()
+
+        #expect(
+            viewModel.modelOption(for: .llama, settings: settings)
+                .compatibleToolIDs.contains(.delegateTask)
+        )
+        #expect(
+            viewModel.modelOption(for: .deepseek, settings: settings)
+                .compatibleToolIDs.contains(.delegateTask)
+        )
+        #expect(
+            viewModel.modelOption(for: .codex, settings: settings)
+                .compatibleToolIDs.contains(.delegateTask)
+        )
+        #expect(
+            viewModel.modelOption(for: .onDevice, settings: settings)
+                .compatibleToolIDs.contains(.delegateTask)
+        )
+        #expect(
+            !viewModel.modelOption(for: .pcc, settings: settings)
+                .compatibleToolIDs.contains(.delegateTask)
+        )
+    }
+
+    @Test("Selecting Delegate Task enables delegation and prepares a worker")
+    func overrideCapabilitySelectionOwnsDelegationRoute() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = DynamicProfileStore(
+            fileURL: root.appendingPathComponent("profiles.json")
+        )
+        let profile = UserDynamicProfile(
+            name: "Selectable coordinator",
+            baseModelID: .llama,
+            toolIDs: [ToolCapabilityID.readFile.rawValue]
+        )
+        try store.save([profile])
+        let viewModel = SkillsViewModel(store: store)
+        viewModel.reload()
+        viewModel.select(.custom(profile.id))
+
+        viewModel.setTool(.delegateTask, included: true)
+
+        #expect(viewModel.draft?.usesDelegation == true)
+        #expect(viewModel.draft?.workerModelID == ProfileBaseModelID.llama.rawValue)
+        #expect(viewModel.draft?.toolIDs.contains(ToolCapabilityID.delegateTask.rawValue) == true)
+
+        viewModel.setTool(.delegateTask, included: false)
+
+        // Removing the capability uses the same invariant-preserving route as
+        // the Execution picker and leaves unrelated explicit tools untouched.
+        #expect(viewModel.draft?.usesDelegation == false)
+        #expect(viewModel.draft?.toolIDs.contains(ToolCapabilityID.delegateTask.rawValue) == false)
+        #expect(viewModel.draft?.toolIDs.contains(ToolCapabilityID.readFile.rawValue) == true)
     }
 
     @Test("Changing a worker does not perturb the DeepSeek coordinator tool prefix")
@@ -265,7 +387,7 @@ struct DynamicProfileTests {
     @Test("Profile option families enforce supported coordinator routes")
     func profileOptionFamiliesAreScoped() {
         #expect(ProfileBaseModelID.builtInCases == [.onDevice, .llama, .pcc, .deepseek])
-        #expect(ProfileBaseModelID.coordinatorCases == [.llama, .deepseek, .codex])
+        #expect(ProfileBaseModelID.coordinatorCases == [.onDevice, .llama, .deepseek, .codex])
         #expect(ProfileBaseModelID.workerCases == [.pcc, .llama, .deepseek])
         #expect(!ProfileBaseModelID.workerCases.contains(.codex))
     }
@@ -347,6 +469,7 @@ struct DynamicProfileTests {
                 delegateReasoningLevel: nil,
                 activeTemperature: nil,
                 delegateTemperature: nil,
+                delegateToolIDs: nil,
                 dropsCompletedToolCalls: false,
                 workspaceInstructions: nil
             ),
@@ -524,6 +647,7 @@ struct DynamicProfileTests {
             delegateReasoningLevel: nil,
             activeTemperature: nil,
             delegateTemperature: nil,
+            delegateToolIDs: profile.resolvedWorkerToolIDs,
             dropsCompletedToolCalls: true,
             workspaceInstructions: nil
         )

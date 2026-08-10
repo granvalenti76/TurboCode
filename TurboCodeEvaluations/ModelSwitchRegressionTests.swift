@@ -68,6 +68,39 @@ struct ModelSwitchRegressionTests {
         #expect(restored.contains { if case .response = $0 { true } else { false } })
     }
 
+    @Test("Conversation metadata round-trips and legacy sessions receive safe defaults")
+    func conversationMetadataRoundTripsAndMigrates() throws {
+        let stored = StoredSession(
+            title: "Pinned plan",
+            projectName: "TurboCode",
+            isPinned: true,
+            isArchived: true,
+            mode: .plan
+        )
+        let data = try JSONEncoder().encode(stored)
+        let decoded = try JSONDecoder().decode(StoredSession.self, from: data)
+
+        #expect(decoded.schemaVersion == StoredSession.currentSchemaVersion)
+        #expect(decoded.isPinned)
+        #expect(decoded.isArchived)
+        #expect(decoded.mode == .plan)
+
+        var legacy = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        legacy.removeValue(forKey: "schemaVersion")
+        legacy.removeValue(forKey: "isPinned")
+        legacy.removeValue(forKey: "isArchived")
+        legacy.removeValue(forKey: "mode")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+        let migrated = try JSONDecoder().decode(StoredSession.self, from: legacyData)
+
+        #expect(migrated.schemaVersion == StoredSession.currentSchemaVersion)
+        #expect(!migrated.isPinned)
+        #expect(!migrated.isArchived)
+        #expect(migrated.mode == .agent)
+    }
+
     @Test("Legacy visible blocks recover user and assistant turns")
     func legacyBlocksRecoverConversationTurns() {
         let result = SessionRebuildHistory.fromVisibleBlocks([
@@ -83,6 +116,35 @@ struct ModelSwitchRegressionTests {
         #expect(!result.contains { if case .reasoning = $0 { true } else { false } })
         #expect(!result.contains { if case .toolCalls = $0 { true } else { false } })
         #expect(!result.contains { if case .toolOutput = $0 { true } else { false } })
+    }
+
+    @Test("On-device compaction keeps durable outcomes and drops tool chatter")
+    func onDeviceCompactionKeepsEssentialContext() throws {
+        let transcript = Transcript(entries: fixtureTranscript())
+        #expect(SessionRebuildHistory.userTurnCount(in: transcript) == 1)
+
+        let compaction = try #require(
+            SessionRebuildHistory.onDeviceCompaction(from: [
+                ChatBlock(kind: .user, text: "Inspect the repository"),
+                ChatBlock(kind: .tool, text: "raw tool output: secret noise"),
+                ChatBlock(kind: .assistant, text: "The repository is clean.")
+            ])
+        )
+
+        #expect(compaction.summary.contains("The repository is clean."))
+        #expect(!compaction.summary.contains("secret noise"))
+        #expect(compaction.history.count == 2)
+        #expect(
+            SessionRebuildHistory.userTurnCount(
+                in: Transcript(entries: compaction.history)
+            ) == 0
+        )
+        #expect(
+            compaction.history.contains {
+                if case .response = $0 { return true }
+                return false
+            }
+        )
     }
 
     @Test("A dynamic profile receives only its selected disk skills")

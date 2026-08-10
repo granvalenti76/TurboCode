@@ -84,7 +84,6 @@ struct AgentTaskRunnerTests {
             attemptID: "attempt-verification",
             goal: "Apply one edit and verify it.",
             acceptanceCriteria: ["The deterministic build passes."],
-            allowedTools: [.editFile],
             verificationRequest: .build,
             verificationParameters: AgentVerificationParameters(
                 scheme: "Fixture"
@@ -123,7 +122,6 @@ struct AgentTaskRunnerTests {
             attemptID: "attempt-stale-verification",
             goal: "Apply edits and verify the final state.",
             acceptanceCriteria: ["Only the latest workspace state is verified."],
-            allowedTools: [.editFile],
             verificationRequest: .test
         )
         let runner = BoundedAgentTaskRunner(
@@ -153,7 +151,6 @@ struct AgentTaskRunnerTests {
             attemptID: "attempt-conflict",
             goal: "Edit the latest file revision.",
             acceptanceCriteria: ["No stale content is overwritten."],
-            allowedTools: [.editFile],
             verificationRequest: .build
         )
         let verifier = RecordingAgentTaskVerifier(succeeds: true)
@@ -175,65 +172,34 @@ struct AgentTaskRunnerTests {
         #expect(await verifier.observedMutationSequence == nil)
     }
 
-    @Test("Execution gate enforces allowlist and maximum tool calls")
-    func enforcesToolBudget() async {
-        let gate = AgentTaskExecutionGate(
-            allowedToolNames: ["read_file"],
-            maximumToolCalls: 1
-        )
-
-        #expect(await gate.beginTool(named: "read_file") == nil)
-        #expect(await gate.count == 1)
-        #expect(await gate.beginTool(named: "read_file") == .toolLimitReached)
-
-        let restricted = AgentTaskExecutionGate(
-            allowedToolNames: ["read_file"],
-            maximumToolCalls: 4
-        )
-        #expect(await restricted.beginTool(named: "git") == .toolNotAllowed("git"))
-        #expect(await restricted.count == 0)
-    }
-
-    @Test("Effective allowlist is the task and catalog-plan intersection")
-    func intersectsTaskAllowlistWithCatalogPlan() throws {
-        let envelope = try AgentTaskEnvelope(
-            taskID: "allowlist-task",
-            attemptID: "allowlist-attempt",
-            goal: "Inspect source without changing repository state.",
-            acceptanceCriteria: ["Read the requested source."],
-            allowedTools: [.readFile, .git]
-        )
-        let plan = ModelToolPlan(
-            profile: .delegate,
-            tier: .standard,
-            assignments: [
-                .init(id: .readFile, isRegistered: true, unavailableReason: nil),
-                .init(id: .git, isRegistered: false, unavailableReason: "Restricted")
-            ]
-        )
+    @Test("Worker capability mode is all configured tools or no tools")
+    func workerModeSelectsBinaryToolSurface() {
+        let configured: [any Tool] = [
+            ReadFileTool(workspaceRoot: "/workspace"),
+            EditFileTool(workspaceRoot: "/workspace")
+        ]
 
         #expect(
-            AgentTaskToolPolicy.permittedNames(envelope: envelope, plan: plan)
-                == ["read_file"]
+            DelegatedWorkerToolPolicy.tools(
+                for: .coding,
+                availableTools: configured
+            ).map(\.name) == ["read_file", "edit_file"]
+        )
+        #expect(
+            DelegatedWorkerToolPolicy.tools(
+                for: .text,
+                availableTools: configured
+            ).isEmpty
         )
     }
 
     @Test("Compatibility tool converts free text into a correlated envelope")
     func compatibilityToolUsesInjectedRunner() async throws {
         let fake = RecordingFakeAgentTaskRunner()
-        let plan = ModelToolPlan(
-            profile: .delegate,
-            tier: .standard,
-            assignments: [
-                ModelToolAssignment(id: .readFile, isRegistered: true, unavailableReason: nil),
-                ModelToolAssignment(id: .editFile, isRegistered: true, unavailableReason: nil)
-            ]
-        )
         let tool = CallPowerfulModelTool(
             model: SystemLanguageModel.default,
             temperature: nil,
             reasoningLevel: nil,
-            delegatePlan: plan,
             delegateTools: [],
             delegateInstructions: "Complete the delegated Swift task.",
             runner: fake
@@ -247,7 +213,7 @@ struct AgentTaskRunnerTests {
         #expect(output == "Fake worker completed the task.")
         #expect(envelope.goal == "Update Parser.swift")
         #expect(envelope.taskID != envelope.attemptID)
-        #expect(envelope.allowedTools == [.editFile, .readFile])
+        #expect(envelope.mode == .coding)
     }
 
     private func makeEnvelope(
@@ -261,7 +227,6 @@ struct AgentTaskRunnerTests {
             attemptID: "attempt-runner",
             goal: "Make one focused Swift change.",
             acceptanceCriteria: ["The requested behavior is implemented."],
-            allowedTools: [.readFile],
             budget: budget
         )
     }
@@ -269,11 +234,6 @@ struct AgentTaskRunnerTests {
     private func makeContext() -> AgentTaskRunContext {
         AgentTaskRunContext(
             model: SystemLanguageModel.default,
-            toolPlan: ModelToolPlan(
-                profile: .delegate,
-                tier: .standard,
-                assignments: []
-            ),
             tools: [],
             instructions: "Complete the task.",
             temperature: nil,

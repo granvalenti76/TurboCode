@@ -29,6 +29,7 @@ nonisolated enum ToolCapabilityID: String, CaseIterable, Codable, Sendable, Hash
     case writeOnDevice = "write_ondevice"
     case removeFile = "remove_file"
     case loadSkill = "load_skill"
+    case createSkill = "create_skill"
     case delegateTask = "delegate_task"
     case callPowerfulModel = "call_powerful_model"
 
@@ -204,15 +205,23 @@ nonisolated enum ModelToolCatalog {
         .init(
             id: .loadSkill,
             name: "Load Skill",
-            summary: "Load a matching skill from ~/.turbocode/SKILLS on demand.",
+            summary: "Load a matching workspace skill on demand.",
             category: .orchestration,
             systemImage: "puzzlepiece.extension",
             hasNativePresentation: false
         ),
         .init(
+            id: .createSkill,
+            name: "Create Skill",
+            summary: "Create a reusable Codex-compatible skill in the active workspace.",
+            category: .orchestration,
+            systemImage: "puzzlepiece.extension.fill",
+            hasNativePresentation: true
+        ),
+        .init(
             id: .delegateTask,
             name: "Delegate Task",
-            summary: "Assign a bounded structured task to the configured worker.",
+            summary: "Send a goal to a tool-using or text-only configured worker.",
             category: .orchestration,
             systemImage: "arrow.triangle.branch",
             hasNativePresentation: false
@@ -231,6 +240,13 @@ nonisolated enum ModelToolCatalog {
         descriptors.first(where: { $0.id == id })!
     }
 
+    /// The worker catalog is intentionally separate from coordinator tools.
+    /// Keeping this set centralized prevents persisted worker overrides from
+    /// accidentally granting recursive delegation capabilities.
+    static var delegateToolIDs: Set<ToolCapabilityID> {
+        Set(membership(for: .delegate).map(\.0))
+    }
+
     static func plan(
         profile: ModelRuntimeProfile,
         tier: ModelToolTier,
@@ -238,17 +254,19 @@ nonisolated enum ModelToolCatalog {
         selectedIDs: Set<ToolCapabilityID>? = nil
     ) -> ModelToolPlan {
         let profileMembership = membership(for: profile)
-        let memberships = selectedIDs.map { ids in
-            // A custom microtask profile may narrow its role but cannot add
-            // capabilities outside that role's product policy. Other custom
-            // profiles retain their explicit catalog-backed selection.
-            let permittedIDs = profile == .microtask
-                ? Set(profileMembership.map(\.0))
-                : Set(ToolCapabilityID.allCases)
+        var memberships = selectedIDs.map { ids in
             return ToolCapabilityID.allCases
-                .filter { ids.contains($0) && permittedIDs.contains($0) }
+                .filter { ids.contains($0) }
                 .map { ($0, requirement(for: $0)) }
         } ?? profileMembership
+        // Built-in profiles always retain the product skill authoring surface.
+        // A custom profile passes selectedIDs explicitly, so its list remains
+        // an actual capability boundary: omitting create_skill must remove it.
+        if selectedIDs == nil,
+           context.hasWorkspace,
+           !memberships.contains(where: { $0.0 == .createSkill }) {
+            memberships.append((.createSkill, .workspace))
+        }
         let assignments = memberships.compactMap { id, requirement -> ModelToolAssignment? in
             if requirement == .repositoryMap,
                (tier == .onDevice || context.repositoryMapDetail == nil) {
@@ -266,7 +284,8 @@ nonisolated enum ModelToolCatalog {
         switch id {
         case .turboCodeGuide: .always
         case .listWorkspace, .readFile, .searchWorkspace, .fileSystem, .git,
-             .bash, .swiftPackageManager, .editFile, .writeOnDevice, .removeFile: .workspace
+             .bash, .swiftPackageManager, .editFile, .writeOnDevice, .removeFile,
+             .createSkill: .workspace
         case .swiftWorkspaceMap: .repositoryMap
         case .xcodeProject: .capableWorkspace
         case .loadSkill: .skills
@@ -279,7 +298,16 @@ nonisolated enum ModelToolCatalog {
     ) -> [(ToolCapabilityID, ToolAvailabilityRequirement)] {
         switch profile {
         case .microtask:
-            return OnDeviceCapabilityPolicy.directToolIDs
+            // This is the default native on-device surface, not a competence
+            // judgment. Explicit profile selections may widen it as supported
+            // by the resolved tool tier and workspace context.
+            return [
+                .turboCodeGuide,
+                .listWorkspace,
+                .readFile,
+                .writeOnDevice,
+                .createSkill
+            ]
                 .sorted { $0.rawValue < $1.rawValue }
                 .map { ($0, requirement(for: $0)) }
         case .standalone:
@@ -296,7 +324,8 @@ nonisolated enum ModelToolCatalog {
                 (.xcodeProject, .capableWorkspace),
                 (.editFile, .workspace),
                 (.removeFile, .workspace),
-                (.loadSkill, .skills)
+                (.loadSkill, .skills),
+                (.createSkill, .workspace)
             ]
         case .orchestrator:
             return [
@@ -304,6 +333,7 @@ nonisolated enum ModelToolCatalog {
                 (.listWorkspace, .workspace),
                 (.fileSystem, .workspace),
                 (.loadSkill, .skills),
+                (.createSkill, .workspace),
                 (.callPowerfulModel, .delegateModel)
             ]
         case .delegate:
@@ -320,7 +350,8 @@ nonisolated enum ModelToolCatalog {
                 (.xcodeProject, .capableWorkspace),
                 (.editFile, .workspace),
                 (.removeFile, .workspace),
-                (.loadSkill, .skills)
+                (.loadSkill, .skills),
+                (.createSkill, .workspace)
             ]
         }
     }

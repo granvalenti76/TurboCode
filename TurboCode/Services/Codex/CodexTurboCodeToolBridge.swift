@@ -75,6 +75,7 @@ nonisolated enum CodexTurboCodeToolBridge {
         workspaceRoot: String,
         agentTuning: AgentTuningConfig,
         dynamicTools: [CodexDynamicToolSpec],
+        availableSkills: [TurboCodeSkillDefinition],
         workspaceInstructions: WorkspaceInstructions?
     ) -> String {
         // Codex owns its agent loop, but receives the same product identity,
@@ -94,11 +95,15 @@ nonisolated enum CodexTurboCodeToolBridge {
                     .swiftPackageManager,
                     .xcodeProject,
                     .git
-                ] + (dynamicTools.contains(where: {
+                ] + (availableSkills.isEmpty ? [] : [.loadSkill])
+                + (dynamicTools.contains(where: {
+                    $0.name == ToolCapabilityID.createSkill.rawValue
+                }) ? [.createSkill] : [])
+                + (dynamicTools.contains(where: {
                     $0.name == ToolCapabilityID.delegateTask.rawValue
                 }) ? [.delegateTask] : []),
                 toolNames: dynamicTools.map(\.name),
-                availableSkills: [],
+                availableSkills: availableSkills,
                 workspaceInstructions: workspaceInstructions
             )
         )
@@ -107,7 +112,8 @@ nonisolated enum CodexTurboCodeToolBridge {
     static func specifications(
         workspaceRoot: String,
         agentTuning: AgentTuningConfig,
-        includesDelegation: Bool = false
+        includesDelegation: Bool = false,
+        availableSkills: [TurboCodeSkillDefinition] = []
     ) -> [CodexDynamicToolSpec] {
         let listTool = ListWorkspaceTool(workspaceRoot: workspaceRoot)
         let mapTool = SwiftWorkspaceMapTool(
@@ -219,6 +225,12 @@ nonisolated enum CodexTurboCodeToolBridge {
             // advertise a tool without a configured bounded worker invoker.
             specifications.append(delegateTaskSpecification)
         }
+        if !availableSkills.isEmpty {
+            specifications.append(loadSkillSpecification)
+        }
+        if !workspaceRoot.isEmpty {
+            specifications.append(createSkillSpecification)
+        }
         return specifications
     }
 
@@ -233,6 +245,7 @@ nonisolated enum CodexTurboCodeToolBridge {
         case "xcode_project": "Working with Xcode project"
         case "git": "Working with Git"
         case "delegate_task": "Delegating task to worker"
+        case "create_skill": "Creating workspace skill"
         default: "Running \(tool)"
         }
     }
@@ -242,6 +255,7 @@ nonisolated enum CodexTurboCodeToolBridge {
         workspaceRoot: String,
         workspaceName: String?,
         agentTuning: AgentTuningConfig,
+        availableSkills: [TurboCodeSkillDefinition] = [],
         delegationInvoker: (any AgentTaskInvoking)? = nil
     ) async throws -> CodexToolExecution {
         switch call.tool {
@@ -352,6 +366,22 @@ nonisolated enum CodexTurboCodeToolBridge {
                 throw AgentTaskWorkerError.invalidEnvelopeEncoding
             }
             return .init(result: .success(json), presentation: nil)
+        case "load_skill":
+            let text = try await LoadSkillTool(skills: availableSkills).call(
+                arguments: LoadSkillArguments(
+                    name: try requiredString("name", in: call)
+                )
+            )
+            return .init(result: .success(text), presentation: nil)
+        case "create_skill":
+            let text = try await CreateSkillTool(workspaceRoot: workspaceRoot).call(
+                arguments: CreateSkillArguments(
+                    name: try requiredString("name", in: call),
+                    description: try requiredString("description", in: call),
+                    instructions: try requiredString("instructions", in: call)
+                )
+            )
+            return .init(result: .success(text), presentation: nil)
         default:
             throw CodexToolBridgeError.unsupportedTool(call.tool)
         }
@@ -400,42 +430,9 @@ nonisolated enum CodexTurboCodeToolBridge {
     private static func delegateTaskArguments(
         _ call: CodexDynamicToolCall
     ) throws -> DelegateTaskArguments {
-        func requiredStrings(_ key: String) throws -> [String] {
-            guard let values = call.arguments[key]?.arrayValue,
-                  values.allSatisfy({ $0.stringValue != nil }) else {
-                throw invalid(call, "'\(key)' must be an array of strings")
-            }
-            return values.compactMap(\.stringValue)
-        }
-        guard let timeoutSeconds = call.arguments["timeoutSeconds"]?.integerValue else {
-            throw invalid(call, "'timeoutSeconds' must be an integer")
-        }
-        guard let maximumToolCalls = call.arguments["maximumToolCalls"]?.integerValue else {
-            throw invalid(call, "'maximumToolCalls' must be an integer")
-        }
         return DelegateTaskArguments(
-            taskID: try requiredString("taskID", in: call),
-            attemptID: try requiredString("attemptID", in: call),
-            goal: try requiredString("goal", in: call),
-            acceptanceCriteria: try requiredStrings("acceptanceCriteria"),
-            suggestedScope: try requiredStrings("suggestedScope"),
-            allowedTools: try requiredStrings("allowedTools"),
-            verificationRequest: try requiredString("verificationRequest", in: call),
-            verificationContainerPath: optionalString(
-                "verificationContainerPath",
-                in: call
-            ),
-            verificationScheme: optionalString("verificationScheme", in: call),
-            verificationConfiguration: optionalString(
-                "verificationConfiguration",
-                in: call
-            ),
-            verificationDestination: optionalString(
-                "verificationDestination",
-                in: call
-            ),
-            timeoutSeconds: timeoutSeconds,
-            maximumToolCalls: maximumToolCalls
+            mode: optionalString("mode", in: call) ?? "coding",
+            goal: try requiredString("goal", in: call)
         )
     }
 
@@ -604,32 +601,42 @@ nonisolated enum CodexTurboCodeToolBridge {
         required: ["operation"]
     )
 
-    /// Mirrors DelegateTaskArguments exactly so Codex and Foundation Models
-    /// coordinators produce one provider-independent contract.
-    private static let delegateTaskSpecification = CodexDynamicToolSpec(
-        name: "delegate_task",
-        description: "Delegate one bounded coding task to the configured worker.",
+    private static let loadSkillSpecification = CodexDynamicToolSpec(
+        name: "load_skill",
+        description: "Load the full instructions for one reusable TurboCode skill when the user's request matches its catalog description.",
         inputSchema: objectSchema(
             properties: [
-                "taskID": stringSchema("Stable logical task identifier."),
-                "attemptID": stringSchema("Unique execution attempt identifier."),
-                "goal": stringSchema("Concrete worker outcome."),
-                "acceptanceCriteria": stringArraySchema,
-                "suggestedScope": stringArraySchema,
-                "allowedTools": stringArraySchema,
-                "verificationRequest": enumSchema(["none", "build", "test"]),
-                "verificationContainerPath": nullableStringSchema(),
-                "verificationScheme": nullableStringSchema(),
-                "verificationConfiguration": nullableStringSchema(),
-                "verificationDestination": nullableStringSchema(),
-                "timeoutSeconds": .object(["type": .string("integer")]),
-                "maximumToolCalls": .object(["type": .string("integer")])
+                "name": stringSchema("Exact skill name from the available skills catalog.")
             ],
-            required: [
-                "taskID", "attemptID", "goal", "acceptanceCriteria",
-                "suggestedScope", "allowedTools", "verificationRequest",
-                "timeoutSeconds", "maximumToolCalls"
-            ]
+            required: ["name"]
+        )
+    )
+
+    private static let createSkillSpecification = CodexDynamicToolSpec(
+        name: "create_skill",
+        description: "Create one reusable Codex-compatible skill at .agents/skills/<name>/SKILL.md in the active workspace.",
+        inputSchema: objectSchema(
+            properties: [
+                "name": stringSchema("Lowercase kebab-case skill identifier."),
+                "description": stringSchema("Concise trigger description used for implicit activation."),
+                "instructions": stringSchema("Complete procedural instructions for the skill body.")
+            ],
+            required: ["name", "description", "instructions"]
+        )
+    )
+
+    /// Mirrors the intentionally small DelegateTaskArguments surface so both
+    /// coordinator transports only choose between a tool-using worker and a
+    /// text-only worker. Runtime policy remains application-owned.
+    private static let delegateTaskSpecification = CodexDynamicToolSpec(
+        name: "delegate_task",
+        description: "Delegate one goal to the configured worker. Use coding for workspace work with the profile-configured worker tools, or text for a tool-free prose response.",
+        inputSchema: objectSchema(
+            properties: [
+                "mode": enumSchema(["coding", "text"]),
+                "goal": stringSchema("Complete task to send to the worker.")
+            ],
+            required: ["mode", "goal"]
         )
     )
 

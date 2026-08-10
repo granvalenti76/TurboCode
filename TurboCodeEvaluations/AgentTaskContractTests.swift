@@ -9,13 +9,13 @@ struct AgentTaskContractTests {
         let envelope = try AgentTaskEnvelope(
             taskID: "task-42",
             attemptID: "attempt-1",
+            mode: .coding,
             goal: "Add a focused Swift parser.",
             acceptanceCriteria: [
                 "The parser accepts valid input.",
                 "The focused tests pass."
             ],
             suggestedScope: ["TurboCode/Services/Parser.swift"],
-            allowedTools: [.readFile, .editFile, .readFile, .xcodeProject],
             verificationRequest: .test,
             verificationParameters: AgentVerificationParameters(
                 containerPath: "TurboCode.xcodeproj",
@@ -49,7 +49,7 @@ struct AgentTaskContractTests {
         )
 
         #expect(decodedEnvelope == envelope)
-        #expect(decodedEnvelope.allowedTools == [.readFile, .editFile, .xcodeProject])
+        #expect(decodedEnvelope.mode == .coding)
         #expect(decodedEnvelope.verificationParameters?.scheme == "TurboCodeEvaluations")
         #expect(decodedResult == result)
         #expect(decodedResult.receiptIDs == ["edit-1", "test-1"])
@@ -81,8 +81,8 @@ struct AgentTaskContractTests {
         let envelope = try JSONDecoder().decode(AgentTaskEnvelope.self, from: envelopeData)
         let result = try JSONDecoder().decode(AgentTaskResult.self, from: resultData)
 
-        #expect(envelope.schemaVersion == 1)
-        #expect(envelope.allowedTools.isEmpty)
+        #expect(envelope.schemaVersion == 2)
+        #expect(envelope.mode == .coding)
         #expect(envelope.verificationRequest == .none)
         #expect(envelope.verificationParameters == nil)
         #expect(envelope.budget == .default)
@@ -128,6 +128,16 @@ struct AgentTaskContractTests {
                 verificationParameters: AgentVerificationParameters(
                     scheme: "TurboCode"
                 )
+            )
+        }
+        #expect(throws: AgentTaskContractError.textWorkerCannotVerify) {
+            try AgentTaskEnvelope(
+                taskID: "task",
+                attemptID: "attempt",
+                mode: .text,
+                goal: "Write a summary.",
+                acceptanceCriteria: ["The summary is concise."],
+                verificationRequest: .test
             )
         }
     }

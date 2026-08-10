@@ -53,6 +53,7 @@ final class ChatResponseCoordinator {
         workspaceRoot: String,
         workspaceName: String?,
         agentTuning: AgentTuningConfig,
+        availableSkills: [TurboCodeSkillDefinition],
         codexModelID: String?,
         codexReasoningEffort: CodexReasoningEffort?,
         delegationInvoker: (any AgentTaskInvoking)?,
@@ -76,6 +77,7 @@ final class ChatResponseCoordinator {
                     workspaceRoot: workspaceRoot,
                     workspaceName: workspaceName,
                     agentTuning: agentTuning,
+                    availableSkills: availableSkills,
                     modelID: codexModelID,
                     reasoningEffort: codexReasoningEffort,
                     delegationInvoker: delegationInvoker

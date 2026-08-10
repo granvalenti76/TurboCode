@@ -14,6 +14,7 @@ struct InputFieldView: View {
     @Environment(ChatStore.self) private var chatStore
     @Environment(\.chatFontSize) private var chatFontSize
     @FocusState private var isFocused: Bool
+    @State private var selectedSlashCommandIndex = 0
 
     let compact: Bool
 
@@ -70,9 +71,6 @@ struct InputFieldView: View {
     // MARK: - Text Field
 
     private var textField: some View {
-        let assignment = chatStore.composerTaskAssignment(
-            for: chatStore.composerInput
-        )
         return VStack(alignment: .leading, spacing: 8) {
             TextField(
                 "Describe a Swift or SwiftUI task…",
@@ -96,6 +94,9 @@ struct InputFieldView: View {
                     }
                 )
                 .onChange(of: chatStore.composerInput) { oldValue, newValue in
+                    // A changed query describes a new result set; keeping the
+                    // previous row selected could execute the wrong command.
+                    selectedSlashCommandIndex = 0
                     // Inspector recovery actions prepare a reviewable draft
                     // rather than executing work immediately. Focus only when
                     // text is inserted externally, not while the user types.
@@ -103,19 +104,18 @@ struct InputFieldView: View {
                         isFocused = true
                     }
                 }
+                .onChange(of: chatStore.busy) { _, isBusy in
+                    guard !isBusy else { return }
+                    // Responses disable the field while they stream. Restore
+                    // the insertion point as soon as the response reaches a
+                    // terminal state so the next prompt needs no extra click.
+                    isFocused = true
+                }
+                .onKeyPress(keys: [.upArrow, .downArrow, .return]) { press in
+                    handleComposerKeyPress(press)
+                }
 
-            if let guidance = assignment.guidance,
-               !chatStore.composerInput
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .isEmpty {
-                Label(guidance, systemImage: "person.2.badge.gearshape")
-                    .font(AppTypography.metadata)
-                    .foregroundStyle(.orange)
-                    .transition(.opacity)
-                    .accessibilityLabel("Model routing: \(guidance)")
-            }
-
-            if isFocused && !slashSuggestions.isEmpty {
+            if isFocused && !chatStore.busy && !slashSuggestions.isEmpty {
                 slashCommandMenu
             }
         }
@@ -150,11 +150,19 @@ struct InputFieldView: View {
 
                         Spacer(minLength: 0)
                     }
+                    .background(
+                        index == selectedSlashCommandIndex
+                            ? Color.accentColor.opacity(0.14)
+                            : .clear
+                    )
                     .padding(.horizontal, 9)
                     .frame(height: 30)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(
+                    index == selectedSlashCommandIndex ? .isSelected : []
+                )
             }
         }
         .background(.regularMaterial)
@@ -163,6 +171,48 @@ struct InputFieldView: View {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .strokeBorder(.separator, lineWidth: 0.5)
         }
+    }
+
+    private func handleComposerKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        guard !slashSuggestions.isEmpty, !chatStore.busy else { return .ignored }
+
+        switch press.key {
+        case .upArrow:
+            moveSlashSelection(by: -1)
+            return .handled
+        case .downArrow:
+            moveSlashSelection(by: 1)
+            return .handled
+        case .return:
+            executeSelectedSlashCommand()
+            return .handled
+        default:
+            return .ignored
+        }
+    }
+
+    private func moveSlashSelection(by offset: Int) {
+        guard !slashSuggestions.isEmpty else { return }
+        let count = slashSuggestions.count
+        selectedSlashCommandIndex = (selectedSlashCommandIndex + offset + count) % count
+    }
+
+    /// Executes a selected complete slash command. `/skill` and `/task` remain
+    /// insertion steps because both require a parameter before execution.
+    private func executeSelectedSlashCommand() {
+        let suggestion = slashSuggestions[
+            min(max(selectedSlashCommandIndex, 0), slashSuggestions.count - 1)
+        ]
+        guard suggestion.command != "/skill", suggestion.command != "/task" else {
+            chatStore.composerInput = suggestion.insertion
+            isFocused = true
+            return
+        }
+
+        let command = suggestion.command
+        chatStore.composerInput = ""
+        isFocused = false
+        Task { await chatStore.sendMessage(command) }
     }
 
     private var slashSuggestions: [SlashCommandSuggestion] {
@@ -187,6 +237,18 @@ struct InputFieldView: View {
         guard !input.contains(" ") else { return [] }
         let query = input.lowercased()
         let commands = [
+            SlashCommandSuggestion(
+                command: "/task",
+                insertion: "/task ",
+                description: "Run an independent worker task",
+                icon: "person.2"
+            ),
+            SlashCommandSuggestion(
+                command: "/documentation",
+                insertion: "/documentation",
+                description: "Open TurboCode documentation",
+                icon: "book.closed"
+            ),
             SlashCommandSuggestion(
                 command: "/skills",
                 insertion: "/skills",
@@ -400,21 +462,7 @@ struct InputFieldView: View {
 
     private var sendButton: some View {
         Button {
-            if chatStore.busy {
-                chatStore.interrupt()
-                return
-            }
-            let text = chatStore.composerInput.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { return }
-            if chatStore.isIncompleteSkillCommand(text) {
-                chatStore.composerInput = "/skill "
-                isFocused = true
-                return
-            }
-            // Clear the shared draft before starting inference so recovery
-            // drafts and ordinary composer input follow the same lifecycle.
-            chatStore.composerInput = ""
-            Task { await chatStore.sendMessage(text) }
+            sendComposerInput()
         } label: {
             Image(systemName: chatStore.busy ? "stop.fill" : "arrow.up")
         }
@@ -428,24 +476,44 @@ struct InputFieldView: View {
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .isEmpty
                     || chatStore.isIncompleteSkillCommand(chatStore.composerInput)
-                    || !chatStore.composerTaskAssignment(
-                        for: chatStore.composerInput
-                    ).allowsOnDevice
-                    || !chatStore.activeProfileCanSend
+                    || chatStore.isIncompleteTaskCommand(chatStore.composerInput)
+                    || (
+                        !chatStore.activeProfileCanSend
+                            && !chatStore.isLocalCommand(chatStore.composerInput)
+                    )
                 )
         )
         .keyboardShortcut(.return, modifiers: [])
         .help(sendButtonHelp)
     }
 
+    private func sendComposerInput() {
+        if chatStore.busy {
+            chatStore.interrupt()
+            return
+        }
+        let text = chatStore.composerInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        if chatStore.isIncompleteSkillCommand(text) {
+            chatStore.composerInput = "/skill "
+            isFocused = true
+            return
+        }
+        if chatStore.isIncompleteTaskCommand(text) {
+            chatStore.composerInput = "/task "
+            isFocused = true
+            return
+        }
+        // Clear the shared draft before starting inference so recovery drafts
+        // and ordinary composer input follow the same lifecycle.
+        chatStore.composerInput = ""
+        Task { await chatStore.sendMessage(text) }
+    }
+
     private var sendButtonHelp: String {
         if chatStore.busy { return "Stop response" }
-        if let guidance = chatStore.composerTaskAssignment(
-            for: chatStore.composerInput
-        ).guidance {
-            return guidance
-        }
-        if !chatStore.activeProfileCanSend {
+        if !chatStore.activeProfileCanSend
+            && !chatStore.isLocalCommand(chatStore.composerInput) {
             return "Wait for Codex to connect or sign in first"
         }
         return "Send message"
@@ -466,41 +534,36 @@ struct InputFieldView: View {
         .padding(.vertical, compact ? 7 : 8)
     }
 
-    /// Presents execution semantics instead of the historical storage enum.
-    /// Users choose a route here; whether that route is internally represented
-    /// by standalone transport mode is not product-facing information.
+    /// Presents the available profile choices. Delegation is a capability of a
+    /// profile, not a separate route users must understand or maintain.
     private var executionRouteMenu: some View {
         Menu {
-            Section("Execution Route") {
+            Section("Profiles") {
                 Button {
                     chatStore.selectDirectExecution()
                 } label: {
-                    if isDirectExecution {
-                        Label("Direct Model", systemImage: "checkmark")
+                    if chatStore.activeDynamicProfile == nil,
+                       chatStore.orchestratorMode == .standalone {
+                        Label("Current Model", systemImage: "checkmark")
                     } else {
-                        Text("Direct Model")
+                        Text("Current Model")
                     }
                 }
-            }
-
-            Section("Coordinator → Worker") {
-                if coordinatorProfiles.isEmpty {
-                    Button("Create Coordinator Profile…") {
-                        chatStore.requestCoordinatorProfileCreation()
-                    }
-                } else {
-                    ForEach(coordinatorProfiles) { profile in
-                        Button {
-                            chatStore.selectCoordinatorProfile(profile.id)
-                        } label: {
-                            if chatStore.activeDynamicProfileID == profile.id,
-                               chatStore.orchestratorMode == .standalone {
-                                Label(profile.name, systemImage: "checkmark")
-                            } else {
-                                Text(profile.name)
-                            }
+                ForEach(chatStore.dynamicProfiles) { profile in
+                    Button {
+                        chatStore.selectDynamicProfile(profile.id)
+                    } label: {
+                        if chatStore.activeDynamicProfileID == profile.id,
+                           chatStore.orchestratorMode == .standalone {
+                            Label(profile.name, systemImage: "checkmark")
+                        } else {
+                            Text(profile.name)
                         }
                     }
+                }
+                Divider()
+                Button("Create Profile…") {
+                    chatStore.requestProfileCreation()
                 }
             }
 
@@ -527,31 +590,25 @@ struct InputFieldView: View {
         .help(executionRouteHelp)
     }
 
-    private var coordinatorProfiles: [UserDynamicProfile] {
-        chatStore.dynamicProfiles.filter(\.isCoordinatorProfile)
-    }
-
-    private var isCoordinatorExecution: Bool {
+    private var isDelegatingExecution: Bool {
         chatStore.orchestratorMode == .standalone
-            && chatStore.activeDynamicProfile?.isCoordinatorProfile == true
-    }
-
-    private var isDirectExecution: Bool {
-        chatStore.orchestratorMode == .standalone && !isCoordinatorExecution
+            && chatStore.activeDynamicProfile?.usesDelegation == true
     }
 
     private var executionRouteLabel: String {
         if chatStore.orchestratorMode == .orchestrator {
             return "On-Device Delegation"
         }
-        if isCoordinatorExecution {
-            return "Coordinator → Worker"
+        if let profile = chatStore.activeDynamicProfile {
+            return profile.usesDelegation
+                ? "\(profile.name) · Delegated"
+                : profile.name
         }
-        return "Direct Model"
+        return chatStore.activeBaseModelID.displayName
     }
 
     private var executionRouteIcon: String {
-        if isCoordinatorExecution {
+        if isDelegatingExecution {
             return "arrow.triangle.branch"
         }
         return chatStore.orchestratorMode == .orchestrator
@@ -561,8 +618,8 @@ struct InputFieldView: View {
 
     private var executionRouteHelp: String {
         if let profile = chatStore.activeDynamicProfile,
-           isCoordinatorExecution {
-            return "\(profile.name) coordinates and delegates bounded tasks to the configured worker"
+           isDelegatingExecution {
+            return "\(profile.name) uses Delegate Task with its configured worker"
         }
         if chatStore.orchestratorMode == .orchestrator {
             return "Apple on-device coordinates through the experimental compatibility route"

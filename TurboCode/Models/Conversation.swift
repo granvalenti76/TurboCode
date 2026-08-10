@@ -33,7 +33,7 @@ public struct Conversation: Identifiable, Sendable, Hashable {
     }
 }
 
-public enum ConversationMode: String, Sendable, Hashable, CaseIterable {
+public enum ConversationMode: String, Codable, Sendable, Hashable, CaseIterable {
     case agent
     case plan
 }

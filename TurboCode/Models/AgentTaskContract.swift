@@ -45,11 +45,14 @@ nonisolated struct AgentVerificationParameters: Codable, Sendable, Hashable {
     }
 }
 
-/// Runtime limits that every worker adapter must enforce independently of its
-/// provider prompt.
+/// Application-owned watchdog plus the legacy decoded tool budget.
+///
+/// The timeout still prevents a lost provider stream from running forever.
+/// `maximumToolCalls` remains Codable for stored/version-2 envelopes, but the
+/// production worker no longer uses it to interrupt a model's normal loop.
 nonisolated struct DelegationBudget: Codable, Sendable, Hashable {
     static let `default` = DelegationBudget(
-        timeoutSeconds: 120,
+        timeoutSeconds: 300,
         maximumToolCalls: 12
     )
 
@@ -72,21 +75,32 @@ nonisolated struct DelegationBudget: Codable, Sendable, Hashable {
     }
 }
 
+/// Coarse worker capability mode selected by the coordinator.
+///
+/// A coding worker receives the complete catalog-backed tool bundle configured
+/// by the active profile;
+/// a text worker receives no session tools. Keeping this as one mode avoids a
+/// fragile model-facing per-tool allowlist while preserving a clear contract.
+nonisolated enum DelegatedWorkerMode: String, Codable, Sendable, Hashable {
+    case coding
+    case text
+}
+
 /// Provider-independent task passed from a coordinator to one sequential worker.
 ///
-/// Arrays retain a stable order for reproducible transport. A non-empty
-/// suggested scope is enforced for path-bearing worker tools; the historical
-/// field name remains stable for schema compatibility.
+/// Detailed fields remain decodable for existing activity and evaluation data.
+/// Production `delegate_task` calls now create them internally and only expose
+/// the goal plus the coarse coding/text mode to coordinator models.
 nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     let schemaVersion: Int
     let taskID: String
     let attemptID: String
+    let mode: DelegatedWorkerMode
     let goal: String
     let acceptanceCriteria: [String]
     let suggestedScope: [String]
-    let allowedTools: [ToolCapabilityID]
     let verificationRequest: VerificationRequest
     let verificationParameters: AgentVerificationParameters?
     let budget: DelegationBudget
@@ -95,10 +109,10 @@ nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
         schemaVersion: Int = currentSchemaVersion,
         taskID: String,
         attemptID: String,
+        mode: DelegatedWorkerMode = .coding,
         goal: String,
         acceptanceCriteria: [String],
         suggestedScope: [String] = [],
-        allowedTools: [ToolCapabilityID] = [],
         verificationRequest: VerificationRequest = .none,
         verificationParameters: AgentVerificationParameters? = nil,
         budget: DelegationBudget = .default
@@ -106,10 +120,10 @@ nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
         self.schemaVersion = schemaVersion
         self.taskID = taskID
         self.attemptID = attemptID
+        self.mode = mode
         self.goal = goal
         self.acceptanceCriteria = acceptanceCriteria
         self.suggestedScope = suggestedScope
-        self.allowedTools = Self.uniqued(allowedTools)
         self.verificationRequest = verificationRequest
         self.verificationParameters = verificationParameters
         self.budget = budget
@@ -118,19 +132,20 @@ nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
 
     init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try values.decodeIfPresent(Int.self, forKey: .schemaVersion)
+        let decodedSchemaVersion = try values.decodeIfPresent(Int.self, forKey: .schemaVersion)
             ?? Self.currentSchemaVersion
+        // Version 1 carried a model-facing allowlist. It is intentionally
+        // discarded on decode and upgraded to the coarse coding mode.
+        schemaVersion = decodedSchemaVersion == 1 ? Self.currentSchemaVersion : decodedSchemaVersion
         taskID = try values.decode(String.self, forKey: .taskID)
         attemptID = try values.decode(String.self, forKey: .attemptID)
+        mode = try values.decodeIfPresent(DelegatedWorkerMode.self, forKey: .mode) ?? .coding
         goal = try values.decode(String.self, forKey: .goal)
         acceptanceCriteria = try values.decodeIfPresent(
             [String].self,
             forKey: .acceptanceCriteria
         ) ?? []
         suggestedScope = try values.decodeIfPresent([String].self, forKey: .suggestedScope) ?? []
-        allowedTools = Self.uniqued(
-            try values.decodeIfPresent([ToolCapabilityID].self, forKey: .allowedTools) ?? []
-        )
         verificationRequest = try values.decodeIfPresent(
             VerificationRequest.self,
             forKey: .verificationRequest
@@ -178,6 +193,9 @@ nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
         if verificationRequest == .none, verificationParameters != nil {
             throw AgentTaskContractError.verificationParametersWithoutRequest
         }
+        if mode == .text, verificationRequest != .none {
+            throw AgentTaskContractError.textWorkerCannotVerify
+        }
         try verificationParameters?.validate()
         _ = try budget.validated()
     }
@@ -188,10 +206,6 @@ nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
         }
     }
 
-    private static func uniqued<T: Hashable>(_ values: [T]) -> [T] {
-        var seen = Set<T>()
-        return values.filter { seen.insert($0).inserted }
-    }
 }
 
 /// Terminal state reported by a worker/coordinator task exchange.
@@ -411,6 +425,7 @@ nonisolated enum AgentTaskContractError: LocalizedError, Sendable, Equatable {
     case invalidTimeout(Int)
     case invalidToolCallLimit(Int)
     case verificationParametersWithoutRequest
+    case textWorkerCannotVerify
     case missingFailureReason
     case invalidTerminalState(AgentTaskOutcome)
     case verifiedWithoutPassingVerification
@@ -430,6 +445,8 @@ nonisolated enum AgentTaskContractError: LocalizedError, Sendable, Equatable {
             "Maximum tool calls must not be negative, got \(limit)."
         case .verificationParametersWithoutRequest:
             "Verification parameters require a build or test request."
+        case .textWorkerCannotVerify:
+            "A text worker cannot run build or test verification."
         case .missingFailureReason:
             "A failed task result requires a failure reason."
         case .invalidTerminalState(let outcome):

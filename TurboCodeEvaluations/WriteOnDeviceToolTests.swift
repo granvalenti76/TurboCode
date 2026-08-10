@@ -53,8 +53,8 @@ struct WriteOnDeviceToolTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: workspace.path).isEmpty)
     }
 
-    @Test("Rejects Swift output beyond the measured microtask envelope")
-    func rejectsOversizedSwiftSnippet() async throws {
+    @Test("Writes Swift output beyond the former microtask envelope")
+    func writesOversizedSwiftSnippet() async throws {
         let workspace = try makeWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         let tool = WriteOnDeviceTool(
@@ -72,11 +72,12 @@ struct WriteOnDeviceToolTests {
             )
         )
 
-        #expect(result.contains("limited to 30 lines"))
+        #expect(result == "WRITE_COMPLETE: Snippet.swift")
         #expect(
-            !FileManager.default.fileExists(
-                atPath: workspace.appendingPathComponent("Snippet.swift").path
-            )
+            try String(
+                contentsOf: workspace.appendingPathComponent("Snippet.swift"),
+                encoding: .utf8
+            ) == content
         )
     }
 

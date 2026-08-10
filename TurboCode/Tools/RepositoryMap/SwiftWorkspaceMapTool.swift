@@ -19,6 +19,28 @@ struct SwiftWorkspaceMapTool: Tool {
     let workspaceRoot: String
     let detail: RepositoryMapDetail
     let contextWindowTokens: Int
+    let taskScope: AgentTaskPathScope?
+
+    init(
+        workspaceRoot: String,
+        detail: RepositoryMapDetail,
+        contextWindowTokens: Int,
+        taskScope: AgentTaskPathScope? = nil
+    ) {
+        self.workspaceRoot = workspaceRoot
+        self.detail = detail
+        self.contextWindowTokens = contextWindowTokens
+        self.taskScope = taskScope
+    }
+
+    func restricted(to scope: AgentTaskPathScope) -> Self {
+        Self(
+            workspaceRoot: workspaceRoot,
+            detail: detail,
+            contextWindowTokens: contextWindowTokens,
+            taskScope: scope
+        )
+    }
 
     var name: String { "swift_workspace_map" }
     var description: String {
@@ -38,6 +60,11 @@ struct SwiftWorkspaceMapTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: SwiftWorkspaceMapArguments) async throws -> String {
+        do {
+            try taskScope?.validate(arguments.path ?? ".")
+        } catch {
+            return "Error: \(error.localizedDescription)"
+        }
         do {
             return try await RepositoryMapService(
                 workspaceRoot: workspaceRoot,

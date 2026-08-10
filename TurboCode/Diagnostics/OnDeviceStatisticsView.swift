@@ -4,6 +4,15 @@ import SwiftUI
 /// may share a root run, so their backend is filtered independently.
 nonisolated struct OnDeviceStatisticsSummary: Sendable {
     let runs: [AgentRunMetric]
+    let compactions: [OnDeviceCompactionMetric]
+
+    init(
+        runs: [AgentRunMetric],
+        compactions: [OnDeviceCompactionMetric] = []
+    ) {
+        self.runs = runs
+        self.compactions = compactions
+    }
 
     var requestCount: Int { runs.count }
 
@@ -101,10 +110,11 @@ nonisolated struct OnDeviceStatisticsError: Identifiable, Sendable {
 /// benchmark reporting. It performs no model requests of its own.
 struct OnDeviceStatisticsView: View {
     @State private var runs: [AgentRunMetric] = []
+    @State private var compactions: [OnDeviceCompactionMetric] = []
     @State private var isLoading = true
 
     private var summary: OnDeviceStatisticsSummary {
-        OnDeviceStatisticsSummary(runs: runs)
+        OnDeviceStatisticsSummary(runs: runs, compactions: compactions)
     }
 
     var body: some View {
@@ -113,6 +123,7 @@ struct OnDeviceStatisticsView: View {
                 header
                 overview
                 performance
+                summarization
                 toolCalls
                 errors
                 recentRequests
@@ -194,6 +205,43 @@ struct OnDeviceStatisticsView: View {
                 }
             }
         }
+    }
+
+    private var summarization: some View {
+        DisclosureGroup {
+            if summary.compactions.isEmpty {
+                emptyState("No context summarization recorded.", icon: "text.badge.xmark")
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(summary.compactions.prefix(20)) { compaction in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Context summarized")
+                                Text("\(compaction.turnCount) turns → \(compaction.retainedCharacters) characters retained")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(compaction.createdAt, style: .relative)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 7)
+                        if compaction.id != summary.compactions.prefix(20).last?.id {
+                            Divider()
+                        }
+                    }
+                }
+            }
+        } label: {
+            Label(
+                "Context Summarization (\(summary.compactions.count))",
+                systemImage: "text.badge.checkmark"
+            )
+        }
+        .padding(.horizontal, 4)
     }
 
     private var errors: some View {
@@ -324,6 +372,7 @@ struct OnDeviceStatisticsView: View {
     private func reload() async {
         isLoading = true
         runs = await AgentDiagnosticsRecorder.shared.onDeviceRuns()
+        compactions = await AgentDiagnosticsRecorder.shared.onDeviceCompactions()
         isLoading = false
     }
 }

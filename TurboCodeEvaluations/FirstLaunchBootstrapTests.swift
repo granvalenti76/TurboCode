@@ -25,7 +25,43 @@ struct FirstLaunchBootstrapTests {
         #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("models.json").path))
         #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("config.json").path))
         #expect(try DynamicProfileStore(fileURL: config.dynamicProfilesURL).load().isEmpty)
-        #expect(Set(config.loadSkills().map(\.name)) == ["skill-creator", "turbocode"])
+        let skills = config.loadSkills()
+        #expect(Set(skills.map(\.name)) == ["skill-creator", "turbocode"])
+        let creator = skills.first { $0.name == "skill-creator" }
+        #expect(creator?.prompt.contains(".agents/skills") == true)
+        #expect(creator?.prompt.contains("Review/Undo") == true)
+    }
+
+    @Test("Skill discovery accepts the Codex repository layout")
+    func discoversCodexRepositorySkills() throws {
+        let home = try makeEmptyHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let config = TurboCodeConfig(
+            rootURL: home.appendingPathComponent(".turbocode", isDirectory: true)
+        )
+        let workspace = home.appendingPathComponent("repo/module", isDirectory: true)
+        let skillURL = home
+            .appendingPathComponent("repo/.agents/skills/release-notes/SKILL.md")
+        try FileManager.default.createDirectory(
+            at: workspace,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: skillURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try """
+        ---
+        name: release-notes
+        description: Prepare concise release notes.
+        ---
+        Keep release notes factual.
+        """.write(to: skillURL, atomically: true, encoding: .utf8)
+
+        #expect(
+            config.loadSkills(workspaceRoot: workspace.path).map(\.name)
+                == ["release-notes"]
+        )
     }
 
     @Test("Onboarding repairs missing additive paths without replacing user profiles")

@@ -67,7 +67,8 @@ public final class ChatStore {
         do {
             try TurboCodeConfig.shared.performOnboarding()
             modelRuntimeStore.applyOnboarding(
-                tuning: try TurboCodeConfig.shared.loadAgentTuning()
+                tuning: try TurboCodeConfig.shared.loadAgentTuning(),
+                workspaceRoot: workspaceRoot
             )
             reloadRemoteModels()
         } catch {
@@ -250,7 +251,7 @@ public final class ChatStore {
         rebuildSession(discardingCapabilityContext: true)
     }
 
-    /// Selects the supported coordinator route as one atomic runtime change.
+    /// Selects a profile with `delegate_task` as one atomic runtime change.
     ///
     /// The historical global "orchestrator" mode is the on-device compatibility
     /// path; production coordinator profiles run in standalone transport mode.
@@ -258,7 +259,7 @@ public final class ChatStore {
     func selectCoordinatorProfile(_ id: UUID) {
         guard !busy,
               let profile = dynamicProfiles.first(where: {
-                  $0.id == id && $0.isCoordinatorProfile
+                  $0.id == id && $0.usesDelegation
               }) else {
             return
         }
@@ -273,9 +274,7 @@ public final class ChatStore {
         rebuildSession(discardingCapabilityContext: true)
     }
 
-    /// Leaves delegation while preserving the selected profile's base model.
-    /// This makes "Direct Model" a real execution choice rather than a label
-    /// that silently leaves `delegate_task` enabled.
+    /// Leaves a custom profile and returns to the current built-in model.
     func selectDirectExecution() {
         guard !busy else { return }
         guard orchestratorMode != .standalone
@@ -453,7 +452,11 @@ public final class ChatStore {
     }
 
     public func selectThread(_ id: String) async {
-        if id != activeThreadId { dismissWorkspaceListingInspector() }
+        await finishActiveResponseBeforeTransition()
+        if id != activeThreadId {
+            dismissWorkspaceListingInspector()
+            workbenchStore.dismissDiffPatchReview()
+        }
         activeThreadId = id
     }
 
@@ -461,6 +464,7 @@ public final class ChatStore {
     /// SwiftUI from building the previous, potentially large timeline merely to
     /// replace it one run-loop later when leaving a utility destination.
     public func openThread(_ id: String) async {
+        await finishActiveResponseBeforeTransition()
         if blocks.isEmpty || activeThreadId != id {
             await restoreSession(id: id)
         } else {
@@ -470,7 +474,9 @@ public final class ChatStore {
     }
 
     public func createThread(title: String = "New Chat", mode: ConversationMode = .agent) async {
+        await finishActiveResponseBeforeTransition()
         dismissWorkspaceListingInspector()
+        workbenchStore.dismissDiffPatchReview()
         conversationStore.createThread(
             title: title,
             workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
@@ -560,6 +566,21 @@ public final class ChatStore {
         }
     }
 
+    /// Persists catalog-only changes without replacing a non-active thread's
+    /// timeline. Active drafts use the full session snapshot; older threads
+    /// retain their durable blocks and transcript while only metadata changes.
+    private func persistConversationMetadata(for threadID: String) async {
+        if threadID == activeThreadId {
+            await persistSession(for: threadID)
+            return
+        }
+        do {
+            try conversationStore.persistMetadata(id: threadID)
+        } catch {
+            print("[TurboCode] Failed to persist conversation metadata: \(error.localizedDescription)")
+        }
+    }
+
     /// Loads all session files and populates the thread list.
     public func restoreSessions() async {
         try? conversationStore.restoreCatalog()
@@ -567,15 +588,18 @@ public final class ChatStore {
 
     /// Fully restores a past session with its blocks.
     public func restoreSession(id: String) async {
+        await finishActiveResponseBeforeTransition()
         guard let snapshot = try? conversationStore.snapshot(id: id),
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
         dismissWorkspaceListingInspector()
+        workbenchStore.dismissDiffPatchReview()
         activeThreadId = id
         timelineStore.restore(snapshot.blocks)
         resetAgentActivityForConversation()
         if let wp = snapshot.conversation.workspace, workspaceRoot != wp {
             workspaceRoot = wp
         }
+        refreshSkillsIfNeeded()
         restoreModelSelection(snapshot.modelBackend)
         let restoredHistory = snapshot.transcript.map {
             SessionRebuildHistory.prepare(
@@ -627,14 +651,17 @@ public final class ChatStore {
 
     public func renameThread(id: String, title: String) async {
         conversationStore.renameThread(id: id, title: title)
+        await persistConversationMetadata(for: id)
     }
 
     public func pinThread(id: String, pinned: Bool) async {
         conversationStore.pinThread(id: id, pinned: pinned)
+        await persistConversationMetadata(for: id)
     }
 
     public func archiveThread(id: String) async {
         conversationStore.archiveThread(id: id)
+        await persistConversationMetadata(for: id)
     }
 
     public func deleteThread(id: String) async {
@@ -682,6 +709,7 @@ public final class ChatStore {
     /// Removes a workspace from TurboCode and deletes only its persisted chats.
     /// The workspace directory and all project files are left untouched.
     public func removeWorkspace(_ path: String) async {
+        await finishActiveResponseBeforeTransition()
         let conversationRemoval = conversationStore.removeWorkspace(path)
         let removedActiveWorkspace = workspaceStore.removeWorkspace(path)
 
@@ -691,7 +719,6 @@ public final class ChatStore {
         }
 
         if removedActiveWorkspace {
-            responseTask?.cancel()
             rightPanelMode = nil
             rebuildSession(keepingHistory: false)
         }
@@ -704,6 +731,7 @@ public final class ChatStore {
 
     public func restoreThread(id: String) async {
         conversationStore.restoreThread(id: id)
+        await persistConversationMetadata(for: id)
     }
 
     /// Open a folder picker and set workspaceRoot.
@@ -718,18 +746,20 @@ public final class ChatStore {
             panel.directoryURL = URL(fileURLWithPath: workspaceRoot)
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        setWorkspace(url.path)
+        Task { await setWorkspace(url.path) }
     }
 
     /// Switch to a previously opened workspace by path.
     public func switchToWorkspace(_ path: String) {
-        setWorkspace(path)
+        Task { await setWorkspace(path) }
     }
 
     /// Internal: configure workspace, rebuild session, refresh git state.
-    private func setWorkspace(_ path: String) {
+    private func setWorkspace(_ path: String) async {
+        await finishActiveResponseBeforeTransition()
         workspaceStore.selectWorkspace(path)
 
+        refreshSkillsIfNeeded()
         rebuildSession(discardingCapabilityContext: true)
         // The inspector is opt-in: changing workspace must not open it.
         rightPanelMode = nil
@@ -739,17 +769,28 @@ public final class ChatStore {
 
     /// Clear the workspace selection.
     public func clearWorkspace() {
-        workspaceStore.clearWorkspace()
-        rebuildSession(discardingCapabilityContext: true)
-        rightPanelMode = nil
+        Task {
+            await finishActiveResponseBeforeTransition()
+            workspaceStore.clearWorkspace()
+            rebuildSession(discardingCapabilityContext: true)
+            rightPanelMode = nil
+        }
     }
 
     public func sendMessage(_ text: String) async {
-        let assignment = composerTaskAssignment(for: text)
-        guard assignment.allowsOnDevice else {
-            // Programmatic sends receive the same fail-closed boundary as the
-            // composer. No conversation or model session is started.
-            error = assignment.guidance
+        // Slash commands are application actions. Handling them here keeps
+        // local documentation and worker execution independent of the active
+        // profile's model-facing tool catalog.
+        if text.trimmingCharacters(in: .whitespacesAndNewlines) == "/documentation" {
+            await openDocumentation()
+            return
+        }
+        if let taskGoal = Self.taskCommandGoal(from: text) {
+            await runIndependentTask(taskGoal)
+            return
+        }
+        if text.trimmingCharacters(in: .whitespacesAndNewlines) == "/task" {
+            error = "Use /task followed by the task instructions."
             return
         }
         refreshSkillsIfNeeded()
@@ -765,25 +806,158 @@ public final class ChatStore {
         await sendMessage(text, promptText: promptText, visibleInTimeline: true)
     }
 
-    /// Returns whether the selected profile may receive this composer task.
-    /// Only explicit multi-file and architectural signals are rejected; other
-    /// profiles and ambiguous prompts preserve the user's chosen route.
-    func composerTaskAssignment(
-        for text: String
-    ) -> OnDeviceTaskAssignment {
-        let routing = ModelRoutingPolicy.resolve(
-            backend: activeBackend,
-            mode: orchestratorMode,
-            activeProfile: activeDynamicProfile
-        )
-        guard routing.role == .microtaskOnDevice else {
-            return .eligibleMicrotask
+    /// Presents the official guide without starting a model response. The
+    /// fixed overview query mirrors the guide tool's normal broad product
+    /// question while retaining its native structured widget and source chips.
+    public func openDocumentation() async {
+        guard !busy else { return }
+        do {
+            let documentation = ProductDocumentationStore.live
+            try documentation.installBundledDocumentation()
+            let resolution = try TurboCodeGuideTool(store: documentation)
+                .resolve(query: "What can TurboCode do?")
+            ensureActiveThread()
+            timelineStore.presentProductGuide(
+                resolution.presentation,
+                markdown: resolution.markdown
+            )
+            if let threadID = activeThreadId {
+                conversationStore.touchThread(id: threadID)
+                await persistSession(for: threadID)
+            }
+        } catch {
+            self.error = error.localizedDescription
         }
-        return OnDeviceCapabilityPolicy.assignment(for: text)
     }
 
     func isIncompleteSkillCommand(_ text: String) -> Bool {
         text.trimmingCharacters(in: .whitespacesAndNewlines) == "/skill"
+    }
+
+    func isIncompleteTaskCommand(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines) == "/task"
+    }
+
+    func isLocalCommand(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed == "/documentation"
+            || trimmed == "/task"
+            || Self.taskCommandGoal(from: trimmed) != nil
+    }
+
+    /// Runs `/task <instructions>` through the configured worker directly.
+    /// The active profile does not need to advertise `delegate_task`, because
+    /// this is an explicit application command rather than model tool use.
+    private func runIndependentTask(_ goal: String) async {
+        guard !busy else { return }
+        let command = "/task \(goal)"
+        let envelope: AgentTaskEnvelope
+        do {
+            envelope = try DelegateTaskArguments(
+                mode: DelegatedWorkerMode.coding.rawValue,
+                goal: goal
+            ).envelope()
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
+
+        ensureActiveThread()
+        let invoker = modelRuntimeStore.makeIndependentTaskInvoker(
+            workspaceRoot: workspaceRoot,
+            events: modelSessionEvents
+        )
+        error = nil
+        responseCoordinator.delegationChanged(true)
+        busy = true
+        let task = Task<Void, Never> { [weak self] in
+            guard let self else { return }
+            let result = await invoker.invoke(envelope)
+            await self.finishIndependentTask(
+                command: command,
+                result: result
+            )
+        }
+        responseTask = task
+        await task.value
+        responseTask = nil
+        busy = false
+        responseCoordinator.delegationChanged(false)
+    }
+
+    /// Publishes the worker's typed terminal result as a visible assistant
+    /// turn and refreshes the current model transcript with that outcome.
+    private func finishIndependentTask(
+        command: String,
+        result: AgentTaskResult
+    ) async {
+        let response = Self.renderIndependentTaskResult(result)
+        timelineStore.presentTaskTurn(command: command, response: response)
+        appendIndependentTaskToTranscript(command: command, response: response)
+        if let threadID = activeThreadId {
+            conversationStore.touchThread(id: threadID)
+            if activeBackend == .codex {
+                codexRuntimeStore.captureImportedContext(
+                    turboThreadID: threadID,
+                    blocks: blocks
+                )
+            }
+            await persistSession(for: threadID)
+        }
+    }
+
+    /// Keeps the worker answer available to the next Foundation Models turn
+    /// without copying its internal tool-call transcript into the coordinator.
+    private func appendIndependentTaskToTranscript(
+        command: String,
+        response: String
+    ) {
+        guard activeBackend != .codex else { return }
+        let additions = RuntimeContextHandoff.transcript(from: [
+            ChatBlock(kind: .user, text: command),
+            ChatBlock(kind: .assistant, text: response)
+        ])
+        let existing = SessionRebuildHistory.prepare(
+            session.transcript,
+            keepingHistory: true,
+            discardingCapabilityContext: false
+        )
+        rebuildSession(restoringHistory: existing + additions)
+    }
+
+    private static func renderIndependentTaskResult(
+        _ result: AgentTaskResult
+    ) -> String {
+        var sections = [
+            "### Independent task",
+            result.technicalSummary
+        ]
+        if let failureDetail = result.failureDetail,
+           !failureDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            sections.append("**Details:** \(failureDetail)")
+        }
+        if !result.unresolvedWork.isEmpty {
+            sections.append(
+                "**Remaining:**\n" + result.unresolvedWork
+                    .map { "- \($0)" }
+                    .joined(separator: "\n")
+            )
+        }
+        if result.outcome == .failed || result.outcome == .cancelled {
+            sections.insert(
+                "Status: `\(result.outcome.rawValue)`",
+                at: 1
+            )
+        }
+        return sections.joined(separator: "\n\n")
+    }
+
+    private static func taskCommandGoal(from text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/task ") else { return nil }
+        let goal = String(trimmed.dropFirst("/task ".count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return goal.isEmpty ? nil : goal
     }
 
     public func reloadSkills() {
@@ -797,7 +971,8 @@ public final class ChatStore {
 
     private func refreshSkillsIfNeeded(forceRebuild: Bool = false) {
         guard modelRuntimeStore.refreshSkills(
-            force: forceRebuild
+            force: forceRebuild,
+            workspaceRoot: workspaceRoot
         ) else { return }
         rebuildSession(discardingCapabilityContext: true)
     }
@@ -811,6 +986,7 @@ public final class ChatStore {
               !busy,
               activeProfileCanSend else { return }
 
+        compactOnDeviceContextIfNeeded()
         let effectivePrompt = promptText ?? text
         ensureActiveThread()
         busy = true
@@ -834,6 +1010,26 @@ public final class ChatStore {
         await task.value
         responseTask = nil
         busy = false
+    }
+
+    /// Compacts only at a turn boundary, when the previous on-device context
+    /// has reached eight question/answer turns. The active session is rebuilt
+    /// from a concise handoff so the ninth question starts with usable context.
+    private func compactOnDeviceContextIfNeeded() {
+        guard activeBackend == .foundationApple else { return }
+        let turnCount = SessionRebuildHistory.userTurnCount(in: session.transcript)
+        guard turnCount >= SessionRebuildHistory.onDeviceCompactionThreshold,
+              let compaction = SessionRebuildHistory.onDeviceCompaction(from: blocks)
+        else { return }
+
+        timelineStore.presentCompaction(compaction.summary)
+        rebuildSession(restoringHistory: compaction.history)
+        Task {
+            await AgentDiagnosticsRecorder.shared.recordCompaction(
+                turnCount: turnCount,
+                retainedCharacters: compaction.summary.count
+            )
+        }
     }
 
     /// Runs one turn through Codex App Server while preserving TurboCode's
@@ -865,6 +1061,10 @@ public final class ChatStore {
             workspaceRoot: workspaceRoot,
             workspaceName: workspaceRoot.isEmpty ? nil : workspaceLabel,
             agentTuning: agentTuning,
+            availableSkills: DynamicProfileRuntimeSelection.skills(
+                from: modelRuntimeStore.availableSkills,
+                profile: activeDynamicProfile
+            ),
             codexModelID: activeDynamicProfile?.codexModelID,
             codexReasoningEffort:
                 activeDynamicProfile?.codexReasoningEffort,
@@ -883,6 +1083,9 @@ public final class ChatStore {
         if let titleTask {
             await titleTask.value
         }
+        // A skill created by skill-creator becomes available to the next turn
+        // without requiring an app restart or a manual Skills reload.
+        refreshSkillsIfNeeded()
         await persistSession(for: turboThreadID)
     }
 
@@ -891,7 +1094,8 @@ public final class ChatStore {
         promptText: String,
         visibleInTimeline: Bool
     ) async {
-        let titleThreadID = activeThreadId
+        let conversationID = activeThreadId
+        let titleThreadID = conversationID
         let titleTask: Task<Void, Never>? = visibleInTimeline ? Task { [weak self] in
             guard let self else { return }
             await self.generateTitle(from: displayText, for: titleThreadID)
@@ -910,16 +1114,19 @@ public final class ChatStore {
             modelName: composerModel
         )
         error = result.errorMessage
-        if result.touchedConversation, let activeThreadId {
-            conversationStore.touchThread(id: activeThreadId)
+        if result.touchedConversation, let conversationID {
+            conversationStore.touchThread(id: conversationID)
         }
         // Persist after the title task finishes so the JSON never races with
         // the Apple on-device title generator and stores a stale "New Chat".
         if let titleTask {
             await titleTask.value
         }
-        if let tid = activeThreadId {
-            await persistSession(for: tid)
+        // A skill created by skill-creator becomes available to the next turn
+        // without requiring an app restart or a manual Skills reload.
+        refreshSkillsIfNeeded()
+        if let conversationID, activeThreadId == conversationID {
+            await persistSession(for: conversationID)
         }
     }
 
@@ -1097,6 +1304,12 @@ public final class ChatStore {
         reviewCoordinator.reviewDiffPatch(id)
     }
 
+    /// Opens a native full-file review from stable workbench state. The
+    /// timeline fallback remains available through `reviewDiffPatch(_:)`.
+    func presentDiffPatchReview(_ id: String) {
+        reviewCoordinator.presentDiffPatchReview(id)
+    }
+
     public func presentGitCommit(_ receipt: GitCommitBlock) {
         reviewCoordinator.presentGitCommit(receipt)
     }
@@ -1171,8 +1384,14 @@ public final class ChatStore {
         workbenchStore.setRoute(route)
     }
 
-    /// Starts the guided coordinator creation flow instead of dropping the user
-    /// into an unconfigured generic profile editor.
+    /// Opens the profile editor. Delegation is configured by including the
+    /// `delegate_task` capability rather than by selecting a separate route.
+    func requestProfileCreation() {
+        workbenchStore.requestProfileCreation(role: .direct)
+    }
+
+    /// Compatibility entry point for older callers that want the delegation
+    /// capability preselected in the creation sheet.
     func requestCoordinatorProfileCreation() {
         workbenchStore.requestProfileCreation(role: .coordinatorWorker)
     }
@@ -1191,6 +1410,15 @@ public final class ChatStore {
         workbenchStore.rightPanelMode = nil
     }
 
+    var diffPatchReviewPresentation: DiffPatchReviewPresentation? {
+        get { workbenchStore.inspectedDiffPatchReview }
+        set { workbenchStore.inspectedDiffPatchReview = newValue }
+    }
+
+    func dismissDiffPatchReview() {
+        workbenchStore.dismissDiffPatchReview()
+    }
+
     public func toggleLeftSidebar() {
         workbenchStore.toggleLeftSidebar()
     }
@@ -1199,6 +1427,20 @@ public final class ChatStore {
         agentActivityStore.reset()
         if workbenchStore.rightPanelMode == .activity {
             workbenchStore.rightPanelMode = nil
+        }
+    }
+
+    /// Navigation and workspace changes are transaction boundaries for a live
+    /// response. Waiting for the cancelled task to finish lets its final
+    /// persistence pass target the old conversation before the new timeline or
+    /// workspace is installed.
+    private func finishActiveResponseBeforeTransition() async {
+        guard let responseTask else { return }
+        responseTask.cancel()
+        await responseTask.value
+        if self.responseTask != nil {
+            self.responseTask = nil
+            busy = false
         }
     }
 

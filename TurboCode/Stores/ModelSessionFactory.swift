@@ -16,6 +16,9 @@ struct ModelSessionConfiguration {
     let delegateReasoningLevel: ContextOptions.ReasoningLevel?
     let activeTemperature: Double?
     let delegateTemperature: Double?
+    /// `nil` keeps the default complete worker catalog; a value is an
+    /// explicit profile-owned allowlist, including an intentionally empty one.
+    let delegateToolIDs: Set<ToolCapabilityID>?
     let dropsCompletedToolCalls: Bool
     let workspaceInstructions: WorkspaceInstructions?
 }
@@ -187,14 +190,15 @@ enum ModelSessionFactory {
                     .swiftWorkspaceMap,
                     .xcodeProject,
                     .writeOnDevice,
-                    .removeFile
+                    .removeFile,
+                    .createSkill
                 ],
             repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
                 ?? 32_768
         )
         if standalonePlan.contains(.delegateTask) {
-            // Dynamic powerful-model profiles receive the production structured
-            // coordinator adapter; ordinary standalone profiles do not gain it.
+            // Profiles that explicitly include delegate_task receive the
+            // production structured coordinator adapter; direct profiles do not.
             standaloneTools.append(
                 DelegateTaskTool(
                     invoker: makeDelegateInvoker(
@@ -287,7 +291,6 @@ enum ModelSessionFactory {
             model: delegateModel,
             temperature: configuration.delegateTemperature,
             reasoningLevel: delegateCapabilities.reasoningLevel,
-            delegatePlan: delegatePlan,
             delegateTools: toolInstances(
                 for: delegatePlan,
                 configuration: configuration,
@@ -453,6 +456,9 @@ enum ModelSessionFactory {
             case .loadSkill:
                 guard !configuration.availableSkills.isEmpty else { return nil }
                 return LoadSkillTool(skills: configuration.availableSkills)
+            case .createSkill:
+                guard !configuration.workspaceRoot.isEmpty else { return nil }
+                return CreateSkillTool(workspaceRoot: configuration.workspaceRoot)
             case .delegateTask, .callPowerfulModel:
                 return nil
             }
@@ -483,7 +489,8 @@ enum ModelSessionFactory {
             context: toolContext(
                 for: configuration,
                 repositoryMap: configuration.delegateRemoteModel.repositoryMap
-            )
+            ),
+            selectedIDs: configuration.delegateToolIDs
         )
         let resolvedRunner = runner ?? BoundedAgentTaskRunner(
             verifier: XcodeAgentTaskVerifier(
@@ -495,7 +502,6 @@ enum ModelSessionFactory {
             runner: resolvedRunner,
             context: AgentTaskRunContext(
                 model: delegateModel,
-                toolPlan: plan,
                 tools: toolInstances(
                     for: plan,
                     configuration: configuration,

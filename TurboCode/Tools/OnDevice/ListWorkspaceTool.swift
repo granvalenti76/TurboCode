@@ -36,10 +36,24 @@ struct ListWorkspaceTool: Tool {
 
     let workspaceRoot: String
     let suggestsXcodeAnalysisTools: Bool
+    let taskScope: AgentTaskPathScope?
 
-    init(workspaceRoot: String, suggestsXcodeAnalysisTools: Bool = false) {
+    init(
+        workspaceRoot: String,
+        suggestsXcodeAnalysisTools: Bool = false,
+        taskScope: AgentTaskPathScope? = nil
+    ) {
         self.workspaceRoot = workspaceRoot
         self.suggestsXcodeAnalysisTools = suggestsXcodeAnalysisTools
+        self.taskScope = taskScope
+    }
+
+    func restricted(to scope: AgentTaskPathScope) -> Self {
+        Self(
+            workspaceRoot: workspaceRoot,
+            suggestsXcodeAnalysisTools: suggestsXcodeAnalysisTools,
+            taskScope: scope
+        )
     }
 
     var name: String { "list_workspace" }
@@ -58,6 +72,20 @@ struct ListWorkspaceTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: ListWorkspaceArguments) async throws -> WorkspaceListingToolOutput {
+        if let taskScope {
+            do {
+                try taskScope.validate(arguments.path)
+            } catch {
+                return WorkspaceListingToolOutput(
+                    path: arguments.path,
+                    entries: [],
+                    totalCount: 0,
+                    isTruncated: false,
+                    errorMessage: error.localizedDescription,
+                    modelGuidance: nil
+                )
+            }
+        }
         do {
             let snapshot = try WorkspaceBrowsingService(workspaceRoot: workspaceRoot)
                 .listDirectory(at: arguments.path)

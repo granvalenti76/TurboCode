@@ -1,6 +1,14 @@
 import Observation
 import SwiftUI
 
+/// The immutable receipt currently being shown in the native edit-review sheet.
+/// Keeping this presentation state above the lazy chat timeline prevents a
+/// timeline refresh from losing the sheet trigger or its action target.
+struct DiffPatchReviewPresentation: Identifiable {
+    let id: String
+    let patch: DiffPatchBlock
+}
+
 /// Owns workbench navigation and panel presentation state.
 ///
 /// Keeping shell state separate prevents model and conversation orchestration
@@ -18,6 +26,7 @@ final class WorkbenchStore {
     var rightSidebarWidth: CGFloat = 360
     var inspectedGitCommit: GitCommitBlock?
     var inspectedWorkspaceListingID: String?
+    var inspectedDiffPatchReview: DiffPatchReviewPresentation?
 
     var rightPanelVisible: Bool { rightPanelMode != nil }
 
@@ -60,5 +69,11 @@ final class WorkbenchStore {
         guard rightPanelMode == .workspaceListing else { return }
         inspectedWorkspaceListingID = nil
         rightPanelMode = nil
+    }
+
+    /// Closes a native review that belongs to the conversation being replaced.
+    /// The receipt itself remains persisted in the old conversation.
+    func dismissDiffPatchReview() {
+        inspectedDiffPatchReview = nil
     }
 }

@@ -43,8 +43,10 @@ private extension ConversationSnapshot {
             title: stored.title,
             createdAt: stored.createdAt,
             updatedAt: stored.updatedAt,
+            isPinned: stored.isPinned,
+            isArchived: stored.isArchived,
             workspace: stored.workspacePath,
-            mode: .agent
+            mode: stored.mode
         )
         modelBackend = stored.modelBackend
         blocks = stored.blocks.map(ChatBlock.init)
@@ -61,6 +63,9 @@ private extension ConversationSnapshot {
             workspacePath: conversation.workspace,
             createdAt: conversation.createdAt,
             updatedAt: conversation.updatedAt,
+            isPinned: conversation.isPinned,
+            isArchived: conversation.isArchived,
+            mode: conversation.mode,
             modelBackend: modelBackend,
             blocks: blocks.map(StoredBlock.init),
             transcript: transcript

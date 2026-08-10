@@ -50,6 +50,16 @@ struct FileSystemTool: Tool {
     typealias Output = String
 
     let workspaceRoot: String
+    let taskScope: AgentTaskPathScope?
+
+    init(workspaceRoot: String, taskScope: AgentTaskPathScope? = nil) {
+        self.workspaceRoot = workspaceRoot
+        self.taskScope = taskScope
+    }
+
+    func restricted(to scope: AgentTaskPathScope) -> Self {
+        Self(workspaceRoot: workspaceRoot, taskScope: scope)
+    }
 
     var name: String { "file_system" }
     var description: String {
@@ -134,7 +144,8 @@ struct FileSystemTool: Tool {
     /// then validates it's within the workspace boundary.
     /// Returns the resolved absolute path on success, throws on error.
     private func resolveAndValidatePath(_ path: String) throws -> String {
-        try WorkspacePathResolver.resolve(path, within: workspaceRoot).path
+        try taskScope?.validate(path)
+        return try WorkspacePathResolver.resolve(path, within: workspaceRoot).path
     }
 
     // MARK: - Safe Operations

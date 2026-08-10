@@ -47,11 +47,13 @@ public final class SettingsStore {
     public var openaiBaseURL: String = ""
     public var anthropicAPIKey: String = ""
     public var anthropicBaseURL: String = ""
+    public private(set) var deepSeekCredentialConfigured = false
     public var deepseekAPIKey: String = "" {
         didSet {
             guard !isLoadingCredentials else { return }
             do {
                 try CredentialStore.set(deepseekAPIKey, for: "deepseek")
+                deepSeekCredentialConfigured = !deepseekAPIKey.isEmpty
                 credentialError = nil
                 reloadRemoteModels()
                 ChatStore.shared?.reloadRemoteModels()
@@ -113,23 +115,23 @@ public final class SettingsStore {
         ChatStore.shared?.reloadRemoteModels()
     }
 
-    /// Loads the existing provider secret for deliberate credential
-    /// management in Settings, keeping normal application launch lazy.
+    /// Loads only credential state for the provider pane.
+    ///
+    /// The existing secret stays in the Keychain and is never copied into the
+    /// observable settings model. The field is intentionally an entry field
+    /// for replacing the secret, not a mirror of the stored credential.
     public func loadDeepSeekCredentialForSettings() {
         guard !isLoadingCredentials else { return }
         isLoadingCredentials = true
         let defaults = UserDefaults.standard
-        if let stored = CredentialStore.value(for: "deepseek") {
-            deepseekAPIKey = stored
-        } else if let legacy = defaults.string(forKey: "deepseekAPIKey"), !legacy.isEmpty {
-            // Migrate the pre-Keychain value only after the user explicitly
-            // opens provider settings, keeping launch free of secret access.
-            deepseekAPIKey = legacy
+        if let legacy = defaults.string(forKey: "deepseekAPIKey"), !legacy.isEmpty {
+            // Migrate the legacy value only when the user opens provider
+            // settings; normal launch remains free of credential access.
             try? CredentialStore.set(legacy, for: "deepseek")
             defaults.removeObject(forKey: "deepseekAPIKey")
-        } else {
-            deepseekAPIKey = ""
         }
+        deepseekAPIKey = ""
+        deepSeekCredentialConfigured = CredentialStore.contains(account: "deepseek")
         isLoadingCredentials = false
         credentialError = nil
     }
@@ -142,7 +144,7 @@ public final class SettingsStore {
 
     public func isConfigured(_ model: RemoteModelConfig) -> Bool {
         guard let credential = model.credential else { return true }
-        return !(CredentialStore.value(for: credential) ?? "").isEmpty
+        return CredentialStore.contains(account: credential)
     }
 
     public func reloadAgentTuning() {

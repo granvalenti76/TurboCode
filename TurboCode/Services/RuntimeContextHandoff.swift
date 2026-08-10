@@ -6,6 +6,7 @@ import FoundationModels
 /// retaining concise, reviewable outcomes from the native widgets.
 nonisolated enum RuntimeContextHandoff {
     static let codexSummaryThreshold = 10_000
+    static let summaryTransferPrompt = "Context transferred from the previous model runtime."
 
     static func shouldSummarizeCodexContext(lastTotalTokens: Int?) -> Bool {
         guard let lastTotalTokens else { return false }
@@ -45,7 +46,7 @@ nonisolated enum RuntimeContextHandoff {
     static func transcript(fromSummary summary: String) -> [Transcript.Entry] {
         let prompt = Transcript.Segment.text(
             Transcript.TextSegment(
-                content: "Context transferred from the previous model runtime."
+                content: summaryTransferPrompt
             )
         )
         let response = Transcript.Segment.text(

@@ -46,6 +46,19 @@ struct ModelRoutingPolicyTests {
         )
         #expect(llamaPowerful.role == .powerfulCoordinator)
         #expect(llamaPowerful.supportsStructuredDelegation)
+        let onDeviceCoordinator = UserDynamicProfile(
+            name: "On-device Coordinator",
+            baseModelID: .onDevice,
+            workerModelID: ProfileBaseModelID.llama.rawValue,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        let onDeviceRouting = ModelRoutingPolicy.resolve(
+            backend: .foundationApple,
+            mode: .standalone,
+            activeProfile: onDeviceCoordinator
+        )
+        #expect(onDeviceRouting.role == .powerfulCoordinator)
+        #expect(onDeviceRouting.supportsStructuredDelegation)
         let codexCoordinator = UserDynamicProfile(
             name: "Codex Coordinator",
             baseModelID: .codex,
@@ -68,8 +81,8 @@ struct ModelRoutingPolicyTests {
         )
     }
 
-    @Test("Microtask profile cannot add broad coding capabilities")
-    func microtaskProfileHasNarrowToolSurface() {
+    @Test("Microtask profile exposes its default tool surface")
+    func microtaskProfileHasDefaultToolSurface() {
         let context = ToolAccessContext(
             hasWorkspace: true,
             hasSkills: true,
@@ -81,25 +94,27 @@ struct ModelRoutingPolicyTests {
             tier: .onDevice,
             context: context
         )
-        let attemptedExpansion = ModelToolCatalog.plan(
+        let explicitExpansion = ModelToolCatalog.plan(
             profile: .microtask,
             tier: .onDevice,
             context: context,
             selectedIDs: [
-                .writeOnDevice, .readFile, .git, .bash, .delegateTask
+                .writeOnDevice, .readFile, .git, .bash, .delegateTask,
+                .createSkill
             ]
         )
 
-        #expect(defaultPlan.registeredIDs == OnDeviceCapabilityPolicy.directToolIDs)
-        #expect(attemptedExpansion.registeredIDs == [.readFile, .writeOnDevice])
+        #expect(defaultPlan.registeredIDs == [.turboCodeGuide, .listWorkspace, .readFile, .writeOnDevice, .createSkill])
+        #expect(explicitExpansion.registeredIDs == [.writeOnDevice, .readFile, .git, .bash, .delegateTask, .createSkill])
         #expect(defaultPlan.contains(.readFile))
         #expect(!defaultPlan.contains(.git))
         #expect(!defaultPlan.contains(.editFile))
+        #expect(!defaultPlan.contains(.delegateTask))
         #expect(!defaultPlan.contains(.callPowerfulModel))
     }
 
-    @Test("Microtask prompt states the measured competence envelope")
-    func microtaskPromptStatesBoundary() {
+    @Test("Prompt does not impose the removed microtask competence barrier")
+    func promptDoesNotImposeMicrotaskBarrier() {
         let prompt = TurboCodeSystemPromptBuilder.build(
             TurboCodeSystemPromptContext(
                 role: .microtask,
@@ -113,42 +128,29 @@ struct ModelRoutingPolicyTests {
             )
         )
 
-        #expect(prompt.contains("at most 30 lines"))
-        #expect(prompt.contains("Do not plan architecture"))
-        #expect(prompt.contains("select a coding-worker or powerful-coordinator profile"))
+        #expect(!prompt.contains("On-device microtask role:"))
+        #expect(!prompt.contains("Do not plan architecture"))
+        #expect(!prompt.contains("select a coding-worker or powerful-coordinator profile"))
+        #expect(prompt.contains("Use write_ondevice once with complete content"))
     }
 
-    @Test("Explicit Swift micro-snippet remains eligible on-device")
-    func explicitSnippetIsEligibleOnDevice() {
-        let request = """
-        Given this signature and context:
-        func clamp(_ value: Int, minimum: Int, maximum: Int) -> Int
-        Implement only the function body in at most 10 lines.
-        """
+    @Test("Prompt explains how an explicit delegate task capability is used")
+    func promptGuidesExplicitDelegation() {
+        let prompt = TurboCodeSystemPromptBuilder.build(
+            TurboCodeSystemPromptContext(
+                role: .standalone,
+                backend: .foundationApple,
+                workspaceRoot: "/workspace",
+                agentTuning: .default,
+                toolIDs: [.delegateTask],
+                toolNames: ["delegate_task"],
+                availableSkills: [],
+                workspaceInstructions: nil
+            )
+        )
 
-        #expect(
-            OnDeviceCapabilityPolicy.assignment(for: request)
-                == .eligibleMicrotask
-        )
-    }
-
-    @Test("Multi-file and architectural tasks never reach the microtask model")
-    func broadTasksRequireCapableModel() {
-        #expect(
-            OnDeviceCapabilityPolicy.assignment(
-                for: "Update Sources/App.swift and Tests/AppTests.swift."
-            ) == .requiresCapableModel(.multiFile)
-        )
-        #expect(
-            OnDeviceCapabilityPolicy.assignment(
-                for: "Riprogetta l'architettura del progetto."
-            ) == .requiresCapableModel(.architecture)
-        )
-        #expect(
-            OnDeviceCapabilityPolicy.assignment(
-                for: "Create two files for this feature."
-            ) == .requiresCapableModel(.multiFile)
-        )
+        #expect(prompt.contains("delegate_task is available"))
+        #expect(prompt.contains("Do not claim the tool is unavailable"))
     }
 
     @Test("Legacy on-device coordinator is visibly experimental")

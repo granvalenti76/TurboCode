@@ -5,6 +5,60 @@ All notable changes to TurboCode are documented in this file.
 The project follows Semantic Versioning while its public API and persisted
 formats continue to evolve before 1.0.
 
+## [0.3.0] - 2026-08-10
+
+### Added
+
+- Workspace-local skill authoring through `create_skill`, including discovery
+  of TurboCode skills and Codex `.agents/skills` entries.
+- `delegate_task` as an explicit capability for custom profiles, including
+  on-device overrides, with a configured worker and progressive disclosure of
+  delegation settings. The built-in On-device profile remains direct.
+- Codex as a selectable model for custom profiles, including its model and
+  reasoning configuration.
+- `/documentation` as an application-owned command that opens the native
+  TurboCode documentation widget without requiring a model tool call.
+- `/task <instructions>` as an application-owned command that runs the
+  configured independent coding worker and writes its result into the current
+  conversation.
+- Per-override worker tool selection with an **All tools** default and an
+  explicit empty selection for text-only workers.
+- Versioned TurboCode tool-call documentation covering the available tools,
+  profile availability, delegation behavior, and safety boundaries.
+
+### Improved
+
+- Custom profiles now use one model selection and one capability list. Adding
+  `delegate_task` enables orchestration without a separate Direct Model versus
+  Coordinator → Worker execution mode.
+- Delegated work now has a small provider-facing contract: the coordinator
+  supplies a goal and chooses `coding` or `text`. Coding workers receive the
+  tool bundle configured by the active profile; text workers receive no session
+  tools and return prose.
+- Worker activity identifiers, runtime bookkeeping, workspace boundaries,
+  review, approval, cancellation, and verification remain owned by TurboCode
+  rather than being authored by the coordinator model.
+- Delegation envelopes use schema version 2 with backward decoding for schema
+  version 1, and the Foundation Models and Codex adapters share the same
+  coding/text contract.
+- On-device context is compacted before the ninth user turn for the on-device
+  model and its overrides. The transcript keeps a concise handoff, shows a
+  native compaction notice, and records the event in On-Device Statistics.
+- Worker tool configuration is progressively disclosed beside the worker
+  picker, grouped by category, and kept independent from coordinator tools.
+- Local commands use the existing timeline, persistence, activity, and
+  cancellation paths, so they remain useful even when the corresponding
+  model-facing capability is excluded from the active override.
+- Profile, skill, routing, and delegation evaluations were expanded to cover
+  the new capability and compatibility rules.
+
+### Fixed
+
+- Removed coordinator-authored path scopes, per-tool allowlists, and callback
+  gates that caused provider loops and false `path_outside_scope` failures.
+- Simplified the worker runner so coding and text tasks follow the same runtime
+  path without fragile model-facing capability bookkeeping.
+
 ## [0.2.0] - 2026-08-01
 
 ### Added

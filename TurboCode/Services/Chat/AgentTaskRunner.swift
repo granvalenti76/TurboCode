@@ -4,7 +4,6 @@ import FoundationModels
 /// Runtime dependencies selected by routing before a worker starts.
 nonisolated struct AgentTaskRunContext: Sendable {
     let model: any LanguageModel
-    let toolPlan: ModelToolPlan
     let tools: [any Tool]
     let workspaceRoot: String
     let instructions: String
@@ -13,7 +12,6 @@ nonisolated struct AgentTaskRunContext: Sendable {
 
     init(
         model: any LanguageModel,
-        toolPlan: ModelToolPlan,
         tools: [any Tool],
         workspaceRoot: String = "",
         instructions: String,
@@ -21,7 +19,6 @@ nonisolated struct AgentTaskRunContext: Sendable {
         reasoningLevel: ContextOptions.ReasoningLevel?
     ) {
         self.model = model
-        self.toolPlan = toolPlan
         self.tools = tools
         self.workspaceRoot = workspaceRoot
         self.instructions = instructions
@@ -372,37 +369,25 @@ nonisolated struct FoundationModelsTaskWorker: AgentTaskWorkerExecuting {
         context: AgentTaskRunContext,
         events: AgentTaskRunnerEvents
     ) async throws -> String {
-        let permittedNames = AgentTaskToolPolicy.permittedNames(
-            envelope: envelope,
-            plan: context.toolPlan
+        // The coordinator makes one capability decision only. Coding receives
+        // the complete catalog-backed worker plan; text receives no tools. Each
+        // concrete tool still enforces the workspace root and its normal review
+        // or approval policy, so a second model-authored path gate adds failure
+        // modes without widening access.
+        let tools = DelegatedWorkerToolPolicy.tools(
+            for: envelope.mode,
+            availableTools: context.tools
         )
-        let pathScope = AgentTaskPathScope(
-            workspaceRoot: context.workspaceRoot,
-            suggestedPaths: envelope.suggestedScope
-        )
-        let tools = context.tools.compactMap { tool -> (any Tool)? in
-            guard permittedNames.contains(tool.name) else { return nil }
-            // The worker receives scoped instances; direct tool validation is
-            // retained even though the runner also preflights each call.
-            if let read = tool as? ReadFileTool {
-                return read.restricted(to: pathScope)
-            }
-            if let search = tool as? GrepTool {
-                return search.restricted(to: pathScope)
-            }
-            if let edit = tool as? EditFileTool {
-                return edit.restricted(to: pathScope)
-            }
-            return tool
-        }
-        let gate = AgentTaskExecutionGate(
-            allowedToolNames: permittedNames,
-            maximumToolCalls: envelope.budget.maximumToolCalls,
-            pathScope: pathScope
-        )
+        let instructions = envelope.mode == .coding
+            ? context.instructions
+            : """
+              Complete the delegated goal and return useful prose to the \
+              coordinator. This is a text-only task: do not inspect or claim \
+              to modify the workspace.
+              """
         let session = LanguageModelSession(
             profile: DelegateProfile(
-                instructions: context.instructions,
+                instructions: instructions,
                 tools: tools,
                 model: context.model,
                 temperature: context.temperature,
@@ -415,11 +400,6 @@ nonisolated struct FoundationModelsTaskWorker: AgentTaskWorkerExecuting {
                         withUnsafeCurrentTask { task in task?.cancel() }
                         return
                     }
-                    let failure = await gate.beginTool(call)
-                    guard !Task.isCancelled else {
-                        withUnsafeCurrentTask { task in task?.cancel() }
-                        return
-                    }
                     await events.toolStarted(
                         AgentTaskToolCallEvent(
                             taskID: envelope.taskID,
@@ -427,11 +407,6 @@ nonisolated struct FoundationModelsTaskWorker: AgentTaskWorkerExecuting {
                             call: call
                         )
                     )
-                    if failure != nil {
-                        // onToolCall cannot throw. Cancelling the current model
-                        // task stops execution before another tool can begin.
-                        withUnsafeCurrentTask { task in task?.cancel() }
-                    }
                 },
                 onToolEnd: { call, output in
                     await events.toolFinished(
@@ -447,126 +422,45 @@ nonisolated struct FoundationModelsTaskWorker: AgentTaskWorkerExecuting {
             history: []
         )
 
-        do {
-            var content = ""
-            let prompt = try Self.encodedPrompt(envelope)
-            for try await snapshot in session.streamResponse(to: prompt) {
-                try Task.checkCancellation()
-                if !snapshot.content.isEmpty {
-                    content = snapshot.content
-                }
+        var content = ""
+        let prompt = try Self.encodedPrompt(envelope)
+        for try await snapshot in session.streamResponse(to: prompt) {
+            try Task.checkCancellation()
+            if !snapshot.content.isEmpty {
+                content = snapshot.content
             }
-            if let failure = await gate.failure {
-                throw failure
-            }
-            return content
-        } catch {
-            if let failure = await gate.failure {
-                throw failure
-            }
-            throw error
         }
+        return content
     }
 
     private static func encodedPrompt(_ envelope: AgentTaskEnvelope) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(envelope)
+        let data = try encoder.encode(
+            WorkerTaskPrompt(goal: envelope.goal)
+        )
         guard let json = String(data: data, encoding: .utf8) else {
             throw AgentTaskWorkerError.invalidEnvelopeEncoding
         }
-        // A stable JSON payload keeps the task contract independent from
-        // transcript formatting and lets every provider receive identical data.
-        return "Complete the following structured task:\n\(json)"
+        // The worker needs the task, not the coordinator/runtime bookkeeping.
+        // Its available tool definitions already communicate coding vs text.
+        return "Complete the following delegated task:\n\(json)"
     }
 }
 
-/// Resolves the effective worker surface from the catalog-backed plan and the
-/// narrower per-task allowlist. Neither the prompt nor either input alone can
-/// grant a capability.
-nonisolated enum AgentTaskToolPolicy {
-    static func permittedNames(
-        envelope: AgentTaskEnvelope,
-        plan: ModelToolPlan
-    ) -> Set<String> {
-        Set(envelope.allowedTools.map(\.rawValue))
-            .intersection(plan.registeredIDs.map(\.rawValue))
-    }
+/// Model-facing payload kept deliberately smaller than AgentTaskEnvelope.
+private nonisolated struct WorkerTaskPrompt: Encodable, Sendable {
+    let goal: String
 }
 
-/// Counts actual worker tool starts and records the first policy violation.
-actor AgentTaskExecutionGate {
-    private let allowedToolNames: Set<String>
-    private let maximumToolCalls: Int
-    private let pathScope: AgentTaskPathScope?
-    private var toolCallCount = 0
-    private(set) var failure: AgentTaskWorkerError?
-
-    init(
-        allowedToolNames: Set<String>,
-        maximumToolCalls: Int,
-        pathScope: AgentTaskPathScope? = nil
-    ) {
-        self.allowedToolNames = allowedToolNames
-        self.maximumToolCalls = maximumToolCalls
-        self.pathScope = pathScope
+/// Binary worker capability policy shared by runtime and focused evaluations.
+nonisolated enum DelegatedWorkerToolPolicy {
+    static func tools(
+        for mode: DelegatedWorkerMode,
+        availableTools: [any Tool]
+    ) -> [any Tool] {
+        mode == .coding ? availableTools : []
     }
-
-    func beginTool(named name: String) -> AgentTaskWorkerError? {
-        guard failure == nil else { return failure }
-        guard allowedToolNames.contains(name) else {
-            failure = .toolNotAllowed(name)
-            return failure
-        }
-        guard toolCallCount < maximumToolCalls else {
-            failure = .toolLimitReached
-            return failure
-        }
-        toolCallCount += 1
-        return nil
-    }
-
-    /// Preflights path-bearing calls before their concrete tool can mutate or
-    /// disclose data. Calls without a path remain governed by global policy.
-    func beginTool(_ call: Transcript.ToolCall) -> AgentTaskWorkerError? {
-        guard failure == nil else { return failure }
-        guard allowedToolNames.contains(call.toolName) else {
-            failure = .toolNotAllowed(call.toolName)
-            return failure
-        }
-        if let pathScope,
-           let path = Self.pathArgument(in: call) {
-            do {
-                try pathScope.validate(path)
-            } catch {
-                failure = .pathOutsideScope(path)
-                return failure
-            }
-        }
-        guard toolCallCount < maximumToolCalls else {
-            failure = .toolLimitReached
-            return failure
-        }
-        toolCallCount += 1
-        return nil
-    }
-
-    private static func pathArgument(
-        in call: Transcript.ToolCall
-    ) -> String? {
-        let property: String
-        switch call.toolName {
-        case "read_file", "edit_file":
-            property = "filePath"
-        case "grep":
-            property = "path"
-        default:
-            return nil
-        }
-        return try? call.arguments.value(String.self, forProperty: property)
-    }
-
-    var count: Int { toolCallCount }
 }
 
 /// Resolves an unstructured worker/timeout race exactly once. The loser is

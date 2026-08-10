@@ -24,6 +24,7 @@ final class ModelRuntimeStore {
     var orchestratorMode: OrchestratorMode
     let skillActivations = SkillActivations()
     private(set) var session: LanguageModelSession
+    private var skillsWorkspaceRoot: String?
 
     var activeDynamicProfile: UserDynamicProfile? {
         activeDynamicProfileID.flatMap { id in
@@ -130,8 +131,12 @@ final class ModelRuntimeStore {
         }
     }
 
-    func applyOnboarding(tuning: AgentTuningConfig) {
+    func applyOnboarding(
+        tuning: AgentTuningConfig,
+        workspaceRoot: String? = nil
+    ) {
         agentTuning = tuning
+        skillsWorkspaceRoot = workspaceRoot
         availableSkills = configuredSkills()
     }
 
@@ -257,7 +262,13 @@ final class ModelRuntimeStore {
         return true
     }
 
-    func refreshSkills(force: Bool = false) -> Bool {
+    func refreshSkills(
+        force: Bool = false,
+        workspaceRoot: String? = nil
+    ) -> Bool {
+        if let workspaceRoot {
+            skillsWorkspaceRoot = workspaceRoot
+        }
         let discovered = configuredSkills()
         guard force || discovered != availableSkills else { return false }
         availableSkills = discovered
@@ -314,7 +325,7 @@ final class ModelRuntimeStore {
     /// provider-management UI; bootstrap paths do not call this helper.
     private static func hasCredential(for model: RemoteModelConfig) -> Bool {
         guard let credential = model.credential else { return true }
-        return !(CredentialStore.value(for: credential) ?? "").isEmpty
+        return CredentialStore.contains(account: credential)
     }
 
     func languageModel(
@@ -367,6 +378,7 @@ final class ModelRuntimeStore {
                 delegateReasoningLevel: reasoningLevel(for: delegateModel),
                 activeTemperature: temperature(for: activeRemoteModel),
                 delegateTemperature: temperature(for: delegateModel),
+                delegateToolIDs: activeDynamicProfile?.resolvedWorkerToolIDs,
                 dropsCompletedToolCalls: shouldDropCompletedToolCalls,
                 workspaceInstructions: workspaceInstructions
             ),
@@ -382,7 +394,9 @@ final class ModelRuntimeStore {
     }
 
     private func configuredSkills() -> [TurboCodeSkillDefinition] {
-        let discovered = TurboCodeConfig.shared.loadSkills()
+        let discovered = TurboCodeConfig.shared.loadSkills(
+            workspaceRoot: skillsWorkspaceRoot
+        )
         guard !agentTuning.skills.discoversUserSkills else {
             return discovered
         }
@@ -449,13 +463,13 @@ final class ModelRuntimeStore {
         ) ?? agentTuning.orchestrator.delegateModelID
         return remoteModels.first(where: {
             $0.id == requestedWorkerID
-                && $0.enabled && isConfigured($0)
+                && $0.enabled
         }) ?? remoteModels.first(where: {
-            $0.enabled && $0.role == .local && isConfigured($0)
+            $0.enabled && $0.role == .local
         }) ?? activeRemoteModel.flatMap {
-            $0.enabled && isConfigured($0) ? $0 : nil
+            $0.enabled ? $0 : nil
         } ?? remoteModels.first(where: {
-            $0.enabled && isConfigured($0)
+            $0.enabled
         }) ?? RemoteModelConfig.fallbackLlama
     }
 
@@ -480,10 +494,24 @@ final class ModelRuntimeStore {
         workspaceRoot: String,
         events: ModelSessionEvents
     ) -> ConfiguredAgentTaskInvoker? {
-        guard activeDynamicProfile?.isCoordinatorProfile == true else {
+        guard activeDynamicProfile?.usesDelegation == true else {
             return nil
         }
         return ModelSessionFactory.makeDelegateInvoker(
+            configuration: sessionConfiguration(workspaceRoot: workspaceRoot),
+            events: events
+        )
+    }
+
+    /// Builds the configured worker for an application-owned task command.
+    /// Unlike the model-facing delegate tool, this path is intentionally not
+    /// gated by the active profile's capability list: `/task` is an explicit
+    /// user action and must remain available when `delegate_task` is hidden.
+    func makeIndependentTaskInvoker(
+        workspaceRoot: String,
+        events: ModelSessionEvents
+    ) -> ConfiguredAgentTaskInvoker {
+        ModelSessionFactory.makeDelegateInvoker(
             configuration: sessionConfiguration(workspaceRoot: workspaceRoot),
             events: events
         )
@@ -510,6 +538,7 @@ final class ModelRuntimeStore {
             delegateReasoningLevel: reasoningLevel(for: delegateModel),
             activeTemperature: temperature(for: activeRemoteModel),
             delegateTemperature: temperature(for: delegateModel),
+            delegateToolIDs: activeDynamicProfile?.resolvedWorkerToolIDs,
             dropsCompletedToolCalls: shouldDropCompletedToolCalls,
             workspaceInstructions: WorkspaceInstructionsLoader.load(
                 from: workspaceRoot

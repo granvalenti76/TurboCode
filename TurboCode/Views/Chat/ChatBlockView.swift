@@ -280,15 +280,30 @@ struct ChatBlockView: View {
     }
 
     private var compactionNotice: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
-            Text("Earlier messages compacted")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.tint)
+                .frame(width: 22, height: 22)
+                .background(.tint.opacity(0.12), in: Circle())
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Context compacted")
+                    .font(.subheadline.weight(.semibold))
+                Text("Earlier tool chatter was summarized so the on-device model can continue with the essential context.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: 760, alignment: .leading)
+        .background(.tint.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.tint.opacity(0.16), lineWidth: 1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 6)
     }
 }

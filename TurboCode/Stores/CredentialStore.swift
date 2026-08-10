@@ -5,26 +5,46 @@ import Security
 enum CredentialStore {
     nonisolated private static let service = "art.granvalenti.turbocode"
 
+    /// Reads a secret without allowing the Keychain to present UI.
+    ///
+    /// Request-scoped authentication must fail cleanly when macOS would need
+    /// user interaction; a model request can then surface the provider error
+    /// instead of blocking an unrelated app flow with a modal prompt.
     nonisolated static func value(for account: String) -> String? {
-        let authenticationContext = LAContext()
-        authenticationContext.interactionNotAllowed = true
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            // Credential availability is queried while constructing ChatStore
-            // and rendering the model menu. Those background checks must never
-            // summon a modal Keychain dialog and stall unrelated profiles such
-            // as Codex. A credential that needs renewed authorization is
-            // treated as unavailable until the user saves it again in Settings.
-            kSecUseAuthenticationContext as String: authenticationContext
-        ]
+        var query = baseQuery(for: account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    /// Checks whether a credential is available without loading its value.
+    ///
+    /// UI and routing code only need this presence signal. Keeping the secret
+    /// out of those paths avoids repeated Keychain reads during view updates
+    /// and session construction.
+    nonisolated static func contains(account: String) -> Bool {
+        var query = baseQuery(for: account)
+        query[kSecReturnData as String] = false
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
+    }
+
+    nonisolated private static func baseQuery(for account: String) -> [String: Any] {
+        let authenticationContext = LAContext()
+        authenticationContext.interactionNotAllowed = true
+        return [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            // Credential availability is queried while rendering model menus.
+            // These checks must never summon a modal Keychain dialog or stall
+            // unrelated profiles such as Codex.
+            kSecUseAuthenticationContext as String: authenticationContext,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail
+        ]
     }
 
     static func set(_ value: String, for account: String) throws {

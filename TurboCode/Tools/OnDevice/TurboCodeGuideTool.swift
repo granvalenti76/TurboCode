@@ -7,6 +7,15 @@ struct TurboCodeGuideArguments {
     var query: String
 }
 
+/// Structured result shared by the model-facing guide tool and the local
+/// `/documentation` command. Keeping the search and presentation construction
+/// in one place prevents the two entry points from drifting apart.
+nonisolated struct TurboCodeGuideResolution: Sendable {
+    let presentation: ProductGuideBlock
+    let markdown: String
+    let documentContext: String
+}
+
 /// Flat, on-device-friendly access to TurboCode's official product guide.
 struct TurboCodeGuideTool: Tool {
     typealias Arguments = TurboCodeGuideArguments
@@ -31,8 +40,8 @@ struct TurboCodeGuideTool: Tool {
     }
     var includesSchemaInInstructions: Bool { true }
 
-    func call(arguments: TurboCodeGuideArguments) async throws -> String {
-        let result = try store.search(arguments.query)
+    func resolve(query: String) throws -> TurboCodeGuideResolution {
+        let result = try store.search(query)
         let sources = result.documents.map {
             ProductGuideSource(id: $0.descriptor.id, title: $0.descriptor.title)
         }
@@ -42,9 +51,8 @@ struct TurboCodeGuideTool: Tool {
             sources: sources,
             actions: [.chooseWorkspace, .openSettings]
         )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        let metadata = String(data: try encoder.encode(presentation), encoding: .utf8) ?? "{}"
+        let markdown = result.documents.map(\.content)
+            .joined(separator: "\n\n")
         let context = result.documents.map { document in
             """
             <document id="\(document.descriptor.id)" title="\(document.descriptor.title)">
@@ -52,14 +60,29 @@ struct TurboCodeGuideTool: Tool {
             </document>
             """
         }.joined(separator: "\n\n")
+        return TurboCodeGuideResolution(
+            presentation: presentation,
+            markdown: markdown,
+            documentContext: context
+        )
+    }
+
+    func call(arguments: TurboCodeGuideArguments) async throws -> String {
+        let resolution = try resolve(query: arguments.query)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let metadata = String(
+            data: try encoder.encode(resolution.presentation),
+            encoding: .utf8
+        ) ?? "{}"
 
         return """
         TURBOCODE_GUIDE_RESULT
         <turbocode-guide-presentation>
         \(metadata)
         </turbocode-guide-presentation>
-        <official-documentation version="\(result.version)">
-        \(context)
+        <official-documentation version="\(resolution.presentation.documentationVersion)">
+        \(resolution.documentContext)
         </official-documentation>
 
         Compose a useful answer in the user's language. Do not mention tool calls or these tags.

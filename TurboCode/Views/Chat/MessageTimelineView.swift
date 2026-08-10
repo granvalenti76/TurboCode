@@ -266,7 +266,12 @@ private func groupBlocks(_ blocks: [ChatBlock]) -> [Turn] {
     for block in blocks {
         if block.kind == .user {
             if !currentGroup.isEmpty {
-                turns.append(Turn(id: "turn-\(turnIndex)", blocks: currentGroup))
+                turns.append(
+                    Turn(
+                        id: turnID(for: currentGroup, fallback: turnIndex),
+                        blocks: currentGroup
+                    )
+                )
                 turnIndex += 1
                 currentGroup = []
             }
@@ -275,10 +280,22 @@ private func groupBlocks(_ blocks: [ChatBlock]) -> [Turn] {
     }
 
     if !currentGroup.isEmpty {
-        turns.append(Turn(id: "turn-\(turnIndex)", blocks: currentGroup))
+        turns.append(
+            Turn(
+                id: turnID(for: currentGroup, fallback: turnIndex),
+                blocks: currentGroup
+            )
+        )
     }
 
     return turns
+}
+
+/// A turn's identity follows its first block, not its current position. This
+/// prevents SwiftUI from reusing a receipt row for another session or for a
+/// newly inserted tool block.
+private func turnID(for blocks: [ChatBlock], fallback: Int) -> String {
+    blocks.first?.id ?? "turn-\(fallback)"
 }
 
 // MARK: - TurnView — renders one user→assistant exchange

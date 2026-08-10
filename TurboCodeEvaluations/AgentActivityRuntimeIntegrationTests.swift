@@ -154,11 +154,6 @@ struct AgentActivityRuntimeIntegrationTests {
             runner: runner,
             context: AgentTaskRunContext(
                 model: SystemLanguageModel.default,
-                toolPlan: ModelToolPlan(
-                    profile: .delegate,
-                    tier: .standard,
-                    assignments: []
-                ),
                 tools: [],
                 instructions: "Test worker.",
                 temperature: nil,
@@ -186,8 +181,7 @@ struct AgentActivityRuntimeIntegrationTests {
             taskID: "task-runtime",
             attemptID: attemptID,
             goal: "Exercise Activity event wiring.",
-            acceptanceCriteria: ["Activity reaches the matching terminal state."],
-            allowedTools: [.readFile]
+            acceptanceCriteria: ["Activity reaches the matching terminal state."]
         )
     }
 }

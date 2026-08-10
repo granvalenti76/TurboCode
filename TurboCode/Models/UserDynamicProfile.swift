@@ -8,13 +8,20 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
     case codex
 
     /// Only provider-backed defaults belong in the profile library. Codex is
-    /// configured contextually as a coordinator; direct Codex selection remains
-    /// owned by the composer while a coordinator route can pin its own model.
+    /// configured contextually for delegated profiles; direct Codex selection
+    /// remains owned by the composer.
     static let builtInCases: [Self] = [.onDevice, .llama, .pcc, .deepseek]
-    /// These providers expose the structured `delegate_task` route. Llama is
-    /// OpenAI-compatible, so it can coordinate through the same adapter used
-    /// by DeepSeek without a provider-specific transport workaround.
-    static let coordinatorCases: [Self] = [.llama, .deepseek, .codex]
+    /// These models expose the structured `delegate_task` route when selected
+    /// in a custom profile. The built-in on-device profile remains direct;
+    /// opting into this capability is an explicit override choice.
+    static let delegationCases: [Self] = [.onDevice, .llama, .deepseek, .codex]
+    /// Models available when creating or editing a custom profile. Codex is
+    /// intentionally not a built-in standalone profile, but it is a valid
+    /// override model with its own App Server and reasoning configuration.
+    static let profileCases: [Self] = [.onDevice, .llama, .pcc, .deepseek, .codex]
+    /// Compatibility alias for integrations that still describe the route as
+    /// coordinator/worker. New UI and runtime code should use `delegationCases`.
+    static let coordinatorCases: [Self] = delegationCases
     static let workerCases: [Self] = [.pcc, .llama, .deepseek]
 
     var id: String { rawValue }
@@ -75,17 +82,21 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     var name: String
     var summary: String
     var baseModelID: ProfileBaseModelID
-    /// The provider-backed worker used only when this is a coordinator route.
+    /// The provider-backed worker used when `delegate_task` is included.
     ///
     /// `nil` is retained for profiles written before M4.3 and resolves through
     /// the global worker preference, preserving their previous behavior.
     var workerModelID: String?
-    /// Optional App Server selections owned by a Codex coordinator route.
+    /// Optional App Server selections owned by a Codex profile.
     ///
     /// Missing values deliberately mean "use the current Codex default", so
     /// profiles written before this field existed remain valid and selectable.
     var codexModelID: String?
     var codexReasoningEffort: CodexReasoningEffort?
+    /// Optional worker capability override. `nil` preserves the safe, simple
+    /// default: the selected worker receives its complete delegate tool set.
+    /// An empty array is meaningful and represents a text-only worker profile.
+    var workerToolIDs: [String]?
     var greedyMode: Bool
     var toolIDs: [String]
     var skillIDs: [String]
@@ -100,6 +111,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         workerModelID: String? = nil,
         codexModelID: String? = nil,
         codexReasoningEffort: CodexReasoningEffort? = nil,
+        workerToolIDs: [String]? = nil,
         greedyMode: Bool = false,
         toolIDs: [String] = [],
         skillIDs: [String] = [],
@@ -113,6 +125,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         self.workerModelID = workerModelID
         self.codexModelID = codexModelID
         self.codexReasoningEffort = codexReasoningEffort
+        self.workerToolIDs = workerToolIDs?.uniqued()
         self.greedyMode = greedyMode
         self.toolIDs = toolIDs.uniqued()
         self.skillIDs = skillIDs.uniqued()
@@ -123,6 +136,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     private enum CodingKeys: String, CodingKey {
         case id, name, summary, baseModelID, workerModelID
         case codexModelID, codexReasoningEffort
+        case workerToolIDs
         case greedyMode, toolIDs, skillIDs
         case createdAt, updatedAt
     }
@@ -139,6 +153,10 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
             CodexReasoningEffort.self,
             forKey: .codexReasoningEffort
         )
+        workerToolIDs = try values.decodeIfPresent(
+            [String].self,
+            forKey: .workerToolIDs
+        )?.uniqued()
         greedyMode = try values.decodeIfPresent(Bool.self, forKey: .greedyMode) ?? false
         toolIDs = try values.decodeIfPresent([String].self, forKey: .toolIDs) ?? []
         skillIDs = try values.decodeIfPresent([String].self, forKey: .skillIDs) ?? []
@@ -157,7 +175,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         if !skillIDs.isEmpty {
             result.insert(.loadSkill)
         }
-        if !ProfileBaseModelID.coordinatorCases.contains(baseModelID) {
+        if !ProfileBaseModelID.delegationCases.contains(baseModelID) {
             // Delegate Task is a managed production route, not a portable
             // capability that arbitrary custom models may enable by stale data.
             result.remove(.delegateTask)
@@ -165,24 +183,37 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         return result
     }
 
-    /// Identifies the production coordinator route exposed in the composer.
+    /// The single source of truth for profile orchestration.
     ///
-    /// A profile name alone never changes runtime semantics: the 0.2.0 route is
-    /// intentionally limited to supported coordinators plus typed delegation.
-    var isCoordinatorProfile: Bool {
-        ProfileBaseModelID.coordinatorCases.contains(baseModelID)
-            && resolvedToolIDs.contains(.delegateTask)
+    /// A custom profile is delegated when its resolved capability set contains
+    /// `delegate_task`; there is no separately persisted execution role.
+    var usesDelegation: Bool {
+        resolvedToolIDs.contains(.delegateTask)
     }
 
-    /// Exposes product intent without persisting a second source of truth.
-    /// Existing profiles therefore migrate automatically from their model and
-    /// typed capability configuration.
+    /// Returns the explicit worker selection while preserving `nil` as the
+    /// backwards-compatible "all worker tools" state.
+    var resolvedWorkerToolIDs: Set<ToolCapabilityID>? {
+        workerToolIDs.map { ids in
+            Set(ids.compactMap(ToolCapabilityID.init(rawValue:)))
+                .intersection(ModelToolCatalog.delegateToolIDs)
+        }
+    }
+
+    /// Compatibility name retained for older callers while the product UI
+    /// speaks in terms of profiles and delegation capability.
+    @available(*, deprecated, message: "Use usesDelegation instead.")
+    var isCoordinatorProfile: Bool { usesDelegation }
+
+    /// Compatibility projection for older persisted-profile evaluations. It
+    /// is derived and never drives UI or runtime selection.
+    @available(*, deprecated, message: "Use usesDelegation instead.")
     var executionRole: ProfileExecutionRole {
-        isCoordinatorProfile ? .coordinatorWorker : .direct
+        usesDelegation ? .coordinatorWorker : .direct
     }
 
-    /// Applies route intent atomically so the editor cannot save a coordinator
-    /// without the model and typed delegation capability required at runtime.
+    /// Compatibility migration helper for older creation flows. New code should
+    /// include or remove `delegate_task` directly through `setTool`.
     mutating func setExecutionRole(_ role: ProfileExecutionRole) {
         switch role {
         case .direct:
@@ -196,7 +227,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
                 baseModelID = .deepseek
             }
         case .coordinatorWorker:
-            if !ProfileBaseModelID.coordinatorCases.contains(baseModelID) {
+            if !ProfileBaseModelID.delegationCases.contains(baseModelID) {
                 baseModelID = .deepseek
             }
             // New routes are self-contained. Older routes may still carry nil
@@ -224,6 +255,14 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         guard value.name.count <= 64 else { throw UserDynamicProfileError.nameTooLong }
         value.toolIDs = toolIDs.uniqued()
         value.skillIDs = skillIDs.uniqued()
+        value.workerToolIDs = workerToolIDs?
+            .filter { id in
+                guard let capability = ToolCapabilityID(rawValue: id) else {
+                    return false
+                }
+                return ModelToolCatalog.delegateToolIDs.contains(capability)
+            }
+            .uniqued()
         return value
     }
 

@@ -32,8 +32,30 @@ struct GitTool: Tool {
     let workspaceRoot: String
     let policy: GitPolicy
     let executionPolicy: ExecutionPolicy
+    let taskScope: AgentTaskPathScope?
     private let service = StructuredGitService()
     private let statusService = GitDiffService()
+
+    init(
+        workspaceRoot: String,
+        policy: GitPolicy,
+        executionPolicy: ExecutionPolicy,
+        taskScope: AgentTaskPathScope? = nil
+    ) {
+        self.workspaceRoot = workspaceRoot
+        self.policy = policy
+        self.executionPolicy = executionPolicy
+        self.taskScope = taskScope
+    }
+
+    func restricted(to scope: AgentTaskPathScope) -> Self {
+        Self(
+            workspaceRoot: workspaceRoot,
+            policy: policy,
+            executionPolicy: executionPolicy,
+            taskScope: scope
+        )
+    }
 
     var name: String { "git" }
     var description: String {
@@ -53,6 +75,12 @@ struct GitTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: GitArguments) async throws -> String {
+        // Git status, history, branch, remote, and index operations are
+        // repository-wide. A narrow delegated scope cannot safely constrain
+        // their side effects or disclosures, so the worker must decline them.
+        if let taskScope, !taskScope.isWorkspaceWide {
+            return "Error: git requires an entire-workspace task scope."
+        }
         guard let operation = GitOperation(rawValue: arguments.operation) else {
             return "Error: Unsupported Git operation '\(arguments.operation)'."
         }

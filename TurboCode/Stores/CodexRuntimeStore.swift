@@ -18,6 +18,9 @@ final class CodexRuntimeStore {
         let workspaceRoot: String
         let workspaceName: String?
         let agentTuning: AgentTuningConfig
+        /// Skills are captured per turn so profile-scoped catalogs and their
+        /// load_skill tool remain aligned with the active runtime session.
+        let availableSkills: [TurboCodeSkillDefinition]
         /// A profile-owned selection overrides the composer preference for this
         /// route without replacing that global direct-Codex preference.
         let modelID: String?
@@ -87,6 +90,7 @@ final class CodexRuntimeStore {
     private struct ThreadConfiguration: Equatable {
         let includesDelegation: Bool
         let modelID: String
+        let skillNames: [String]
     }
 
     private var threadConfigurations: [String: ThreadConfiguration] = [:]
@@ -251,7 +255,8 @@ final class CodexRuntimeStore {
         let includesDelegation = request.delegationInvoker != nil
         let configuration = ThreadConfiguration(
             includesDelegation: includesDelegation,
-            modelID: snapshot.selectedModel.id
+            modelID: snapshot.selectedModel.id,
+            skillNames: request.availableSkills.map(\.name)
         )
         let threadID: String
         if let existing = threadIDs[request.turboThreadID],
@@ -261,7 +266,8 @@ final class CodexRuntimeStore {
             let dynamicTools = CodexTurboCodeToolBridge.specifications(
                 workspaceRoot: request.workspaceRoot,
                 agentTuning: request.agentTuning,
-                includesDelegation: includesDelegation
+                includesDelegation: includesDelegation,
+                availableSkills: request.availableSkills
             )
             let workspaceInstructions = WorkspaceInstructionsLoader.load(
                 from: request.workspaceRoot
@@ -270,6 +276,7 @@ final class CodexRuntimeStore {
                 workspaceRoot: request.workspaceRoot,
                 agentTuning: request.agentTuning,
                 dynamicTools: dynamicTools,
+                availableSkills: request.availableSkills,
                 workspaceInstructions: workspaceInstructions
             )
             // App Server instructions are sticky for the thread. Keeping them
@@ -326,6 +333,7 @@ final class CodexRuntimeStore {
                         workspaceRoot: request.workspaceRoot,
                         workspaceName: request.workspaceName,
                         agentTuning: request.agentTuning,
+                        availableSkills: request.availableSkills,
                         delegationInvoker: request.delegationInvoker
                     )
                     if let presentation = execution.presentation {

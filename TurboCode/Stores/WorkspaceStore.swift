@@ -24,11 +24,13 @@ final class WorkspaceStore {
         root.isEmpty ? "No workspace" : URL(fileURLWithPath: root).lastPathComponent
     }
 
-    /// Recent paths stay in UserDefaults because they are lightweight sidebar
-    /// preferences rather than conversation or workspace-domain data.
+    /// Recent paths remain observable in memory so sidebar removals render
+    /// immediately, while every mutation is mirrored to UserDefaults for the
+    /// next launch. Reading only from UserDefaults would bypass Observation.
     var recentWorkspaces: [String] {
-        get { defaults.stringArray(forKey: Self.recentWorkspacesKey) ?? [] }
-        set { defaults.set(newValue, forKey: Self.recentWorkspacesKey) }
+        didSet {
+            defaults.set(recentWorkspaces, forKey: Self.recentWorkspacesKey)
+        }
     }
 
     private static let recentWorkspacesKey = "recentWorkspaces"
@@ -43,6 +45,9 @@ final class WorkspaceStore {
     ) {
         self.gitService = gitService
         self.defaults = defaults
+        self.recentWorkspaces = defaults.stringArray(
+            forKey: Self.recentWorkspacesKey
+        ) ?? []
     }
 
     /// Applies a user-selected workspace synchronously. Refreshes remain

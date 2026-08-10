@@ -26,6 +26,40 @@ struct WorkspaceStoreTests {
         #expect(store.selectedProject == "project-5")
     }
 
+    @Test("Removing a recent workspace updates the sidebar and preserves its directory")
+    func removingRecentWorkspaceIsObservableAndNonDestructive() async throws {
+        let suiteName = "WorkspaceStoreTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let projectURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCode-Workspace-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: projectURL,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: projectURL) }
+        let store = WorkspaceStore(
+            gitService: WorkspaceGitServiceStub(),
+            defaults: defaults
+        )
+        store.selectWorkspace(projectURL.path)
+        store.clearWorkspace()
+
+        await confirmation("Recent workspace mutation is observed") { observed in
+            withObservationTracking {
+                _ = store.recentWorkspaces
+            } onChange: {
+                observed()
+            }
+
+            #expect(!store.removeWorkspace(projectURL.path))
+        }
+
+        #expect(store.recentWorkspaces.isEmpty)
+        #expect(defaults.stringArray(forKey: "recentWorkspaces")?.isEmpty == true)
+        #expect(FileManager.default.fileExists(atPath: projectURL.path))
+    }
+
     @Test("Clearing a workspace resets derived Git and diff state")
     func clearWorkspaceResetsDerivedState() {
         let store = WorkspaceStore(gitService: WorkspaceGitServiceStub())

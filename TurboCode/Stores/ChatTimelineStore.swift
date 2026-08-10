@@ -195,6 +195,32 @@ final class ChatTimelineStore {
         blocks[index].gitCommit = receipt
     }
 
+    /// Presents an intentional context boundary without hiding the durable
+    /// conversation. The chat view renders this as a quiet HIG-style status
+    /// card between the previous work and the next model turn.
+    func presentCompaction(_ text: String) {
+        insertBeforeActivePlaceholderOrAppend(
+            ChatBlock(kind: .compaction, text: text)
+        )
+    }
+
+    /// Inserts documentation opened by a local command as the same native
+    /// guide card used for model-grounded `turbocode_guide` responses.
+    func presentProductGuide(_ guide: ProductGuideBlock, markdown: String) {
+        insertBeforeActivePlaceholderOrAppend(
+            ChatBlock(kind: .productGuide, text: markdown, productGuide: guide)
+        )
+    }
+
+    /// Records an application-owned task as an ordinary visible conversation
+    /// turn. The worker remains independent, while its final prose is easy to
+    /// read, copy, persist, and include in later context handoffs.
+    func presentTaskTurn(command: String, response: String) {
+        isFirstMessage = false
+        blocks.append(ChatBlock(kind: .user, text: command))
+        blocks.append(ChatBlock(kind: .assistant, text: response))
+    }
+
     private func insertBeforeActivePlaceholderOrAppend(_ block: ChatBlock) {
         if let activeAssistantPlaceholderID,
            let index = blocks.firstIndex(where: { $0.id == activeAssistantPlaceholderID }) {

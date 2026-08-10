@@ -15,16 +15,27 @@ struct RemoveFileTool: Tool {
     typealias Output = String
 
     let workspaceRoot: String
+    let taskScope: AgentTaskPathScope?
     private let requestApproval: @Sendable (PendingToolApproval) async -> String
 
     init(
         workspaceRoot: String,
+        taskScope: AgentTaskPathScope? = nil,
         requestApproval: @escaping @Sendable (PendingToolApproval) async -> String = {
             await ToolApprovalRegistry.shared.request($0)
         }
     ) {
         self.workspaceRoot = workspaceRoot
+        self.taskScope = taskScope
         self.requestApproval = requestApproval
+    }
+
+    func restricted(to scope: AgentTaskPathScope) -> Self {
+        Self(
+            workspaceRoot: workspaceRoot,
+            taskScope: scope,
+            requestApproval: requestApproval
+        )
     }
 
     var name: String { "remove_file" }
@@ -41,6 +52,7 @@ struct RemoveFileTool: Tool {
 
         let validation: ValidatedRemoval
         do {
+            try taskScope?.validate(requestedPath)
             validation = try validateRemoval(path: requestedPath, within: workspaceRoot)
         } catch {
             return "Error: \(error.localizedDescription)"
@@ -55,6 +67,7 @@ struct RemoveFileTool: Tool {
             summary: "Permanently delete '\(validation.relativePath)'?",
             action: {
                 do {
+                    try taskScope?.validate(requestedPath)
                     let current = try validateRemoval(
                         path: requestedPath,
                         within: workspaceRoot
