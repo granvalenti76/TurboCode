@@ -252,9 +252,11 @@ nonisolated enum ModelToolCatalog {
                 .filter { ids.contains($0) }
                 .map { ($0, requirement(for: $0)) }
         } ?? profileMembership
-        // Skill authoring is a workspace-scoped product capability available
-        // in every profile, including custom profiles with explicit tools.
-        if context.hasWorkspace,
+        // Built-in profiles always retain the product skill authoring surface.
+        // A custom profile passes selectedIDs explicitly, so its list remains
+        // an actual capability boundary: omitting create_skill must remove it.
+        if selectedIDs == nil,
+           context.hasWorkspace,
            !memberships.contains(where: { $0.0 == .createSkill }) {
             memberships.append((.createSkill, .workspace))
         }
