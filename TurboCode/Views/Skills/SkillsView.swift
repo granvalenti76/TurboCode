@@ -621,10 +621,10 @@ struct SkillsView: View {
 
     private func availableTools(option: ProfileModelOption, search: String) -> [ToolCapabilityDescriptor] {
         ModelToolCatalog.descriptors.filter {
-            // Delegation is owned by the Execution picker; hiding it here keeps
-            // the drag composer focused on optional advanced capabilities.
-            $0.id != .delegateTask
-                && $0.id != .loadSkill
+            // Loading skills is derived from the selected skill set and legacy
+            // delegation is not authorable. Structured delegate_task remains
+            // visible because it is a supported override capability.
+            $0.id != .loadSkill
                 && $0.id != .callPowerfulModel
                 && !viewModel.containsTool($0.id)
                 && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)
@@ -633,9 +633,7 @@ struct SkillsView: View {
     }
 
     private func includedTools() -> [ToolCapabilityDescriptor] {
-        ModelToolCatalog.descriptors.filter {
-            $0.id != .delegateTask && viewModel.containsTool($0.id)
-        }
+        ModelToolCatalog.descriptors.filter { viewModel.containsTool($0.id) }
     }
 
     private func availableSkills(search: String) -> [TurboCodeSkillDefinition] {
@@ -662,9 +660,7 @@ struct SkillsView: View {
 
     private var includedCount: Int {
         capabilityKind == .tools
-            ? (viewModel.draft?.toolIDs.filter {
-                $0 != ToolCapabilityID.delegateTask.rawValue
-            }.count ?? 0)
+            ? (viewModel.draft?.toolIDs.count ?? 0)
             : (viewModel.draft?.skillIDs.count ?? 0)
     }
 

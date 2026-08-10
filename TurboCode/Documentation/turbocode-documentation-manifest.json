@@ -1,5 +1,5 @@
 {
-  "version": "1.4.0",
+  "version": "1.5.0",
   "documents": [
     {
       "id": "capabilities",
@@ -28,6 +28,13 @@
       "summary": "How TurboCode inspects Xcode projects and returns compact build and test diagnostics.",
       "file": "turbocode-xcode-tools.md",
       "keywords": ["Xcode", "build", "compile", "test", "scheme", "xcresult", "DerivedData", "diagnostics"]
+    },
+    {
+      "id": "tools",
+      "title": "TurboCode Tool Calls",
+      "summary": "The complete tool-call catalog, including availability, supported operations, review behavior, and delegation.",
+      "file": "turbocode-tools.md",
+      "keywords": ["tool", "tools", "tool call", "toolcall", "available tools", "capabilities", "strumenti", "disponibili", "quali tool", "delegate_task"]
     },
     {
       "id": "safety",

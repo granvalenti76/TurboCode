@@ -155,6 +155,14 @@ final class SkillsViewModel {
 
     func setTool(_ id: ToolCapabilityID, included: Bool) {
         updateDraft { value in
+            if id == .delegateTask {
+                // The capability composer and the Execution picker represent
+                // the same typed route. Keep them synchronized so selecting
+                // delegation also establishes an explicit worker and removing
+                // it cannot leave a coordinator profile without its tool.
+                value.setExecutionRole(included ? .coordinatorWorker : .direct)
+                return
+            }
             if included, !value.toolIDs.contains(id.rawValue) {
                 value.toolIDs.append(id.rawValue)
             } else if !included {
@@ -163,8 +171,9 @@ final class SkillsViewModel {
         }
     }
 
-    /// Changes product-level execution intent as one edit. The technical
-    /// `delegate_task` capability remains managed and out of the drag surface.
+    /// Changes product-level execution intent as one edit. The capability
+    /// composer delegates the same transition here through `setTool`, keeping
+    /// both profile-authoring surfaces consistent.
     func setExecutionRole(_ role: ProfileExecutionRole) {
         updateDraft { $0.setExecutionRole(role) }
     }
@@ -224,6 +233,11 @@ final class SkillsViewModel {
         ).registeredIDs
         compatible.remove(.callPowerfulModel)
         compatible.remove(.loadSkill)
+        if !ProfileBaseModelID.coordinatorCases.contains(id) {
+            // A configured worker is necessary but not sufficient: only the
+            // provider adapters in coordinatorCases implement delegate_task.
+            compatible.remove(.delegateTask)
+        }
         let subtitle: String
         switch id {
         case .onDevice: subtitle = "Private and optimized for compact tool schemas"

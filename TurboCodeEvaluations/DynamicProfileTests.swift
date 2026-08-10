@@ -222,6 +222,65 @@ struct DynamicProfileTests {
         #expect(profile.isCoordinatorProfile)
     }
 
+    @Test("Capability overrides expose delegation only to supported coordinators")
+    func overrideOptionsScopeDelegationToCoordinatorModels() {
+        let viewModel = SkillsViewModel()
+        let settings = SettingsStore()
+
+        #expect(
+            viewModel.modelOption(for: .llama, settings: settings)
+                .compatibleToolIDs.contains(.delegateTask)
+        )
+        #expect(
+            viewModel.modelOption(for: .deepseek, settings: settings)
+                .compatibleToolIDs.contains(.delegateTask)
+        )
+        #expect(
+            viewModel.modelOption(for: .codex, settings: settings)
+                .compatibleToolIDs.contains(.delegateTask)
+        )
+        #expect(
+            !viewModel.modelOption(for: .onDevice, settings: settings)
+                .compatibleToolIDs.contains(.delegateTask)
+        )
+        #expect(
+            !viewModel.modelOption(for: .pcc, settings: settings)
+                .compatibleToolIDs.contains(.delegateTask)
+        )
+    }
+
+    @Test("Selecting Delegate Task in an override synchronizes its execution role")
+    func overrideCapabilitySelectionOwnsDelegationRoute() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = DynamicProfileStore(
+            fileURL: root.appendingPathComponent("profiles.json")
+        )
+        let profile = UserDynamicProfile(
+            name: "Selectable coordinator",
+            baseModelID: .llama,
+            toolIDs: [ToolCapabilityID.readFile.rawValue]
+        )
+        try store.save([profile])
+        let viewModel = SkillsViewModel(store: store)
+        viewModel.reload()
+        viewModel.select(.custom(profile.id))
+
+        viewModel.setTool(.delegateTask, included: true)
+
+        #expect(viewModel.draft?.executionRole == .coordinatorWorker)
+        #expect(viewModel.draft?.workerModelID == ProfileBaseModelID.llama.rawValue)
+        #expect(viewModel.draft?.toolIDs.contains(ToolCapabilityID.delegateTask.rawValue) == true)
+
+        viewModel.setTool(.delegateTask, included: false)
+
+        // Removing the capability uses the same invariant-preserving route as
+        // the Execution picker and leaves unrelated explicit tools untouched.
+        #expect(viewModel.draft?.executionRole == .direct)
+        #expect(viewModel.draft?.toolIDs.contains(ToolCapabilityID.delegateTask.rawValue) == false)
+        #expect(viewModel.draft?.toolIDs.contains(ToolCapabilityID.readFile.rawValue) == true)
+    }
+
     @Test("Changing a worker does not perturb the DeepSeek coordinator tool prefix")
     func deepSeekCoordinatorToolPrefixStaysCacheStable() {
         let llamaRoute = UserDynamicProfile(
