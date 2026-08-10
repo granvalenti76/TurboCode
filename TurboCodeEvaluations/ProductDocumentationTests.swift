@@ -28,4 +28,25 @@ struct ProductDocumentationTests {
         }
         #expect(tools.content.contains("`apply_edits`"))
     }
+
+    @Test("The local documentation command reuses the guide presentation")
+    func localGuideResolutionProducesNativeWidgetData() throws {
+        let documentationDirectory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("TurboCode/Documentation", isDirectory: true)
+        let store = ProductDocumentationStore(
+            officialDirectoryURL: documentationDirectory,
+            bundleResourceURL: nil
+        )
+
+        let resolution = try TurboCodeGuideTool(store: store)
+            .resolve(query: "What can TurboCode do?")
+
+        #expect(resolution.presentation.title == "What TurboCode Can Do")
+        #expect(resolution.presentation.documentationVersion == "1.5.0")
+        #expect(resolution.presentation.sources.contains { $0.id == "capabilities" })
+        #expect(resolution.markdown.contains("TurboCode"))
+        #expect(resolution.documentContext.contains("<document id=\"capabilities\""))
+    }
 }

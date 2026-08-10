@@ -778,6 +778,13 @@ public final class ChatStore {
     }
 
     public func sendMessage(_ text: String) async {
+        // Slash commands are application actions. Handling documentation here
+        // keeps it available even when the selected profile omits the guide
+        // tool from its model-facing tool catalog.
+        if text.trimmingCharacters(in: .whitespacesAndNewlines) == "/documentation" {
+            await openDocumentation()
+            return
+        }
         refreshSkillsIfNeeded()
         if activeBackend != .codex,
            modelRuntimeStore.workspaceInstructionsChanged(in: workspaceRoot) {
@@ -789,6 +796,30 @@ public final class ChatStore {
             for: text
         ) else { return }
         await sendMessage(text, promptText: promptText, visibleInTimeline: true)
+    }
+
+    /// Presents the official guide without starting a model response. The
+    /// fixed overview query mirrors the guide tool's normal broad product
+    /// question while retaining its native structured widget and source chips.
+    public func openDocumentation() async {
+        guard !busy else { return }
+        do {
+            let documentation = ProductDocumentationStore.live
+            try documentation.installBundledDocumentation()
+            let resolution = try TurboCodeGuideTool(store: documentation)
+                .resolve(query: "What can TurboCode do?")
+            ensureActiveThread()
+            timelineStore.presentProductGuide(
+                resolution.presentation,
+                markdown: resolution.markdown
+            )
+            if let threadID = activeThreadId {
+                conversationStore.touchThread(id: threadID)
+                await persistSession(for: threadID)
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     func isIncompleteSkillCommand(_ text: String) -> Bool {

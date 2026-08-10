@@ -238,6 +238,12 @@ struct InputFieldView: View {
         let query = input.lowercased()
         let commands = [
             SlashCommandSuggestion(
+                command: "/documentation",
+                insertion: "/documentation",
+                description: "Open TurboCode documentation",
+                icon: "book.closed"
+            ),
+            SlashCommandSuggestion(
                 command: "/skills",
                 insertion: "/skills",
                 description: "List available skills",

@@ -22,6 +22,10 @@ Searches this official, versioned TurboCode documentation. It is intended for
 questions about the product, supported workflows, models, settings, safety, and
 available tools; it does not inspect the user's source code.
 
+The composer also provides `/documentation`. This application command opens the
+same native guide widget locally, using the overview documentation, so it works
+even when a custom profile does not expose `turbocode_guide` to its model.
+
 ### `list_workspace`
 
 Lists one workspace-relative directory with structured file metadata and a

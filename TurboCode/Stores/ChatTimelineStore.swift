@@ -204,6 +204,14 @@ final class ChatTimelineStore {
         )
     }
 
+    /// Inserts documentation opened by a local command as the same native
+    /// guide card used for model-grounded `turbocode_guide` responses.
+    func presentProductGuide(_ guide: ProductGuideBlock, markdown: String) {
+        insertBeforeActivePlaceholderOrAppend(
+            ChatBlock(kind: .productGuide, text: markdown, productGuide: guide)
+        )
+    }
+
     private func insertBeforeActivePlaceholderOrAppend(_ block: ChatBlock) {
         if let activeAssistantPlaceholderID,
            let index = blocks.firstIndex(where: { $0.id == activeAssistantPlaceholderID }) {
