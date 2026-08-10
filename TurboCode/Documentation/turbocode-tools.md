@@ -26,6 +26,11 @@ The composer also provides `/documentation`. This application command opens the
 same native guide widget locally, using the overview documentation, so it works
 even when a custom profile does not expose `turbocode_guide` to its model.
 
+The composer also provides `/task <instructions>`. This application command
+starts one independent coding worker through the configured delegate runtime,
+without asking the active model to emit `delegate_task`. The typed worker result
+is added to the current conversation and remains available to the next turn.
+
 ### `list_workspace`
 
 Lists one workspace-relative directory with structured file metadata and a

@@ -502,6 +502,20 @@ final class ModelRuntimeStore {
         )
     }
 
+    /// Builds the configured worker for an application-owned task command.
+    /// Unlike the model-facing delegate tool, this path is intentionally not
+    /// gated by the active profile's capability list: `/task` is an explicit
+    /// user action and must remain available when `delegate_task` is hidden.
+    func makeIndependentTaskInvoker(
+        workspaceRoot: String,
+        events: ModelSessionEvents
+    ) -> ConfiguredAgentTaskInvoker {
+        ModelSessionFactory.makeDelegateInvoker(
+            configuration: sessionConfiguration(workspaceRoot: workspaceRoot),
+            events: events
+        )
+    }
+
     private func sessionConfiguration(
         workspaceRoot: String
     ) -> ModelSessionConfiguration {

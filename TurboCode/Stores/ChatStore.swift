@@ -778,11 +778,19 @@ public final class ChatStore {
     }
 
     public func sendMessage(_ text: String) async {
-        // Slash commands are application actions. Handling documentation here
-        // keeps it available even when the selected profile omits the guide
-        // tool from its model-facing tool catalog.
+        // Slash commands are application actions. Handling them here keeps
+        // local documentation and worker execution independent of the active
+        // profile's model-facing tool catalog.
         if text.trimmingCharacters(in: .whitespacesAndNewlines) == "/documentation" {
             await openDocumentation()
+            return
+        }
+        if let taskGoal = Self.taskCommandGoal(from: text) {
+            await runIndependentTask(taskGoal)
+            return
+        }
+        if text.trimmingCharacters(in: .whitespacesAndNewlines) == "/task" {
+            error = "Use /task followed by the task instructions."
             return
         }
         refreshSkillsIfNeeded()
@@ -824,6 +832,132 @@ public final class ChatStore {
 
     func isIncompleteSkillCommand(_ text: String) -> Bool {
         text.trimmingCharacters(in: .whitespacesAndNewlines) == "/skill"
+    }
+
+    func isIncompleteTaskCommand(_ text: String) -> Bool {
+        text.trimmingCharacters(in: .whitespacesAndNewlines) == "/task"
+    }
+
+    func isLocalCommand(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed == "/documentation"
+            || trimmed == "/task"
+            || Self.taskCommandGoal(from: trimmed) != nil
+    }
+
+    /// Runs `/task <instructions>` through the configured worker directly.
+    /// The active profile does not need to advertise `delegate_task`, because
+    /// this is an explicit application command rather than model tool use.
+    private func runIndependentTask(_ goal: String) async {
+        guard !busy else { return }
+        let command = "/task \(goal)"
+        let envelope: AgentTaskEnvelope
+        do {
+            envelope = try DelegateTaskArguments(
+                mode: DelegatedWorkerMode.coding.rawValue,
+                goal: goal
+            ).envelope()
+        } catch {
+            self.error = error.localizedDescription
+            return
+        }
+
+        ensureActiveThread()
+        let invoker = modelRuntimeStore.makeIndependentTaskInvoker(
+            workspaceRoot: workspaceRoot,
+            events: modelSessionEvents
+        )
+        error = nil
+        responseCoordinator.delegationChanged(true)
+        busy = true
+        let task = Task<Void, Never> { [weak self] in
+            guard let self else { return }
+            let result = await invoker.invoke(envelope)
+            await self.finishIndependentTask(
+                command: command,
+                result: result
+            )
+        }
+        responseTask = task
+        await task.value
+        responseTask = nil
+        busy = false
+        responseCoordinator.delegationChanged(false)
+    }
+
+    /// Publishes the worker's typed terminal result as a visible assistant
+    /// turn and refreshes the current model transcript with that outcome.
+    private func finishIndependentTask(
+        command: String,
+        result: AgentTaskResult
+    ) async {
+        let response = Self.renderIndependentTaskResult(result)
+        timelineStore.presentTaskTurn(command: command, response: response)
+        appendIndependentTaskToTranscript(command: command, response: response)
+        if let threadID = activeThreadId {
+            conversationStore.touchThread(id: threadID)
+            if activeBackend == .codex {
+                codexRuntimeStore.captureImportedContext(
+                    turboThreadID: threadID,
+                    blocks: blocks
+                )
+            }
+            await persistSession(for: threadID)
+        }
+    }
+
+    /// Keeps the worker answer available to the next Foundation Models turn
+    /// without copying its internal tool-call transcript into the coordinator.
+    private func appendIndependentTaskToTranscript(
+        command: String,
+        response: String
+    ) {
+        guard activeBackend != .codex else { return }
+        let additions = RuntimeContextHandoff.transcript(from: [
+            ChatBlock(kind: .user, text: command),
+            ChatBlock(kind: .assistant, text: response)
+        ])
+        let existing = SessionRebuildHistory.prepare(
+            session.transcript,
+            keepingHistory: true,
+            discardingCapabilityContext: false
+        )
+        rebuildSession(restoringHistory: existing + additions)
+    }
+
+    private static func renderIndependentTaskResult(
+        _ result: AgentTaskResult
+    ) -> String {
+        var sections = [
+            "### Independent task",
+            result.technicalSummary
+        ]
+        if let failureDetail = result.failureDetail,
+           !failureDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            sections.append("**Details:** \(failureDetail)")
+        }
+        if !result.unresolvedWork.isEmpty {
+            sections.append(
+                "**Remaining:**\n" + result.unresolvedWork
+                    .map { "- \($0)" }
+                    .joined(separator: "\n")
+            )
+        }
+        if result.outcome == .failed || result.outcome == .cancelled {
+            sections.insert(
+                "Status: `\(result.outcome.rawValue)`",
+                at: 1
+            )
+        }
+        return sections.joined(separator: "\n\n")
+    }
+
+    private static func taskCommandGoal(from text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/task ") else { return nil }
+        let goal = String(trimmed.dropFirst("/task ".count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return goal.isEmpty ? nil : goal
     }
 
     public func reloadSkills() {

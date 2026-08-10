@@ -212,6 +212,15 @@ final class ChatTimelineStore {
         )
     }
 
+    /// Records an application-owned task as an ordinary visible conversation
+    /// turn. The worker remains independent, while its final prose is easy to
+    /// read, copy, persist, and include in later context handoffs.
+    func presentTaskTurn(command: String, response: String) {
+        isFirstMessage = false
+        blocks.append(ChatBlock(kind: .user, text: command))
+        blocks.append(ChatBlock(kind: .assistant, text: response))
+    }
+
     private func insertBeforeActivePlaceholderOrAppend(_ block: ChatBlock) {
         if let activeAssistantPlaceholderID,
            let index = blocks.firstIndex(where: { $0.id == activeAssistantPlaceholderID }) {

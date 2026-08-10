@@ -197,13 +197,13 @@ struct InputFieldView: View {
         selectedSlashCommandIndex = (selectedSlashCommandIndex + offset + count) % count
     }
 
-    /// Executes a selected complete slash command. `/skill` itself remains an
-    /// insertion step because it needs a skill name before it can be resolved.
+    /// Executes a selected complete slash command. `/skill` and `/task` remain
+    /// insertion steps because both require a parameter before execution.
     private func executeSelectedSlashCommand() {
         let suggestion = slashSuggestions[
             min(max(selectedSlashCommandIndex, 0), slashSuggestions.count - 1)
         ]
-        guard suggestion.command != "/skill" else {
+        guard suggestion.command != "/skill", suggestion.command != "/task" else {
             chatStore.composerInput = suggestion.insertion
             isFocused = true
             return
@@ -237,6 +237,12 @@ struct InputFieldView: View {
         guard !input.contains(" ") else { return [] }
         let query = input.lowercased()
         let commands = [
+            SlashCommandSuggestion(
+                command: "/task",
+                insertion: "/task ",
+                description: "Run an independent worker task",
+                icon: "person.2"
+            ),
             SlashCommandSuggestion(
                 command: "/documentation",
                 insertion: "/documentation",
@@ -470,7 +476,11 @@ struct InputFieldView: View {
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .isEmpty
                     || chatStore.isIncompleteSkillCommand(chatStore.composerInput)
-                    || !chatStore.activeProfileCanSend
+                    || chatStore.isIncompleteTaskCommand(chatStore.composerInput)
+                    || (
+                        !chatStore.activeProfileCanSend
+                            && !chatStore.isLocalCommand(chatStore.composerInput)
+                    )
                 )
         )
         .keyboardShortcut(.return, modifiers: [])
@@ -489,6 +499,11 @@ struct InputFieldView: View {
             isFocused = true
             return
         }
+        if chatStore.isIncompleteTaskCommand(text) {
+            chatStore.composerInput = "/task "
+            isFocused = true
+            return
+        }
         // Clear the shared draft before starting inference so recovery drafts
         // and ordinary composer input follow the same lifecycle.
         chatStore.composerInput = ""
@@ -497,7 +512,8 @@ struct InputFieldView: View {
 
     private var sendButtonHelp: String {
         if chatStore.busy { return "Stop response" }
-        if !chatStore.activeProfileCanSend {
+        if !chatStore.activeProfileCanSend
+            && !chatStore.isLocalCommand(chatStore.composerInput) {
             return "Wait for Codex to connect or sign in first"
         }
         return "Send message"
