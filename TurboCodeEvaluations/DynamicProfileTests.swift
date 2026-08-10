@@ -258,7 +258,7 @@ struct DynamicProfileTests {
 
         // Worker choice is runtime invocation state. It must not alter the
         // DeepSeek coordinator's leading tool definition or trigger cache miss.
-        #expect(llamaPlan.registeredIDs == [.delegateTask])
+        #expect(llamaPlan.registeredIDs == [.delegateTask, .createSkill])
         #expect(pccPlan.registeredIDs == llamaPlan.registeredIDs)
     }
 
@@ -297,7 +297,7 @@ struct DynamicProfileTests {
             selectedIDs: [.writeOnDevice, .git, .swiftWorkspaceMap, .xcodeProject]
         )
 
-        #expect(plan.registeredIDs == [.writeOnDevice, .git])
+        #expect(plan.registeredIDs == [.writeOnDevice, .git, .createSkill])
         #expect(!StandaloneSkills.isEnabled(for: plan))
     }
 
@@ -326,7 +326,7 @@ struct DynamicProfileTests {
             configuration: configuration
         )
 
-        #expect(tools.map(\.name) == ["write_ondevice"])
+        #expect(tools.map(\.name) == ["write_ondevice", "create_skill"])
     }
 
     @Test("DeepSeek keeps skill-backed tools directly available")
@@ -397,7 +397,7 @@ struct DynamicProfileTests {
             configuration: makeConfiguration(profile: profile)
         )
 
-        #expect(tools.map(\.name) == ["remove_file"])
+        #expect(tools.map(\.name) == ["remove_file", "create_skill"])
     }
 
     @Test("A Swift package profile exposes exactly the unified manager tool")
@@ -424,7 +424,7 @@ struct DynamicProfileTests {
             configuration: makeConfiguration(profile: profile)
         )
 
-        #expect(tools.map(\.name) == ["swift_package_manager"])
+        #expect(tools.map(\.name) == ["swift_package_manager", "create_skill"])
     }
 
     @Test("Legacy Swift package initializer profiles migrate to the unified manager")
@@ -481,7 +481,7 @@ struct DynamicProfileTests {
             configuration: makeConfiguration(profile: profile)
         )
 
-        #expect(tools.map(\.name) == ["file_system"])
+        #expect(tools.map(\.name) == ["file_system", "create_skill"])
     }
 
     @Test("Native skill activation is registered only for skill-backed tools")

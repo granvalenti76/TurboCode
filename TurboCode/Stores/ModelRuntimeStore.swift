@@ -24,6 +24,7 @@ final class ModelRuntimeStore {
     var orchestratorMode: OrchestratorMode
     let skillActivations = SkillActivations()
     private(set) var session: LanguageModelSession
+    private var skillsWorkspaceRoot: String?
 
     var activeDynamicProfile: UserDynamicProfile? {
         activeDynamicProfileID.flatMap { id in
@@ -130,8 +131,12 @@ final class ModelRuntimeStore {
         }
     }
 
-    func applyOnboarding(tuning: AgentTuningConfig) {
+    func applyOnboarding(
+        tuning: AgentTuningConfig,
+        workspaceRoot: String? = nil
+    ) {
         agentTuning = tuning
+        skillsWorkspaceRoot = workspaceRoot
         availableSkills = configuredSkills()
     }
 
@@ -257,7 +262,13 @@ final class ModelRuntimeStore {
         return true
     }
 
-    func refreshSkills(force: Bool = false) -> Bool {
+    func refreshSkills(
+        force: Bool = false,
+        workspaceRoot: String? = nil
+    ) -> Bool {
+        if let workspaceRoot {
+            skillsWorkspaceRoot = workspaceRoot
+        }
         let discovered = configuredSkills()
         guard force || discovered != availableSkills else { return false }
         availableSkills = discovered
@@ -382,7 +393,9 @@ final class ModelRuntimeStore {
     }
 
     private func configuredSkills() -> [TurboCodeSkillDefinition] {
-        let discovered = TurboCodeConfig.shared.loadSkills()
+        let discovered = TurboCodeConfig.shared.loadSkills(
+            workspaceRoot: skillsWorkspaceRoot
+        )
         guard !agentTuning.skills.discoversUserSkills else {
             return discovered
         }

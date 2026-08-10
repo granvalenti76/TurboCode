@@ -86,12 +86,13 @@ struct ModelRoutingPolicyTests {
             tier: .onDevice,
             context: context,
             selectedIDs: [
-                .writeOnDevice, .readFile, .git, .bash, .delegateTask
+                .writeOnDevice, .readFile, .git, .bash, .delegateTask,
+                .createSkill
             ]
         )
 
-        #expect(defaultPlan.registeredIDs == [.turboCodeGuide, .listWorkspace, .readFile, .writeOnDevice])
-        #expect(explicitExpansion.registeredIDs == [.writeOnDevice, .readFile, .git, .bash, .delegateTask])
+        #expect(defaultPlan.registeredIDs == [.turboCodeGuide, .listWorkspace, .readFile, .writeOnDevice, .createSkill])
+        #expect(explicitExpansion.registeredIDs == [.writeOnDevice, .readFile, .git, .bash, .delegateTask, .createSkill])
         #expect(defaultPlan.contains(.readFile))
         #expect(!defaultPlan.contains(.git))
         #expect(!defaultPlan.contains(.editFile))

@@ -67,7 +67,8 @@ public final class ChatStore {
         do {
             try TurboCodeConfig.shared.performOnboarding()
             modelRuntimeStore.applyOnboarding(
-                tuning: try TurboCodeConfig.shared.loadAgentTuning()
+                tuning: try TurboCodeConfig.shared.loadAgentTuning(),
+                workspaceRoot: workspaceRoot
             )
             reloadRemoteModels()
         } catch {
@@ -600,6 +601,7 @@ public final class ChatStore {
         if let wp = snapshot.conversation.workspace, workspaceRoot != wp {
             workspaceRoot = wp
         }
+        refreshSkillsIfNeeded()
         restoreModelSelection(snapshot.modelBackend)
         let restoredHistory = snapshot.transcript.map {
             SessionRebuildHistory.prepare(
@@ -759,6 +761,7 @@ public final class ChatStore {
         await finishActiveResponseBeforeTransition()
         workspaceStore.selectWorkspace(path)
 
+        refreshSkillsIfNeeded()
         rebuildSession(discardingCapabilityContext: true)
         // The inspector is opt-in: changing workspace must not open it.
         rightPanelMode = nil
@@ -805,7 +808,8 @@ public final class ChatStore {
 
     private func refreshSkillsIfNeeded(forceRebuild: Bool = false) {
         guard modelRuntimeStore.refreshSkills(
-            force: forceRebuild
+            force: forceRebuild,
+            workspaceRoot: workspaceRoot
         ) else { return }
         rebuildSession(discardingCapabilityContext: true)
     }
@@ -873,6 +877,10 @@ public final class ChatStore {
             workspaceRoot: workspaceRoot,
             workspaceName: workspaceRoot.isEmpty ? nil : workspaceLabel,
             agentTuning: agentTuning,
+            availableSkills: DynamicProfileRuntimeSelection.skills(
+                from: modelRuntimeStore.availableSkills,
+                profile: activeDynamicProfile
+            ),
             codexModelID: activeDynamicProfile?.codexModelID,
             codexReasoningEffort:
                 activeDynamicProfile?.codexReasoningEffort,
@@ -891,6 +899,9 @@ public final class ChatStore {
         if let titleTask {
             await titleTask.value
         }
+        // A skill created by skill-creator becomes available to the next turn
+        // without requiring an app restart or a manual Skills reload.
+        refreshSkillsIfNeeded()
         await persistSession(for: turboThreadID)
     }
 
@@ -927,6 +938,9 @@ public final class ChatStore {
         if let titleTask {
             await titleTask.value
         }
+        // A skill created by skill-creator becomes available to the next turn
+        // without requiring an app restart or a manual Skills reload.
+        refreshSkillsIfNeeded()
         if let conversationID, activeThreadId == conversationID {
             await persistSession(for: conversationID)
         }

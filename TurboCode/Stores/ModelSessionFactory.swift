@@ -187,7 +187,8 @@ enum ModelSessionFactory {
                     .swiftWorkspaceMap,
                     .xcodeProject,
                     .writeOnDevice,
-                    .removeFile
+                    .removeFile,
+                    .createSkill
                 ],
             repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
                 ?? 32_768
@@ -453,6 +454,9 @@ enum ModelSessionFactory {
             case .loadSkill:
                 guard !configuration.availableSkills.isEmpty else { return nil }
                 return LoadSkillTool(skills: configuration.availableSkills)
+            case .createSkill:
+                guard !configuration.workspaceRoot.isEmpty else { return nil }
+                return CreateSkillTool(workspaceRoot: configuration.workspaceRoot)
             case .delegateTask, .callPowerfulModel:
                 return nil
             }

@@ -356,6 +356,7 @@ struct CodexProfileTests {
         #expect(names.contains("apply_edits"))
         #expect(names.contains("git"))
         #expect(names.contains("swift_package_manager"))
+        #expect(names.contains("create_skill"))
         #expect(
             specs.allSatisfy {
                 $0.inputSchema["type"]?.stringValue == "object"
@@ -434,5 +435,73 @@ struct CodexProfileTests {
         #expect(execution.result.succeeded)
         #expect(execution.result.text.contains("Exit code: 0"))
         #expect(execution.result.text.contains("CodexFixture"))
+    }
+
+    @Test("Codex advertises and loads discovered skills")
+    @MainActor
+    func codexAdvertisesAndLoadsDiscoveredSkills() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let skillURL = root.appendingPathComponent("SKILL.md")
+        try """
+        ---
+        name: release-notes
+        description: Prepare concise release notes.
+        ---
+        Keep the release notes factual and grouped by user impact.
+        """.write(to: skillURL, atomically: true, encoding: .utf8)
+        let skill = try TurboCodeSkillDefinition(contentsOf: skillURL)
+
+        let specs = CodexTurboCodeToolBridge.specifications(
+            workspaceRoot: root.path,
+            agentTuning: .default,
+            availableSkills: [skill]
+        )
+        #expect(specs.map(\.name).contains("load_skill"))
+
+        let call = CodexDynamicToolCall(
+            rpcID: .integer(12),
+            callID: "call-skill",
+            tool: "load_skill",
+            arguments: .object(["name": .string(skill.name)])
+        )
+        let execution = try await CodexTurboCodeToolBridge.execute(
+            call,
+            workspaceRoot: root.path,
+            workspaceName: "Fixture",
+            agentTuning: .default,
+            availableSkills: [skill]
+        )
+
+        #expect(execution.result.succeeded)
+        #expect(execution.result.text.contains(skill.prompt))
+
+        let createCall = CodexDynamicToolCall(
+            rpcID: .integer(13),
+            callID: "call-create-skill",
+            tool: "create_skill",
+            arguments: .object([
+                "name": .string("workspace-review"),
+                "description": .string("Review workspace changes before handoff."),
+                "instructions": .string("Inspect the diff and summarize user-visible impact.")
+            ])
+        )
+        let createExecution = try await CodexTurboCodeToolBridge.execute(
+            createCall,
+            workspaceRoot: root.path,
+            workspaceName: "Fixture",
+            agentTuning: .default,
+            availableSkills: [skill]
+        )
+        #expect(createExecution.result.succeeded)
+        let createdURL = root
+            .appendingPathComponent(".agents/skills/workspace-review/SKILL.md")
+        #expect(FileManager.default.fileExists(atPath: createdURL.path))
+        #expect(try TurboCodeSkillDefinition(contentsOf: createdURL).name == "workspace-review")
     }
 }

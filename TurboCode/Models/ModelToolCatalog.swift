@@ -29,6 +29,7 @@ nonisolated enum ToolCapabilityID: String, CaseIterable, Codable, Sendable, Hash
     case writeOnDevice = "write_ondevice"
     case removeFile = "remove_file"
     case loadSkill = "load_skill"
+    case createSkill = "create_skill"
     case delegateTask = "delegate_task"
     case callPowerfulModel = "call_powerful_model"
 
@@ -204,10 +205,18 @@ nonisolated enum ModelToolCatalog {
         .init(
             id: .loadSkill,
             name: "Load Skill",
-            summary: "Load a matching skill from ~/.turbocode/SKILLS on demand.",
+            summary: "Load a matching workspace skill on demand.",
             category: .orchestration,
             systemImage: "puzzlepiece.extension",
             hasNativePresentation: false
+        ),
+        .init(
+            id: .createSkill,
+            name: "Create Skill",
+            summary: "Create a reusable Codex-compatible skill in the active workspace.",
+            category: .orchestration,
+            systemImage: "puzzlepiece.extension.fill",
+            hasNativePresentation: true
         ),
         .init(
             id: .delegateTask,
@@ -238,11 +247,17 @@ nonisolated enum ModelToolCatalog {
         selectedIDs: Set<ToolCapabilityID>? = nil
     ) -> ModelToolPlan {
         let profileMembership = membership(for: profile)
-        let memberships = selectedIDs.map { ids in
+        var memberships = selectedIDs.map { ids in
             return ToolCapabilityID.allCases
                 .filter { ids.contains($0) }
                 .map { ($0, requirement(for: $0)) }
         } ?? profileMembership
+        // Skill authoring is a workspace-scoped product capability available
+        // in every profile, including custom profiles with explicit tools.
+        if context.hasWorkspace,
+           !memberships.contains(where: { $0.0 == .createSkill }) {
+            memberships.append((.createSkill, .workspace))
+        }
         let assignments = memberships.compactMap { id, requirement -> ModelToolAssignment? in
             if requirement == .repositoryMap,
                (tier == .onDevice || context.repositoryMapDetail == nil) {
@@ -260,7 +275,8 @@ nonisolated enum ModelToolCatalog {
         switch id {
         case .turboCodeGuide: .always
         case .listWorkspace, .readFile, .searchWorkspace, .fileSystem, .git,
-             .bash, .swiftPackageManager, .editFile, .writeOnDevice, .removeFile: .workspace
+             .bash, .swiftPackageManager, .editFile, .writeOnDevice, .removeFile,
+             .createSkill: .workspace
         case .swiftWorkspaceMap: .repositoryMap
         case .xcodeProject: .capableWorkspace
         case .loadSkill: .skills
@@ -280,7 +296,8 @@ nonisolated enum ModelToolCatalog {
                 .turboCodeGuide,
                 .listWorkspace,
                 .readFile,
-                .writeOnDevice
+                .writeOnDevice,
+                .createSkill
             ]
                 .sorted { $0.rawValue < $1.rawValue }
                 .map { ($0, requirement(for: $0)) }
@@ -298,7 +315,8 @@ nonisolated enum ModelToolCatalog {
                 (.xcodeProject, .capableWorkspace),
                 (.editFile, .workspace),
                 (.removeFile, .workspace),
-                (.loadSkill, .skills)
+                (.loadSkill, .skills),
+                (.createSkill, .workspace)
             ]
         case .orchestrator:
             return [
@@ -306,6 +324,7 @@ nonisolated enum ModelToolCatalog {
                 (.listWorkspace, .workspace),
                 (.fileSystem, .workspace),
                 (.loadSkill, .skills),
+                (.createSkill, .workspace),
                 (.callPowerfulModel, .delegateModel)
             ]
         case .delegate:
@@ -322,7 +341,8 @@ nonisolated enum ModelToolCatalog {
                 (.xcodeProject, .capableWorkspace),
                 (.editFile, .workspace),
                 (.removeFile, .workspace),
-                (.loadSkill, .skills)
+                (.loadSkill, .skills),
+                (.createSkill, .workspace)
             ]
         }
     }

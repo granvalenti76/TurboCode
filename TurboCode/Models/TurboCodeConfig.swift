@@ -96,22 +96,12 @@ public final class TurboCodeConfig {
 
     // MARK: - Skills
 
-    func loadSkills() -> [TurboCodeSkillDefinition] {
-        guard let enumerator = FileManager.default.enumerator(
-            at: skillsDirectoryURL,
-            includingPropertiesForKeys: [.isRegularFileKey, .isHiddenKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-
-        let resolvedSkillsRoot = skillsDirectoryURL.resolvingSymlinksInPath().standardizedFileURL
-        let allowedPrefix = resolvedSkillsRoot.path + "/"
-        let skillFiles = enumerator.compactMap { $0 as? URL }
-            .filter { url in
-                guard url.lastPathComponent == "SKILL.md" else { return false }
-                let resolved = url.resolvingSymlinksInPath().standardizedFileURL
-                return resolved.path.hasPrefix(allowedPrefix)
-            }
-            .sorted { $0.path < $1.path }
+    /// Loads legacy TurboCode skills together with Codex-compatible skills.
+    /// Repository skills are discovered from `.agents/skills` at the selected
+    /// workspace and its parents, matching Codex's repository scope rules.
+    func loadSkills(workspaceRoot: String? = nil) -> [TurboCodeSkillDefinition] {
+        let roots = skillRoots(workspaceRoot: workspaceRoot)
+        let skillFiles = roots.flatMap(skillFiles(in:)).sorted { $0.path < $1.path }
 
         var skillsByName: [String: TurboCodeSkillDefinition] = [:]
         for url in skillFiles {
@@ -127,6 +117,45 @@ public final class TurboCodeConfig {
             }
         }
         return skillsByName.values.sorted { $0.name < $1.name }
+    }
+
+    private func skillRoots(workspaceRoot: String?) -> [URL] {
+        var roots = [skillsDirectoryURL]
+        let defaultRoot = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".turbocode", isDirectory: true)
+        if rootURL.standardizedFileURL == defaultRoot.standardizedFileURL {
+            roots.append(
+                FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent(".agents/skills", isDirectory: true)
+            )
+        }
+        if let workspaceRoot,
+           !workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            var current = URL(fileURLWithPath: workspaceRoot).standardizedFileURL
+            while current.path != current.deletingLastPathComponent().path {
+                roots.append(current.appendingPathComponent(".agents/skills", isDirectory: true))
+                current.deleteLastPathComponent()
+            }
+        }
+        var seen: Set<String> = []
+        return roots.filter { seen.insert($0.standardizedFileURL.path).inserted }
+    }
+
+    private func skillFiles(in root: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey, .isHiddenKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [] }
+
+        let resolvedRoot = root.resolvingSymlinksInPath().standardizedFileURL
+        let allowedPrefix = resolvedRoot.path + "/"
+        return enumerator.compactMap { $0 as? URL }
+            .filter { url in
+                guard url.lastPathComponent == "SKILL.md" else { return false }
+                let resolved = url.resolvingSymlinksInPath().standardizedFileURL
+                return resolved.path.hasPrefix(allowedPrefix)
+            }
     }
 
     private func installBuiltInSkill(name: String, contents: String) throws {
@@ -374,7 +403,9 @@ public final class TurboCodeConfig {
 
     ## Skills
 
-    Skills are discovered automatically from `~/.turbocode/SKILLS/**/SKILL.md`.
+    Skills are discovered automatically from the legacy `~/.turbocode/SKILLS/**/SKILL.md`
+    location and from Codex-compatible `.agents/skills/**/SKILL.md` folders in the
+    workspace and user scope.
     Their names and descriptions stay in the session instructions; their full body
     is loaded on demand when relevant. Users can type `/skills`, `/skill <name>`, or
     `/<skill-name>` in the composer.
@@ -387,8 +418,16 @@ public final class TurboCodeConfig {
     ---
     # Skill Creator
 
-    Help the user design a reusable TurboCode skill. A skill lives at
-    `~/.turbocode/SKILLS/<skill-name>/SKILL.md` and uses this format:
+    Help the user design and install a reusable TurboCode skill. When a workspace
+    is selected, create the skill at
+    `.agents/skills/<skill-name>/SKILL.md` using `create_skill` when available;
+    otherwise use the available workspace write tool (`edit_file`, `apply_edits`,
+    or `file_system`). The write must go through TurboCode's normal Review/Undo
+    transaction; never claim the skill was saved until the tool succeeds. Without
+    a workspace, return the complete file and explain that the user must choose a
+    workspace before installation.
+
+    A skill uses this format:
 
     ```markdown
     ---
@@ -403,8 +442,11 @@ public final class TurboCodeConfig {
     Keep the name under 64 characters and use lowercase letters, digits, and hyphens.
     Make the description specific enough for automatic activation. Keep the body
     procedural and focused; avoid repeating general TurboCode behavior. When asked
-    to create a skill, return the complete `SKILL.md` and its intended directory.
-    TurboCode discovers valid files automatically before the next submitted prompt.
+    to create a skill, validate the name and description, create the directory and
+    file when workspace tools are available, then report the exact path. TurboCode
+    discovers valid files automatically before the next submitted prompt. Keep the
+    full file in the response only when the user asks for a draft or when the write
+    cannot be performed.
     """
 
     // MARK: - Agent Tuning
