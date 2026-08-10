@@ -251,7 +251,7 @@ public final class ChatStore {
         rebuildSession(discardingCapabilityContext: true)
     }
 
-    /// Selects the supported coordinator route as one atomic runtime change.
+    /// Selects a profile with `delegate_task` as one atomic runtime change.
     ///
     /// The historical global "orchestrator" mode is the on-device compatibility
     /// path; production coordinator profiles run in standalone transport mode.
@@ -259,7 +259,7 @@ public final class ChatStore {
     func selectCoordinatorProfile(_ id: UUID) {
         guard !busy,
               let profile = dynamicProfiles.first(where: {
-                  $0.id == id && $0.isCoordinatorProfile
+                  $0.id == id && $0.usesDelegation
               }) else {
             return
         }
@@ -274,9 +274,7 @@ public final class ChatStore {
         rebuildSession(discardingCapabilityContext: true)
     }
 
-    /// Leaves delegation while preserving the selected profile's base model.
-    /// This makes "Direct Model" a real execution choice rather than a label
-    /// that silently leaves `delegate_task` enabled.
+    /// Leaves a custom profile and returns to the current built-in model.
     func selectDirectExecution() {
         guard !busy else { return }
         guard orchestratorMode != .standalone
@@ -1200,8 +1198,14 @@ public final class ChatStore {
         workbenchStore.setRoute(route)
     }
 
-    /// Starts the guided coordinator creation flow instead of dropping the user
-    /// into an unconfigured generic profile editor.
+    /// Opens the profile editor. Delegation is configured by including the
+    /// `delegate_task` capability rather than by selecting a separate route.
+    func requestProfileCreation() {
+        workbenchStore.requestProfileCreation(role: .direct)
+    }
+
+    /// Compatibility entry point for older callers that want the delegation
+    /// capability preselected in the creation sheet.
     func requestCoordinatorProfileCreation() {
         workbenchStore.requestProfileCreation(role: .coordinatorWorker)
     }

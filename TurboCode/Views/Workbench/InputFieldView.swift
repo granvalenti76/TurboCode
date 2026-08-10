@@ -512,41 +512,36 @@ struct InputFieldView: View {
         .padding(.vertical, compact ? 7 : 8)
     }
 
-    /// Presents execution semantics instead of the historical storage enum.
-    /// Users choose a route here; whether that route is internally represented
-    /// by standalone transport mode is not product-facing information.
+    /// Presents the available profile choices. Delegation is a capability of a
+    /// profile, not a separate route users must understand or maintain.
     private var executionRouteMenu: some View {
         Menu {
-            Section("Execution Route") {
+            Section("Profiles") {
                 Button {
                     chatStore.selectDirectExecution()
                 } label: {
-                    if isDirectExecution {
-                        Label("Direct Model", systemImage: "checkmark")
+                    if chatStore.activeDynamicProfile == nil,
+                       chatStore.orchestratorMode == .standalone {
+                        Label("Current Model", systemImage: "checkmark")
                     } else {
-                        Text("Direct Model")
+                        Text("Current Model")
                     }
                 }
-            }
-
-            Section("Coordinator → Worker") {
-                if coordinatorProfiles.isEmpty {
-                    Button("Create Coordinator Profile…") {
-                        chatStore.requestCoordinatorProfileCreation()
-                    }
-                } else {
-                    ForEach(coordinatorProfiles) { profile in
-                        Button {
-                            chatStore.selectCoordinatorProfile(profile.id)
-                        } label: {
-                            if chatStore.activeDynamicProfileID == profile.id,
-                               chatStore.orchestratorMode == .standalone {
-                                Label(profile.name, systemImage: "checkmark")
-                            } else {
-                                Text(profile.name)
-                            }
+                ForEach(chatStore.dynamicProfiles) { profile in
+                    Button {
+                        chatStore.selectDynamicProfile(profile.id)
+                    } label: {
+                        if chatStore.activeDynamicProfileID == profile.id,
+                           chatStore.orchestratorMode == .standalone {
+                            Label(profile.name, systemImage: "checkmark")
+                        } else {
+                            Text(profile.name)
                         }
                     }
+                }
+                Divider()
+                Button("Create Profile…") {
+                    chatStore.requestProfileCreation()
                 }
             }
 
@@ -573,31 +568,25 @@ struct InputFieldView: View {
         .help(executionRouteHelp)
     }
 
-    private var coordinatorProfiles: [UserDynamicProfile] {
-        chatStore.dynamicProfiles.filter(\.isCoordinatorProfile)
-    }
-
-    private var isCoordinatorExecution: Bool {
+    private var isDelegatingExecution: Bool {
         chatStore.orchestratorMode == .standalone
-            && chatStore.activeDynamicProfile?.isCoordinatorProfile == true
-    }
-
-    private var isDirectExecution: Bool {
-        chatStore.orchestratorMode == .standalone && !isCoordinatorExecution
+            && chatStore.activeDynamicProfile?.usesDelegation == true
     }
 
     private var executionRouteLabel: String {
         if chatStore.orchestratorMode == .orchestrator {
             return "On-Device Delegation"
         }
-        if isCoordinatorExecution {
-            return "Coordinator → Worker"
+        if let profile = chatStore.activeDynamicProfile {
+            return profile.usesDelegation
+                ? "\(profile.name) · Delegated"
+                : profile.name
         }
-        return "Direct Model"
+        return chatStore.activeBaseModelID.displayName
     }
 
     private var executionRouteIcon: String {
-        if isCoordinatorExecution {
+        if isDelegatingExecution {
             return "arrow.triangle.branch"
         }
         return chatStore.orchestratorMode == .orchestrator
@@ -607,8 +596,8 @@ struct InputFieldView: View {
 
     private var executionRouteHelp: String {
         if let profile = chatStore.activeDynamicProfile,
-           isCoordinatorExecution {
-            return "\(profile.name) coordinates and delegates bounded tasks to the configured worker"
+           isDelegatingExecution {
+            return "\(profile.name) uses Delegate Task with its configured worker"
         }
         if chatStore.orchestratorMode == .orchestrator {
             return "Apple on-device coordinates through the experimental compatibility route"

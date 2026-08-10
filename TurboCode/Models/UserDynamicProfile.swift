@@ -8,13 +8,16 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
     case codex
 
     /// Only provider-backed defaults belong in the profile library. Codex is
-    /// configured contextually as a coordinator; direct Codex selection remains
-    /// owned by the composer while a coordinator route can pin its own model.
+    /// configured contextually for delegated profiles; direct Codex selection
+    /// remains owned by the composer.
     static let builtInCases: [Self] = [.onDevice, .llama, .pcc, .deepseek]
     /// These providers expose the structured `delegate_task` route. Llama is
     /// OpenAI-compatible, so it can coordinate through the same adapter used
     /// by DeepSeek without a provider-specific transport workaround.
-    static let coordinatorCases: [Self] = [.llama, .deepseek, .codex]
+    static let delegationCases: [Self] = [.llama, .deepseek, .codex]
+    /// Compatibility alias for integrations that still describe the route as
+    /// coordinator/worker. New UI and runtime code should use `delegationCases`.
+    static let coordinatorCases: [Self] = delegationCases
     static let workerCases: [Self] = [.pcc, .llama, .deepseek]
 
     var id: String { rawValue }
@@ -75,12 +78,12 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     var name: String
     var summary: String
     var baseModelID: ProfileBaseModelID
-    /// The provider-backed worker used only when this is a coordinator route.
+    /// The provider-backed worker used when `delegate_task` is included.
     ///
     /// `nil` is retained for profiles written before M4.3 and resolves through
     /// the global worker preference, preserving their previous behavior.
     var workerModelID: String?
-    /// Optional App Server selections owned by a Codex coordinator route.
+    /// Optional App Server selections owned by a Codex profile.
     ///
     /// Missing values deliberately mean "use the current Codex default", so
     /// profiles written before this field existed remain valid and selectable.
@@ -157,7 +160,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         if !skillIDs.isEmpty {
             result.insert(.loadSkill)
         }
-        if !ProfileBaseModelID.coordinatorCases.contains(baseModelID) {
+        if !ProfileBaseModelID.delegationCases.contains(baseModelID) {
             // Delegate Task is a managed production route, not a portable
             // capability that arbitrary custom models may enable by stale data.
             result.remove(.delegateTask)
@@ -165,24 +168,28 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         return result
     }
 
-    /// Identifies the production coordinator route exposed in the composer.
+    /// The single source of truth for profile orchestration.
     ///
-    /// A profile name alone never changes runtime semantics: the 0.2.0 route is
-    /// intentionally limited to supported coordinators plus typed delegation.
-    var isCoordinatorProfile: Bool {
-        ProfileBaseModelID.coordinatorCases.contains(baseModelID)
-            && resolvedToolIDs.contains(.delegateTask)
+    /// A custom profile is delegated when its resolved capability set contains
+    /// `delegate_task`; there is no separately persisted execution role.
+    var usesDelegation: Bool {
+        resolvedToolIDs.contains(.delegateTask)
     }
 
-    /// Exposes product intent without persisting a second source of truth.
-    /// Existing profiles therefore migrate automatically from their model and
-    /// typed capability configuration.
+    /// Compatibility name retained for older callers while the product UI
+    /// speaks in terms of profiles and delegation capability.
+    @available(*, deprecated, message: "Use usesDelegation instead.")
+    var isCoordinatorProfile: Bool { usesDelegation }
+
+    /// Compatibility projection for older persisted-profile evaluations. It
+    /// is derived and never drives UI or runtime selection.
+    @available(*, deprecated, message: "Use usesDelegation instead.")
     var executionRole: ProfileExecutionRole {
-        isCoordinatorProfile ? .coordinatorWorker : .direct
+        usesDelegation ? .coordinatorWorker : .direct
     }
 
-    /// Applies route intent atomically so the editor cannot save a coordinator
-    /// without the model and typed delegation capability required at runtime.
+    /// Compatibility migration helper for older creation flows. New code should
+    /// include or remove `delegate_task` directly through `setTool`.
     mutating func setExecutionRole(_ role: ProfileExecutionRole) {
         switch role {
         case .direct:
@@ -196,7 +203,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
                 baseModelID = .deepseek
             }
         case .coordinatorWorker:
-            if !ProfileBaseModelID.coordinatorCases.contains(baseModelID) {
+            if !ProfileBaseModelID.delegationCases.contains(baseModelID) {
                 baseModelID = .deepseek
             }
             // New routes are self-contained. Older routes may still carry nil

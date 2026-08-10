@@ -72,8 +72,8 @@ struct DynamicProfileTests {
         #expect(profile.skillIDs.isEmpty)
     }
 
-    @Test("Llama, DeepSeek, and Codex require typed delegation to coordinate")
-    func coordinatorProfileRequiresSupportedRoute() {
+    @Test("Delegate Task enables delegation only for supported profiles")
+    func delegationProfileRequiresSupportedRoute() {
         let llamaCoordinator = UserDynamicProfile(
             name: "Llama Coordinator",
             baseModelID: .llama,
@@ -103,13 +103,13 @@ struct DynamicProfileTests {
 
         // Product semantics come from model plus capability, never the
         // user-editable display name.
-        #expect(llamaCoordinator.isCoordinatorProfile)
-        #expect(deepSeekCoordinator.isCoordinatorProfile)
-        #expect(codexCoordinator.isCoordinatorProfile)
+        #expect(llamaCoordinator.usesDelegation)
+        #expect(deepSeekCoordinator.usesDelegation)
+        #expect(codexCoordinator.usesDelegation)
         #expect(codexCoordinator.resolvedToolIDs.contains(.delegateTask))
-        #expect(!renamedOnDevice.isCoordinatorProfile)
+        #expect(!renamedOnDevice.usesDelegation)
         #expect(!renamedOnDevice.resolvedToolIDs.contains(.delegateTask))
-        #expect(!directDeepSeek.isCoordinatorProfile)
+        #expect(!directDeepSeek.usesDelegation)
     }
 
     @Test("Coordinator workers are persisted and legacy routes keep their fallback")
@@ -249,7 +249,7 @@ struct DynamicProfileTests {
         )
     }
 
-    @Test("Selecting Delegate Task in an override synchronizes its execution role")
+    @Test("Selecting Delegate Task enables delegation and prepares a worker")
     func overrideCapabilitySelectionOwnsDelegationRoute() throws {
         let root = try makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -268,7 +268,7 @@ struct DynamicProfileTests {
 
         viewModel.setTool(.delegateTask, included: true)
 
-        #expect(viewModel.draft?.executionRole == .coordinatorWorker)
+        #expect(viewModel.draft?.usesDelegation == true)
         #expect(viewModel.draft?.workerModelID == ProfileBaseModelID.llama.rawValue)
         #expect(viewModel.draft?.toolIDs.contains(ToolCapabilityID.delegateTask.rawValue) == true)
 
@@ -276,7 +276,7 @@ struct DynamicProfileTests {
 
         // Removing the capability uses the same invariant-preserving route as
         // the Execution picker and leaves unrelated explicit tools untouched.
-        #expect(viewModel.draft?.executionRole == .direct)
+        #expect(viewModel.draft?.usesDelegation == false)
         #expect(viewModel.draft?.toolIDs.contains(ToolCapabilityID.delegateTask.rawValue) == false)
         #expect(viewModel.draft?.toolIDs.contains(ToolCapabilityID.readFile.rawValue) == true)
     }

@@ -65,13 +65,13 @@ final class SkillsViewModel {
         workerModelID: String? = nil,
         codexModelID: String? = nil,
         codexReasoningEffort: CodexReasoningEffort? = nil,
-        executionRole: ProfileExecutionRole = .direct,
+        includeDelegation: Bool = false,
         copyDefaults: Bool,
         settings: SettingsStore
     ) -> Bool {
-        // Resolve defaults from the visible coordinator or direct model before
-        // the execution role adds its managed delegation capability. Codex
-        // route selections stay profile data rather than global settings.
+        // Resolve defaults from the selected model. Delegation is a capability
+        // choice, not a parallel execution role, and is added only when the
+        // user explicitly enables `delegate_task` in the creation flow.
         let effectiveBaseModelID = baseModelID
         let option = modelOption(for: effectiveBaseModelID, settings: settings)
         let toolIDs = copyDefaults
@@ -89,7 +89,9 @@ final class SkillsViewModel {
                 toolIDs: toolIDs,
                 skillIDs: skillIDs
             )
-            profile.setExecutionRole(executionRole)
+            if includeDelegation {
+                profile.setExecutionRole(.coordinatorWorker)
+            }
             profile = try profile.validated()
             try ensureUniqueName(profile.name, excluding: nil)
             profiles.append(profile)
@@ -156,11 +158,22 @@ final class SkillsViewModel {
     func setTool(_ id: ToolCapabilityID, included: Bool) {
         updateDraft { value in
             if id == .delegateTask {
-                // The capability composer and the Execution picker represent
-                // the same typed route. Keep them synchronized so selecting
-                // delegation also establishes an explicit worker and removing
-                // it cannot leave a coordinator profile without its tool.
-                value.setExecutionRole(included ? .coordinatorWorker : .direct)
+                // The capability itself is the orchestration switch. Keep the
+                // selected worker ready for progressive disclosure without
+                // introducing a second persisted execution mode.
+                if included {
+                    if !ProfileBaseModelID.delegationCases.contains(value.baseModelID) {
+                        value.baseModelID = .deepseek
+                        value.greedyMode = false
+                    }
+                    value.workerModelID = value.workerModelID
+                        ?? ProfileBaseModelID.llama.rawValue
+                    if !value.toolIDs.contains(id.rawValue) {
+                        value.toolIDs.append(id.rawValue)
+                    }
+                } else {
+                    value.toolIDs.removeAll { $0 == id.rawValue }
+                }
                 return
             }
             if included, !value.toolIDs.contains(id.rawValue) {
@@ -169,13 +182,6 @@ final class SkillsViewModel {
                 value.toolIDs.removeAll { $0 == id.rawValue }
             }
         }
-    }
-
-    /// Changes product-level execution intent as one edit. The capability
-    /// composer delegates the same transition here through `setTool`, keeping
-    /// both profile-authoring surfaces consistent.
-    func setExecutionRole(_ role: ProfileExecutionRole) {
-        updateDraft { $0.setExecutionRole(role) }
     }
 
     func containsSkill(_ name: String) -> Bool {
@@ -198,10 +204,24 @@ final class SkillsViewModel {
         }
     }
 
-    func coordinatorOptions(settings: SettingsStore) -> [ProfileModelOption] {
-        ProfileBaseModelID.coordinatorCases.map {
+    /// All models that can be selected by a custom profile. Codex is omitted
+    /// from the built-in library but remains available here for profiles that
+    /// opt into Delegate Task and its App Server settings.
+    func profileModelOptions(settings: SettingsStore) -> [ProfileModelOption] {
+        ProfileBaseModelID.allCases.map {
             modelOption(for: $0, settings: settings)
         }
+    }
+
+    func delegationOptions(settings: SettingsStore) -> [ProfileModelOption] {
+        ProfileBaseModelID.delegationCases.map {
+            modelOption(for: $0, settings: settings)
+        }
+    }
+
+    /// Compatibility alias for older callers of the profile editor.
+    func coordinatorOptions(settings: SettingsStore) -> [ProfileModelOption] {
+        delegationOptions(settings: settings)
     }
 
     func workerOptions(settings: SettingsStore) -> [ProfileModelOption] {
@@ -233,9 +253,9 @@ final class SkillsViewModel {
         ).registeredIDs
         compatible.remove(.callPowerfulModel)
         compatible.remove(.loadSkill)
-        if !ProfileBaseModelID.coordinatorCases.contains(id) {
-            // A configured worker is necessary but not sufficient: only the
-            // provider adapters in coordinatorCases implement delegate_task.
+        if !ProfileBaseModelID.delegationCases.contains(id) {
+            // Only provider adapters in delegationCases implement
+            // delegate_task; other models can still be used directly.
             compatible.remove(.delegateTask)
         }
         let subtitle: String

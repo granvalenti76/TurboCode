@@ -139,7 +139,7 @@ response.
 
 Provides the older free-text delegation path used by the experimental
 on-device orchestrator. It remains implemented for compatibility, but new
-custom coordinator profiles should use the safer, structured `delegate_task`
+custom profiles that include **Delegate Task** should use the safer, structured
 route.
 
 ## Why a tool may be unavailable

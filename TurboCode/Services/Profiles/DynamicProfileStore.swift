@@ -1,7 +1,7 @@
 import Foundation
 
 nonisolated struct DynamicProfileStore: Sendable {
-    /// Version 2 records the coordinator/worker profile fields introduced in
+    /// Version 2 records the delegated-worker profile fields introduced in
     /// M4.3. Version 1 remains readable so existing 0.1.0 profiles can be
     /// upgraded atomically during onboarding.
     static let currentSchemaVersion = 2

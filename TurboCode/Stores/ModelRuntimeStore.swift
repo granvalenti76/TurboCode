@@ -493,7 +493,7 @@ final class ModelRuntimeStore {
         workspaceRoot: String,
         events: ModelSessionEvents
     ) -> ConfiguredAgentTaskInvoker? {
-        guard activeDynamicProfile?.isCoordinatorProfile == true else {
+        guard activeDynamicProfile?.usesDelegation == true else {
             return nil
         }
         return ModelSessionFactory.makeDelegateInvoker(
