@@ -208,7 +208,7 @@ final class SkillsViewModel {
     /// from the built-in library but remains available here for profiles that
     /// opt into Delegate Task and its App Server settings.
     func profileModelOptions(settings: SettingsStore) -> [ProfileModelOption] {
-        ProfileBaseModelID.allCases.map {
+        ProfileBaseModelID.profileCases.map {
             modelOption(for: $0, settings: settings)
         }
     }

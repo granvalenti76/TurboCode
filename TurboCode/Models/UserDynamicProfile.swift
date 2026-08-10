@@ -15,6 +15,10 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
     /// OpenAI-compatible, so it can coordinate through the same adapter used
     /// by DeepSeek without a provider-specific transport workaround.
     static let delegationCases: [Self] = [.llama, .deepseek, .codex]
+    /// Models available when creating or editing a custom profile. Codex is
+    /// intentionally not a built-in standalone profile, but it is a valid
+    /// override model with its own App Server and reasoning configuration.
+    static let profileCases: [Self] = [.onDevice, .llama, .pcc, .deepseek, .codex]
     /// Compatibility alias for integrations that still describe the route as
     /// coordinator/worker. New UI and runtime code should use `delegationCases`.
     static let coordinatorCases: [Self] = delegationCases

@@ -112,6 +112,15 @@ struct DynamicProfileTests {
         #expect(!directDeepSeek.usesDelegation)
     }
 
+    @Test("Custom profile model options include Codex")
+    func customProfileModelsIncludeCodex() {
+        let viewModel = SkillsViewModel()
+        let options = viewModel.profileModelOptions(settings: SettingsStore())
+
+        #expect(options.map(\.id) == ProfileBaseModelID.profileCases)
+        #expect(options.contains(where: { $0.id == .codex && $0.isAvailable }))
+    }
+
     @Test("Coordinator workers are persisted and legacy routes keep their fallback")
     func coordinatorWorkerSelectionMigrates() throws {
         let route = UserDynamicProfile(
