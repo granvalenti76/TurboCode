@@ -93,6 +93,10 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     /// profiles written before this field existed remain valid and selectable.
     var codexModelID: String?
     var codexReasoningEffort: CodexReasoningEffort?
+    /// Optional worker capability override. `nil` preserves the safe, simple
+    /// default: the selected worker receives its complete delegate tool set.
+    /// An empty array is meaningful and represents a text-only worker profile.
+    var workerToolIDs: [String]?
     var greedyMode: Bool
     var toolIDs: [String]
     var skillIDs: [String]
@@ -107,6 +111,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         workerModelID: String? = nil,
         codexModelID: String? = nil,
         codexReasoningEffort: CodexReasoningEffort? = nil,
+        workerToolIDs: [String]? = nil,
         greedyMode: Bool = false,
         toolIDs: [String] = [],
         skillIDs: [String] = [],
@@ -120,6 +125,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         self.workerModelID = workerModelID
         self.codexModelID = codexModelID
         self.codexReasoningEffort = codexReasoningEffort
+        self.workerToolIDs = workerToolIDs?.uniqued()
         self.greedyMode = greedyMode
         self.toolIDs = toolIDs.uniqued()
         self.skillIDs = skillIDs.uniqued()
@@ -130,6 +136,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     private enum CodingKeys: String, CodingKey {
         case id, name, summary, baseModelID, workerModelID
         case codexModelID, codexReasoningEffort
+        case workerToolIDs
         case greedyMode, toolIDs, skillIDs
         case createdAt, updatedAt
     }
@@ -146,6 +153,10 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
             CodexReasoningEffort.self,
             forKey: .codexReasoningEffort
         )
+        workerToolIDs = try values.decodeIfPresent(
+            [String].self,
+            forKey: .workerToolIDs
+        )?.uniqued()
         greedyMode = try values.decodeIfPresent(Bool.self, forKey: .greedyMode) ?? false
         toolIDs = try values.decodeIfPresent([String].self, forKey: .toolIDs) ?? []
         skillIDs = try values.decodeIfPresent([String].self, forKey: .skillIDs) ?? []
@@ -178,6 +189,15 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     /// `delegate_task`; there is no separately persisted execution role.
     var usesDelegation: Bool {
         resolvedToolIDs.contains(.delegateTask)
+    }
+
+    /// Returns the explicit worker selection while preserving `nil` as the
+    /// backwards-compatible "all worker tools" state.
+    var resolvedWorkerToolIDs: Set<ToolCapabilityID>? {
+        workerToolIDs.map { ids in
+            Set(ids.compactMap(ToolCapabilityID.init(rawValue:)))
+                .intersection(ModelToolCatalog.delegateToolIDs)
+        }
     }
 
     /// Compatibility name retained for older callers while the product UI
@@ -235,6 +255,14 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         guard value.name.count <= 64 else { throw UserDynamicProfileError.nameTooLong }
         value.toolIDs = toolIDs.uniqued()
         value.skillIDs = skillIDs.uniqued()
+        value.workerToolIDs = workerToolIDs?
+            .filter { id in
+                guard let capability = ToolCapabilityID(rawValue: id) else {
+                    return false
+                }
+                return ModelToolCatalog.delegateToolIDs.contains(capability)
+            }
+            .uniqued()
         return value
     }
 

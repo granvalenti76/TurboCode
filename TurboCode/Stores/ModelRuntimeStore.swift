@@ -378,6 +378,7 @@ final class ModelRuntimeStore {
                 delegateReasoningLevel: reasoningLevel(for: delegateModel),
                 activeTemperature: temperature(for: activeRemoteModel),
                 delegateTemperature: temperature(for: delegateModel),
+                delegateToolIDs: activeDynamicProfile?.resolvedWorkerToolIDs,
                 dropsCompletedToolCalls: shouldDropCompletedToolCalls,
                 workspaceInstructions: workspaceInstructions
             ),
@@ -537,6 +538,7 @@ final class ModelRuntimeStore {
             delegateReasoningLevel: reasoningLevel(for: delegateModel),
             activeTemperature: temperature(for: activeRemoteModel),
             delegateTemperature: temperature(for: delegateModel),
+            delegateToolIDs: activeDynamicProfile?.resolvedWorkerToolIDs,
             dropsCompletedToolCalls: shouldDropCompletedToolCalls,
             workspaceInstructions: WorkspaceInstructionsLoader.load(
                 from: workspaceRoot

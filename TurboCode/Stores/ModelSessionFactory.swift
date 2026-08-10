@@ -16,6 +16,9 @@ struct ModelSessionConfiguration {
     let delegateReasoningLevel: ContextOptions.ReasoningLevel?
     let activeTemperature: Double?
     let delegateTemperature: Double?
+    /// `nil` keeps the default complete worker catalog; a value is an
+    /// explicit profile-owned allowlist, including an intentionally empty one.
+    let delegateToolIDs: Set<ToolCapabilityID>?
     let dropsCompletedToolCalls: Bool
     let workspaceInstructions: WorkspaceInstructions?
 }
@@ -486,7 +489,8 @@ enum ModelSessionFactory {
             context: toolContext(
                 for: configuration,
                 repositoryMap: configuration.delegateRemoteModel.repositoryMap
-            )
+            ),
+            selectedIDs: configuration.delegateToolIDs
         )
         let resolvedRunner = runner ?? BoundedAgentTaskRunner(
             verifier: XcodeAgentTaskVerifier(

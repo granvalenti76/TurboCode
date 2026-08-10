@@ -240,6 +240,13 @@ nonisolated enum ModelToolCatalog {
         descriptors.first(where: { $0.id == id })!
     }
 
+    /// The worker catalog is intentionally separate from coordinator tools.
+    /// Keeping this set centralized prevents persisted worker overrides from
+    /// accidentally granting recursive delegation capabilities.
+    static var delegateToolIDs: Set<ToolCapabilityID> {
+        Set(membership(for: .delegate).map(\.0))
+    }
+
     static func plan(
         profile: ModelRuntimeProfile,
         tier: ModelToolTier,

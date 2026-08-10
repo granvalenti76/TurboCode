@@ -469,6 +469,8 @@ struct SkillsView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .padding(.top, 3)
+
+                            workerToolDisclosure(draft: draft)
                         } label: {
                             Label("Worker model", systemImage: "person.2")
                         }
@@ -493,6 +495,153 @@ struct SkillsView: View {
             .frame(maxWidth: 1120, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .top)
         }
+    }
+
+    /// Progressive disclosure keeps the common "all worker tools" path quiet,
+    /// while the explicit allowlist remains discoverable beside the worker it
+    /// controls. This avoids mixing coordinator and worker capabilities in the
+    /// main Included Capabilities editor.
+    @ViewBuilder
+    private func workerToolDisclosure(draft: UserDynamicProfile) -> some View {
+        let workerID = draft.resolvedWorkerModelID(
+            fallback: ProfileBaseModelID.llama.rawValue
+        )
+        if let plan = viewModel.workerToolPlan(
+            workerModelID: workerID,
+            settings: settings
+        ) {
+            let defaultIDs = plan.registeredIDs
+            let selectedIDs = draft.resolvedWorkerToolIDs ?? defaultIDs
+            // Count only tools currently usable by this worker; unavailable
+            // rows remain visible so the reason is discoverable inline.
+            let selectedCount = selectedIDs.intersection(defaultIDs).count
+            let usesAllTools = draft.workerToolIDs == nil
+
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("By default, the worker receives its complete supported tool set. Customize this only when the task needs a smaller surface.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Toggle(
+                        "Use all worker tools",
+                        isOn: workerUsesAllToolsBinding(
+                            defaultIDs: defaultIDs
+                        )
+                    )
+                    .toggleStyle(.checkbox)
+
+                    if !usesAllTools {
+                        Divider()
+                        Text("Selected tools")
+                            .font(.subheadline.weight(.semibold))
+
+                        ForEach(ToolCapabilityCategory.allCases, id: \.self) { category in
+                            let assignments = plan.assignments.filter {
+                                ModelToolCatalog.descriptor(for: $0.id).category == category
+                            }
+                            if !assignments.isEmpty {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(category.rawValue)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                    ForEach(assignments) { assignment in
+                                        workerToolToggle(
+                                            assignment,
+                                            defaultIDs: defaultIDs
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if selectedCount == 0 {
+                            Label(
+                                "No tools selected. The worker can return text but cannot inspect or change the workspace.",
+                                systemImage: "info.circle"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(.top, 8)
+            } label: {
+                HStack(spacing: 8) {
+                    Label("Worker tools", systemImage: "wrench.and.screwdriver")
+                    Spacer()
+                    Text(usesAllTools ? "All tools" : "\(selectedCount) selected")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.top, 10)
+        }
+    }
+
+    private func workerUsesAllToolsBinding(
+        defaultIDs: Set<ToolCapabilityID>
+    ) -> Binding<Bool> {
+        Binding(
+            get: { viewModel.draft?.workerToolIDs == nil },
+            set: { usesAllTools in
+                viewModel.updateDraft { value in
+                    value.workerToolIDs = usesAllTools
+                        ? nil
+                        : defaultIDs.map(\.rawValue).sorted()
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func workerToolToggle(
+        _ assignment: ModelToolAssignment,
+        defaultIDs: Set<ToolCapabilityID>
+    ) -> some View {
+        let descriptor = ModelToolCatalog.descriptor(for: assignment.id)
+        Toggle(
+            isOn: workerToolBinding(
+                id: assignment.id,
+                defaultIDs: defaultIDs
+            )
+        ) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(descriptor.name)
+                Text(assignment.unavailableReason ?? descriptor.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .toggleStyle(.checkbox)
+        .disabled(!assignment.isRegistered)
+        .opacity(assignment.isRegistered ? 1 : 0.58)
+    }
+
+    private func workerToolBinding(
+        id: ToolCapabilityID,
+        defaultIDs: Set<ToolCapabilityID>
+    ) -> Binding<Bool> {
+        Binding(
+            get: {
+                viewModel.draft?.resolvedWorkerToolIDs?.contains(id)
+                    ?? defaultIDs.contains(id)
+            },
+            set: { included in
+                viewModel.updateDraft { value in
+                    var selected = value.resolvedWorkerToolIDs ?? defaultIDs
+                    if included {
+                        selected.insert(id)
+                    } else {
+                        selected.remove(id)
+                    }
+                    value.workerToolIDs = selected == defaultIDs
+                        ? nil
+                        : selected.map(\.rawValue).sorted()
+                }
+            }
+        )
     }
 
     @ViewBuilder

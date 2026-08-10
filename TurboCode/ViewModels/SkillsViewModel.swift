@@ -230,6 +230,35 @@ final class SkillsViewModel {
         }
     }
 
+    /// Returns the complete tool catalog the selected worker can support. The
+    /// profile editor uses this for an explicit worker allowlist while runtime
+    /// construction applies the saved selection itself.
+    func workerToolPlan(
+        workerModelID: String,
+        settings: SettingsStore
+    ) -> ModelToolPlan? {
+        guard let workerID = ProfileBaseModelID(rawValue: workerModelID),
+              ProfileBaseModelID.workerCases.contains(workerID) else {
+            return nil
+        }
+        let option = modelOption(for: workerID, settings: settings)
+        let remote = workerID.remoteModelID.flatMap { remoteID in
+            settings.remoteModels.first(where: { $0.id == remoteID })
+                ?? RemoteModelConfig.defaults.first(where: { $0.id == remoteID })
+        }
+        let context = ToolAccessContext(
+            hasWorkspace: true,
+            hasSkills: true,
+            hasDelegateModel: true,
+            repositoryMapDetail: remote?.repositoryMap.detail
+        )
+        return ModelToolCatalog.plan(
+            profile: .delegate,
+            tier: option.tier,
+            context: context
+        )
+    }
+
     func modelOption(for id: ProfileBaseModelID, settings: SettingsStore) -> ProfileModelOption {
         let remote = id.remoteModelID.flatMap { remoteID in
             settings.remoteModels.first(where: { $0.id == remoteID })

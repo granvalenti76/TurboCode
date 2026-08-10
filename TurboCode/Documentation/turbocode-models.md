@@ -27,6 +27,16 @@ availability still comes from `~/.turbocode/models.json`; secrets remain in the
 macOS Keychain. **TurboCode > Settings > Agents > Default Delegated Worker**
 remains the fallback for older profiles and experimental on-device delegation.
 
+After choosing a worker, expand **Worker tools** to customize its tool surface.
+The default is **All tools**, so existing profiles keep the complete worker
+catalog without extra configuration. Turning that option off reveals the tools
+grouped by category with their availability explained inline. The selection is
+stored on the override profile, independently from the coordinator's Included
+Capabilities: an empty selection deliberately creates a text-only worker,
+while restoring **All tools** removes the override and follows the worker
+catalog again. Delegation itself is never offered as a worker tool, preventing
+recursive worker chains.
+
 TurboCode validates reasoning and tool-calling capabilities before building a model profile. Worker tool availability comes from the catalog-backed profile rather than per-delegation restrictions invented by the coordinator.
 
 ## Configure Codex

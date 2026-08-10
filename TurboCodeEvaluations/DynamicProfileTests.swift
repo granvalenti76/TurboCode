@@ -153,6 +153,60 @@ struct DynamicProfileTests {
         #expect(legacy.resolvedWorkerModelID(fallback: "deepseek") == "deepseek")
     }
 
+    @Test("Worker tool overrides persist and distinguish all from none")
+    func workerToolSelectionRoundTrips() throws {
+        let selected = UserDynamicProfile(
+            name: "Focused worker",
+            baseModelID: .onDevice,
+            workerModelID: ProfileBaseModelID.llama.rawValue,
+            workerToolIDs: [
+                ToolCapabilityID.git.rawValue,
+                ToolCapabilityID.readFile.rawValue,
+                ToolCapabilityID.git.rawValue
+            ],
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        let decoded = try JSONDecoder().decode(
+            UserDynamicProfile.self,
+            from: JSONEncoder().encode(selected)
+        )
+
+        #expect(decoded.workerToolIDs == [
+            ToolCapabilityID.git.rawValue,
+            ToolCapabilityID.readFile.rawValue
+        ])
+        #expect(decoded.resolvedWorkerToolIDs == [.git, .readFile])
+
+        let none = UserDynamicProfile(
+            name: "Text-only worker",
+            baseModelID: .onDevice,
+            workerToolIDs: [],
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        #expect(none.resolvedWorkerToolIDs?.isEmpty == true)
+        #expect(UserDynamicProfile(name: "Default worker", baseModelID: .onDevice)
+            .resolvedWorkerToolIDs == nil)
+    }
+
+    @Test("Delegate tool plans honor an explicit worker allowlist")
+    func delegateToolPlanUsesSelectedWorkerTools() {
+        let context = ToolAccessContext(
+            hasWorkspace: true,
+            hasSkills: true,
+            hasDelegateModel: true,
+            repositoryMapDetail: .compact
+        )
+        let plan = ModelToolCatalog.plan(
+            profile: .delegate,
+            tier: .standard,
+            context: context,
+            selectedIDs: [.git, .readFile]
+        )
+
+        #expect(plan.registeredIDs == [.git, .readFile])
+        #expect(plan.assignment(for: .bash) == nil)
+    }
+
     @Test("Codex coordinator configuration persists with legacy defaults")
     func codexCoordinatorConfigurationMigrates() throws {
         let route = UserDynamicProfile(
@@ -415,6 +469,7 @@ struct DynamicProfileTests {
                 delegateReasoningLevel: nil,
                 activeTemperature: nil,
                 delegateTemperature: nil,
+                delegateToolIDs: nil,
                 dropsCompletedToolCalls: false,
                 workspaceInstructions: nil
             ),
@@ -592,6 +647,7 @@ struct DynamicProfileTests {
             delegateReasoningLevel: nil,
             activeTemperature: nil,
             delegateTemperature: nil,
+            delegateToolIDs: profile.resolvedWorkerToolIDs,
             dropsCompletedToolCalls: true,
             workspaceInstructions: nil
         )
