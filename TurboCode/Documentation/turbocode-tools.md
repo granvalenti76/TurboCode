@@ -6,10 +6,11 @@ custom profile, installed skills, configured worker, repository-map support,
 and whether a workspace is open. The Tools screen shows the resolved set for
 the current configuration.
 
-Custom profile overrides can include compatible tools explicitly. Selecting
-`delegate_task` also changes the override into a Coordinator → Worker profile
-and requires a configured worker. Llama, DeepSeek, and Codex can act as the
-coordinator; Apple PCC, Llama, and DeepSeek can act as workers.
+Custom profile overrides keep one model selection and one explicit capability
+list. Including `delegate_task` is the profile's only orchestration signal: it
+enables delegation to the configured worker and progressively reveals the
+worker settings in the profile editor. Llama, DeepSeek, and Codex can act as
+coordinators; Apple PCC, Llama, and DeepSeek can act as workers.
 
 ## Product and discovery
 
@@ -126,18 +127,19 @@ Undo.
 
 ### `delegate_task`
 
-Sends one goal to the configured worker with a single capability choice:
-`coding` or `text`. Coding workers receive the complete default TurboCode worker
-tool bundle and can work anywhere inside the active workspace. Text workers
-receive no tools and return prose to the coordinator. TurboCode generates
-activity identifiers internally, keeps the normal workspace and approval
-boundaries, and returns a structured result. The coordinator remains responsible
-for the final user-facing response.
+Sends one goal to the configured worker with a coarse execution mode:
+`coding` or `text`. Coding workers receive the complete worker tool bundle
+configured by the active profile and can use those tools throughout the active
+workspace. Text workers receive no session tools and return prose to the
+coordinator. TurboCode creates activity identifiers and runtime bookkeeping
+internally, keeps each tool's workspace, review, and approval boundaries, and
+returns a structured result. The coordinator remains responsible for the final
+user-facing response.
 
-The coordinator cannot provide per-file scopes, custom tool allowlists, tool-call
-counts, or verification policy. If granular worker capabilities are added, they
-must come from explicit profile configuration in the UI rather than values
-invented during a model turn.
+The coordinator does not invent per-file scopes, per-tool allowlists, tool-call
+budgets, or verification policies during a model turn. Any future granular
+worker restrictions must be explicit profile configuration, while the current
+contract stays intentionally limited to the coding/text choice.
 
 ### `call_powerful_model`
 
