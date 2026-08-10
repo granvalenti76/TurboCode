@@ -154,11 +154,6 @@ struct AgentActivityRuntimeIntegrationTests {
             runner: runner,
             context: AgentTaskRunContext(
                 model: SystemLanguageModel.default,
-                toolPlan: ModelToolPlan(
-                    profile: .delegate,
-                    tier: .standard,
-                    assignments: []
-                ),
                 tools: [],
                 instructions: "Test worker.",
                 temperature: nil,

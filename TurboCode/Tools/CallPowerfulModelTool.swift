@@ -43,7 +43,6 @@ struct CallPowerfulModelTool: Tool {
     private let model: any LanguageModel
     private let temperature: Double?
     private let reasoningLevel: ContextOptions.ReasoningLevel?
-    private let delegatePlan: ModelToolPlan
     /// Tools registered with the delegate session (e.g. read_file, grep, file_system).
     private let delegateTools: [any Tool]
     /// System instructions for the delegate session (workspace context, rules, etc.).
@@ -61,7 +60,6 @@ struct CallPowerfulModelTool: Tool {
         model: any LanguageModel,
         temperature: Double?,
         reasoningLevel: ContextOptions.ReasoningLevel?,
-        delegatePlan: ModelToolPlan,
         delegateTools: [any Tool],
         delegateInstructions: String,
         onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)? = nil,
@@ -76,7 +74,6 @@ struct CallPowerfulModelTool: Tool {
         self.model = model
         self.temperature = temperature
         self.reasoningLevel = reasoningLevel
-        self.delegatePlan = delegatePlan
         self.delegateTools = delegateTools
         self.delegateInstructions = delegateInstructions
         self.onToolStart = onToolStart
@@ -128,7 +125,6 @@ struct CallPowerfulModelTool: Tool {
                 envelope: envelope,
                 context: AgentTaskRunContext(
                     model: model,
-                    toolPlan: delegatePlan,
                     tools: delegateTools,
                     instructions: delegateInstructions,
                     temperature: temperature,

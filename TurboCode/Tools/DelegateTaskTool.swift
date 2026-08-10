@@ -1,91 +1,47 @@
 import Foundation
 import FoundationModels
 
-/// Flat provider-facing arguments for the structured delegation contract.
+/// Minimal provider-facing choice for one delegated worker turn.
 ///
-/// Keeping the schema flat makes it portable between Foundation Models dynamic
-/// profiles and Codex App Server dynamic tools without provider-only fields.
+/// Runtime identifiers, safety timeout, and workspace confinement are owned by
+/// TurboCode. Keeping them out of the model schema prevents coordinators from
+/// inventing invalid policy values instead of describing the work itself.
 @Generable
 struct DelegateTaskArguments {
-    /// Stable identifier shared by every attempt for this logical task.
-    var taskID: String
-    /// Unique identifier for this execution attempt.
-    var attemptID: String
     /// Coarse worker mode: coding gets the default tool bundle, text gets none.
     @Guide(.anyOf(["coding", "text"]))
     var mode: String = "coding"
     /// Concrete outcome the worker must produce.
     var goal: String
-    /// Observable conditions the worker should satisfy.
-    var acceptanceCriteria: [String]
-    /// Workspace-relative files or directories likely relevant to the task.
-    var suggestedScope: [String]
-    /// Deterministic verification requested after the worker: none, build, or test.
-    @Guide(.anyOf(["none", "build", "test"]))
-    var verificationRequest: String
-    /// Optional workspace-relative .xcworkspace or .xcodeproj for verification.
-    var verificationContainerPath: String? = nil
-    /// Optional scheme retained for deterministic build or test verification.
-    var verificationScheme: String? = nil
-    /// Optional build configuration, such as Debug or Release.
-    var verificationConfiguration: String? = nil
-    /// Optional xcodebuild destination, such as platform=macOS.
-    var verificationDestination: String? = nil
-    /// Wall-clock limit applied by TurboCode, in seconds.
-    var timeoutSeconds: Int
-    /// Maximum number of worker tool calls.
-    var maximumToolCalls: Int
 
     func envelope() throws -> AgentTaskEnvelope {
         guard let workerMode = DelegatedWorkerMode(rawValue: mode) else {
             throw DelegateTaskAdapterError.unknownMode(mode)
         }
-        guard let verification = VerificationRequest(rawValue: verificationRequest) else {
-            throw DelegateTaskAdapterError.unknownVerification(verificationRequest)
-        }
-        let verificationParameters: AgentVerificationParameters? =
-            if [
-                verificationContainerPath,
-                verificationScheme,
-                verificationConfiguration,
-                verificationDestination
-            ].contains(where: { $0 != nil }) {
-                AgentVerificationParameters(
-                    containerPath: verificationContainerPath,
-                    scheme: verificationScheme,
-                    configuration: verificationConfiguration,
-                    destination: verificationDestination
-                )
-            } else {
-                nil
-            }
+        let taskID = UUID().uuidString
         return try AgentTaskEnvelope(
             taskID: taskID,
-            attemptID: attemptID,
+            attemptID: "\(taskID)-attempt-1",
             mode: workerMode,
             goal: goal,
-            acceptanceCriteria: acceptanceCriteria,
-            suggestedScope: suggestedScope,
-            verificationRequest: verification,
-            verificationParameters: verificationParameters,
-            budget: DelegationBudget(
-                timeoutSeconds: timeoutSeconds,
-                maximumToolCalls: maximumToolCalls
-            )
+            acceptanceCriteria: ["Complete the delegated goal and report the result."],
+            // The worker may use any workspace path its registered tools allow.
+            // Per-path restrictions belong in a future explicit UI, not in
+            // coordinator-authored prose masquerading as policy.
+            suggestedScope: [],
+            verificationRequest: .none,
+            budget: .default
         )
     }
 }
 
 nonisolated enum DelegateTaskAdapterError: LocalizedError, Sendable, Equatable {
     case unknownMode(String)
-    case unknownVerification(String)
 
     var errorDescription: String? {
         switch self {
         case .unknownMode(let mode):
             "Unknown delegated worker mode '\(mode)'."
-        case .unknownVerification(let value):
-            "Unknown verification request '\(value)'."
         }
     }
 }
@@ -177,13 +133,12 @@ struct DelegateTaskTool: Tool {
     var name: String { "delegate_task" }
     var description: String {
         """
-        Delegate one bounded task to the configured worker. Supply stable task
-        and attempt identifiers, a worker mode (coding or text), explicit
-        acceptance criteria, a narrow scope, verification, and a hard budget.
-        Coding workers receive TurboCode's complete default tool bundle; text
-        workers receive no tools.
+        Delegate one goal to the configured worker. Use coding when the worker
+        must inspect or change the workspace: it receives TurboCode's complete
+        default worker tool bundle. Use text when the worker only needs to
+        return prose: it receives no tools.
         TurboCode returns a JSON AgentTaskResult; inspect its outcome and remain
-        responsible for verification and the final response.
+        responsible for the final response.
         """
     }
     var includesSchemaInInstructions: Bool { true }

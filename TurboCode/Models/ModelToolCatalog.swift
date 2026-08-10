@@ -221,7 +221,7 @@ nonisolated enum ModelToolCatalog {
         .init(
             id: .delegateTask,
             name: "Delegate Task",
-            summary: "Assign a bounded structured task to the configured worker.",
+            summary: "Send a goal to a tool-using or text-only configured worker.",
             category: .orchestration,
             systemImage: "arrow.triangle.branch",
             hasNativePresentation: false

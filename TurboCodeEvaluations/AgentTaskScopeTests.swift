@@ -84,62 +84,6 @@ struct AgentTaskScopeTests {
         )
     }
 
-    @Test("Runner maps an out-of-scope call to a typed terminal result")
-    func runnerMapsScopeViolation() async throws {
-        let fixture = try makeFixture()
-        defer { try? FileManager.default.removeItem(at: fixture.root) }
-        let envelope = try AgentTaskEnvelope(
-            taskID: "scope-task",
-            attemptID: "scope-attempt",
-            goal: "Read only the allowed source.",
-            acceptanceCriteria: ["Do not inspect unrelated files."],
-            suggestedScope: ["Sources"],
-            budget: DelegationBudget(timeoutSeconds: 5, maximumToolCalls: 2)
-        )
-        let gate = AgentTaskExecutionGate(
-            allowedToolNames: ["read_file"],
-            maximumToolCalls: 2,
-            pathScope: AgentTaskPathScope(
-                workspaceRoot: fixture.root.path,
-                suggestedPaths: envelope.suggestedScope
-            )
-        )
-        let call = Transcript.ToolCall(
-            id: "scope-call",
-            toolName: "read_file",
-            arguments: GeneratedContent(properties: ["filePath": "Outside.swift"])
-        )
-        let runner = BoundedAgentTaskRunner(worker: OutOfScopeTaskWorker())
-
-        #expect(await gate.beginTool(call) == .pathOutsideScope("Outside.swift"))
-        #expect(await gate.count == 0)
-        let result = await runner.run(
-            envelope: envelope,
-            context: AgentTaskRunContext(
-                model: SystemLanguageModel.default,
-                toolPlan: ModelToolPlan(
-                    profile: .delegate,
-                    tier: .standard,
-                    assignments: [
-                        .init(id: .readFile, isRegistered: true, unavailableReason: nil)
-                    ]
-                ),
-                tools: [
-                    ReadFileTool(workspaceRoot: fixture.root.path)
-                ],
-                workspaceRoot: fixture.root.path,
-                instructions: "Stay inside task scope.",
-                temperature: nil,
-                reasoningLevel: nil
-            ),
-            events: .none
-        )
-
-        #expect(result.outcome == .failed)
-        #expect(result.failureReason == .pathOutsideScope)
-        #expect(result.failureDetail?.contains("Outside.swift") == true)
-    }
-
     @Test("Empty task scope preserves workspace-wide tool behavior")
     func emptyScopePreservesWorkspaceBoundary() throws {
         let fixture = try makeFixture()
@@ -230,18 +174,5 @@ struct AgentTaskScopeTests {
             encoding: .utf8
         )
         return (root, source)
-    }
-}
-
-private struct OutOfScopeTaskWorker: AgentTaskWorkerExecuting {
-    @MainActor
-    func execute(
-        envelope: AgentTaskEnvelope,
-        context: AgentTaskRunContext,
-        events: AgentTaskRunnerEvents
-    ) async throws -> String {
-        // FoundationModelsTaskWorker throws the gate's recorded violation after
-        // cancellation. This fake isolates the runner's typed result mapping.
-        throw AgentTaskWorkerError.pathOutsideScope("Outside.swift")
     }
 }

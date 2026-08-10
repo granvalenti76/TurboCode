@@ -288,7 +288,6 @@ enum ModelSessionFactory {
             model: delegateModel,
             temperature: configuration.delegateTemperature,
             reasoningLevel: delegateCapabilities.reasoningLevel,
-            delegatePlan: delegatePlan,
             delegateTools: toolInstances(
                 for: delegatePlan,
                 configuration: configuration,
@@ -499,7 +498,6 @@ enum ModelSessionFactory {
             runner: resolvedRunner,
             context: AgentTaskRunContext(
                 model: delegateModel,
-                toolPlan: plan,
                 tools: toolInstances(
                     for: plan,
                     configuration: configuration,

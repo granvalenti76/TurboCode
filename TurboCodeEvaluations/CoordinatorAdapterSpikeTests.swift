@@ -40,12 +40,15 @@ struct CoordinatorAdapterSpikeTests {
             from: Data(json.utf8)
         )
 
-        #expect(result.taskID == "task-spike")
-        #expect(result.attemptID == "attempt-spike")
+        #expect(result.taskID == invoker.lastEnvelope?.taskID)
+        #expect(result.attemptID == invoker.lastEnvelope?.attemptID)
         #expect(result.outcome == .completed)
         #expect(invoker.lastEnvelope?.mode == .coding)
-        #expect(invoker.lastEnvelope?.verificationRequest == .test)
-        #expect(invoker.lastEnvelope?.verificationParameters?.scheme == "FixtureTests")
+        #expect(invoker.lastEnvelope?.suggestedScope.isEmpty == true)
+        #expect(
+            invoker.lastEnvelope?.verificationRequest
+                == VerificationRequest.none
+        )
     }
 
     @Test("Shared invocation propagates worker events and cancellation")
@@ -120,28 +123,17 @@ struct CoordinatorAdapterSpikeTests {
         )
 
         #expect(!defaultNames.contains("delegate_task"))
-        #expect(delegationSpec.inputSchema["required"]?.arrayValue?.count == 9)
+        #expect(delegationSpec.inputSchema["required"]?.arrayValue?.count == 2)
         #expect(execution.result.succeeded)
-        #expect(result.taskID == "task-spike")
-        #expect(result.attemptID == "attempt-spike")
-        #expect(invoker.lastEnvelope?.verificationParameters?.destination == "platform=macOS")
+        #expect(result.taskID == invoker.lastEnvelope?.taskID)
+        #expect(result.attemptID == invoker.lastEnvelope?.attemptID)
+        #expect(invoker.lastEnvelope?.verificationParameters == nil)
     }
 
     private func makeArguments() -> DelegateTaskArguments {
         DelegateTaskArguments(
-            taskID: "task-spike",
-            attemptID: "attempt-spike",
             mode: "coding",
-            goal: "Inspect one Swift file.",
-            acceptanceCriteria: ["Return a focused technical result."],
-            suggestedScope: ["TurboCode/App.swift"],
-            verificationRequest: VerificationRequest.test.rawValue,
-            verificationContainerPath: "Fixture.xcodeproj",
-            verificationScheme: "FixtureTests",
-            verificationConfiguration: "Debug",
-            verificationDestination: "platform=macOS",
-            timeoutSeconds: 5,
-            maximumToolCalls: 2
+            goal: "Inspect one Swift file and return a focused technical result."
         )
     }
 
@@ -166,13 +158,6 @@ struct CoordinatorAdapterSpikeTests {
     private func makeContext() -> AgentTaskRunContext {
         AgentTaskRunContext(
             model: SystemLanguageModel.default,
-            toolPlan: ModelToolPlan(
-                profile: .delegate,
-                tier: .standard,
-                assignments: [
-                    .init(id: .readFile, isRegistered: true, unavailableReason: nil)
-                ]
-            ),
             tools: [],
             workspaceRoot: "/workspace",
             instructions: "Complete the bounded worker task.",
@@ -183,21 +168,8 @@ struct CoordinatorAdapterSpikeTests {
 
     private func codexArguments() -> CodexJSONValue {
         .object([
-            "taskID": .string("task-spike"),
-            "attemptID": .string("attempt-spike"),
-            "goal": .string("Inspect one Swift file."),
-            "acceptanceCriteria": .array([
-                .string("Return a focused technical result.")
-            ]),
-            "suggestedScope": .array([.string("TurboCode/App.swift")]),
             "mode": .string("coding"),
-            "verificationRequest": .string("test"),
-            "verificationContainerPath": .string("Fixture.xcodeproj"),
-            "verificationScheme": .string("FixtureTests"),
-            "verificationConfiguration": .string("Debug"),
-            "verificationDestination": .string("platform=macOS"),
-            "timeoutSeconds": .integer(5),
-            "maximumToolCalls": .integer(2)
+            "goal": .string("Inspect one Swift file and return a focused technical result.")
         ])
     }
 }

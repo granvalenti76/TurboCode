@@ -1,7 +1,10 @@
 import Foundation
 
-/// Resolves task-declared paths against the workspace and enforces the narrowest
-/// boundary shared by runner preflight and concrete file tools.
+/// Reusable explicit path restriction for scoped tool instances.
+///
+/// Production delegation deliberately does not derive this policy from model
+/// output. The type remains available for a future user-authored profile control
+/// and for purpose-built restricted tools.
 nonisolated struct AgentTaskPathScope: Sendable, Hashable {
     let workspaceRoot: String
     let suggestedPaths: [String]

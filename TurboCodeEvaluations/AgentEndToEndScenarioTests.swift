@@ -6,8 +6,8 @@ import Testing
 @MainActor
 @Suite("M4.2 delegated task scenarios")
 struct AgentEndToEndScenarioTests {
-    @Test("Delegated edit reaches deterministic verification and the chat timeline")
-    func successfulDelegatedEditIsVerifiedEndToEnd() async throws {
+    @Test("Delegated edit reaches the chat timeline without coordinator policy fields")
+    func successfulDelegatedEditCompletesEndToEnd() async throws {
         let fixture = try ScenarioWorkspace()
         defer { fixture.remove() }
         let activity = AgentActivityStore()
@@ -49,16 +49,15 @@ struct AgentEndToEndScenarioTests {
         let result = try decodedResult(from: timeline.blocks.last?.text)
         #expect(responseResult.errorMessage == nil)
         #expect(responseResult.touchedConversation)
-        #expect(result.outcome == .verified)
-        #expect(result.verification.status == .passed)
-        #expect(result.verification.receiptID == "scenario-verification")
+        #expect(result.outcome == .completed)
+        #expect(result.verification.status == .notRequested)
         #expect(activity.current?.phase == .succeeded)
-        #expect(activity.current?.lastOperationalPhase == .verifying)
+        #expect(activity.current?.lastOperationalPhase == .workerRunning)
         #expect(activity.current?.finalResult == result)
         #expect(timeline.activeAssistantPlaceholderID == nil)
         #expect(try String(contentsOf: fixture.fileURL, encoding: .utf8)
             == ScenarioWorkspace.editedContent)
-        #expect(await verifier.invocationCount == 1)
+        #expect(await verifier.invocationCount == 0)
     }
 
     @Test("Empty worker output fails closed and exposes one recovery")
@@ -232,22 +231,6 @@ struct AgentEndToEndScenarioTests {
             ),
             context: AgentTaskRunContext(
                 model: SystemLanguageModel.default,
-                toolPlan: ModelToolPlan(
-                    profile: .delegate,
-                    tier: .standard,
-                    assignments: [
-                        .init(
-                            id: .readFile,
-                            isRegistered: true,
-                            unavailableReason: nil
-                        ),
-                        .init(
-                            id: .editFile,
-                            isRegistered: true,
-                            unavailableReason: nil
-                        )
-                    ]
-                ),
                 tools: [],
                 instructions: "Complete the deterministic release scenario.",
                 temperature: nil,
@@ -285,18 +268,8 @@ struct AgentEndToEndScenarioTests {
 
     private static func arguments(attemptID: String) -> DelegateTaskArguments {
         DelegateTaskArguments(
-            taskID: "m4-2-focused-edit",
-            attemptID: attemptID,
             mode: "coding",
-            goal: "Increment Sources/Counter.swift and verify the focused test.",
-            acceptanceCriteria: [
-                "Counter.value is 2.",
-                "The focused deterministic test passes."
-            ],
-            suggestedScope: ["Sources/Counter.swift"],
-            verificationRequest: "test",
-            timeoutSeconds: 5,
-            maximumToolCalls: 3
+            goal: "Increment Sources/Counter.swift and report the completed edit for \(attemptID)."
         )
     }
 

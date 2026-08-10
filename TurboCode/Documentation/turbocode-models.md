@@ -6,8 +6,10 @@ In Standalone mode, the selected profile determines the route. Apple on-device i
 
 For the structured route, delegation is a capability rather than a separate
 profile type. When a custom profile includes `delegate_task`, its selected
-model delegates a bounded envelope to the configured worker and remains
-responsible for verification and the final answer. DeepSeek, Codex, and the
+model sends a goal to the configured worker and remains responsible for the
+final answer. The coordinator chooses only between a coding worker with the
+default workspace tools and a text-only worker with no tools; TurboCode owns
+runtime identifiers, workspace safety, and the timeout. DeepSeek, Codex, and the
 configured Llama-compatible route support this capability; Apple PCC, Llama,
 or DeepSeek can be selected as the worker.
 
@@ -21,7 +23,7 @@ availability still comes from `~/.turbocode/models.json`; secrets remain in the
 macOS Keychain. **TurboCode > Settings > Agents > Default Delegated Worker**
 remains the fallback for older profiles and experimental on-device delegation.
 
-TurboCode validates reasoning and tool-calling capabilities before building a model profile. This prevents unsupported options from reaching a model and provides a foundation for giving advanced tools only to models that can use them reliably.
+TurboCode validates reasoning and tool-calling capabilities before building a model profile. Worker tool availability comes from the catalog-backed profile rather than per-delegation restrictions invented by the coordinator.
 
 ## Configure Codex
 

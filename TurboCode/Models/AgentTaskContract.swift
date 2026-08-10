@@ -45,11 +45,14 @@ nonisolated struct AgentVerificationParameters: Codable, Sendable, Hashable {
     }
 }
 
-/// Runtime limits that every worker adapter must enforce independently of its
-/// provider prompt.
+/// Application-owned watchdog plus the legacy decoded tool budget.
+///
+/// The timeout still prevents a lost provider stream from running forever.
+/// `maximumToolCalls` remains Codable for stored/version-2 envelopes, but the
+/// production worker no longer uses it to interrupt a model's normal loop.
 nonisolated struct DelegationBudget: Codable, Sendable, Hashable {
     static let `default` = DelegationBudget(
-        timeoutSeconds: 120,
+        timeoutSeconds: 300,
         maximumToolCalls: 12
     )
 
@@ -84,9 +87,9 @@ nonisolated enum DelegatedWorkerMode: String, Codable, Sendable, Hashable {
 
 /// Provider-independent task passed from a coordinator to one sequential worker.
 ///
-/// Arrays retain a stable order for reproducible transport. A non-empty
-/// suggested scope is enforced for path-bearing worker tools; the historical
-/// field name remains stable for schema compatibility.
+/// Detailed fields remain decodable for existing activity and evaluation data.
+/// Production `delegate_task` calls now create them internally and only expose
+/// the goal plus the coarse coding/text mode to coordinator models.
 nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
     static let currentSchemaVersion = 2
 

@@ -430,42 +430,9 @@ nonisolated enum CodexTurboCodeToolBridge {
     private static func delegateTaskArguments(
         _ call: CodexDynamicToolCall
     ) throws -> DelegateTaskArguments {
-        func requiredStrings(_ key: String) throws -> [String] {
-            guard let values = call.arguments[key]?.arrayValue,
-                  values.allSatisfy({ $0.stringValue != nil }) else {
-                throw invalid(call, "'\(key)' must be an array of strings")
-            }
-            return values.compactMap(\.stringValue)
-        }
-        guard let timeoutSeconds = call.arguments["timeoutSeconds"]?.integerValue else {
-            throw invalid(call, "'timeoutSeconds' must be an integer")
-        }
-        guard let maximumToolCalls = call.arguments["maximumToolCalls"]?.integerValue else {
-            throw invalid(call, "'maximumToolCalls' must be an integer")
-        }
         return DelegateTaskArguments(
-            taskID: try requiredString("taskID", in: call),
-            attemptID: try requiredString("attemptID", in: call),
             mode: optionalString("mode", in: call) ?? "coding",
-            goal: try requiredString("goal", in: call),
-            acceptanceCriteria: try requiredStrings("acceptanceCriteria"),
-            suggestedScope: try requiredStrings("suggestedScope"),
-            verificationRequest: try requiredString("verificationRequest", in: call),
-            verificationContainerPath: optionalString(
-                "verificationContainerPath",
-                in: call
-            ),
-            verificationScheme: optionalString("verificationScheme", in: call),
-            verificationConfiguration: optionalString(
-                "verificationConfiguration",
-                in: call
-            ),
-            verificationDestination: optionalString(
-                "verificationDestination",
-                in: call
-            ),
-            timeoutSeconds: timeoutSeconds,
-            maximumToolCalls: maximumToolCalls
+            goal: try requiredString("goal", in: call)
         )
     }
 
@@ -658,32 +625,18 @@ nonisolated enum CodexTurboCodeToolBridge {
         )
     )
 
-    /// Mirrors DelegateTaskArguments exactly so Codex and Foundation Models
-    /// coordinators produce one provider-independent contract.
+    /// Mirrors the intentionally small DelegateTaskArguments surface so both
+    /// coordinator transports only choose between a tool-using worker and a
+    /// text-only worker. Runtime policy remains application-owned.
     private static let delegateTaskSpecification = CodexDynamicToolSpec(
         name: "delegate_task",
-        description: "Delegate one bounded task to the configured worker. Coding mode uses the default worker tool bundle; text mode uses no tools.",
+        description: "Delegate one goal to the configured worker. Use coding for workspace work with the default worker tools, or text for a tool-free prose response.",
         inputSchema: objectSchema(
             properties: [
-                "taskID": stringSchema("Stable logical task identifier."),
-                "attemptID": stringSchema("Unique execution attempt identifier."),
                 "mode": enumSchema(["coding", "text"]),
-                "goal": stringSchema("Concrete worker outcome."),
-                "acceptanceCriteria": stringArraySchema,
-                "suggestedScope": stringArraySchema,
-                "verificationRequest": enumSchema(["none", "build", "test"]),
-                "verificationContainerPath": nullableStringSchema(),
-                "verificationScheme": nullableStringSchema(),
-                "verificationConfiguration": nullableStringSchema(),
-                "verificationDestination": nullableStringSchema(),
-                "timeoutSeconds": .object(["type": .string("integer")]),
-                "maximumToolCalls": .object(["type": .string("integer")])
+                "goal": stringSchema("Complete task to send to the worker.")
             ],
-            required: [
-                "taskID", "attemptID", "goal", "acceptanceCriteria",
-                "suggestedScope", "mode", "verificationRequest",
-                "timeoutSeconds", "maximumToolCalls"
-            ]
+            required: ["mode", "goal"]
         )
     )
 

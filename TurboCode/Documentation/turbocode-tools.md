@@ -126,14 +126,18 @@ Undo.
 
 ### `delegate_task`
 
-Assigns one bounded, typed task to the configured worker. The coordinator
-must supply stable task and attempt identifiers, a worker `mode` (`coding` or
-`text`), an explicit goal and acceptance criteria, a narrow workspace scope, an
-optional build or test verification request, a timeout, and a maximum tool-call
-count. Coding workers receive the complete default TurboCode worker tool bundle;
-text workers receive no tools. TurboCode enforces the envelope and returns a
-structured result; the coordinator remains responsible for the final user-facing
-response.
+Sends one goal to the configured worker with a single capability choice:
+`coding` or `text`. Coding workers receive the complete default TurboCode worker
+tool bundle and can work anywhere inside the active workspace. Text workers
+receive no tools and return prose to the coordinator. TurboCode generates
+activity identifiers internally, keeps the normal workspace and approval
+boundaries, and returns a structured result. The coordinator remains responsible
+for the final user-facing response.
+
+The coordinator cannot provide per-file scopes, custom tool allowlists, tool-call
+counts, or verification policy. If granular worker capabilities are added, they
+must come from explicit profile configuration in the UI rather than values
+invented during a model turn.
 
 ### `call_powerful_model`
 

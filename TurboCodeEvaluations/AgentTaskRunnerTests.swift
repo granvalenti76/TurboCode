@@ -172,71 +172,34 @@ struct AgentTaskRunnerTests {
         #expect(await verifier.observedMutationSequence == nil)
     }
 
-    @Test("Execution gate enforces runtime capability and maximum tool calls")
-    func enforcesToolBudget() async {
-        let gate = AgentTaskExecutionGate(
-            allowedToolNames: ["read_file"],
-            maximumToolCalls: 1
-        )
-
-        #expect(await gate.beginTool(named: "read_file") == nil)
-        #expect(await gate.count == 1)
-        #expect(await gate.beginTool(named: "read_file") == .toolLimitReached)
-
-        let restricted = AgentTaskExecutionGate(
-            allowedToolNames: ["read_file"],
-            maximumToolCalls: 4
-        )
-        #expect(await restricted.beginTool(named: "git") == .toolNotAllowed("git"))
-        #expect(await restricted.count == 0)
-    }
-
-    @Test("Coding worker uses the complete registered catalog plan")
-    func resolvesCodingWorkerPlan() throws {
-        let plan = ModelToolPlan(
-            profile: .delegate,
-            tier: .standard,
-            assignments: [
-                .init(id: .readFile, isRegistered: true, unavailableReason: nil),
-                .init(id: .git, isRegistered: false, unavailableReason: "Restricted")
-            ]
-        )
+    @Test("Worker capability mode is all configured tools or no tools")
+    func workerModeSelectsBinaryToolSurface() {
+        let configured: [any Tool] = [
+            ReadFileTool(workspaceRoot: "/workspace"),
+            EditFileTool(workspaceRoot: "/workspace")
+        ]
 
         #expect(
-            AgentTaskToolPolicy.permittedNames(plan: plan)
-                == ["read_file"]
+            DelegatedWorkerToolPolicy.tools(
+                for: .coding,
+                availableTools: configured
+            ).map(\.name) == ["read_file", "edit_file"]
         )
-
         #expect(
-            AgentTaskToolPolicy.permittedNames(
-                plan: ModelToolPlan(
-                    profile: .delegate,
-                    tier: .standard,
-                    assignments: [
-                        .init(id: .readFile, isRegistered: true, unavailableReason: nil),
-                        .init(id: .git, isRegistered: true, unavailableReason: nil)
-                    ]
-                )
-            ) == ["git", "read_file"]
+            DelegatedWorkerToolPolicy.tools(
+                for: .text,
+                availableTools: configured
+            ).isEmpty
         )
     }
 
     @Test("Compatibility tool converts free text into a correlated envelope")
     func compatibilityToolUsesInjectedRunner() async throws {
         let fake = RecordingFakeAgentTaskRunner()
-        let plan = ModelToolPlan(
-            profile: .delegate,
-            tier: .standard,
-            assignments: [
-                ModelToolAssignment(id: .readFile, isRegistered: true, unavailableReason: nil),
-                ModelToolAssignment(id: .editFile, isRegistered: true, unavailableReason: nil)
-            ]
-        )
         let tool = CallPowerfulModelTool(
             model: SystemLanguageModel.default,
             temperature: nil,
             reasoningLevel: nil,
-            delegatePlan: plan,
             delegateTools: [],
             delegateInstructions: "Complete the delegated Swift task.",
             runner: fake
@@ -271,11 +234,6 @@ struct AgentTaskRunnerTests {
     private func makeContext() -> AgentTaskRunContext {
         AgentTaskRunContext(
             model: SystemLanguageModel.default,
-            toolPlan: ModelToolPlan(
-                profile: .delegate,
-                tier: .standard,
-                assignments: []
-            ),
             tools: [],
             instructions: "Complete the task.",
             temperature: nil,
