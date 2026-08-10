@@ -287,13 +287,13 @@ struct AgentEndToEndScenarioTests {
         DelegateTaskArguments(
             taskID: "m4-2-focused-edit",
             attemptID: attemptID,
+            mode: "coding",
             goal: "Increment Sources/Counter.swift and verify the focused test.",
             acceptanceCriteria: [
                 "Counter.value is 2.",
                 "The focused deterministic test passes."
             ],
             suggestedScope: ["Sources/Counter.swift"],
-            allowedTools: ["read_file", "edit_file"],
             verificationRequest: "test",
             timeoutSeconds: 5,
             maximumToolCalls: 3

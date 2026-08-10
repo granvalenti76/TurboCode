@@ -93,13 +93,11 @@ struct CallPowerfulModelTool: Tool {
             let envelope = try AgentTaskEnvelope(
                 taskID: taskID,
                 attemptID: UUID().uuidString,
+                mode: .coding,
                 goal: arguments.task,
                 acceptanceCriteria: [
                     "Return a complete, technically actionable response to the delegated task."
                 ],
-                allowedTools: delegatePlan.registeredIDs.sorted {
-                    $0.rawValue < $1.rawValue
-                },
                 budget: .default
             )
             if let coordinator, let worker {

@@ -11,14 +11,15 @@ struct DelegateTaskArguments {
     var taskID: String
     /// Unique identifier for this execution attempt.
     var attemptID: String
+    /// Coarse worker mode: coding gets the default tool bundle, text gets none.
+    @Guide(.anyOf(["coding", "text"]))
+    var mode: String = "coding"
     /// Concrete outcome the worker must produce.
     var goal: String
     /// Observable conditions the worker should satisfy.
     var acceptanceCriteria: [String]
     /// Workspace-relative files or directories likely relevant to the task.
     var suggestedScope: [String]
-    /// Exact TurboCode tool identifiers the worker may invoke.
-    var allowedTools: [String]
     /// Deterministic verification requested after the worker: none, build, or test.
     @Guide(.anyOf(["none", "build", "test"]))
     var verificationRequest: String
@@ -36,11 +37,8 @@ struct DelegateTaskArguments {
     var maximumToolCalls: Int
 
     func envelope() throws -> AgentTaskEnvelope {
-        let tools = try allowedTools.map { rawValue in
-            guard let tool = ToolCapabilityID(rawValue: rawValue) else {
-                throw DelegateTaskAdapterError.unknownTool(rawValue)
-            }
-            return tool
+        guard let workerMode = DelegatedWorkerMode(rawValue: mode) else {
+            throw DelegateTaskAdapterError.unknownMode(mode)
         }
         guard let verification = VerificationRequest(rawValue: verificationRequest) else {
             throw DelegateTaskAdapterError.unknownVerification(verificationRequest)
@@ -64,10 +62,10 @@ struct DelegateTaskArguments {
         return try AgentTaskEnvelope(
             taskID: taskID,
             attemptID: attemptID,
+            mode: workerMode,
             goal: goal,
             acceptanceCriteria: acceptanceCriteria,
             suggestedScope: suggestedScope,
-            allowedTools: tools,
             verificationRequest: verification,
             verificationParameters: verificationParameters,
             budget: DelegationBudget(
@@ -79,13 +77,13 @@ struct DelegateTaskArguments {
 }
 
 nonisolated enum DelegateTaskAdapterError: LocalizedError, Sendable, Equatable {
-    case unknownTool(String)
+    case unknownMode(String)
     case unknownVerification(String)
 
     var errorDescription: String? {
         switch self {
-        case .unknownTool(let name):
-            "Unknown delegated tool '\(name)'."
+        case .unknownMode(let mode):
+            "Unknown delegated worker mode '\(mode)'."
         case .unknownVerification(let value):
             "Unknown verification request '\(value)'."
         }
@@ -179,9 +177,11 @@ struct DelegateTaskTool: Tool {
     var name: String { "delegate_task" }
     var description: String {
         """
-        Delegate one bounded coding task to the configured worker. Supply stable
-        task and attempt identifiers, explicit acceptance criteria, a narrow
-        scope, the exact allowed TurboCode tools, verification, and hard budget.
+        Delegate one bounded task to the configured worker. Supply stable task
+        and attempt identifiers, a worker mode (coding or text), explicit
+        acceptance criteria, a narrow scope, verification, and a hard budget.
+        Coding workers receive TurboCode's complete default tool bundle; text
+        workers receive no tools.
         TurboCode returns a JSON AgentTaskResult; inspect its outcome and remain
         responsible for verification and the final response.
         """

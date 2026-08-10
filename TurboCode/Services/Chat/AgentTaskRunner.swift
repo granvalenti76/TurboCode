@@ -376,59 +376,59 @@ nonisolated struct FoundationModelsTaskWorker: AgentTaskWorkerExecuting {
             workspaceRoot: context.workspaceRoot,
             suggestedPaths: envelope.suggestedScope
         )
-        let permittedNames = AgentTaskToolPolicy.permittedNames(
-            envelope: envelope,
-            plan: context.toolPlan,
-            scope: pathScope
-        )
-        let requestedNames = Set(envelope.allowedTools.map(\.rawValue))
-            .intersection(context.toolPlan.registeredIDs.map(\.rawValue))
-        if let incompatibleName = requestedNames.subtracting(permittedNames).sorted().first {
-            // Fail before creating a model session: silently removing a broad
-            // tool can make the model claim completion without doing the work.
-            throw AgentTaskWorkerError.toolNotAllowed(incompatibleName)
-        }
-        let tools = context.tools.compactMap { tool -> (any Tool)? in
-            guard permittedNames.contains(tool.name) else { return nil }
-            // The worker receives scoped instances; direct tool validation is
-            // retained even though the runner also preflights each call.
-            if let read = tool as? ReadFileTool {
-                return read.restricted(to: pathScope)
+        let permittedNames = envelope.mode == .coding
+            ? AgentTaskToolPolicy.permittedNames(plan: context.toolPlan)
+            : []
+        // Mode is deliberately the only model-facing capability decision:
+        // coding receives the entire catalog-backed plan, while text gets no
+        // tools at all. Scope filtering below remains a runtime safety guard,
+        // not a second selection mechanism exposed to the coordinator model.
+        let tools: [any Tool]
+        if envelope.mode == .coding {
+            tools = context.tools.compactMap { tool -> (any Tool)? in
+                guard permittedNames.contains(tool.name) else { return nil }
+                // The worker receives scoped instances; direct tool validation
+                // is retained even though the runner also preflights each call.
+                if let read = tool as? ReadFileTool {
+                    return read.restricted(to: pathScope)
+                }
+                if let search = tool as? GrepTool {
+                    return search.restricted(to: pathScope)
+                }
+                if let edit = tool as? EditFileTool {
+                    return edit.restricted(to: pathScope)
+                }
+                if let list = tool as? ListWorkspaceTool {
+                    return list.restricted(to: pathScope)
+                }
+                if let map = tool as? SwiftWorkspaceMapTool {
+                    return map.restricted(to: pathScope)
+                }
+                if let fileSystem = tool as? FileSystemTool {
+                    return fileSystem.restricted(to: pathScope)
+                }
+                if let writer = tool as? WriteOnDeviceTool {
+                    return writer.restricted(to: pathScope)
+                }
+                if let remover = tool as? RemoveFileTool {
+                    return remover.restricted(to: pathScope)
+                }
+                if let git = tool as? GitTool {
+                    return git.restricted(to: pathScope)
+                }
+                if let bash = tool as? BashTool {
+                    return bash.restricted(to: pathScope)
+                }
+                if let xcode = tool as? XcodeProjectTool {
+                    return xcode.restricted(to: pathScope)
+                }
+                if let swiftPM = tool as? SwiftPackageManagerTool {
+                    return swiftPM.restricted(to: pathScope)
+                }
+                return tool
             }
-            if let search = tool as? GrepTool {
-                return search.restricted(to: pathScope)
-            }
-            if let edit = tool as? EditFileTool {
-                return edit.restricted(to: pathScope)
-            }
-            if let list = tool as? ListWorkspaceTool {
-                return list.restricted(to: pathScope)
-            }
-            if let map = tool as? SwiftWorkspaceMapTool {
-                return map.restricted(to: pathScope)
-            }
-            if let fileSystem = tool as? FileSystemTool {
-                return fileSystem.restricted(to: pathScope)
-            }
-            if let writer = tool as? WriteOnDeviceTool {
-                return writer.restricted(to: pathScope)
-            }
-            if let remover = tool as? RemoveFileTool {
-                return remover.restricted(to: pathScope)
-            }
-            if let git = tool as? GitTool {
-                return git.restricted(to: pathScope)
-            }
-            if let bash = tool as? BashTool {
-                return bash.restricted(to: pathScope)
-            }
-            if let xcode = tool as? XcodeProjectTool {
-                return xcode.restricted(to: pathScope)
-            }
-            if let swiftPM = tool as? SwiftPackageManagerTool {
-                return swiftPM.restricted(to: pathScope)
-            }
-            return tool
+        } else {
+            tools = []
         }
         let gate = AgentTaskExecutionGate(
             allowedToolNames: permittedNames,
@@ -516,35 +516,16 @@ nonisolated struct FoundationModelsTaskWorker: AgentTaskWorkerExecuting {
     }
 }
 
-/// Resolves the effective worker surface from the catalog-backed plan and the
-/// narrower per-task allowlist. Neither the prompt nor either input alone can
-/// grant a capability.
+/// Resolves the effective coding-worker surface from the catalog-backed plan.
+/// A task never supplies a second, model-facing per-tool allowlist.
 nonisolated enum AgentTaskToolPolicy {
     static func permittedNames(
-        envelope: AgentTaskEnvelope,
-        plan: ModelToolPlan,
-        scope: AgentTaskPathScope? = nil
+        plan: ModelToolPlan
     ) -> Set<String> {
-        let names = Set(envelope.allowedTools.map(\.rawValue))
-            .intersection(plan.registeredIDs.map(\.rawValue))
-        guard let scope, !scope.isWorkspaceWide else { return names }
-
-        // These tools can validate every path-bearing argument against the
-        // delegated boundary. Repository/build/shell tools remain workspace
-        // wide because their operations inherently span more than one path.
-        let scopeCompatible: Set<String> = [
-            ToolCapabilityID.turboCodeGuide.rawValue,
-            ToolCapabilityID.listWorkspace.rawValue,
-            ToolCapabilityID.swiftWorkspaceMap.rawValue,
-            ToolCapabilityID.readFile.rawValue,
-            ToolCapabilityID.searchWorkspace.rawValue,
-            ToolCapabilityID.fileSystem.rawValue,
-            ToolCapabilityID.editFile.rawValue,
-            ToolCapabilityID.writeOnDevice.rawValue,
-            ToolCapabilityID.removeFile.rawValue,
-            ToolCapabilityID.loadSkill.rawValue
-        ]
-        return names.intersection(scopeCompatible)
+        // The catalog plan is the sole coding-worker tool surface. Suggested
+        // scope remains enforced by path-aware tools and the execution gate,
+        // never by silently dropping tools from the worker session.
+        return Set(plan.registeredIDs.map(\.rawValue))
     }
 }
 

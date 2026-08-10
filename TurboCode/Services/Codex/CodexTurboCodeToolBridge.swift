@@ -446,10 +446,10 @@ nonisolated enum CodexTurboCodeToolBridge {
         return DelegateTaskArguments(
             taskID: try requiredString("taskID", in: call),
             attemptID: try requiredString("attemptID", in: call),
+            mode: optionalString("mode", in: call) ?? "coding",
             goal: try requiredString("goal", in: call),
             acceptanceCriteria: try requiredStrings("acceptanceCriteria"),
             suggestedScope: try requiredStrings("suggestedScope"),
-            allowedTools: try requiredStrings("allowedTools"),
             verificationRequest: try requiredString("verificationRequest", in: call),
             verificationContainerPath: optionalString(
                 "verificationContainerPath",
@@ -662,15 +662,15 @@ nonisolated enum CodexTurboCodeToolBridge {
     /// coordinators produce one provider-independent contract.
     private static let delegateTaskSpecification = CodexDynamicToolSpec(
         name: "delegate_task",
-        description: "Delegate one bounded coding task to the configured worker.",
+        description: "Delegate one bounded task to the configured worker. Coding mode uses the default worker tool bundle; text mode uses no tools.",
         inputSchema: objectSchema(
             properties: [
                 "taskID": stringSchema("Stable logical task identifier."),
                 "attemptID": stringSchema("Unique execution attempt identifier."),
+                "mode": enumSchema(["coding", "text"]),
                 "goal": stringSchema("Concrete worker outcome."),
                 "acceptanceCriteria": stringArraySchema,
                 "suggestedScope": stringArraySchema,
-                "allowedTools": stringArraySchema,
                 "verificationRequest": enumSchema(["none", "build", "test"]),
                 "verificationContainerPath": nullableStringSchema(),
                 "verificationScheme": nullableStringSchema(),
@@ -681,7 +681,7 @@ nonisolated enum CodexTurboCodeToolBridge {
             ],
             required: [
                 "taskID", "attemptID", "goal", "acceptanceCriteria",
-                "suggestedScope", "allowedTools", "verificationRequest",
+                "suggestedScope", "mode", "verificationRequest",
                 "timeoutSeconds", "maximumToolCalls"
             ]
         )

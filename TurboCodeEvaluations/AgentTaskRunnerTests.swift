@@ -84,7 +84,6 @@ struct AgentTaskRunnerTests {
             attemptID: "attempt-verification",
             goal: "Apply one edit and verify it.",
             acceptanceCriteria: ["The deterministic build passes."],
-            allowedTools: [.editFile],
             verificationRequest: .build,
             verificationParameters: AgentVerificationParameters(
                 scheme: "Fixture"
@@ -123,7 +122,6 @@ struct AgentTaskRunnerTests {
             attemptID: "attempt-stale-verification",
             goal: "Apply edits and verify the final state.",
             acceptanceCriteria: ["Only the latest workspace state is verified."],
-            allowedTools: [.editFile],
             verificationRequest: .test
         )
         let runner = BoundedAgentTaskRunner(
@@ -153,7 +151,6 @@ struct AgentTaskRunnerTests {
             attemptID: "attempt-conflict",
             goal: "Edit the latest file revision.",
             acceptanceCriteria: ["No stale content is overwritten."],
-            allowedTools: [.editFile],
             verificationRequest: .build
         )
         let verifier = RecordingAgentTaskVerifier(succeeds: true)
@@ -175,7 +172,7 @@ struct AgentTaskRunnerTests {
         #expect(await verifier.observedMutationSequence == nil)
     }
 
-    @Test("Execution gate enforces allowlist and maximum tool calls")
+    @Test("Execution gate enforces runtime capability and maximum tool calls")
     func enforcesToolBudget() async {
         let gate = AgentTaskExecutionGate(
             allowedToolNames: ["read_file"],
@@ -194,15 +191,8 @@ struct AgentTaskRunnerTests {
         #expect(await restricted.count == 0)
     }
 
-    @Test("Effective allowlist is the task and catalog-plan intersection")
-    func intersectsTaskAllowlistWithCatalogPlan() throws {
-        let envelope = try AgentTaskEnvelope(
-            taskID: "allowlist-task",
-            attemptID: "allowlist-attempt",
-            goal: "Inspect source without changing repository state.",
-            acceptanceCriteria: ["Read the requested source."],
-            allowedTools: [.readFile, .git]
-        )
+    @Test("Coding worker uses the complete registered catalog plan")
+    func resolvesCodingWorkerPlan() throws {
         let plan = ModelToolPlan(
             profile: .delegate,
             tier: .standard,
@@ -213,17 +203,12 @@ struct AgentTaskRunnerTests {
         )
 
         #expect(
-            AgentTaskToolPolicy.permittedNames(envelope: envelope, plan: plan)
+            AgentTaskToolPolicy.permittedNames(plan: plan)
                 == ["read_file"]
         )
 
-        let narrowScope = AgentTaskPathScope(
-            workspaceRoot: "/workspace",
-            suggestedPaths: ["Sources"]
-        )
         #expect(
             AgentTaskToolPolicy.permittedNames(
-                envelope: envelope,
                 plan: ModelToolPlan(
                     profile: .delegate,
                     tier: .standard,
@@ -231,9 +216,8 @@ struct AgentTaskRunnerTests {
                         .init(id: .readFile, isRegistered: true, unavailableReason: nil),
                         .init(id: .git, isRegistered: true, unavailableReason: nil)
                     ]
-                ),
-                scope: narrowScope
-            ) == ["read_file"]
+                )
+            ) == ["git", "read_file"]
         )
     }
 
@@ -266,7 +250,7 @@ struct AgentTaskRunnerTests {
         #expect(output == "Fake worker completed the task.")
         #expect(envelope.goal == "Update Parser.swift")
         #expect(envelope.taskID != envelope.attemptID)
-        #expect(envelope.allowedTools == [.editFile, .readFile])
+        #expect(envelope.mode == .coding)
     }
 
     private func makeEnvelope(
@@ -280,7 +264,6 @@ struct AgentTaskRunnerTests {
             attemptID: "attempt-runner",
             goal: "Make one focused Swift change.",
             acceptanceCriteria: ["The requested behavior is implemented."],
-            allowedTools: [.readFile],
             budget: budget
         )
     }

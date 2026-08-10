@@ -94,7 +94,6 @@ struct AgentTaskScopeTests {
             goal: "Read only the allowed source.",
             acceptanceCriteria: ["Do not inspect unrelated files."],
             suggestedScope: ["Sources"],
-            allowedTools: [.readFile],
             budget: DelegationBudget(timeoutSeconds: 5, maximumToolCalls: 2)
         )
         let gate = AgentTaskExecutionGate(

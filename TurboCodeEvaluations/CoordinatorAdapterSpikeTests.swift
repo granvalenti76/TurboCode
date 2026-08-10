@@ -25,7 +25,7 @@ struct CoordinatorAdapterSpikeTests {
             selectedIDs: profile.resolvedToolIDs
         )
 
-        #expect(plan.registeredIDs == [.delegateTask])
+        #expect(plan.registeredIDs == [.delegateTask, .createSkill])
         #expect(ModelToolCatalog.descriptor(for: .delegateTask).name == "Delegate Task")
     }
 
@@ -43,7 +43,7 @@ struct CoordinatorAdapterSpikeTests {
         #expect(result.taskID == "task-spike")
         #expect(result.attemptID == "attempt-spike")
         #expect(result.outcome == .completed)
-        #expect(invoker.lastEnvelope?.allowedTools == [.readFile])
+        #expect(invoker.lastEnvelope?.mode == .coding)
         #expect(invoker.lastEnvelope?.verificationRequest == .test)
         #expect(invoker.lastEnvelope?.verificationParameters?.scheme == "FixtureTests")
     }
@@ -131,10 +131,10 @@ struct CoordinatorAdapterSpikeTests {
         DelegateTaskArguments(
             taskID: "task-spike",
             attemptID: "attempt-spike",
+            mode: "coding",
             goal: "Inspect one Swift file.",
             acceptanceCriteria: ["Return a focused technical result."],
             suggestedScope: ["TurboCode/App.swift"],
-            allowedTools: [ToolCapabilityID.readFile.rawValue],
             verificationRequest: VerificationRequest.test.rawValue,
             verificationContainerPath: "Fixture.xcodeproj",
             verificationScheme: "FixtureTests",
@@ -155,7 +155,6 @@ struct CoordinatorAdapterSpikeTests {
             goal: "Inspect one Swift file.",
             acceptanceCriteria: ["Return a focused technical result."],
             suggestedScope: ["TurboCode/App.swift"],
-            allowedTools: [.readFile],
             verificationRequest: .none,
             budget: DelegationBudget(
                 timeoutSeconds: 5,
@@ -191,7 +190,7 @@ struct CoordinatorAdapterSpikeTests {
                 .string("Return a focused technical result.")
             ]),
             "suggestedScope": .array([.string("TurboCode/App.swift")]),
-            "allowedTools": .array([.string("read_file")]),
+            "mode": .string("coding"),
             "verificationRequest": .string("test"),
             "verificationContainerPath": .string("Fixture.xcodeproj"),
             "verificationScheme": .string("FixtureTests"),

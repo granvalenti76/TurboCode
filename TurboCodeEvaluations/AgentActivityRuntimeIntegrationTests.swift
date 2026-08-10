@@ -186,8 +186,7 @@ struct AgentActivityRuntimeIntegrationTests {
             taskID: "task-runtime",
             attemptID: attemptID,
             goal: "Exercise Activity event wiring.",
-            acceptanceCriteria: ["Activity reaches the matching terminal state."],
-            allowedTools: [.readFile]
+            acceptanceCriteria: ["Activity reaches the matching terminal state."]
         )
     }
 }
