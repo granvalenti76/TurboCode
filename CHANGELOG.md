@@ -5,6 +5,14 @@ All notable changes to TurboCode are documented in this file.
 The project follows Semantic Versioning while its public API and persisted
 formats continue to evolve before 1.0.
 
+## [Unreleased]
+
+### Fixed
+
+- Restored Xcode 27 beta 5 builds by temporarily using a documented local copy
+  of Apple Foundation Models Utilities without the removed
+  `Transcript.Segment.custom` case.
+
 ## [0.3.0] - 2026-08-10
 
 ### Added

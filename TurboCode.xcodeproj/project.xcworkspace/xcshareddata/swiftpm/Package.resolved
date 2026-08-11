@@ -1,15 +1,6 @@
 {
-  "originHash" : "5b9f9db248ee1d1d91bcf4ed51afd26031d9c841582c14cf8faaf75ce354e240",
+  "originHash" : "344b0cdd85d2d9a979ab7eaed6fa906a173cfa27225efb0b66d77e2d6c5d66e9",
   "pins" : [
-    {
-      "identity" : "foundation-models-utilities",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/foundation-models-utilities.git",
-      "state" : {
-        "branch" : "main",
-        "revision" : "376ca60e61985369d5067bd3c575bdb6a13f0e1b"
-      }
-    },
     {
       "identity" : "networkimage",
       "kind" : "remoteSourceControl",

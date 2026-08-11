@@ -240,7 +240,11 @@ xcodebuild \
 
 Swift Package dependencies are resolved automatically by Xcode. Direct dependencies:
 
-- [Apple Foundation Models Utilities](https://github.com/apple/foundation-models-utilities)
+- [Apple Foundation Models Utilities](https://github.com/apple/foundation-models-utilities),
+  temporarily vendored from `1.0.0-beta3` with the obsolete
+  `Transcript.Segment.custom` case removed for Xcode 27 beta 5 compatibility.
+  Provenance and removal instructions are documented in
+  `Vendor/foundation-models-utilities/README-TurboCode.md`.
 - [MarkdownUI](https://github.com/gonzalezreal/swift-markdown-ui)
 
 ## Tests and evaluations

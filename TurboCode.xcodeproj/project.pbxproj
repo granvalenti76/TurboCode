@@ -155,7 +155,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				5E5203BD3004E70900C554D4 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
-				5E5203CB30053A3A00C554D4 /* XCRemoteSwiftPackageReference "foundation-models-utilities" */,
+				5E5203CB30053A3A00C554D4 /* XCLocalSwiftPackageReference "Vendor/foundation-models-utilities" */,
 			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
@@ -371,7 +371,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -428,7 +428,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.2.0;
+				MARKETING_VERSION = 0.3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -525,15 +525,14 @@
 				minimumVersion = 2.4.1;
 			};
 		};
-		5E5203CB30053A3A00C554D4 /* XCRemoteSwiftPackageReference "foundation-models-utilities" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/apple/foundation-models-utilities.git";
-			requirement = {
-				kind = revision;
-				revision = 376ca60e61985369d5067bd3c575bdb6a13f0e1b;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		5E5203CB30053A3A00C554D4 /* XCLocalSwiftPackageReference "Vendor/foundation-models-utilities" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "Vendor/foundation-models-utilities";
+		};
+/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		5E5203BE3004E70900C554D4 /* MarkdownUI */ = {
@@ -543,7 +542,7 @@
 		};
 		5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 5E5203CB30053A3A00C554D4 /* XCRemoteSwiftPackageReference "foundation-models-utilities" */;
+			package = 5E5203CB30053A3A00C554D4 /* XCLocalSwiftPackageReference "Vendor/foundation-models-utilities" */;
 			productName = FoundationModelsUtilities;
 		};
 /* End XCSwiftPackageProductDependency section */
