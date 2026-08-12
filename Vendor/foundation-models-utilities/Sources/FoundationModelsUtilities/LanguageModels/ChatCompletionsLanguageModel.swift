@@ -635,8 +635,7 @@ private struct ChatCompletionsClient {
       urlRequest.setValue(value, forHTTPHeaderField: header)
     }
 
-    let encoder = JSONEncoder()
-    urlRequest.httpBody = try encoder.encode(request)
+    urlRequest.httpBody = try ChatCompletionsRequestEncoding.encode(request)
 
     return urlRequest
   }
@@ -925,6 +924,16 @@ private struct ChatCompletionsClient {
       self.text = nil
       self.imageURL = imageURL
     }
+  }
+}
+
+/// Canonicalizes semantically equivalent request bodies so provider-side KV
+/// caches see the same token prefix when dynamic profiles rebuild their schemas.
+enum ChatCompletionsRequestEncoding {
+  static func encode<Value: Encodable>(_ value: Value) throws -> Data {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    return try encoder.encode(value)
   }
 }
 

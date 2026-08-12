@@ -10,5 +10,11 @@ that case and therefore does not compile. The compatibility change removes
 only that obsolete case from `ChatCompletionsLanguageModel`; the
 `@unknown default` branch continues to reject unsupported future segments.
 
+TurboCode also encodes chat-completions request bodies with recursively sorted
+JSON object keys. Dynamic profiles may reconstruct equivalent tool schemas
+between turns, and canonical bytes prevent that implementation detail from
+invalidating provider-side prefix caches such as llama.cpp's KV cache. This
+does not change the JSON request semantics or the order of tool arrays.
+
 Remove this directory and restore the remote Xcode package reference after
 Apple publishes an upstream release compatible with Xcode 27 beta 5 or later.

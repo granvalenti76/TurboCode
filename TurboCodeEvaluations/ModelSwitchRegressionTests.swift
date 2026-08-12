@@ -6,6 +6,31 @@ import Testing
 @MainActor
 @Suite("Model switching")
 struct ModelSwitchRegressionTests {
+    @Test("Llama profiles retain completed tool calls for cache-stable history")
+    func llamaProfilesKeepAppendOnlyHistory() {
+        // Built-in and custom Llama profiles both resolve to llamaServer, so the
+        // backend policy covers overrides without depending on editable metadata.
+        #expect(!ModelHistoryPolicy.dropsCompletedToolCalls(
+            backend: .llamaServer,
+            reasoningTransport: .contextOptions
+        ))
+
+        // Preserve the established policies for compact Apple/PCC history and
+        // DeepSeek's complete provider-specific reasoning transcript.
+        #expect(ModelHistoryPolicy.dropsCompletedToolCalls(
+            backend: .foundationApple,
+            reasoningTransport: nil
+        ))
+        #expect(ModelHistoryPolicy.dropsCompletedToolCalls(
+            backend: .foundationServe,
+            reasoningTransport: .none
+        ))
+        #expect(!ModelHistoryPolicy.dropsCompletedToolCalls(
+            backend: .premium,
+            reasoningTransport: .deepseekThinking
+        ))
+    }
+
     @Test("A capability change keeps conversation turns and removes model-specific context")
     func capabilityChangeSanitizesTranscript() {
         let entries = fixtureTranscript()
