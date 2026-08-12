@@ -248,6 +248,9 @@ struct DynamicProfileTests {
         var profile = UserDynamicProfile(
             name: "Focused Direct Profile",
             baseModelID: .onDevice,
+            // Exercise repair of an explicit stale worker selection when the
+            // compatibility execution-role helper enables delegation.
+            workerModelID: "old-provider",
             greedyMode: true,
             toolIDs: [ToolCapabilityID.readFile.rawValue]
         )
@@ -322,6 +325,7 @@ struct DynamicProfileTests {
         let profile = UserDynamicProfile(
             name: "Selectable coordinator",
             baseModelID: .llama,
+            greedyMode: true,
             toolIDs: [ToolCapabilityID.readFile.rawValue]
         )
         try store.save([profile])
@@ -333,6 +337,7 @@ struct DynamicProfileTests {
 
         #expect(viewModel.draft?.usesDelegation == true)
         #expect(viewModel.draft?.workerModelID == ProfileBaseModelID.llama.rawValue)
+        #expect(viewModel.draft?.greedyMode == false)
         #expect(viewModel.draft?.toolIDs.contains(ToolCapabilityID.delegateTask.rawValue) == true)
 
         viewModel.setTool(.delegateTask, included: false)
@@ -342,6 +347,35 @@ struct DynamicProfileTests {
         #expect(viewModel.draft?.usesDelegation == false)
         #expect(viewModel.draft?.toolIDs.contains(ToolCapabilityID.delegateTask.rawValue) == false)
         #expect(viewModel.draft?.toolIDs.contains(ToolCapabilityID.readFile.rawValue) == true)
+    }
+
+    @Test("Profile validation repairs delegated sampling and worker invariants")
+    func validationRepairsDelegatedProfileInvariants() throws {
+        let blankWorker = UserDynamicProfile(
+            name: "Blank worker",
+            baseModelID: .llama,
+            workerModelID: "   ",
+            greedyMode: true,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+        let invalidWorker = UserDynamicProfile(
+            name: "Removed worker",
+            baseModelID: .llama,
+            workerModelID: "old-provider",
+            greedyMode: true,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+
+        let blankResult = try blankWorker.validated()
+        let invalidResult = try invalidWorker.validated()
+
+        // Nil remains the compatibility signal for profiles that should use
+        // the global worker preference, while an explicit stale ID is repaired
+        // to the same default used when delegation is newly enabled.
+        #expect(blankResult.workerModelID == nil)
+        #expect(invalidResult.workerModelID == ProfileBaseModelID.llama.rawValue)
+        #expect(!blankResult.greedyMode)
+        #expect(!invalidResult.greedyMode)
     }
 
     @Test("Changing a worker does not perturb the DeepSeek coordinator tool prefix")
@@ -623,6 +657,51 @@ struct DynamicProfileTests {
         )
 
         #expect(StandaloneSkills.isEnabled(for: plan))
+    }
+
+    @Test("TurboCode watermark is restricted to explicit Llama overrides")
+    func llamaWatermarkRequiresLlamaOverride() {
+        let llamaProfile = UserDynamicProfile(
+            name: "Marked local writer",
+            baseModelID: .llama,
+            toolIDs: [ToolCapabilityID.llamaWatermark.rawValue]
+        )
+        let pccProfile = UserDynamicProfile(
+            name: "Unmarked cloud writer",
+            baseModelID: .pcc,
+            toolIDs: [ToolCapabilityID.llamaWatermark.rawValue]
+        )
+        let llamaContext = ToolAccessContext(
+            hasWorkspace: true,
+            hasSkills: false,
+            hasDelegateModel: false,
+            repositoryMapDetail: .compact,
+            baseModelID: .llama
+        )
+        let pccContext = ToolAccessContext(
+            hasWorkspace: true,
+            hasSkills: false,
+            hasDelegateModel: false,
+            repositoryMapDetail: .compact,
+            baseModelID: .pcc
+        )
+
+        let llamaPlan = ModelToolCatalog.plan(
+            profile: .standalone,
+            tier: .standard,
+            context: llamaContext,
+            selectedIDs: llamaProfile.resolvedToolIDs
+        )
+        let pccPlan = ModelToolCatalog.plan(
+            profile: .standalone,
+            tier: .standard,
+            context: pccContext,
+            selectedIDs: pccProfile.resolvedToolIDs
+        )
+
+        #expect(llamaPlan.registeredIDs == [.llamaWatermark])
+        #expect(pccProfile.resolvedToolIDs.isEmpty)
+        #expect(pccPlan.registeredIDs.isEmpty)
     }
 
     private func makeRoot() throws -> URL {
