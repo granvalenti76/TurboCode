@@ -4,7 +4,7 @@ import FoundationModels
 // MARK: - File System Tool
 
 /// Operations the file system tool can perform.
-enum FileOperation: String, CaseIterable, Sendable {
+nonisolated enum FileOperation: String, CaseIterable, Sendable {
     /// List contents of a directory (safe)
     case list
     /// Get file/directory metadata (safe)
@@ -23,6 +23,16 @@ enum FileOperation: String, CaseIterable, Sendable {
     case move
     /// Permanently delete a file or directory
     case delete
+
+    /// Read-only operations can safely target the workspace root itself.
+    var allowsWorkspaceRoot: Bool {
+        switch self {
+        case .list, .info, .find:
+            true
+        case .createDirectory, .write, .append, .copy, .move, .delete:
+            false
+        }
+    }
 }
 
 // MARK: - Arguments
@@ -51,14 +61,26 @@ struct FileSystemTool: Tool {
 
     let workspaceRoot: String
     let taskScope: AgentTaskPathScope?
+    private let requestApproval: @Sendable (PendingToolApproval) async -> String
 
-    init(workspaceRoot: String, taskScope: AgentTaskPathScope? = nil) {
+    init(
+        workspaceRoot: String,
+        taskScope: AgentTaskPathScope? = nil,
+        requestApproval: @escaping @Sendable (PendingToolApproval) async -> String = {
+            await ToolApprovalRegistry.shared.request($0)
+        }
+    ) {
         self.workspaceRoot = workspaceRoot
         self.taskScope = taskScope
+        self.requestApproval = requestApproval
     }
 
     func restricted(to scope: AgentTaskPathScope) -> Self {
-        Self(workspaceRoot: workspaceRoot, taskScope: scope)
+        Self(
+            workspaceRoot: workspaceRoot,
+            taskScope: scope,
+            requestApproval: requestApproval
+        )
     }
 
     var name: String { "file_system" }
@@ -76,7 +98,7 @@ struct FileSystemTool: Tool {
         - write: Write content through TurboCode's atomic change transaction
         - append: Append content through TurboCode's atomic change transaction
         - copy: Copy a file or directory (requires destination)
-        - move: Move or rename a file or directory (requires destination)
+        - move: Move or rename a file or directory (requires destination and approval)
         - delete: Permanently delete a file or directory (requires approval)
 
         write and append require the 'content' argument and automatically produce the
@@ -102,7 +124,10 @@ struct FileSystemTool: Tool {
         // 2. Resolve paths (relative paths are resolved against workspaceRoot)
         let resolvedPath: String
         do {
-            resolvedPath = try resolveAndValidatePath(arguments.path)
+            resolvedPath = try resolveAndValidatePath(
+                arguments.path,
+                allowingWorkspaceRoot: operation.allowsWorkspaceRoot
+            )
         } catch {
             return "Error: \(error.localizedDescription)"
         }
@@ -110,7 +135,7 @@ struct FileSystemTool: Tool {
         var resolvedDest: String?
         if let dest = arguments.destination, (operation == .copy || operation == .move) {
             do {
-                resolvedDest = try resolveAndValidatePath(dest)
+                resolvedDest = try resolveAndValidatePath(dest, allowingWorkspaceRoot: false)
             } catch {
                 return "Error: \(error.localizedDescription)"
             }
@@ -120,8 +145,8 @@ struct FileSystemTool: Tool {
         switch operation {
         case .list:              return listDirectory(at: resolvedPath)
         case .info:              return fileInfo(at: resolvedPath)
-        case .find:              return findFiles(in: resolvedPath, pattern: arguments.pattern)
-        case .createDirectory:   return execute(operation: .createDirectory, path: resolvedPath, destination: nil, content: nil)
+        case .find:              return await findFiles(in: resolvedPath, pattern: arguments.pattern)
+        case .createDirectory:   return await execute(operation: .createDirectory, path: resolvedPath, destination: nil, content: nil)
         case .write:
             guard let content = arguments.content else { return "Error: 'content' is required for write." }
             return try await applyTextChange(path: resolvedPath, content: content, append: false)
@@ -130,11 +155,20 @@ struct FileSystemTool: Tool {
             return try await applyTextChange(path: resolvedPath, content: content, append: true)
         case .copy:
             guard let dest = resolvedDest else { return "Error: 'destination' is required for copy." }
-            return execute(operation: .copy, path: resolvedPath, destination: dest, content: nil)
+            return await execute(operation: .copy, path: resolvedPath, destination: dest, content: nil)
         case .move:
             guard let dest = resolvedDest else { return "Error: 'destination' is required for move." }
-            return execute(operation: .move, path: resolvedPath, destination: dest, content: nil)
-        case .delete:            return await requestDeletionApproval(path: resolvedPath)
+            return await requestMoveApproval(
+                path: resolvedPath,
+                destination: dest,
+                requestedPath: arguments.path,
+                requestedDestination: arguments.destination ?? ""
+            )
+        case .delete:
+            return await requestDeletionApproval(
+                path: resolvedPath,
+                requestedPath: arguments.path
+            )
         }
     }
 
@@ -143,9 +177,22 @@ struct FileSystemTool: Tool {
     /// Resolves a potentially relative path against the workspace root,
     /// then validates it's within the workspace boundary.
     /// Returns the resolved absolute path on success, throws on error.
-    private func resolveAndValidatePath(_ path: String) throws -> String {
-        try taskScope?.validate(path)
-        return try WorkspacePathResolver.resolve(path, within: workspaceRoot).path
+    private func resolveAndValidatePath(
+        _ path: String,
+        allowingWorkspaceRoot: Bool
+    ) throws -> String {
+        // Canonicalize before applying the delegated scope so both checks
+        // reason about the same symlink-resolved path.
+        let resolvedPath = try WorkspacePathResolver.resolve(path, within: workspaceRoot).path
+        try taskScope?.validate(resolvedPath)
+
+        if !allowingWorkspaceRoot {
+            let workspacePath = try WorkspacePathResolver.resolve(".", within: workspaceRoot).path
+            guard resolvedPath != workspacePath else {
+                throw FileSystemError.workspaceRootMutation
+            }
+        }
+        return resolvedPath
     }
 
     // MARK: - Safe Operations
@@ -197,42 +244,53 @@ struct FileSystemTool: Tool {
         """
     }
 
-    private func findFiles(in path: String, pattern: String?) -> String {
-        // Use subpathsOfDirectory to avoid the enumator async unavailability issue
-        guard let allSubpaths = try? FileManager.default.subpathsOfDirectory(atPath: path) else {
+    private func findFiles(in path: String, pattern: String?) async -> String {
+        guard let enumerator = FileManager.default.enumerator(atPath: path) else {
             return "Error: Cannot read directory '\(path)'"
         }
 
-        // Filter: only regular files (not dirs), and match pattern
+        // Enumerate lazily so a large workspace is not materialized in memory
+        // before the result limit can stop the search.
         let url = URL(fileURLWithPath: path)
         var matches: [String] = []
         let maxResults = 200
+        var truncated = false
 
-        for subpath in allSubpaths {
-            guard matches.count < maxResults else { break }
-
-            let fullPath = url.appendingPathComponent(subpath).path
-            var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: fullPath, isDirectory: &isDir), !isDir.boolValue else {
-                continue
-            }
-            guard let pattern else {
-                matches.append(subpath)
-                continue
-            }
-            let filename = (subpath as NSString).lastPathComponent
-            // Simple glob matching
+        let regex: NSRegularExpression?
+        if let pattern {
             let escaped = NSRegularExpression.escapedPattern(for: pattern)
             let regexPattern = "^" + escaped
                 .replacingOccurrences(of: "\\*", with: ".*")
                 .replacingOccurrences(of: "\\?", with: ".")
             + "$"
-            if let regex = try? NSRegularExpression(pattern: regexPattern) {
-                let range = NSRange(filename.startIndex..., in: filename)
-                if regex.firstMatch(in: filename, range: range) != nil {
-                    matches.append(subpath)
-                }
+            guard let compiled = try? NSRegularExpression(pattern: regexPattern) else {
+                return "Error: Invalid file pattern '\(pattern)'."
             }
+            regex = compiled
+        } else {
+            regex = nil
+        }
+
+        while let entry = enumerator.nextObject() {
+            guard !Task.isCancelled else { return "Search cancelled." }
+            guard let subpath = entry as? String else { continue }
+            let entryURL = url.appendingPathComponent(subpath)
+            let values = try? entryURL.resourceValues(forKeys: [.isDirectoryKey])
+            guard values?.isDirectory != true else { continue }
+
+            let filename = (subpath as NSString).lastPathComponent
+            let range = NSRange(filename.startIndex..., in: filename)
+            let matchesPattern = regex?.firstMatch(in: filename, range: range) != nil
+                || regex == nil
+            guard matchesPattern else { continue }
+
+            if matches.count == maxResults {
+                // Inspect one additional match so exactly 200 results are not
+                // incorrectly reported as truncated.
+                truncated = true
+                break
+            }
+            matches.append(subpath)
         }
 
         guard !matches.isEmpty else {
@@ -244,7 +302,7 @@ struct FileSystemTool: Tool {
         for match in matches.sorted() {
             result += "\n- \(url.appendingPathComponent(match).path)"
         }
-        if matches.count >= maxResults {
+        if truncated {
             result += "\n... (truncated, too many results)"
         }
         return result
@@ -354,28 +412,91 @@ struct FileSystemTool: Tool {
 
     // MARK: - Approval Gate
 
-    private func requestDeletionApproval(path: String) async -> String {
-        let id = UUID().uuidString
+    private func requestDeletionApproval(path: String, requestedPath: String) async -> String {
         let summary = "Delete '\(path)'. This action cannot be undone."
+        let expectedSnapshot = fileSnapshot(at: path)
         let request = PendingToolApproval(
-            id: id,
+            id: UUID().uuidString,
             operation: FileOperation.delete.rawValue,
             path: path,
             destination: nil,
             summary: summary,
-            action: { [path] in
-                deleteItem(at: path)
+            action: { [self, path, requestedPath, expectedSnapshot] in
+                do {
+                    let currentPath = try resolveAndValidatePath(
+                        requestedPath,
+                        allowingWorkspaceRoot: false
+                    )
+                    guard currentPath == path else {
+                        return "Error: The deletion target changed before approval."
+                    }
+                    guard fileSnapshot(at: currentPath) == expectedSnapshot else {
+                        return "Error: The deletion target changed before approval."
+                    }
+                    return deleteItem(at: currentPath)
+                } catch {
+                    return "Error: \(error.localizedDescription)"
+                }
             }
         )
-        await ToolApprovalRegistry.shared.register(request)
+        // Keep the model turn suspended until the user decision is resolved;
+        // the final result is then returned as the tool output directly.
+        return await requestApproval(request)
+    }
 
-        return """
-        TURBOCODE_APPROVAL_REQUIRED
-        approval_id: \(id)
-        operation: delete
-        path: \(path)
-        summary: \(summary)
-        """
+    private func requestMoveApproval(
+        path: String,
+        destination: String,
+        requestedPath: String,
+        requestedDestination: String
+    ) async -> String {
+        // Moving changes the source namespace and cannot be represented by the
+        // existing review/undo transaction, so keep it behind explicit approval.
+        let summary = "Move '\(path)' to '\(destination)'."
+        let expectedSourceSnapshot = fileSnapshot(at: path)
+        let expectedDestinationSnapshot = fileSnapshot(at: destination)
+        let request = PendingToolApproval(
+            id: UUID().uuidString,
+            operation: FileOperation.move.rawValue,
+            path: path,
+            destination: destination,
+            summary: summary,
+            action: { [self, path, destination, requestedPath, requestedDestination, expectedSourceSnapshot, expectedDestinationSnapshot] in
+                do {
+                    let currentPath = try resolveAndValidatePath(
+                        requestedPath,
+                        allowingWorkspaceRoot: false
+                    )
+                    let currentDestination = try resolveAndValidatePath(
+                        requestedDestination,
+                        allowingWorkspaceRoot: false
+                    )
+                    guard currentPath == path, currentDestination == destination else {
+                        return "Error: The move target changed before approval."
+                    }
+                    guard fileSnapshot(at: currentPath) == expectedSourceSnapshot,
+                          fileSnapshot(at: currentDestination) == expectedDestinationSnapshot else {
+                        return "Error: The move target changed before approval."
+                    }
+                    return moveItem(from: currentPath, to: currentDestination)
+                } catch {
+                    return "Error: \(error.localizedDescription)"
+                }
+            }
+        )
+        return await requestApproval(request)
+    }
+
+    private func fileSnapshot(at path: String) -> FileSnapshot? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path) else {
+            return nil
+        }
+        return FileSnapshot(
+            type: String(describing: attributes[.type]),
+            size: attributes[.size] as? UInt64,
+            creationDate: attributes[.creationDate] as? Date,
+            modificationDate: attributes[.modificationDate] as? Date
+        )
     }
 
     private func execute(
@@ -383,7 +504,7 @@ struct FileSystemTool: Tool {
         path: String,
         destination: String?,
         content: String?
-    ) -> String {
+    ) async -> String {
         switch operation {
         case .createDirectory:
             return makeDirectory(at: path)
@@ -402,7 +523,7 @@ struct FileSystemTool: Tool {
         case .info:
             return fileInfo(at: path)
         case .find:
-            return findFiles(in: path, pattern: nil)
+            return await findFiles(in: path, pattern: nil)
         }
     }
 
@@ -520,6 +641,7 @@ public struct ToolApprovalResolution: Sendable {
 enum FileSystemError: LocalizedError {
     case noWorkspace
     case outsideWorkspace(path: String, workspace: String)
+    case workspaceRootMutation
 
     var errorDescription: String? {
         switch self {
@@ -527,8 +649,17 @@ enum FileSystemError: LocalizedError {
             return "No workspace is set. Choose a workspace folder first."
         case .outsideWorkspace(let path, let workspace):
             return "Access denied: '\(path)' is outside the workspace '\(workspace)'."
+        case .workspaceRootMutation:
+            return "Access denied: mutating the workspace root itself is not allowed."
         }
     }
+}
+
+private struct FileSnapshot: Sendable, Equatable {
+    let type: String
+    let size: UInt64?
+    let creationDate: Date?
+    let modificationDate: Date?
 }
 
 // MARK: - Shared Workspace Path Validation

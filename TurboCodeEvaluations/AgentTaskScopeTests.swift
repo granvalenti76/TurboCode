@@ -129,6 +129,150 @@ struct AgentTaskScopeTests {
         #expect(listingResult.errorMessage?.contains("outside the delegated task scope") == true)
     }
 
+    @Test("Filesystem mutations cannot target the workspace root")
+    func filesystemMutationsRejectWorkspaceRoot() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let approval = FileSystemApprovalProbe()
+        let tool = FileSystemTool(
+            workspaceRoot: fixture.root.path,
+            requestApproval: { request in
+                await approval.handle(request)
+            }
+        )
+
+        let createResult = try await tool.call(
+            arguments: FileSystemArguments(
+                operation: "createDirectory",
+                path: ".",
+                destination: nil,
+                pattern: nil,
+                content: nil
+            )
+        )
+        let deleteResult = try await tool.call(
+            arguments: FileSystemArguments(
+                operation: "delete",
+                path: ".",
+                destination: nil,
+                pattern: nil,
+                content: nil
+            )
+        )
+
+        #expect(createResult.contains("workspace root itself"))
+        #expect(deleteResult.contains("workspace root itself"))
+        #expect(approval.count == 0)
+        #expect(FileManager.default.fileExists(atPath: fixture.root.path))
+    }
+
+    @Test("Delete returns the approved result through the tool call")
+    func deleteUsesSuspendingApproval() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let approval = FileSystemApprovalProbe()
+        let tool = FileSystemTool(
+            workspaceRoot: fixture.root.path,
+            requestApproval: { request in
+                await approval.handle(request)
+            }
+        )
+
+        let result = try await tool.call(
+            arguments: FileSystemArguments(
+                operation: "delete",
+                path: "Outside.swift",
+                destination: nil,
+                pattern: nil,
+                content: nil
+            )
+        )
+
+        #expect(approval.count == 1)
+        #expect(result.contains("Deleted"))
+        #expect(!result.contains("TURBOCODE_APPROVAL_REQUIRED"))
+        #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("Outside.swift").path))
+    }
+
+    @Test("Move requires approval and rejects a changed source")
+    func moveRevalidatesBeforeExecution() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let destination = fixture.root.appendingPathComponent("Moved.swift")
+        let approval = FileSystemApprovalProbe()
+        approval.beforeAction = {
+            try? "replacement with a different size\n".write(
+                to: fixture.root.appendingPathComponent("Outside.swift"),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+        let tool = FileSystemTool(
+            workspaceRoot: fixture.root.path,
+            requestApproval: { request in
+                await approval.handle(request)
+            }
+        )
+
+        let result = try await tool.call(
+            arguments: FileSystemArguments(
+                operation: "move",
+                path: "Outside.swift",
+                destination: "Moved.swift",
+                pattern: nil,
+                content: nil
+            )
+        )
+
+        #expect(approval.count == 1)
+        #expect(result.contains("changed before approval"))
+        #expect(FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("Outside.swift").path))
+        #expect(!FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    @Test("Find reports truncation only when a 201st match exists")
+    func findReportsAccurateTruncation() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        for index in 0..<200 {
+            try "file\(index)".write(
+                to: fixture.root.appendingPathComponent("Match-\(index).txt"),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+        let tool = FileSystemTool(workspaceRoot: fixture.root.path)
+        let exactResult = try await tool.call(
+            arguments: FileSystemArguments(
+                operation: "find",
+                path: ".",
+                destination: nil,
+                pattern: "*.txt",
+                content: nil
+            )
+        )
+
+        try "file200".write(
+            to: fixture.root.appendingPathComponent("Match-200.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let truncatedResult = try await tool.call(
+            arguments: FileSystemArguments(
+                operation: "find",
+                path: ".",
+                destination: nil,
+                pattern: "*.txt",
+                content: nil
+            )
+        )
+
+        #expect(exactResult.contains("Found 200 files"))
+        #expect(!exactResult.contains("truncated"))
+        #expect(truncatedResult.contains("Found 200 files"))
+        #expect(truncatedResult.contains("truncated"))
+    }
+
     @Test("Workspace-wide execution tools refuse narrow delegated scopes")
     func workspaceWideToolsRefuseNarrowScope() async throws {
         let fixture = try makeFixture()
@@ -174,5 +318,16 @@ struct AgentTaskScopeTests {
             encoding: .utf8
         )
         return (root, source)
+    }
+}
+
+private final class FileSystemApprovalProbe: @unchecked Sendable {
+    var count = 0
+    var beforeAction: (() -> Void)?
+
+    func handle(_ request: PendingToolApproval) async -> String {
+        count += 1
+        beforeAction?()
+        return await request.action()
     }
 }
