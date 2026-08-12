@@ -164,10 +164,16 @@ final class SkillsViewModel {
                 if included {
                     if !ProfileBaseModelID.delegationCases.contains(value.baseModelID) {
                         value.baseModelID = .deepseek
-                        value.greedyMode = false
                     }
-                    value.workerModelID = value.workerModelID
-                        ?? ProfileBaseModelID.llama.rawValue
+                    // The editor disables greedy mode for delegated profiles,
+                    // but this mutation must also repair a draft that already
+                    // contains the incompatible combination.
+                    value.greedyMode = false
+                    if !ProfileBaseModelID.workerCases.contains(where: {
+                        $0.rawValue == (value.workerModelID ?? "")
+                    }) {
+                        value.workerModelID = ProfileBaseModelID.llama.rawValue
+                    }
                     if !value.toolIDs.contains(id.rawValue) {
                         value.toolIDs.append(id.rawValue)
                     }

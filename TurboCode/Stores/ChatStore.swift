@@ -60,6 +60,11 @@ public final class ChatStore {
     // The currently running response task. Keeping the handle makes the Stop
     // button cancel the actual model stream rather than only changing the UI.
     private var responseTask: Task<Void, Never>?
+    // Codex selection and handoff are also transition operations. Keeping
+    // their handles here prevents navigation from observing half-switched
+    // backend state while one of them is suspended at an await.
+    private var codexSelectionTask: Task<Void, Never>?
+    private var codexHandoffTask: Task<Void, Never>?
     // MARK: - Onboarding
 
     /// Ensures the current `~/.turbocode/` layout exists and applies additive migrations.
@@ -127,9 +132,10 @@ public final class ChatStore {
     public func switchBackend(to backend: ModelBackend) {
         guard !busy, orchestratorMode == .standalone else { return }
         if backend == .codex {
-            Task { await selectCodexProfile() }
+            scheduleCodexProfileSelection()
             return
         }
+        cancelCodexSelection()
         if activeBackend == .codex {
             beginCodexHandoff(to: .backend(backend))
             return
@@ -140,6 +146,7 @@ public final class ChatStore {
 
     public func switchRemoteModel(to id: String) {
         guard !busy, orchestratorMode == .standalone else { return }
+        cancelCodexSelection()
         if activeBackend == .codex {
             beginCodexHandoff(to: .remoteModel(id))
             return
@@ -179,18 +186,58 @@ public final class ChatStore {
 
         do {
             try await codexRuntimeStore.select(modelID: modelID)
-            composerModel = activeDynamicProfile?.name
+            guard !Task.isCancelled,
+                  activeBackend == .codex,
+                  activeDynamicProfileID == dynamicProfileID else { return }
+            modelRuntimeStore.composerModel = activeDynamicProfile?.name
                 ?? "Codex · \(codexDisplayName)"
+        } catch is CancellationError {
+            return
         } catch CodexAppServerError.chatGPTLoginRequired {
+            guard !Task.isCancelled else { return }
             codexRuntimeStore.markSignedOut()
         } catch let codexError as CodexAppServerError
             where codexError.requiresChatGPTLogin {
+            guard !Task.isCancelled else { return }
             codexRuntimeStore.markSignedOut()
             self.error = nil
         } catch {
+            guard !Task.isCancelled else { return }
             codexRuntimeStore.markFailed(error.localizedDescription)
             self.error = error.localizedDescription
         }
+    }
+
+    /// Starts a cancellable Codex selection for UI callers. A later model
+    /// choice supersedes the previous request instead of allowing an older
+    /// App Server lookup to win after its await completes.
+    @discardableResult
+    func scheduleCodexProfileSelection(
+        modelID: String? = nil,
+        dynamicProfileID: UUID? = nil
+    ) -> Task<Void, Never> {
+        codexSelectionTask?.cancel()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.selectCodexProfile(
+                modelID: modelID,
+                dynamicProfileID: dynamicProfileID
+            )
+        }
+        codexSelectionTask = task
+        return task
+    }
+
+    /// Compatibility entry point for callers that only need to request a
+    /// selection and do not need to await its completion.
+    func requestCodexProfileSelection(
+        modelID: String? = nil,
+        dynamicProfileID: UUID? = nil
+    ) {
+        scheduleCodexProfileSelection(
+            modelID: modelID,
+            dynamicProfileID: dynamicProfileID
+        )
     }
 
     /// Rechecks the App Server and Luna catalog without changing the selected
@@ -198,7 +245,10 @@ public final class ChatStore {
     func retryCodexConnection() {
         guard activeBackend == .codex else { return }
         let profileID = activeDynamicProfileID
-        Task { await selectCodexProfile(dynamicProfileID: profileID) }
+        scheduleCodexProfileSelection(
+            modelID: activeDynamicProfile?.codexModelID,
+            dynamicProfileID: profileID
+        )
     }
 
     /// Starts ChatGPT OAuth through App Server, opens the system default
@@ -209,7 +259,8 @@ public final class ChatStore {
             error = nil
             do {
                 try await codexRuntimeStore.signIn()
-                composerModel = "Codex · \(codexDisplayName)"
+                modelRuntimeStore.composerModel = activeDynamicProfile?.name
+                    ?? "Codex · \(codexDisplayName)"
             } catch {
                 codexRuntimeStore.markFailed(error.localizedDescription)
                 self.error = error.localizedDescription
@@ -226,9 +277,10 @@ public final class ChatStore {
     func selectBuiltInProfile(_ id: ProfileBaseModelID) {
         guard !busy, orchestratorMode == .standalone else { return }
         if id == .codex {
-            Task { await selectCodexProfile() }
+            scheduleCodexProfileSelection()
             return
         }
+        cancelCodexSelection()
         if activeBackend == .codex {
             beginCodexHandoff(to: .builtIn(id))
             return
@@ -239,10 +291,15 @@ public final class ChatStore {
 
     func selectDynamicProfile(_ id: UUID) {
         guard !busy, orchestratorMode == .standalone else { return }
-        if dynamicProfiles.first(where: { $0.id == id })?.baseModelID == .codex {
-            Task { await selectCodexProfile(dynamicProfileID: id) }
+        if let profile = dynamicProfiles.first(where: { $0.id == id }),
+           profile.baseModelID == .codex {
+            scheduleCodexProfileSelection(
+                modelID: profile.codexModelID,
+                dynamicProfileID: profile.id
+            )
             return
         }
+        cancelCodexSelection()
         if activeBackend == .codex {
             beginCodexHandoff(to: .dynamic(id))
             return
@@ -265,11 +322,13 @@ public final class ChatStore {
         }
         modelRuntimeStore.setOrchestratorMode(.standalone)
         if profile.baseModelID == .codex {
-            Task {
-                await selectCodexProfile(dynamicProfileID: profile.id)
-            }
+            scheduleCodexProfileSelection(
+                modelID: profile.codexModelID,
+                dynamicProfileID: profile.id
+            )
             return
         }
+        cancelCodexSelection()
         guard modelRuntimeStore.selectDynamicProfile(profile.id) else { return }
         rebuildSession(discardingCapabilityContext: true)
     }
@@ -286,9 +345,10 @@ public final class ChatStore {
         let baseModel = activeDynamicProfile?.baseModelID ?? activeBaseModelID
         modelRuntimeStore.setOrchestratorMode(.standalone)
         if baseModel == .codex {
-            Task { await selectCodexProfile() }
+            scheduleCodexProfileSelection()
             return
         }
+        cancelCodexSelection()
         guard modelRuntimeStore.selectBuiltInProfile(baseModel) else { return }
         rebuildSession(discardingCapabilityContext: true)
     }
@@ -298,10 +358,13 @@ public final class ChatStore {
     /// ready, preventing a half-switched UI/runtime state.
     private func beginCodexHandoff(to selection: TurboCodeProfileSelection) {
         guard !busy, activeBackend == .codex else { return }
+        cancelCodexSelection()
         busy = true
-        Task {
+        codexHandoffTask?.cancel()
+        codexHandoffTask = Task { [weak self] in
+            guard let self else { return }
             await completeCodexHandoff(to: selection)
-            busy = false
+            self.busy = false
         }
     }
 
@@ -313,16 +376,22 @@ public final class ChatStore {
             rebuildSession(discardingCapabilityContext: true)
             return
         }
+        let handoffWorkspaceRoot = workspaceRoot
 
         let handoff = await codexRuntimeStore.prepareHandoff(
             turboThreadID: turboThreadID,
             blocks: blocks,
-            workspaceRoot: workspaceRoot
+            workspaceRoot: handoffWorkspaceRoot
         )
 
+        guard !Task.isCancelled,
+              activeThreadId == turboThreadID,
+              workspaceRoot == handoffWorkspaceRoot else {
+            return
+        }
         guard applyTurboCodeSelection(selection) else { return }
         if handoff.didSummarize {
-            blocks.append(
+            timelineStore.blocks.append(
                 ChatBlock(
                     kind: .compaction,
                     text: "Codex context summarized for the selected TurboCode profile."
@@ -457,7 +526,7 @@ public final class ChatStore {
             dismissWorkspaceListingInspector()
             workbenchStore.dismissDiffPatchReview()
         }
-        activeThreadId = id
+        conversationStore.activeThreadID = id
     }
 
     /// Opens a conversation as one navigation transition. Restoring first keeps
@@ -550,7 +619,11 @@ public final class ChatStore {
 
     /// Saves the active thread and its blocks to `~/.turbocode/sessions/<id>.json`.
     public func persistSession(for threadId: String) async {
-        guard let thread = threads.first(where: { $0.id == threadId }) else { return }
+        guard threadId == activeThreadId,
+              let thread = threads.first(where: { $0.id == threadId }) else {
+            assertionFailure("persistSession can only persist the active thread")
+            return
+        }
         let snapshot = ConversationSnapshot(
             conversation: thread,
             modelBackend: modelRuntimeStore.persistedModelIdentifier,
@@ -593,14 +666,16 @@ public final class ChatStore {
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
         dismissWorkspaceListingInspector()
         workbenchStore.dismissDiffPatchReview()
-        activeThreadId = id
+        conversationStore.activeThreadID = id
         timelineStore.restore(snapshot.blocks)
         resetAgentActivityForConversation()
         if let wp = snapshot.conversation.workspace, workspaceRoot != wp {
-            workspaceRoot = wp
+            // Restoration adopts the persisted root without starting the
+            // interactive workspace transition a second time.
+            workspaceStore.root = wp
         }
         refreshSkillsIfNeeded()
-        restoreModelSelection(snapshot.modelBackend)
+        await restoreModelSelection(snapshot.modelBackend)
         let restoredHistory = snapshot.transcript.map {
             SessionRebuildHistory.prepare(
                 $0,
@@ -611,12 +686,27 @@ public final class ChatStore {
         rebuildSession(keepingHistory: false, restoringHistory: restoredHistory)
     }
 
-    private func restoreModelSelection(_ identifier: String) {
+    private func restoreModelSelection(_ identifier: String) async {
         guard orchestratorMode == .standalone else { return }
         if identifier.hasPrefix("profile:"),
            let id = UUID(uuidString: String(identifier.dropFirst("profile:".count))),
-           dynamicProfiles.contains(where: { $0.id == id }) {
-            _ = modelRuntimeStore.selectDynamicProfile(id)
+           let profile = dynamicProfiles.first(where: { $0.id == id }) {
+            if profile.baseModelID == .codex {
+                if let turboThreadID = activeThreadId {
+                    codexRuntimeStore.restoreImportedContext(
+                        turboThreadID: turboThreadID,
+                        blocks: blocks
+                    )
+                }
+                let task = scheduleCodexProfileSelection(
+                    modelID: profile.codexModelID,
+                    dynamicProfileID: profile.id
+                )
+                await task.value
+            } else {
+                cancelCodexSelection()
+                _ = modelRuntimeStore.selectDynamicProfile(id)
+            }
             return
         }
         if identifier == ModelBackend.codex.rawValue {
@@ -627,12 +717,14 @@ public final class ChatStore {
                     blocks: blocks
                 )
             }
-            Task { await selectCodexProfile() }
+            let task = scheduleCodexProfileSelection()
+            await task.value
             return
         }
+        cancelCodexSelection()
         if identifier == ModelBackend.foundationApple.rawValue {
             _ = modelRuntimeStore.selectBuiltInProfile(.onDevice)
-            composerModel = ModelBackend.foundationApple.rawValue
+            modelRuntimeStore.composerModel = ModelBackend.foundationApple.rawValue
             return
         }
 
@@ -689,7 +781,7 @@ public final class ChatStore {
         // the original transition always cleared that conversation's timeline.
         guard deletesActiveThread else { return }
 
-        activeThreadId = nil
+        conversationStore.activeThreadID = nil
         timelineStore.reset()
         resetAgentActivityForConversation()
 
@@ -698,7 +790,7 @@ public final class ChatStore {
             if activeThreadId == nil {
                 // A never-persisted draft has no snapshot to restore but remains
                 // a valid next selection with a fresh model session.
-                activeThreadId = nextThreadID
+                conversationStore.activeThreadID = nextThreadID
                 rebuildSession(keepingHistory: false)
             }
         } else {
@@ -719,7 +811,7 @@ public final class ChatStore {
         }
 
         if removedActiveWorkspace {
-            rightPanelMode = nil
+            workbenchStore.rightPanelMode = nil
             rebuildSession(keepingHistory: false)
         }
 
@@ -762,7 +854,7 @@ public final class ChatStore {
         refreshSkillsIfNeeded()
         rebuildSession(discardingCapabilityContext: true)
         // The inspector is opt-in: changing workspace must not open it.
-        rightPanelMode = nil
+        workbenchStore.rightPanelMode = nil
         Task { await reloadDiffs() }
         Task { await refreshGitBranches() }
     }
@@ -773,7 +865,7 @@ public final class ChatStore {
             await finishActiveResponseBeforeTransition()
             workspaceStore.clearWorkspace()
             rebuildSession(discardingCapabilityContext: true)
-            rightPanelMode = nil
+            workbenchStore.rightPanelMode = nil
         }
     }
 
@@ -1074,7 +1166,7 @@ public final class ChatStore {
             ),
             modelName: composerModel
         )
-        composerModel = activeDynamicProfile?.name
+        modelRuntimeStore.composerModel = activeDynamicProfile?.name
             ?? "Codex · \(codexDisplayName)"
         error = result.errorMessage
         if result.touchedConversation {
@@ -1132,10 +1224,11 @@ public final class ChatStore {
 
     public func interrupt() {
         responseTask?.cancel()
+        let shouldInterruptCodex = activeBackend == .codex
         let approvals = toolInteractionStore.takeAllApprovals()
         toolInteractionStore.clearActivities()
         Task {
-            if activeBackend == .codex {
+            if shouldInterruptCodex {
                 await codexRuntimeStore.interrupt()
             }
             // Stop is terminal for the current response. Reject every approval
@@ -1202,6 +1295,7 @@ public final class ChatStore {
     /// then inform the model that the action completed.
     public func approveAction() {
         guard let request = toolInteractionStore.takePendingApproval() else { return }
+        let conversationID = activeThreadId
 
         Task {
             do {
@@ -1217,13 +1311,16 @@ public final class ChatStore {
             }
             let resolution = await ToolApprovalRegistry.shared.approve(id: request.id)
             if resolution.requiresModelFollowUp {
-                await sendInternalMessageWhenIdle("""
+                await sendInternalMessageWhenIdle(
+                    conversationID: conversationID,
+                    text: """
                 [User approved tool action]
                 Operation: \(request.operation)
                 Path: \(request.path)
                 Result:
                 \(resolution.result)
-                """)
+                """
+                )
             }
         }
     }
@@ -1231,6 +1328,7 @@ public final class ChatStore {
     /// Reject a pending tool operation.
     public func rejectAction() {
         guard let request = toolInteractionStore.takePendingApproval() else { return }
+        let conversationID = activeThreadId
         Task {
             do {
                 if try await codexRuntimeStore.resolveApproval(
@@ -1248,7 +1346,10 @@ public final class ChatStore {
             }
             let resolution = await ToolApprovalRegistry.shared.reject(id: request.id)
             if resolution.requiresModelFollowUp {
-                await sendInternalMessageWhenIdle("[User rejected tool action: \(request.summary). Do NOT perform this action.]")
+                await sendInternalMessageWhenIdle(
+                    conversationID: conversationID,
+                    text: "[User rejected tool action: \(request.summary). Do NOT perform this action.]"
+                )
             }
         }
     }
@@ -1263,10 +1364,20 @@ public final class ChatStore {
         toolInteractionStore.dismissApproval(id: id)
     }
 
-    private func sendInternalMessageWhenIdle(_ text: String) async {
+    private func sendInternalMessageWhenIdle(
+        conversationID: String?,
+        text: String
+    ) async {
         while busy {
-            try? await Task.sleep(nanoseconds: 100_000_000)
+            guard !Task.isCancelled else { return }
+            do {
+                try await Task.sleep(nanoseconds: 100_000_000)
+            } catch {
+                return
+            }
         }
+        guard !Task.isCancelled,
+              activeThreadId == conversationID else { return }
         await sendMessage(text, visibleInTimeline: false)
     }
 
@@ -1430,16 +1541,33 @@ public final class ChatStore {
         }
     }
 
+    private func cancelCodexSelection() {
+        codexSelectionTask?.cancel()
+        codexSelectionTask = nil
+    }
+
     /// Navigation and workspace changes are transaction boundaries for a live
     /// response. Waiting for the cancelled task to finish lets its final
     /// persistence pass target the old conversation before the new timeline or
     /// workspace is installed.
     private func finishActiveResponseBeforeTransition() async {
-        guard let responseTask else { return }
-        responseTask.cancel()
-        await responseTask.value
-        if self.responseTask != nil {
-            self.responseTask = nil
+        if let selectionTask = codexSelectionTask {
+            selectionTask.cancel()
+            await selectionTask.value
+            codexSelectionTask = nil
+        }
+        if let responseTask {
+            responseTask.cancel()
+            await responseTask.value
+            if self.responseTask != nil {
+                self.responseTask = nil
+                busy = false
+            }
+        }
+        if let handoffTask = codexHandoffTask {
+            handoffTask.cancel()
+            await handoffTask.value
+            codexHandoffTask = nil
             busy = false
         }
     }

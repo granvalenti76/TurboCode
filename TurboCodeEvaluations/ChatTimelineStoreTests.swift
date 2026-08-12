@@ -145,7 +145,10 @@ struct ChatTimelineStoreTests {
             } onChange: {
                 observed()
             }
-            store.blocks.append(ChatBlock(kind: .assistant, text: "Observed"))
+            // Seed the bounded timeline owner; the façade only projects it.
+            store.timelineStore.blocks.append(
+                ChatBlock(kind: .assistant, text: "Observed")
+            )
         }
 
         #expect(store.blocks.map(\.text) == ["Observed"])

@@ -7,11 +7,24 @@ formats continue to evolve before 1.0.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-12
+
+> **Compatibility warning:** This version works only with macOS 27 beta 5.
+> For earlier macOS 27 beta versions, use TurboCode 0.3.0.
+
 ### Fixed
 
 - Restored Xcode 27 beta 5 builds by temporarily using a documented local copy
   of Apple Foundation Models Utilities without the removed
   `Transcript.Segment.custom` case.
+- Hardened ChatStore and profile transitions, including safer dynamic-profile
+  restoration, capability validation, and regression coverage for profile
+  changes.
+- Restricted ChatStoreFacade mutations to their owning stores, keeping domain
+  projections read-only while preserving the UI state that the facade owns.
+- Hardened `file_system` mutations by blocking workspace-root changes, using
+  suspending approvals for delete and move, revalidating targets before
+  execution, and making file search lazy with accurate result truncation.
 
 ## [0.3.0] - 2026-08-10
 

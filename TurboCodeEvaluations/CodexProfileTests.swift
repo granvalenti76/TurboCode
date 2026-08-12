@@ -13,15 +13,17 @@ struct CodexProfileTests {
     @MainActor
     func codexIsNotSendableBeforeRuntimeIsReady() {
         let store = ChatStore()
-        store.activeBackend = .codex
+        // This is a runtime fixture, so seed the bounded owners directly
+        // instead of exposing a façade mutation path.
+        store.modelRuntimeStore.activeBackend = .codex
 
-        store.codexConnectionState = .connecting
+        store.codexRuntimeStore.connectionState = .connecting
         #expect(!store.activeProfileCanSend)
 
-        store.codexConnectionState = .signedOut
+        store.codexRuntimeStore.connectionState = .signedOut
         #expect(!store.activeProfileCanSend)
 
-        store.codexConnectionState = .ready(planType: "plus")
+        store.codexRuntimeStore.connectionState = .ready(planType: "plus")
         #expect(store.activeProfileCanSend)
     }
 

@@ -8,11 +8,13 @@ struct ConversationTitleRegressionTests {
     @Test("Generated title updates its initiating conversation after navigation")
     func generatedTitleUsesStableThreadIdentity() {
         let store = ChatStore(conversationRepository: EmptyConversationRepository())
-        store.threads = [
+        // Seed the owning stores directly; façade projections intentionally
+        // cannot mutate catalog or selection state.
+        store.conversationStore.threads = [
             Conversation(id: "initiating", title: "New Chat", workspace: "/Work/First"),
             Conversation(id: "active", title: "New Chat", workspace: "/Work/Second")
         ]
-        store.activeThreadId = "active"
+        store.conversationStore.activeThreadID = "active"
 
         store.applyGeneratedTitle("Refine native sidebar", to: "initiating")
 
@@ -23,7 +25,7 @@ struct ConversationTitleRegressionTests {
     @Test("Generated title is visible in global and workspace collections")
     func generatedTitlePropagatesThroughSidebarCollections() {
         let store = ChatStore(conversationRepository: EmptyConversationRepository())
-        store.threads = [
+        store.conversationStore.threads = [
             Conversation(id: "session", title: "New Chat", workspace: "/Work/TurboCode")
         ]
 
@@ -37,7 +39,7 @@ struct ConversationTitleRegressionTests {
     @Test("Generated title does not replace a manual rename")
     func generatedTitlePreservesManualRename() {
         let store = ChatStore(conversationRepository: EmptyConversationRepository())
-        store.threads = [Conversation(id: "session", title: "Manual title")]
+        store.conversationStore.threads = [Conversation(id: "session", title: "Manual title")]
 
         store.applyGeneratedTitle("Generated title", to: "session")
 

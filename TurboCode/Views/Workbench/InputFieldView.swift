@@ -380,7 +380,7 @@ struct InputFieldView: View {
             Section("Model") {
                 if chatStore.codexModels.isEmpty {
                     Button {
-                        Task { await chatStore.selectCodexProfile() }
+                        chatStore.requestCodexProfileSelection()
                     } label: {
                         if chatStore.activeBackend == .codex {
                             Label(
@@ -395,11 +395,9 @@ struct InputFieldView: View {
                 } else {
                     ForEach(chatStore.codexModels) { model in
                         Button {
-                            Task {
-                                await chatStore.selectCodexProfile(
-                                    modelID: model.id
-                                )
-                            }
+                            chatStore.requestCodexProfileSelection(
+                                modelID: model.id
+                            )
                         } label: {
                             if chatStore.activeBackend == .codex,
                                chatStore.codexModel?.id == model.id {

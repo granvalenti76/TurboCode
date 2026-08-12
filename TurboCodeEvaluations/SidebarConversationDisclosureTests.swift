@@ -45,9 +45,13 @@ struct SidebarConversationDisclosureTests {
             )
         )
         let store = ChatStore(conversationRepository: repository)
-        store.threads = [conversation]
-        store.blocks = [ChatBlock(kind: .assistant, text: "Stale timeline")]
-        store.route = .tools
+        // Seed the bounded stores directly; navigation itself remains command
+        // based through openThread and setRoute.
+        store.conversationStore.threads = [conversation]
+        store.timelineStore.restore([
+            ChatBlock(kind: .assistant, text: "Stale timeline")
+        ])
+        store.workbenchStore.route = .tools
 
         await store.openThread(conversation.id)
 

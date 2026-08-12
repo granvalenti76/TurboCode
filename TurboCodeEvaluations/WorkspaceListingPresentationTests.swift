@@ -36,14 +36,14 @@ struct WorkspaceListingPresentationTests {
     func receiptSelectsInspectorSnapshot() {
         let store = ChatStore(conversationRepository: ListingConversationRepository())
         let listing = makeListing()
-        store.blocks = [
+        store.timelineStore.restore([
             ChatBlock(
                 id: "listing-block",
                 kind: .workspaceListing,
                 text: ".",
                 workspaceListing: listing
             )
-        ]
+        ])
 
         store.reviewWorkspaceListing("listing-block")
 
@@ -56,7 +56,7 @@ struct WorkspaceListingPresentationTests {
     func activityReceiptSelectsInspectorSnapshot() {
         let store = ChatStore(conversationRepository: ListingConversationRepository())
         let listing = makeListing()
-        store.blocks = [listingBlock(listing)]
+        store.timelineStore.restore([listingBlock(listing)])
 
         #expect(store.canOpenActivityReceipt(listing.toolCallID))
         #expect(store.openActivityReceipt(listing.toolCallID))
@@ -69,7 +69,7 @@ struct WorkspaceListingPresentationTests {
     func workspaceListingDismissalIsScoped() {
         let store = ChatStore(conversationRepository: ListingConversationRepository())
         let listing = makeListing()
-        store.blocks = [listingBlock(listing)]
+        store.timelineStore.restore([listingBlock(listing)])
         store.reviewWorkspaceListing("listing-block")
 
         store.dismissWorkspaceListingInspector()
@@ -77,7 +77,7 @@ struct WorkspaceListingPresentationTests {
         #expect(store.rightPanelMode == nil)
         #expect(store.inspectedWorkspaceListingID == nil)
 
-        store.rightPanelMode = .changes
+        store.workbenchStore.rightPanelMode = .changes
         store.dismissWorkspaceListingInspector()
         #expect(store.rightPanelMode == .changes)
     }

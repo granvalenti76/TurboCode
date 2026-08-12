@@ -230,9 +230,14 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
             if !ProfileBaseModelID.delegationCases.contains(baseModelID) {
                 baseModelID = .deepseek
             }
-            // New routes are self-contained. Older routes may still carry nil
-            // until edited, at which point the visible default becomes explicit.
-            workerModelID = workerModelID ?? ProfileBaseModelID.llama.rawValue
+            // Enabling the route makes the worker selection self-contained.
+            // Invalid legacy IDs are treated like an omitted selection so a
+            // removed provider cannot remain embedded in a new route.
+            if !ProfileBaseModelID.workerCases.contains(where: {
+                $0.rawValue == (workerModelID ?? "")
+            }) {
+                workerModelID = ProfileBaseModelID.llama.rawValue
+            }
             greedyMode = false
             if !toolIDs.contains(ToolCapabilityID.delegateTask.rawValue) {
                 toolIDs.append(ToolCapabilityID.delegateTask.rawValue)
@@ -246,6 +251,11 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         value.summary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
         value.workerModelID = workerModelID?
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.workerModelID?.isEmpty == true {
+            // Keep empty values equivalent to the pre-M4.3 nil state instead
+            // of persisting a second representation of "use the fallback".
+            value.workerModelID = nil
+        }
         value.codexModelID = codexModelID?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if value.codexModelID?.isEmpty == true {
@@ -255,6 +265,18 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         guard value.name.count <= 64 else { throw UserDynamicProfileError.nameTooLong }
         value.toolIDs = toolIDs.uniqued()
         value.skillIDs = skillIDs.uniqued()
+        if value.usesDelegation {
+            // Delegated profiles use a worker route, so greedy sampling on the
+            // coordinator is an invalid persisted combination. Preserve nil
+            // for legacy worker selection, but repair an explicit stale ID.
+            value.greedyMode = false
+            if let workerModelID = value.workerModelID,
+               !ProfileBaseModelID.workerCases.contains(where: {
+                   $0.rawValue == workerModelID
+               }) {
+                value.workerModelID = ProfileBaseModelID.llama.rawValue
+            }
+        }
         value.workerToolIDs = workerToolIDs?
             .filter { id in
                 guard let capability = ToolCapabilityID(rawValue: id) else {

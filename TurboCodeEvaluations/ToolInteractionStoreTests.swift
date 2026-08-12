@@ -94,7 +94,9 @@ struct ToolInteractionStoreTests {
             } onChange: {
                 observed()
             }
-            store.toolActivities.append(
+            // Seed the bounded owner directly; the façade only projects
+            // activity state for consumers.
+            store.toolInteractionStore.activities.append(
                 ToolActivity(id: "observed", summary: "Reading workspace")
             )
         }

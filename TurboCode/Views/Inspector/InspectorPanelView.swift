@@ -1388,8 +1388,7 @@ private struct WorkspaceListingInspectorView: View {
             .help("Copy directory path")
 
             Button {
-                chatStore.inspectedWorkspaceListingID = nil
-                chatStore.rightPanelMode = nil
+                chatStore.dismissWorkspaceListingInspector()
             } label: {
                 Image(systemName: "xmark")
             }
@@ -1540,7 +1539,7 @@ private struct GitCommitInspectorView: View {
             .help("Copy commit hash")
 
             Button {
-                chatStore.rightPanelMode = nil
+                chatStore.closeRightPanel()
             } label: {
                 Image(systemName: "xmark")
             }
@@ -1635,7 +1634,7 @@ struct FileInspectorView: View {
             .help("Refresh changes")
 
             Button {
-                chatStore.rightPanelMode = nil
+                chatStore.closeRightPanel()
             } label: {
                 Image(systemName: "xmark")
             }
