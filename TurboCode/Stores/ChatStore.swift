@@ -189,7 +189,7 @@ public final class ChatStore {
             guard !Task.isCancelled,
                   activeBackend == .codex,
                   activeDynamicProfileID == dynamicProfileID else { return }
-            composerModel = activeDynamicProfile?.name
+            modelRuntimeStore.composerModel = activeDynamicProfile?.name
                 ?? "Codex · \(codexDisplayName)"
         } catch is CancellationError {
             return
@@ -259,7 +259,7 @@ public final class ChatStore {
             error = nil
             do {
                 try await codexRuntimeStore.signIn()
-                composerModel = activeDynamicProfile?.name
+                modelRuntimeStore.composerModel = activeDynamicProfile?.name
                     ?? "Codex · \(codexDisplayName)"
             } catch {
                 codexRuntimeStore.markFailed(error.localizedDescription)
@@ -391,7 +391,7 @@ public final class ChatStore {
         }
         guard applyTurboCodeSelection(selection) else { return }
         if handoff.didSummarize {
-            blocks.append(
+            timelineStore.blocks.append(
                 ChatBlock(
                     kind: .compaction,
                     text: "Codex context summarized for the selected TurboCode profile."
@@ -526,7 +526,7 @@ public final class ChatStore {
             dismissWorkspaceListingInspector()
             workbenchStore.dismissDiffPatchReview()
         }
-        activeThreadId = id
+        conversationStore.activeThreadID = id
     }
 
     /// Opens a conversation as one navigation transition. Restoring first keeps
@@ -666,11 +666,13 @@ public final class ChatStore {
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
         dismissWorkspaceListingInspector()
         workbenchStore.dismissDiffPatchReview()
-        activeThreadId = id
+        conversationStore.activeThreadID = id
         timelineStore.restore(snapshot.blocks)
         resetAgentActivityForConversation()
         if let wp = snapshot.conversation.workspace, workspaceRoot != wp {
-            workspaceRoot = wp
+            // Restoration adopts the persisted root without starting the
+            // interactive workspace transition a second time.
+            workspaceStore.root = wp
         }
         refreshSkillsIfNeeded()
         await restoreModelSelection(snapshot.modelBackend)
@@ -722,7 +724,7 @@ public final class ChatStore {
         cancelCodexSelection()
         if identifier == ModelBackend.foundationApple.rawValue {
             _ = modelRuntimeStore.selectBuiltInProfile(.onDevice)
-            composerModel = ModelBackend.foundationApple.rawValue
+            modelRuntimeStore.composerModel = ModelBackend.foundationApple.rawValue
             return
         }
 
@@ -779,7 +781,7 @@ public final class ChatStore {
         // the original transition always cleared that conversation's timeline.
         guard deletesActiveThread else { return }
 
-        activeThreadId = nil
+        conversationStore.activeThreadID = nil
         timelineStore.reset()
         resetAgentActivityForConversation()
 
@@ -788,7 +790,7 @@ public final class ChatStore {
             if activeThreadId == nil {
                 // A never-persisted draft has no snapshot to restore but remains
                 // a valid next selection with a fresh model session.
-                activeThreadId = nextThreadID
+                conversationStore.activeThreadID = nextThreadID
                 rebuildSession(keepingHistory: false)
             }
         } else {
@@ -809,7 +811,7 @@ public final class ChatStore {
         }
 
         if removedActiveWorkspace {
-            rightPanelMode = nil
+            workbenchStore.rightPanelMode = nil
             rebuildSession(keepingHistory: false)
         }
 
@@ -852,7 +854,7 @@ public final class ChatStore {
         refreshSkillsIfNeeded()
         rebuildSession(discardingCapabilityContext: true)
         // The inspector is opt-in: changing workspace must not open it.
-        rightPanelMode = nil
+        workbenchStore.rightPanelMode = nil
         Task { await reloadDiffs() }
         Task { await refreshGitBranches() }
     }
@@ -863,7 +865,7 @@ public final class ChatStore {
             await finishActiveResponseBeforeTransition()
             workspaceStore.clearWorkspace()
             rebuildSession(discardingCapabilityContext: true)
-            rightPanelMode = nil
+            workbenchStore.rightPanelMode = nil
         }
     }
 
@@ -1164,7 +1166,7 @@ public final class ChatStore {
             ),
             modelName: composerModel
         )
-        composerModel = activeDynamicProfile?.name
+        modelRuntimeStore.composerModel = activeDynamicProfile?.name
             ?? "Codex · \(codexDisplayName)"
         error = result.errorMessage
         if result.touchedConversation {

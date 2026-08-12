@@ -35,7 +35,8 @@ struct ConversationDeletionTests {
             deletionFailure: .denied
         )
         let store = ChatStore(conversationRepository: repository)
-        store.threads = [conversation]
+        // Seed the owning catalog directly; the public façade is read-only.
+        store.conversationStore.threads = [conversation]
 
         await store.deleteThread(id: conversation.id)
 
@@ -57,9 +58,13 @@ struct ConversationDeletionTests {
             snapshots: [makeSnapshot(deleted), retainedSnapshot]
         )
         let store = ChatStore(conversationRepository: repository)
-        store.threads = [deleted, retained]
-        store.activeThreadId = deleted.id
-        store.blocks = [ChatBlock(kind: .assistant, text: "Deleted timeline")]
+        // Test setup bypasses UI commands while keeping production projections
+        // read-only and the bounded stores explicit.
+        store.conversationStore.threads = [deleted, retained]
+        store.conversationStore.activeThreadID = deleted.id
+        store.timelineStore.restore([
+            ChatBlock(kind: .assistant, text: "Deleted timeline")
+        ])
 
         await store.deleteThread(id: deleted.id)
 

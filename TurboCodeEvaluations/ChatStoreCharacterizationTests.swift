@@ -78,7 +78,8 @@ struct ChatStoreCharacterizationTests {
             conversationRepository: CharacterizationConversationRepository(),
             gitService: gitService
         )
-        store.workspaceRoot = "/tmp/project"
+        // Seed the bounded workspace owner instead of mutating the façade.
+        store.workspaceStore.selectWorkspace("/tmp/project")
 
         await store.refreshGitBranches()
 
@@ -98,7 +99,7 @@ struct ChatStoreCharacterizationTests {
             conversationRepository: CharacterizationConversationRepository(),
             gitService: gitService
         )
-        store.workspaceRoot = "/tmp/project"
+        store.workspaceStore.selectWorkspace("/tmp/project")
 
         await store.switchToBranch("feature/refactor")
 
@@ -118,7 +119,7 @@ struct ChatStoreCharacterizationTests {
             conversationRepository: CharacterizationConversationRepository(),
             gitService: gitService
         )
-        store.workspaceRoot = "/tmp/project"
+        store.workspaceStore.selectWorkspace("/tmp/project")
 
         await confirmation("Nested workspace mutation is observed") { observed in
             withObservationTracking {

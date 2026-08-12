@@ -256,8 +256,7 @@ final class SkillsViewModel {
             hasWorkspace: true,
             hasSkills: true,
             hasDelegateModel: true,
-            repositoryMapDetail: remote?.repositoryMap.detail,
-            baseModelID: workerID
+            repositoryMapDetail: remote?.repositoryMap.detail
         )
         return ModelToolCatalog.plan(
             profile: .delegate,
@@ -278,8 +277,7 @@ final class SkillsViewModel {
             hasWorkspace: true,
             hasSkills: true,
             hasDelegateModel: true,
-            repositoryMapDetail: remote?.repositoryMap.detail,
-            baseModelID: id
+            repositoryMapDetail: remote?.repositoryMap.detail
         )
         let defaults = ModelToolCatalog.plan(profile: .standalone, tier: tier, context: context).registeredIDs
         var compatible = ModelToolCatalog.plan(

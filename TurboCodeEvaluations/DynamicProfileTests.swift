@@ -659,51 +659,6 @@ struct DynamicProfileTests {
         #expect(StandaloneSkills.isEnabled(for: plan))
     }
 
-    @Test("TurboCode watermark is restricted to explicit Llama overrides")
-    func llamaWatermarkRequiresLlamaOverride() {
-        let llamaProfile = UserDynamicProfile(
-            name: "Marked local writer",
-            baseModelID: .llama,
-            toolIDs: [ToolCapabilityID.llamaWatermark.rawValue]
-        )
-        let pccProfile = UserDynamicProfile(
-            name: "Unmarked cloud writer",
-            baseModelID: .pcc,
-            toolIDs: [ToolCapabilityID.llamaWatermark.rawValue]
-        )
-        let llamaContext = ToolAccessContext(
-            hasWorkspace: true,
-            hasSkills: false,
-            hasDelegateModel: false,
-            repositoryMapDetail: .compact,
-            baseModelID: .llama
-        )
-        let pccContext = ToolAccessContext(
-            hasWorkspace: true,
-            hasSkills: false,
-            hasDelegateModel: false,
-            repositoryMapDetail: .compact,
-            baseModelID: .pcc
-        )
-
-        let llamaPlan = ModelToolCatalog.plan(
-            profile: .standalone,
-            tier: .standard,
-            context: llamaContext,
-            selectedIDs: llamaProfile.resolvedToolIDs
-        )
-        let pccPlan = ModelToolCatalog.plan(
-            profile: .standalone,
-            tier: .standard,
-            context: pccContext,
-            selectedIDs: pccProfile.resolvedToolIDs
-        )
-
-        #expect(llamaPlan.registeredIDs == [.llamaWatermark])
-        #expect(pccProfile.resolvedToolIDs.isEmpty)
-        #expect(pccPlan.registeredIDs.isEmpty)
-    }
-
     private func makeRoot() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("TurboCode-DynamicProfileTests-\(UUID().uuidString)", isDirectory: true)

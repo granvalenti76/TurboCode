@@ -7,17 +7,17 @@ import SwiftUI
 ///
 /// These properties intentionally contain no behavior: each forwards to the
 /// bounded store that owns the state. Views can migrate incrementally without
-/// forcing ChatStore to regain ownership of those responsibilities.
+/// forcing ChatStore to regain ownership of those responsibilities. Domain
+/// transitions remain command-only so a view cannot change one projection
+/// without rebuilding the related session, timeline, or runtime state.
 @MainActor
 extension ChatStore {
     public var threads: [Conversation] {
-        get { conversationStore.threads }
-        set { conversationStore.threads = newValue }
+        conversationStore.threads
     }
 
     public var activeThreadId: String? {
-        get { conversationStore.activeThreadID }
-        set { conversationStore.activeThreadID = newValue }
+        conversationStore.activeThreadID
     }
 
     public var threadSearch: String {
@@ -31,23 +31,19 @@ extension ChatStore {
     }
 
     public var blocks: [ChatBlock] {
-        get { timelineStore.blocks }
-        set { timelineStore.blocks = newValue }
+        timelineStore.blocks
     }
 
     public var liveReasoning: String {
-        get { timelineStore.liveReasoning }
-        set { timelineStore.liveReasoning = newValue }
+        timelineStore.liveReasoning
     }
 
     public var liveAssistant: String {
-        get { timelineStore.liveAssistant }
-        set { timelineStore.liveAssistant = newValue }
+        timelineStore.liveAssistant
     }
 
     public var toolActivities: [ToolActivity] {
-        get { toolInteractionStore.activities }
-        set { toolInteractionStore.activities = newValue }
+        toolInteractionStore.activities
     }
 
     public var activeToolActivity: ToolActivity? {
@@ -61,23 +57,19 @@ extension ChatStore {
     }
 
     public var isFirstMessage: Bool {
-        get { timelineStore.isFirstMessage }
-        set { timelineStore.isFirstMessage = newValue }
+        timelineStore.isFirstMessage
     }
 
     public var pendingApproval: ApprovalRequest? {
-        get { toolInteractionStore.pendingApproval }
-        set { toolInteractionStore.pendingApproval = newValue }
+        toolInteractionStore.pendingApproval
     }
 
     public var composerModel: String {
-        get { modelRuntimeStore.composerModel }
-        set { modelRuntimeStore.composerModel = newValue }
+        modelRuntimeStore.composerModel
     }
 
     public var route: AppRoute {
-        get { workbenchStore.route }
-        set { workbenchStore.route = newValue }
+        workbenchStore.route
     }
 
     public var isCustomProfilesPresented: Bool {
@@ -101,8 +93,7 @@ extension ChatStore {
     }
 
     public var rightPanelMode: RightPanelMode? {
-        get { workbenchStore.rightPanelMode }
-        set { workbenchStore.rightPanelMode = newValue }
+        workbenchStore.rightPanelMode
     }
 
     public var rightPanelVisible: Bool {
@@ -115,13 +106,11 @@ extension ChatStore {
     }
 
     public var inspectedGitCommit: GitCommitBlock? {
-        get { workbenchStore.inspectedGitCommit }
-        set { workbenchStore.inspectedGitCommit = newValue }
+        workbenchStore.inspectedGitCommit
     }
 
     public var inspectedWorkspaceListingID: String? {
-        get { workbenchStore.inspectedWorkspaceListingID }
-        set { workbenchStore.inspectedWorkspaceListingID = newValue }
+        workbenchStore.inspectedWorkspaceListingID
     }
 
     public var inspectedWorkspaceListing: WorkspaceListingBlock? {
@@ -131,8 +120,7 @@ extension ChatStore {
     }
 
     public var workspaceRoot: String {
-        get { workspaceStore.root }
-        set { workspaceStore.root = newValue }
+        workspaceStore.root
     }
 
     public var workspaceLabel: String {
@@ -140,8 +128,7 @@ extension ChatStore {
     }
 
     public var recentWorkspaces: [String] {
-        get { workspaceStore.recentWorkspaces }
-        set { workspaceStore.recentWorkspaces = newValue }
+        workspaceStore.recentWorkspaces
     }
 
     public var selectedProject: String? {
@@ -150,8 +137,7 @@ extension ChatStore {
     }
 
     public var activeBackend: ModelBackend {
-        get { modelRuntimeStore.activeBackend }
-        set { modelRuntimeStore.activeBackend = newValue }
+        modelRuntimeStore.activeBackend
     }
 
     public var agentTuning: AgentTuningConfig {
@@ -195,8 +181,7 @@ extension ChatStore {
     }
 
     var codexConnectionState: CodexConnectionState {
-        get { codexRuntimeStore.connectionState }
-        set { codexRuntimeStore.connectionState = newValue }
+        codexRuntimeStore.connectionState
     }
 
     var codexModel: CodexModelDescriptor? {

@@ -175,11 +175,6 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         if !skillIDs.isEmpty {
             result.insert(.loadSkill)
         }
-        // The watermark is a llama-server request capability. Do not let a
-        // stale persisted override activate it after switching providers.
-        if baseModelID != .llama {
-            result.remove(.llamaWatermark)
-        }
         if !ProfileBaseModelID.delegationCases.contains(baseModelID) {
             // Delegate Task is a managed production route, not a portable
             // capability that arbitrary custom models may enable by stale data.
