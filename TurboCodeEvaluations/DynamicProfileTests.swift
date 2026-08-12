@@ -530,6 +530,33 @@ struct DynamicProfileTests {
         #expect(Set(names).count == names.count)
     }
 
+    @Test("Llama tool definitions keep their order across profile rebuilds")
+    func llamaToolDefinitionOrderIsStable() throws {
+        let firstBuiltIn = try llamaToolNames(profile: nil)
+        let secondBuiltIn = try llamaToolNames(profile: nil)
+
+        #expect(firstBuiltIn == secondBuiltIn)
+        #expect(Set(firstBuiltIn).count == firstBuiltIn.count)
+
+        let override = UserDynamicProfile(
+            name: "Cache-stable Llama",
+            baseModelID: .llama,
+            // Deliberately avoid catalog order: selected sets must still resolve
+            // through ToolCapabilityID.allCases before tools reach the wire.
+            toolIDs: [
+                ToolCapabilityID.editFile.rawValue,
+                ToolCapabilityID.git.rawValue,
+                ToolCapabilityID.readFile.rawValue,
+                ToolCapabilityID.listWorkspace.rawValue,
+            ]
+        )
+        let firstOverride = try llamaToolNames(profile: override)
+        let secondOverride = try llamaToolNames(profile: override)
+
+        #expect(firstOverride == secondOverride)
+        #expect(firstOverride == ["list_workspace", "read_file", "git", "edit_file"])
+    }
+
     @Test("A remove-only profile exposes exactly the flat removal tool")
     func removeOnlyProfileCreatesOneInstance() {
         let profile = UserDynamicProfile(
@@ -664,6 +691,41 @@ struct DynamicProfileTests {
             .appendingPathComponent("TurboCode-DynamicProfileTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+
+    private func llamaToolNames(profile: UserDynamicProfile?) throws -> [String] {
+        let session = ModelSessionFactory.makeSession(
+            configuration: ModelSessionConfiguration(
+                backend: .llamaServer,
+                activeRemoteModel: .fallbackLlama,
+                delegateRemoteModel: .fallbackLlama,
+                orchestratorMode: .standalone,
+                workspaceRoot: "/tmp/workspace",
+                agentTuning: .default,
+                availableSkills: [],
+                activeDynamicProfile: profile,
+                skillActivations: SkillActivations(),
+                reasoningLevel: nil,
+                delegateReasoningLevel: nil,
+                activeTemperature: nil,
+                delegateTemperature: nil,
+                delegateToolIDs: nil,
+                dropsCompletedToolCalls: false,
+                workspaceInstructions: nil
+            ),
+            history: [],
+            events: ModelSessionEvents(
+                toolStarted: { _, _, _ in },
+                toolFinished: { _, _, _, _ in },
+                delegationChanged: { _ in }
+            )
+        )
+        let firstEntry = try #require(session.transcript.first)
+        guard case .instructions(let instructions) = firstEntry else {
+            Issue.record("Expected the Llama session to begin with instructions")
+            return []
+        }
+        return instructions.toolDefinitions.map(\.name)
     }
 
     private func makeConfiguration(profile: UserDynamicProfile) -> ModelSessionConfiguration {

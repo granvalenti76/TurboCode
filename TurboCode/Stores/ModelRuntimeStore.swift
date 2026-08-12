@@ -483,8 +483,10 @@ final class ModelRuntimeStore {
     }
 
     private var shouldDropCompletedToolCalls: Bool {
-        guard activeBackend != .foundationApple else { return true }
-        return activeRemoteModel?.reasoningTransport != .deepseekThinking
+        ModelHistoryPolicy.dropsCompletedToolCalls(
+            backend: activeBackend,
+            reasoningTransport: activeRemoteModel?.reasoningTransport
+        )
     }
 
     /// Creates the same bounded worker adapter used by native coordinators.

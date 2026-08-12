@@ -69,6 +69,26 @@ struct ResolvedModelCapabilities {
     let toolAccess: ModelToolTier
 }
 
+/// Chooses the transcript-retention behavior without coupling it to a profile's
+/// display identity. Llama overrides resolve to the same backend as the built-in
+/// Llama profile, so both keep an append-only wire prefix for KV-cache reuse.
+nonisolated enum ModelHistoryPolicy {
+    static func dropsCompletedToolCalls(
+        backend: ModelBackend,
+        reasoningTransport: RemoteReasoningTransport?
+    ) -> Bool {
+        if backend == .llamaServer {
+            return false
+        }
+        if backend == .foundationApple {
+            return true
+        }
+        // DeepSeek must retain complete reasoning and tool exchanges to satisfy
+        // its transport contract; the other remote backends keep compact history.
+        return reasoningTransport != .deepseekThinking
+    }
+}
+
 private struct ToollessProfile: LanguageModelSession.DynamicProfile {
     let instructions: String
     let model: any LanguageModel
