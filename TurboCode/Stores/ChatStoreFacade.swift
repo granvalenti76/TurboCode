@@ -241,6 +241,18 @@ extension ChatStore {
         workspaceStore.diffLoadError
     }
 
+    var reviewComments: [ReviewComment] {
+        reviewDraftStore.comments
+    }
+
+    var outdatedReviewCommentCount: Int {
+        reviewDraftStore.outdatedCount
+    }
+
+    var canSendReviewComments: Bool {
+        reviewDraftStore.canSend && !busy && activeProfileCanSend
+    }
+
     var isGitRepository: Bool {
         workspaceStore.isGitRepository
     }
@@ -255,6 +267,23 @@ extension ChatStore {
 
     public func reloadDiffs() async {
         await workspaceStore.reloadDiffs()
+    }
+
+    @discardableResult
+    func upsertReviewComment(
+        id: UUID?,
+        anchor: ReviewLineAnchor,
+        body: String
+    ) -> ReviewComment? {
+        reviewDraftStore.upsert(id: id, anchor: anchor, body: body)
+    }
+
+    func removeReviewComment(_ id: UUID) {
+        reviewDraftStore.remove(id)
+    }
+
+    func discardReviewComments() {
+        reviewDraftStore.discardAll()
     }
 
     public func refreshGitBranches() async {

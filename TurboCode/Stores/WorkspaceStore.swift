@@ -37,13 +37,16 @@ final class WorkspaceStore {
 
     private var diffLoadID: UUID?
     private let gitService: any GitRepositoryServicing
+    private let reviewDraftStore: ReviewDraftStore
     private let defaults: UserDefaults
 
     init(
         gitService: any GitRepositoryServicing,
+        reviewDraftStore: ReviewDraftStore = ReviewDraftStore(),
         defaults: UserDefaults = .standard
     ) {
         self.gitService = gitService
+        self.reviewDraftStore = reviewDraftStore
         self.defaults = defaults
         self.recentWorkspaces = defaults.stringArray(
             forKey: Self.recentWorkspacesKey
@@ -55,6 +58,7 @@ final class WorkspaceStore {
     /// results become visible.
     func selectWorkspace(_ path: String) {
         root = path
+        reviewDraftStore.begin(workspaceRoot: path)
         resetGitState()
 
         var recent = recentWorkspaces
@@ -72,6 +76,7 @@ final class WorkspaceStore {
     /// project filter, matching ChatStore's existing navigation behavior.
     func clearWorkspace() {
         root = ""
+        reviewDraftStore.begin(workspaceRoot: "")
         diffLoadID = nil
         diffSections = []
         diffLoadError = nil
@@ -87,6 +92,7 @@ final class WorkspaceStore {
         guard root == path else { return false }
 
         root = ""
+        reviewDraftStore.begin(workspaceRoot: "")
         selectedProject = nil
         resetGitState()
         diffSections = []
@@ -127,6 +133,10 @@ final class WorkspaceStore {
         if let sections {
             diffSections = sections
             diffLoadError = nil
+            reviewDraftStore.reconcile(
+                workspaceRoot: requestedWorkspace,
+                sections: sections
+            )
         } else {
             diffSections = []
             diffLoadError = "Not a git repository or git unavailable"
