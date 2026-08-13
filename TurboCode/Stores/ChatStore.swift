@@ -1560,6 +1560,12 @@ public final class ChatStore {
         workbenchStore.toggleRightPanel(mode)
     }
 
+    /// Toggles the user-owned project terminal. This presentation command is
+    /// intentionally unrelated to model tool availability or delegation.
+    public func toggleTerminal() {
+        workbenchStore.toggleTerminal()
+    }
+
     /// Closes the system inspector without discarding its conversation-local
     /// data, allowing the user to reopen the completed Activity summary.
     func closeRightPanel() {

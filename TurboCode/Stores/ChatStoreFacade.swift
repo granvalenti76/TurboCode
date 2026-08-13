@@ -104,6 +104,11 @@ extension ChatStore {
         set { workbenchStore.rightSidebarWidth = newValue }
     }
 
+    public var terminalPresented: Bool {
+        get { workbenchStore.terminalPresented }
+        set { workbenchStore.terminalPresented = newValue }
+    }
+
     public var inspectedGitCommit: GitCommitBlock? {
         workbenchStore.inspectedGitCommit
     }
