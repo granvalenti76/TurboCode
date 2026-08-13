@@ -6,6 +6,11 @@ custom profile, installed skills, configured worker, repository-map support,
 and whether a workspace is open. The Tools screen shows the resolved set for
 the current configuration.
 
+Profiles are the only authority that enables runtime tools: every resolved
+tool is registered directly. Skills never reveal, hide, activate, or deactivate
+tool capabilities; `load_skill` only adds a selected instruction body to the
+current task.
+
 Custom profile overrides keep one model selection and one explicit capability
 list. Including `delegate_task` is the profile's only orchestration signal: it
 enables delegation to the configured worker and progressively reveals the
@@ -64,8 +69,10 @@ nonstandard executable location.
 ### `read_file`
 
 Reads a focused, numbered UTF-8 range from a workspace file and returns a
-revision token. Models use that revision to avoid applying edits to stale file
-contents.
+revision token. Output is capped by the shared execution policy, stops on a
+source-line boundary, estimates its token cost, and reports the exact next
+range when more requested lines remain. Models use the revision to avoid
+applying edits to stale file contents.
 
 ### `edit_file`
 

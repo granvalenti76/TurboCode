@@ -1,6 +1,5 @@
 import Foundation
 import FoundationModels
-import FoundationModelsUtilities
 import Observation
 
 /// Owns FoundationModels profile selection and session construction.
@@ -22,7 +21,6 @@ final class ModelRuntimeStore {
     var composerModel: String
     var activeBackend: ModelBackend
     var orchestratorMode: OrchestratorMode
-    let skillActivations = SkillActivations()
     private(set) var session: LanguageModelSession
     private var skillsWorkspaceRoot: String?
 
@@ -349,11 +347,6 @@ final class ModelRuntimeStore {
             keepingHistory: keepingHistory,
             discardingCapabilityContext: discardingCapabilityContext
         )
-        if discardingCapabilityContext {
-            for name in skillActivations.activeSkillNames {
-                skillActivations.deactivate(name)
-            }
-        }
         let workspaceInstructions = WorkspaceInstructionsLoader.load(
             from: workspaceRoot
         )
@@ -373,7 +366,6 @@ final class ModelRuntimeStore {
                 agentTuning: agentTuning,
                 availableSkills: sessionSkills,
                 activeDynamicProfile: activeDynamicProfile,
-                skillActivations: skillActivations,
                 reasoningLevel: reasoningLevel,
                 delegateReasoningLevel: reasoningLevel(for: delegateModel),
                 activeTemperature: temperature(for: activeRemoteModel),
@@ -535,7 +527,6 @@ final class ModelRuntimeStore {
                 profile: activeDynamicProfile
             ),
             activeDynamicProfile: activeDynamicProfile,
-            skillActivations: skillActivations,
             reasoningLevel: reasoningLevel,
             delegateReasoningLevel: reasoningLevel(for: delegateModel),
             activeTemperature: temperature(for: activeRemoteModel),

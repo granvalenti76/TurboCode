@@ -546,7 +546,7 @@ final class ChatResponseCoordinator {
             return path == "."
                 ? "Browsing workspace"
                 : "Browsing \(path ?? "workspace")"
-        case "activate_skill", "toggle_skill", "load_skill":
+        case "load_skill":
             let skill = try? call.arguments.value(
                 String.self,
                 forProperty: "skill"

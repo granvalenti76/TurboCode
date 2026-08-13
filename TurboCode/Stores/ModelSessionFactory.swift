@@ -11,7 +11,6 @@ struct ModelSessionConfiguration {
     let agentTuning: AgentTuningConfig
     let availableSkills: [TurboCodeSkillDefinition]
     let activeDynamicProfile: UserDynamicProfile?
-    let skillActivations: SkillActivations
     let reasoningLevel: ContextOptions.ReasoningLevel?
     let delegateReasoningLevel: ContextOptions.ReasoningLevel?
     let activeTemperature: Double?
@@ -232,7 +231,6 @@ enum ModelSessionFactory {
         return LanguageModelSession(
             profile: StandaloneProfile(
                 instructions: instructions,
-                activations: configuration.skillActivations,
                 diskSkills: configuration.availableSkills,
                 workspaceRoot: configuration.workspaceRoot,
                 model: activeModel,
@@ -240,8 +238,6 @@ enum ModelSessionFactory {
                 samplingMode: samplingMode,
                 reasoningLevel: activeCapabilities.reasoningLevel,
                 dropsCompletedToolCalls: configuration.dropsCompletedToolCalls,
-                usesCacheStableToolDefinitions:
-                    activeRemoteConfiguration?.reasoningTransport == .deepseekThinking,
                 executionPolicy: configuration.agentTuning.execution,
                 gitPolicy: configuration.agentTuning.git,
                 toolPlan: standalonePlan,
@@ -436,7 +432,10 @@ enum ModelSessionFactory {
                     contextWindowTokens: repositoryMapContextTokens
                 )
             case .readFile:
-                return ReadFileTool(workspaceRoot: configuration.workspaceRoot)
+                return ReadFileTool(
+                    workspaceRoot: configuration.workspaceRoot,
+                    executionPolicy: configuration.agentTuning.execution
+                )
             case .searchWorkspace:
                 return RipgrepTool(
                     workspaceRoot: configuration.workspaceRoot,

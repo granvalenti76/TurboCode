@@ -121,7 +121,10 @@ nonisolated enum CodexTurboCodeToolBridge {
             detail: .compact,
             contextWindowTokens: 32_768
         )
-        let readTool = ReadFileTool(workspaceRoot: workspaceRoot)
+        let readTool = ReadFileTool(
+            workspaceRoot: workspaceRoot,
+            executionPolicy: agentTuning.execution
+        )
         let ripgrepTool = RipgrepTool(
             workspaceRoot: workspaceRoot,
             executionPolicy: agentTuning.execution
@@ -304,7 +307,10 @@ nonisolated enum CodexTurboCodeToolBridge {
             ))
             return .init(result: .success(text), presentation: nil)
         case "read_file":
-            let text = try await ReadFileTool(workspaceRoot: workspaceRoot)
+            let text = try await ReadFileTool(
+                workspaceRoot: workspaceRoot,
+                executionPolicy: agentTuning.execution
+            )
                 .call(arguments: ReadFileArguments(
                     filePath: try requiredString("filePath", in: call),
                     startLine: optionalInteger("startLine", in: call),

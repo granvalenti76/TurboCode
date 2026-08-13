@@ -1,6 +1,5 @@
 import Foundation
 import FoundationModels
-import FoundationModelsUtilities
 import SwiftUI
 
 /// Backwards-compatible view API for the decomposed chat domains.
@@ -216,10 +215,6 @@ extension ChatStore {
 
     var activeProfileCanSend: Bool {
         activeBackend != .codex || codexRuntimeStore.canSend
-    }
-
-    public var skillActivations: SkillActivations {
-        modelRuntimeStore.skillActivations
     }
 
     var availableSkills: [TurboCodeSkillDefinition] {

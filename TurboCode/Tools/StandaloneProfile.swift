@@ -4,11 +4,10 @@ import FoundationModelsUtilities
 
 // MARK: - Standalone Profile
 
-/// DynamicProfile for standalone mode with Skills, model selection,
-/// and reasoning level control.
+/// DynamicProfile for standalone mode with direct tools, disk-backed skills,
+/// model selection, and reasoning level control.
 struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let instructions: String
-    let activations: SkillActivations
     let diskSkills: [TurboCodeSkillDefinition]
     let workspaceRoot: String
     let model: any LanguageModel
@@ -16,7 +15,6 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let samplingMode: GenerationOptions.SamplingMode?
     let reasoningLevel: ContextOptions.ReasoningLevel?
     let dropsCompletedToolCalls: Bool
-    let usesCacheStableToolDefinitions: Bool
     let executionPolicy: ExecutionPolicy
     let gitPolicy: GitPolicy
     let toolPlan: ModelToolPlan
@@ -38,8 +36,8 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
             Instructions(instructions)
             if usesExclusiveToolSelection {
                 // Dynamic profiles are capability boundaries. Register the
-                // resolved instances directly so FoundationModelsUtilities
-                // cannot add activation tools or other implicit capabilities.
+                // resolved instances directly so no implicit capability can
+                // appear outside the user's selection.
                 supplementalTools
             } else {
                 if !workspaceRoot.isEmpty {
@@ -48,7 +46,10 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                     // prevents Foundation Models from emitting a second
                     // system-prompt fragment for the same capability.
                     if toolPlan.contains(.readFile) {
-                        ReadFileTool(workspaceRoot: workspaceRoot)
+                        ReadFileTool(
+                            workspaceRoot: workspaceRoot,
+                            executionPolicy: executionPolicy
+                        )
                     }
                     if toolPlan.contains(.git) {
                         GitTool(
@@ -67,24 +68,17 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                         )
                     }
                     if toolPlan.contains(.searchWorkspace) {
-                        // Ripgrep is a default primitive for every profile. It
-                        // stays directly available instead of requiring a
-                        // model-managed skill activation before exploration.
+                        // Ripgrep is a default exploration primitive and stays
+                        // directly available whenever the plan authorizes it.
                         RipgrepTool(
                             workspaceRoot: workspaceRoot,
                             executionPolicy: executionPolicy
                         )
                     }
-                    if usesCacheStableToolDefinitions {
-                        if toolPlan.contains(.fileSystem) {
-                            FileSystemTool(workspaceRoot: workspaceRoot)
-                        }
-                    } else if StandaloneSkills.isEnabled(for: toolPlan) {
-                        StandaloneSkills(
-                            activations: activations,
-                            workspaceRoot: workspaceRoot,
-                            toolPlan: toolPlan
-                        )
+                    if toolPlan.contains(.fileSystem) {
+                        // Profiles authorize tools directly. Skills remain
+                        // instruction packs and never alter runtime capability.
+                        FileSystemTool(workspaceRoot: workspaceRoot)
                     }
                     if toolPlan.contains(.editFile) {
                         EditFileTool(workspaceRoot: workspaceRoot)
@@ -110,41 +104,5 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                 await action(call, output)
             }
         }
-    }
-}
-
-// MARK: - Skills
-
-/// Skills-only component for standalone mode.
-struct StandaloneSkills: DynamicInstructions {
-    let activations: SkillActivations
-    let workspaceRoot: String
-    let toolPlan: ModelToolPlan
-
-    static func isEnabled(for toolPlan: ModelToolPlan) -> Bool {
-        toolPlan.contains(.fileSystem)
-    }
-
-    var body: some DynamicInstructions {
-        Skills(activations: activations, skills: configuredSkills)
-    }
-
-    private var configuredSkills: [Skill] {
-        var skills: [Skill] = []
-        if toolPlan.contains(.fileSystem) {
-            skills.append(
-                Skill(
-                    name: "file-browser",
-                    description: "Get file metadata, find files by name, and perform file operations in the workspace",
-                    allowsDeactivation: true
-                ) {
-                    Instructions {
-                        "Use list_workspace for every directory listing. Use this skill when you need file metadata, file discovery, or file write/delete/copy/move operations."
-                    }
-                    FileSystemTool(workspaceRoot: workspaceRoot)
-                }
-            )
-        }
-        return skills
     }
 }
