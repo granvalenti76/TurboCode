@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // MARK: - Inspector Panel
@@ -1563,6 +1564,8 @@ private enum DiffContextMode: String, CaseIterable, Identifiable {
 
 struct FileInspectorView: View {
     let sections: [FileDiffSection]
+    private let gutterWidth: CGFloat
+    private let minimumContentWidth: CGFloat
 
     @Environment(ChatStore.self) private var chatStore
     @State private var collapsed: Set<String> = []
@@ -1571,26 +1574,50 @@ struct FileInspectorView: View {
     private var additions: Int { sections.reduce(0) { $0 + $1.added } }
     private var deletions: Int { sections.reduce(0) { $0 + $1.removed } }
 
+    init(sections: [FileDiffSection]) {
+        self.sections = sections
+        // Measure the immutable Git snapshot once. Disclosure and collapse
+        // state should not rescan every source line during each animation.
+        let lines = sections.flatMap(\.diffLines)
+        let gutterWidth = InspectorDiffLayout.gutterWidth(for: lines)
+        self.gutterWidth = gutterWidth
+        minimumContentWidth = InspectorDiffLayout.minimumContentWidth(
+            for: lines,
+            gutterWidth: gutterWidth
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             headerBar
             Divider()
 
-            ScrollView(.vertical) {
-                LazyVStack(spacing: 0) {
-                    ForEach(sections) { section in
-                        DiffSectionView(
-                            section: section,
-                            isCollapsed: collapsed.contains(section.id),
-                            contextMode: contextMode,
-                            onToggle: { toggle(section.id) }
-                        )
+            GeometryReader { geometry in
+                let viewportWidth = geometry.size.width
+                let contentWidth = max(viewportWidth, minimumContentWidth)
 
-                        if section.id != sections.last?.id {
-                            Divider()
+                ScrollView([.horizontal, .vertical]) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(sections) { section in
+                            DiffSectionView(
+                                section: section,
+                                isCollapsed: collapsed.contains(section.id),
+                                contextMode: contextMode,
+                                viewportWidth: viewportWidth,
+                                contentWidth: contentWidth,
+                                gutterWidth: gutterWidth,
+                                onToggle: { toggle(section.id) }
+                            )
+
+                            if section.id != sections.last?.id {
+                                Divider()
+                                    .frame(width: contentWidth)
+                            }
                         }
                     }
+                    .frame(width: contentWidth, alignment: .leading)
                 }
+                .scrollIndicators(.visible)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1615,15 +1642,20 @@ struct FileInspectorView: View {
 
             Spacer(minLength: 8)
 
-            Picker("Context", selection: $contextMode) {
-                ForEach(DiffContextMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
+            Menu {
+                Picker("Context", selection: $contextMode) {
+                    ForEach(DiffContextMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
                 }
+            } label: {
+                Image(systemName: contextMode == .focused
+                      ? "line.3.horizontal.decrease"
+                      : "text.alignleft")
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-            .frame(width: 126)
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Context: \(contextMode.rawValue)")
 
             Button {
                 Task { await chatStore.reloadDiffs() }
@@ -1663,7 +1695,11 @@ struct DiffSectionView: View {
     let section: FileDiffSection
     let isCollapsed: Bool
     fileprivate let contextMode: DiffContextMode
+    let viewportWidth: CGFloat
+    let contentWidth: CGFloat
+    let gutterWidth: CGFloat
     let onToggle: () -> Void
+    @State private var revealedContextIndices: Set<Int> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1674,9 +1710,16 @@ struct DiffSectionView: View {
             .buttonStyle(.plain)
 
             if !isCollapsed, !section.diffLines.isEmpty {
-                DiffLinesView(rows: displayRows)
+                DiffLinesView(
+                    rows: displayRows,
+                    viewportWidth: viewportWidth,
+                    contentWidth: contentWidth,
+                    gutterWidth: gutterWidth,
+                    onRevealOmitted: reveal
+                )
             }
         }
+        .frame(width: contentWidth, alignment: .leading)
     }
 
     private var sectionHeader: some View {
@@ -1721,9 +1764,9 @@ struct DiffSectionView: View {
             .font(.system(size: 11, weight: .medium, design: .monospaced))
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(minHeight: 46)
-        .background(Color.primary.opacity(0.025))
+        .padding(.vertical, 7)
+        .frame(width: viewportWidth)
+        .frame(minHeight: 42)
     }
 
     private var displayRows: [InspectorDiffRow] {
@@ -1733,15 +1776,35 @@ struct DiffSectionView: View {
                 InspectorDiffRow(id: "line-\(index)-\(line.id)", content: .line(line))
             }
         case .focused:
-            return focusedRows(section.diffLines, contextRadius: 3)
+            return InspectorDiffRowBuilder.focusedRows(
+                section.diffLines,
+                contextRadius: 3,
+                revealedIndices: revealedContextIndices
+            )
         }
     }
 
-    private func focusedRows(_ lines: [DiffLine], contextRadius: Int) -> [InspectorDiffRow] {
+    private func reveal(_ range: ClosedRange<Int>) {
+        withAnimation(.easeInOut(duration: 0.16)) {
+            revealedContextIndices.formUnion(range)
+        }
+    }
+}
+
+// MARK: - Focused diff presentation
+
+/// Builds compact context groups independently from the view so revealing one
+/// omitted region never forces the entire file into Full mode.
+nonisolated enum InspectorDiffRowBuilder {
+    static func focusedRows(
+        _ lines: [DiffLine],
+        contextRadius: Int,
+        revealedIndices: Set<Int> = []
+    ) -> [InspectorDiffRow] {
         let changedIndices = lines.indices.filter { lines[$0].type != .context }
         guard !changedIndices.isEmpty else { return [] }
 
-        var visibleIndices = Set<Int>()
+        var visibleIndices = revealedIndices
         for index in changedIndices {
             let lower = max(lines.startIndex, index - contextRadius)
             let upper = min(lines.endIndex - 1, index + contextRadius)
@@ -1753,10 +1816,11 @@ struct DiffSectionView: View {
 
         func appendOmitted(endingAt end: Int) {
             guard let start = omittedStart else { return }
+            let range = start...end
             rows.append(
                 InspectorDiffRow(
                     id: "omitted-\(start)-\(end)",
-                    content: .omitted(end - start + 1)
+                    content: .omitted(range)
                 )
             )
             omittedStart = nil
@@ -1782,10 +1846,10 @@ struct DiffSectionView: View {
 
 // MARK: - Diff Rows
 
-private struct InspectorDiffRow: Identifiable {
-    enum Content {
+nonisolated struct InspectorDiffRow: Identifiable, Sendable {
+    nonisolated enum Content: Sendable {
         case line(DiffLine)
-        case omitted(Int)
+        case omitted(ClosedRange<Int>)
     }
 
     let id: String
@@ -1794,54 +1858,76 @@ private struct InspectorDiffRow: Identifiable {
 
 struct DiffLinesView: View {
     fileprivate let rows: [InspectorDiffRow]
+    let viewportWidth: CGFloat
+    let contentWidth: CGFloat
+    let gutterWidth: CGFloat
+    let onRevealOmitted: (ClosedRange<Int>) -> Void
 
     var body: some View {
-        ScrollView(.horizontal) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(rows) { row in
-                    switch row.content {
-                    case .line(let line):
-                        DiffLineView(line: line)
-                    case .omitted(let count):
-                        omittedRow(count)
-                    }
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(rows) { row in
+                switch row.content {
+                case .line(let line):
+                    DiffLineView(line: line, gutterWidth: gutterWidth)
+                        .frame(width: contentWidth, alignment: .leading)
+                case .omitted(let range):
+                    omittedRow(range)
+                        .frame(width: contentWidth, alignment: .leading)
                 }
             }
-            .font(.system(size: 11.5, design: .monospaced))
-            .textSelection(.enabled)
-            .frame(minWidth: 419, alignment: .leading)
         }
+        .font(.system(size: 11.5, design: .monospaced))
+        .textSelection(.enabled)
+        .frame(width: contentWidth, alignment: .leading)
     }
 
-    private func omittedRow(_ count: Int) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 10, weight: .medium))
-            Text("\(count) unchanged \(count == 1 ? "line" : "lines")")
+    private func omittedRow(_ range: ClosedRange<Int>) -> some View {
+        let count = range.count
+        return Button {
+            onRevealOmitted(range)
+        } label: {
+            HStack(spacing: 0) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .frame(width: gutterWidth)
+
+                Rectangle()
+                    .fill(Color.primary.opacity(0.07))
+                    .frame(width: 0.5)
+
+                Text("\(count) unmodified \(count == 1 ? "line" : "lines")")
+                    .padding(.leading, 14)
+
+                Spacer(minLength: 8)
+            }
+            .foregroundStyle(.secondary)
+            .frame(width: viewportWidth, alignment: .leading)
+            .frame(minHeight: 34)
+            .background(
+                Color.primary.opacity(0.04),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .contentShape(Rectangle())
         }
-        .font(.system(size: 11))
-        .foregroundStyle(.secondary)
-        .padding(.leading, 12)
-        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
-        .background(Color.primary.opacity(0.035))
+        .buttonStyle(.plain)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .help("Show \(count) unmodified \(count == 1 ? "line" : "lines")")
     }
 }
 
 struct DiffLineView: View {
     let line: DiffLine
+    let gutterWidth: CGFloat
 
     var body: some View {
         HStack(spacing: 0) {
-            HStack(spacing: 0) {
-                Text(number(line.oldLineNumber))
-                    .frame(width: 30, alignment: .trailing)
-                Text(number(line.newLineNumber))
-                    .frame(width: 30, alignment: .trailing)
-            }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .frame(height: 20)
-            .background(gutterBackground)
+            Text(number(line.newLineNumber ?? line.oldLineNumber))
+                .frame(width: gutterWidth - 10, alignment: .trailing)
+                .padding(.trailing, 10)
+                .foregroundStyle(.secondary)
+                .frame(height: 20)
+                .background(gutterBackground)
 
             Rectangle()
                 .fill(stripeColor)
@@ -1904,5 +1990,36 @@ struct DiffLineView: View {
         case .removed: return .red.opacity(0.7)
         case .context: return .clear
         }
+    }
+}
+
+/// The inspector is deliberately denser than the document-modal review. One
+/// contextual line number and a measured content canvas keep narrow panes useful
+/// without wrapping or clipping long source lines.
+private enum InspectorDiffLayout {
+    private static let codeFont = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
+    private static let markerWidth: CGFloat = 20
+
+    static func gutterWidth(for lines: [DiffLine]) -> CGFloat {
+        let largest = lines.reduce(0) { partial, line in
+            max(partial, max(line.oldLineNumber ?? 0, line.newLineNumber ?? 0))
+        }
+        let measured = (String(largest) as NSString).size(
+            withAttributes: [.font: codeFont]
+        ).width
+        return max(42, measured + 18)
+    }
+
+    static func minimumContentWidth(
+        for lines: [DiffLine],
+        gutterWidth: CGFloat
+    ) -> CGFloat {
+        let longest = lines.reduce(CGFloat.zero) { width, line in
+            let measured = (line.content as NSString).size(
+                withAttributes: [.font: codeFont]
+            ).width
+            return max(width, measured)
+        }
+        return gutterWidth + markerWidth + longest + 24
     }
 }

@@ -34,9 +34,9 @@ struct WorkbenchSplitView: View {
                 if chatStore.rightPanelVisible {
                     InspectorPanelView()
                         .frame(
-                            minWidth: 320,
-                            idealWidth: 420,
-                            maxWidth: 600,
+                            minWidth: 360,
+                            idealWidth: 520,
+                            maxWidth: 720,
                             maxHeight: .infinity
                         )
                 }
