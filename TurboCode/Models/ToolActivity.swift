@@ -14,6 +14,36 @@ public struct ToolActivity: Identifiable, Sendable, Hashable {
     }
 }
 
+/// Summarizes a bounded read using the filename and requested line interval so
+/// the timeline communicates useful progress without exposing raw arguments.
+nonisolated enum ReadFileActivitySummary {
+    static func make(
+        filePath: String?,
+        startLine: Int?,
+        endLine: Int?,
+        limit: Int?
+    ) -> String {
+        let file = filePath
+            .map { URL(fileURLWithPath: $0).lastPathComponent }
+            .flatMap { $0.isEmpty ? nil : $0 }
+        let operation = file.map { "Reading \($0)" } ?? "Reading file"
+        let start = max(startLine ?? 1, 1)
+
+        if let endLine {
+            return "\(operation) · lines \(start)–\(max(endLine, start))"
+        }
+        if let limit, limit > 0 {
+            let (offset, overflow) = start.addingReportingOverflow(limit - 1)
+            let end = overflow ? Int.max : offset
+            return "\(operation) · lines \(start)–\(end)"
+        }
+        if startLine != nil {
+            return "\(operation) · from line \(start)"
+        }
+        return operation
+    }
+}
+
 /// Produces compact activity copy from ripgrep's actual invocation instead of
 /// exposing its raw argument payload in the chat timeline.
 nonisolated enum RipgrepActivitySummary {

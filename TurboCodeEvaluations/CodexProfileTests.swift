@@ -366,6 +366,25 @@ struct CodexProfileTests {
         )
     }
 
+    @Test("Codex read activity includes the requested line range")
+    func codexReadActivityUsesStructuredArguments() {
+        let call = CodexDynamicToolCall(
+            rpcID: .integer(43),
+            callID: "call-read",
+            tool: "read_file",
+            arguments: .object([
+                "filePath": .string("TurboCode/Tools/ReadFileTool.swift"),
+                "startLine": .integer(48),
+                "endLine": .integer(96)
+            ])
+        )
+
+        #expect(
+            CodexTurboCodeToolBridge.activitySummary(for: call)
+                == "Reading ReadFileTool.swift · lines 48–96"
+        )
+    }
+
     @Test("Codex exposes the TurboCode tools with native presentations")
     func codexExposesNativePresentationTools() {
         let specs = CodexTurboCodeToolBridge.specifications(

@@ -252,7 +252,13 @@ nonisolated enum CodexTurboCodeToolBridge {
         switch call.tool {
         case "list_workspace": "Browsing workspace"
         case "swift_workspace_map": "Mapping Swift workspace"
-        case "read_file": "Reading file"
+        case "read_file":
+            ReadFileActivitySummary.make(
+                filePath: optionalString("filePath", in: call),
+                startLine: optionalInteger("startLine", in: call),
+                endLine: optionalInteger("endLine", in: call),
+                limit: optionalInteger("limit", in: call)
+            )
         case "ripgrep":
             RipgrepActivitySummary.make(
                 action: optionalString("action", in: call),

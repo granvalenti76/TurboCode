@@ -102,6 +102,32 @@ struct ToolInteractionStoreTests {
         #expect(fileMatches == "Finding files containing “TODO FIXME”")
     }
 
+    @Test("Read activity describes the requested line interval")
+    func readFileActivitySummaryUsesInvocationDetails() {
+        let explicitRange = ReadFileActivitySummary.make(
+            filePath: "TurboCode/Stores/ChatStore.swift",
+            startLine: 120,
+            endLine: 180,
+            limit: nil
+        )
+        let limitedRange = ReadFileActivitySummary.make(
+            filePath: "README.md",
+            startLine: 40,
+            endLine: nil,
+            limit: 25
+        )
+        let completeFile = ReadFileActivitySummary.make(
+            filePath: "Package.swift",
+            startLine: nil,
+            endLine: nil,
+            limit: nil
+        )
+
+        #expect(explicitRange == "Reading ChatStore.swift · lines 120–180")
+        #expect(limitedRange == "Reading README.md · lines 40–64")
+        #expect(completeFile == "Reading Package.swift")
+    }
+
     @Test("ChatStore approval forwarding remains observable")
     func chatStoreApprovalForwardingRemainsObservable() async {
         let store = ChatStore(

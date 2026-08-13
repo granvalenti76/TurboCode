@@ -19,12 +19,12 @@ struct MessageTimelineView: View {
     /// These related flags move through one reducer so geometry and phase
     /// callbacks cannot leave the timeline in a contradictory state.
     @State private var scrollFollowState = TimelineScrollFollowState()
-    /// Fast searches remain legible long enough to communicate intent, then
-    /// briefly acknowledge completion instead of flashing in and out.
-    @State private var retainedRipgrepActivity: ToolActivity?
-    @State private var ripgrepStartedAt: Date?
-    @State private var ripgrepIsComplete = false
-    @State private var ripgrepDismissalGeneration = UUID()
+    /// Fast exploration calls remain legible long enough to communicate intent,
+    /// then briefly acknowledge completion instead of flashing in and out.
+    @State private var retainedExplorationActivity: ToolActivity?
+    @State private var explorationStartedAt: Date?
+    @State private var explorationIsComplete = false
+    @State private var explorationDismissalGeneration = UUID()
 
     var body: some View {
         ScrollView {
@@ -60,7 +60,7 @@ struct MessageTimelineView: View {
                         .id("live-assistant")
                 }
 
-                if chatStore.busy || retainedRipgrepActivity != nil {
+                if chatStore.busy || retainedExplorationActivity != nil {
                     modelActivityIndicator
                         .padding(.horizontal, 12)
                         .padding(.vertical, 4)
@@ -101,13 +101,13 @@ struct MessageTimelineView: View {
             scrollToBottom()
         }
         .onAppear {
-            updateRipgrepPresentation(for: chatStore.activeToolActivity)
+            updateExplorationPresentation(for: chatStore.activeToolActivity)
         }
         .onChange(of: chatStore.activeToolActivity) { _, activity in
-            updateRipgrepPresentation(for: activity)
+            updateExplorationPresentation(for: activity)
         }
         .onDisappear {
-            ripgrepDismissalGeneration = UUID()
+            explorationDismissalGeneration = UUID()
         }
     }
 
@@ -124,62 +124,67 @@ struct MessageTimelineView: View {
         return "Preparing response"
     }
 
-    /// Ripgrep receives a distinct but deliberately quiet affordance because
-    /// workspace exploration can otherwise look like an idle model pause.
+    /// File reads and searches share a deliberately quiet terminal affordance
+    /// because fast workspace exploration can look like an idle model pause.
     @ViewBuilder
     private var modelActivityIndicator: some View {
         if let activity = chatStore.activeToolActivity,
-           activity.toolName == "ripgrep" || activity.toolName == "grep" {
-            RipgrepTerminalActivityIndicator(
+           usesExplorationIndicator(activity) {
+            ExplorationTerminalActivityIndicator(
                 summary: activity.summary,
                 isComplete: false
             )
         } else if chatStore.activeToolActivity == nil,
-                  let activity = retainedRipgrepActivity {
-            RipgrepTerminalActivityIndicator(
+                  let activity = retainedExplorationActivity {
+            ExplorationTerminalActivityIndicator(
                 summary: activity.summary,
-                isComplete: ripgrepIsComplete
+                isComplete: explorationIsComplete
             )
         } else {
             ModelActivityIndicator(summary: modelActivitySummary)
         }
     }
 
-    private func updateRipgrepPresentation(for activity: ToolActivity?) {
-        ripgrepDismissalGeneration = UUID()
+    private func usesExplorationIndicator(_ activity: ToolActivity) -> Bool {
+        activity.toolName == "read_file"
+            || activity.toolName == "ripgrep"
+            || activity.toolName == "grep"
+    }
 
-        if let activity,
-           activity.toolName == "ripgrep" || activity.toolName == "grep" {
-            if retainedRipgrepActivity?.id != activity.id {
-                ripgrepStartedAt = Date()
+    private func updateExplorationPresentation(for activity: ToolActivity?) {
+        explorationDismissalGeneration = UUID()
+
+        if let activity, usesExplorationIndicator(activity) {
+            if retainedExplorationActivity?.id != activity.id {
+                explorationStartedAt = Date()
             }
-            retainedRipgrepActivity = activity
-            ripgrepIsComplete = false
+            retainedExplorationActivity = activity
+            explorationIsComplete = false
             return
         }
 
-        // Another tool is more relevant than an old search acknowledgement.
+        // Another tool is more relevant than an old exploration acknowledgement.
         guard activity == nil else {
-            retainedRipgrepActivity = nil
-            ripgrepStartedAt = nil
-            ripgrepIsComplete = false
+            retainedExplorationActivity = nil
+            explorationStartedAt = nil
+            explorationIsComplete = false
             return
         }
-        guard retainedRipgrepActivity != nil else { return }
+        guard retainedExplorationActivity != nil else { return }
 
-        ripgrepIsComplete = true
-        let elapsed = Date().timeIntervalSince(ripgrepStartedAt ?? Date())
+        explorationIsComplete = true
+        let elapsed = Date().timeIntervalSince(explorationStartedAt ?? Date())
         let remainingMinimum = max(1.6 - elapsed, 0)
         let delay = max(remainingMinimum, 0.55)
-        let generation = ripgrepDismissalGeneration
+        let generation = explorationDismissalGeneration
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(delay))
-            guard generation == ripgrepDismissalGeneration,
+            guard generation == explorationDismissalGeneration,
                   chatStore.activeToolActivity == nil else { return }
             withAnimation(.easeOut(duration: 0.18)) {
-                retainedRipgrepActivity = nil
-                ripgrepStartedAt = nil
-                ripgrepIsComplete = false
+                retainedExplorationActivity = nil
+                explorationStartedAt = nil
+                explorationIsComplete = false
             }
         }
     }
@@ -326,9 +331,9 @@ private struct ActivityPulse: View {
     }
 }
 
-/// A low-frequency terminal cursor makes active workspace search visible
+/// A low-frequency terminal cursor makes active workspace exploration visible
 /// without competing with streamed reasoning or assistant text.
-private struct RipgrepTerminalActivityIndicator: View {
+private struct ExplorationTerminalActivityIndicator: View {
     let summary: String
     let isComplete: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

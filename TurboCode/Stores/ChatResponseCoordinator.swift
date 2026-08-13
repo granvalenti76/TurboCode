@@ -498,7 +498,24 @@ final class ChatResponseCoordinator {
         let item = path.map { URL(fileURLWithPath: $0).lastPathComponent }
         switch call.toolName {
         case "read_file":
-            return item.map { "Reading \($0)" } ?? "Reading file"
+            return ReadFileActivitySummary.make(
+                filePath: try? call.arguments.value(
+                    String.self,
+                    forProperty: "filePath"
+                ),
+                startLine: try? call.arguments.value(
+                    Int.self,
+                    forProperty: "startLine"
+                ),
+                endLine: try? call.arguments.value(
+                    Int.self,
+                    forProperty: "endLine"
+                ),
+                limit: try? call.arguments.value(
+                    Int.self,
+                    forProperty: "limit"
+                )
+            )
         case "ripgrep", "grep":
             return RipgrepActivitySummary.make(
                 action: try? call.arguments.value(
