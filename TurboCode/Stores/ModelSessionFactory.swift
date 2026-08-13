@@ -419,12 +419,7 @@ enum ModelSessionFactory {
             case .turboCodeGuide:
                 return TurboCodeGuideTool(store: .live)
             case .listWorkspace:
-                return ListWorkspaceTool(
-                    workspaceRoot: configuration.workspaceRoot,
-                    // Only llama-server models need an explicit continuation
-                    // hint after discovering an Xcode container.
-                    suggestsXcodeAnalysisTools: configuration.backend == .llamaServer
-                )
+                return ListWorkspaceTool(workspaceRoot: configuration.workspaceRoot)
             case .swiftWorkspaceMap:
                 return SwiftWorkspaceMapTool(
                     workspaceRoot: configuration.workspaceRoot,

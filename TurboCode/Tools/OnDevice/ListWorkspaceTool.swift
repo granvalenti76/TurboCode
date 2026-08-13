@@ -24,34 +24,28 @@ struct WorkspaceListingToolOutput {
     var totalCount: Int
     var isTruncated: Bool
     var errorMessage: String?
-    /// Optional model-only direction appended for runtimes that need help
-    /// continuing from a broad listing. Native presentation ignores it.
-    var modelGuidance: String?
 }
 
-/// Flat, read-only directory listing designed to be reliable for smaller models.
+/// Flat, read-only directory listing that reports facts without prescribing the
+/// model's next exploration step.
 struct ListWorkspaceTool: Tool {
     typealias Arguments = ListWorkspaceArguments
     typealias Output = WorkspaceListingToolOutput
 
     let workspaceRoot: String
-    let suggestsXcodeAnalysisTools: Bool
     let taskScope: AgentTaskPathScope?
 
     init(
         workspaceRoot: String,
-        suggestsXcodeAnalysisTools: Bool = false,
         taskScope: AgentTaskPathScope? = nil
     ) {
         self.workspaceRoot = workspaceRoot
-        self.suggestsXcodeAnalysisTools = suggestsXcodeAnalysisTools
         self.taskScope = taskScope
     }
 
     func restricted(to scope: AgentTaskPathScope) -> Self {
         Self(
             workspaceRoot: workspaceRoot,
-            suggestsXcodeAnalysisTools: suggestsXcodeAnalysisTools,
             taskScope: scope
         )
     }
@@ -59,14 +53,9 @@ struct ListWorkspaceTool: Tool {
     var name: String { "list_workspace" }
     var description: String {
         """
-        List one directory inside the active workspace. Use this instead of
-        file_system when the user asks to browse, inspect, or show files and
-        folders. Pass only a workspace-relative directory path; use "." for the
-        root. This tool is read-only and returns structured file metadata.
-        After a successful call, do not repeat the directory entries as Markdown,
-        a table, or a numbered list. TurboCode presents the result natively in the
-        timeline. Add at most one short contextual sentence unless the user asks
-        you to analyze the listing.
+        List one directory in the active workspace. Pass a workspace-relative
+        path; use "." for the root. The result is read-only and shown natively,
+        so do not repeat its entries unless the user asks for analysis.
         """
     }
     var includesSchemaInInstructions: Bool { true }
@@ -81,8 +70,7 @@ struct ListWorkspaceTool: Tool {
                     entries: [],
                     totalCount: 0,
                     isTruncated: false,
-                    errorMessage: error.localizedDescription,
-                    modelGuidance: nil
+                    errorMessage: error.localizedDescription
                 )
             }
         }
@@ -105,8 +93,7 @@ struct ListWorkspaceTool: Tool {
                 entries: entries,
                 totalCount: snapshot.totalCount,
                 isTruncated: snapshot.isTruncated,
-                errorMessage: nil,
-                modelGuidance: xcodeAnalysisGuidance(for: entries)
+                errorMessage: nil
             )
         } catch {
             return WorkspaceListingToolOutput(
@@ -114,32 +101,8 @@ struct ListWorkspaceTool: Tool {
                 entries: [],
                 totalCount: 0,
                 isTruncated: false,
-                errorMessage: error.localizedDescription,
-                modelGuidance: nil
+                errorMessage: error.localizedDescription
             )
         }
-    }
-
-    /// Llama benefits from an explicit next action after discovering an Xcode
-    /// container; other profiles retain the compact listing-only payload.
-    private func xcodeAnalysisGuidance(
-        for entries: [WorkspaceListingToolEntry]
-    ) -> String? {
-        guard suggestsXcodeAnalysisTools,
-              entries.contains(where: { entry in
-                  let extensionName = URL(fileURLWithPath: entry.name)
-                      .pathExtension
-                      .lowercased()
-                  return extensionName == "xcodeproj" || extensionName == "xcworkspace"
-              }) else { return nil }
-
-        return """
-        An Xcode project or workspace is present. Continue the requested analysis
-        without asking for confirmation. Use swift_workspace_map to orient around
-        Swift declarations, ripgrep when file or text search is useful,
-        read_file for relevant source ranges, xcode_project for
-        project discovery/build/test information, and git for repository state or
-        changes. Call only the tools needed to complete the user's request.
-        """
     }
 }
