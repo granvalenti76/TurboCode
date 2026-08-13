@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Native document-modal review for immutable edit_file snapshots. The sheet
@@ -101,7 +102,9 @@ struct DiffPatchReviewSheet: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer()
-                    if let fileChange {
+                    // The global summary already describes a single-file edit.
+                    // Keep the local count only when it helps compare files.
+                    if snapshots.count > 1, let fileChange {
                         changeSummary(
                             additions: fileChange.additions,
                             deletions: fileChange.deletions
@@ -140,22 +143,43 @@ struct DiffPatchReviewSheet: View {
 
 private struct DiffReviewFileView: View {
     let snapshot: DiffReviewFileSnapshot
+    private let lines: [DiffReviewLine]
+    private let lineNumberColumnWidth: CGFloat
+    private let minimumContentWidth: CGFloat
 
-    private var lines: [DiffReviewLine] {
-        DiffReviewLineBuilder.lines(
+    init(snapshot: DiffReviewFileSnapshot) {
+        self.snapshot = snapshot
+        let lines = DiffReviewLineBuilder.lines(
             original: snapshot.originalText,
             modified: snapshot.modifiedText
+        )
+        self.lines = lines
+        lineNumberColumnWidth = DiffReviewLayout.lineNumberColumnWidth(for: lines)
+        minimumContentWidth = DiffReviewLayout.minimumContentWidth(
+            for: lines,
+            lineNumberColumnWidth: lineNumberColumnWidth
         )
     }
 
     var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(lines) { line in
-                    DiffReviewLineRow(line: line)
+        GeometryReader { geometry in
+            let contentWidth = max(geometry.size.width, minimumContentWidth)
+
+            ScrollView([.horizontal, .vertical]) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(lines) { line in
+                        DiffReviewLineRow(
+                            line: line,
+                            lineNumberColumnWidth: lineNumberColumnWidth
+                        )
+                        // A concrete width creates genuine horizontal overflow;
+                        // LazyVStack otherwise adopts the viewport and clips text.
+                        .frame(width: contentWidth, alignment: .leading)
+                    }
                 }
+                .frame(width: contentWidth, alignment: .leading)
             }
-            .frame(minWidth: 820, alignment: .leading)
+            .scrollIndicators(.visible)
         }
         .background(Color(nsColor: .textBackgroundColor))
         .accessibilityLabel("Full file changes for \(snapshot.path)")
@@ -164,16 +188,25 @@ private struct DiffReviewFileView: View {
 
 private struct DiffReviewLineRow: View {
     let line: DiffReviewLine
+    let lineNumberColumnWidth: CGFloat
 
     var body: some View {
         HStack(spacing: 0) {
-            lineNumber(line.oldLineNumber)
-            lineNumber(line.newLineNumber)
+            HStack(spacing: 0) {
+                lineNumber(line.oldLineNumber)
+                lineNumber(line.newLineNumber)
+            }
+            .background(Color.primary.opacity(0.022))
+            .overlay(alignment: .trailing) {
+                Rectangle()
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(width: 0.5)
+            }
 
             Text(line.kind.marker)
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 .foregroundStyle(line.kind.markerColor)
-                .frame(width: 22)
+                .frame(width: DiffReviewLayout.markerWidth)
 
             Text(line.text.isEmpty ? " " : line.text)
                 .font(.system(size: 12, design: .monospaced))
@@ -199,9 +232,40 @@ private struct DiffReviewLineRow: View {
         Text(value.map(String.init) ?? "")
             .font(.system(size: 11, design: .monospaced))
             .foregroundStyle(.tertiary)
-            .frame(width: 42, alignment: .trailing)
-            .padding(.trailing, 8)
-            .background(Color.primary.opacity(0.025))
+            .padding(.leading, 6)
+            .frame(width: lineNumberColumnWidth, alignment: .leading)
+    }
+}
+
+/// Keeps the diff gutter compact while still reserving enough canvas for the
+/// longest unwrapped line. Explicit sizing is required because a lazy stack in
+/// a two-axis ScrollView does not infer horizontal overflow from its children.
+private enum DiffReviewLayout {
+    static let markerWidth: CGFloat = 20
+    private static let codeFont = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+
+    static func lineNumberColumnWidth(for lines: [DiffReviewLine]) -> CGFloat {
+        let largestNumber = lines.reduce(0) { partial, line in
+            max(partial, max(line.oldLineNumber ?? 0, line.newLineNumber ?? 0))
+        }
+        let digits = max(String(largestNumber).count, 1)
+        return max(28, CGFloat(digits * 7 + 10))
+    }
+
+    static func minimumContentWidth(
+        for lines: [DiffReviewLine],
+        lineNumberColumnWidth: CGFloat
+    ) -> CGFloat {
+        let longestCodeWidth = lines.reduce(CGFloat.zero) { width, line in
+            let measured = (line.text as NSString).size(
+                withAttributes: [.font: codeFont]
+            ).width
+            return max(width, measured)
+        }
+        let gutterWidth = lineNumberColumnWidth * 2
+        // Trailing breathing room prevents the final glyph from sitting under
+        // the overlay scroller when the system uses automatic scroll bars.
+        return gutterWidth + markerWidth + longestCodeWidth + 24
     }
 }
 
