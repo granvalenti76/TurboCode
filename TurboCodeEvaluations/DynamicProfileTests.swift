@@ -485,6 +485,38 @@ struct DynamicProfileTests {
         #expect(tools.map(\.name) == ["write_ondevice"])
     }
 
+    @Test("Persisted grep capability resolves to the Ripgrep replacement")
+    func persistedGrepCapabilityUsesRipgrepRuntimeName() {
+        let profile = UserDynamicProfile(
+            name: "Search only",
+            baseModelID: .llama,
+            // `grep` is the historical persisted capability value. Runtime
+            // replacement must not require rewriting an existing profile.
+            toolIDs: ["grep"]
+        )
+        let plan = ModelToolCatalog.plan(
+            profile: .standalone,
+            tier: .standard,
+            context: ToolAccessContext(
+                hasWorkspace: true,
+                hasSkills: false,
+                hasDelegateModel: false,
+                repositoryMapDetail: .compact
+            ),
+            selectedIDs: profile.resolvedToolIDs
+        )
+
+        let tools = ModelSessionFactory.toolInstances(
+            for: plan,
+            configuration: makeConfiguration(profile: profile)
+        )
+
+        #expect(profile.resolvedToolIDs == [.searchWorkspace])
+        #expect(tools.map(\.name) == ["ripgrep"])
+        #expect(ToolCapabilityID.searchWorkspace.rawValue == "grep")
+        #expect(ToolCapabilityID.searchWorkspace.runtimeName == "ripgrep")
+    }
+
     @Test("DeepSeek keeps skill-backed tools directly available")
     func deepSeekUsesCacheStableToolDefinitions() throws {
         let deepSeek = try #require(RemoteModelConfig.defaults.first { $0.id == "deepseek" })
@@ -522,7 +554,7 @@ struct DynamicProfileTests {
         }
         let names = instructions.toolDefinitions.map { $0.name }
         #expect(names.contains("file_system"))
-        #expect(names.contains("grep"))
+        #expect(names.contains("ripgrep"))
         #expect(names.contains("swift_package_manager"))
         #expect(!names.contains("toggle_skill"))
         // DeepSeek depends on a fixed direct tool surface; skill activation

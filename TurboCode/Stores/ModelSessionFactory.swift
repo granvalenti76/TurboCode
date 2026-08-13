@@ -438,7 +438,10 @@ enum ModelSessionFactory {
             case .readFile:
                 return ReadFileTool(workspaceRoot: configuration.workspaceRoot)
             case .searchWorkspace:
-                return GrepTool(workspaceRoot: configuration.workspaceRoot)
+                return RipgrepTool(
+                    workspaceRoot: configuration.workspaceRoot,
+                    executionPolicy: configuration.agentTuning.execution
+                )
             case .fileSystem:
                 return FileSystemTool(workspaceRoot: configuration.workspaceRoot)
             case .git:
@@ -668,7 +671,9 @@ enum ModelSessionFactory {
                 workspaceRoot: configuration.workspaceRoot,
                 agentTuning: configuration.agentTuning,
                 toolIDs: toolIDs,
-                toolNames: toolIDs.map(\.rawValue),
+                // Runtime names may differ from persisted capability IDs, as
+                // with the legacy `grep` ID now implemented by `ripgrep`.
+                toolNames: toolIDs.map(\.runtimeName),
                 availableSkills: configuration.availableSkills,
                 workspaceInstructions: configuration.workspaceInstructions
             )

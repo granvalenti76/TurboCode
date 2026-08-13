@@ -377,7 +377,7 @@ public final class TurboCodeConfig {
     ## Workspace tools
 
     - `read_file` reads complete files or focused numbered line ranges.
-    - `grep` searches workspace text.
+    - `ripgrep` discovers workspace files or searches their text with optional filters.
     - `file_system` lists and manages files inside the workspace.
     - `git` initializes repositories and provides complete structured local and
       remote Git workflows. Git writes are independent from the read-only bash

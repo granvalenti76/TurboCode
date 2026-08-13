@@ -355,6 +355,7 @@ struct CodexProfileTests {
         let names = Set(specs.map(\.name))
 
         #expect(names.contains("list_workspace"))
+        #expect(names.contains("ripgrep"))
         #expect(names.contains("apply_edits"))
         #expect(names.contains("git"))
         #expect(names.contains("swift_package_manager"))

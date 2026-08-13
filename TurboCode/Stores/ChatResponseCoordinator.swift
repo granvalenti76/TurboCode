@@ -497,7 +497,7 @@ final class ChatResponseCoordinator {
         switch call.toolName {
         case "read_file":
             return item.map { "Reading \($0)" } ?? "Reading file"
-        case "grep":
+        case "ripgrep", "grep":
             return item.map { "Searching in \($0)" } ?? "Searching workspace"
         case "bash":
             return "Running command"

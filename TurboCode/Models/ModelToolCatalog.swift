@@ -34,11 +34,18 @@ nonisolated enum ToolCapabilityID: String, CaseIterable, Codable, Sendable, Hash
     case callPowerfulModel = "call_powerful_model"
 
     var id: String { rawValue }
+
+    /// Most capability identifiers equal their model-facing function name.
+    /// Search keeps its historical persisted ID while exposing the replacement
+    /// name, so saved profiles survive without showing a stale `grep` label.
+    var runtimeName: String {
+        self == .searchWorkspace ? "ripgrep" : rawValue
+    }
 }
 
 nonisolated enum ToolCapabilityCategory: String, CaseIterable, Sendable, Hashable {
     case product = "Product"
-    case discovery = "Discovery"
+    case discovery = "Exploration"
     case code = "Code"
     case execution = "Execution"
     case orchestration = "Orchestration"
@@ -132,8 +139,8 @@ nonisolated enum ModelToolCatalog {
         ),
         .init(
             id: .searchWorkspace,
-            name: "Search Workspace",
-            summary: "Search text and code patterns inside the workspace.",
+            name: "Ripgrep",
+            summary: "Find workspace files or search their contents with ripgrep.",
             category: .discovery,
             systemImage: "text.magnifyingglass",
             hasNativePresentation: false
@@ -305,6 +312,7 @@ nonisolated enum ModelToolCatalog {
                 .turboCodeGuide,
                 .listWorkspace,
                 .readFile,
+                .searchWorkspace,
                 .writeOnDevice,
                 .createSkill
             ]
@@ -331,6 +339,7 @@ nonisolated enum ModelToolCatalog {
             return [
                 (.turboCodeGuide, .always),
                 (.listWorkspace, .workspace),
+                (.searchWorkspace, .workspace),
                 (.fileSystem, .workspace),
                 (.loadSkill, .skills),
                 (.createSkill, .workspace),

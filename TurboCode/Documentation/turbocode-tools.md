@@ -44,10 +44,20 @@ locate types, functions, signatures, and likely related files while conserving
 context. It is available only when the selected profile supports a repository
 map.
 
-### `grep`
+### `ripgrep`
 
-Searches for text or regular-expression patterns in a workspace file or
-directory and returns matching lines with line numbers.
+Uses ripgrep for flexible, read-only workspace exploration. Its `files` action
+discovers paths, while `search` finds literal text or regular-expression
+patterns with optional path, glob, case, hidden-file, context-line, and
+files-only controls. Ripgrep respects repository ignore files by default and
+returns workspace-relative evidence without choosing an exploration strategy
+for the model. The persisted capability identifier remains `grep` so existing
+custom profiles automatically receive the replacement tool.
+
+TurboCode resolves `rg` from the application bundle first, then from
+`TURBOCODE_RG_PATH`, common Homebrew locations, or `PATH`. Release archives
+must bundle the executable and its license so the tool does not depend on a
+developer-machine installation.
 
 ## Reading and changing files
 

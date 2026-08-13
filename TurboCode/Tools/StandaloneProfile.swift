@@ -66,12 +66,18 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                             executionPolicy: executionPolicy
                         )
                     }
+                    if toolPlan.contains(.searchWorkspace) {
+                        // Ripgrep is a default primitive for every profile. It
+                        // stays directly available instead of requiring a
+                        // model-managed skill activation before exploration.
+                        RipgrepTool(
+                            workspaceRoot: workspaceRoot,
+                            executionPolicy: executionPolicy
+                        )
+                    }
                     if usesCacheStableToolDefinitions {
                         if toolPlan.contains(.fileSystem) {
                             FileSystemTool(workspaceRoot: workspaceRoot)
-                        }
-                        if toolPlan.contains(.searchWorkspace) {
-                            GrepTool(workspaceRoot: workspaceRoot)
                         }
                     } else if StandaloneSkills.isEnabled(for: toolPlan) {
                         StandaloneSkills(
@@ -116,7 +122,7 @@ struct StandaloneSkills: DynamicInstructions {
     let toolPlan: ModelToolPlan
 
     static func isEnabled(for toolPlan: ModelToolPlan) -> Bool {
-        toolPlan.contains(.fileSystem) || toolPlan.contains(.searchWorkspace)
+        toolPlan.contains(.fileSystem)
     }
 
     var body: some DynamicInstructions {
@@ -136,21 +142,6 @@ struct StandaloneSkills: DynamicInstructions {
                         "Use list_workspace for every directory listing. Use this skill when you need file metadata, file discovery, or file write/delete/copy/move operations."
                     }
                     FileSystemTool(workspaceRoot: workspaceRoot)
-                }
-            )
-        }
-
-        if toolPlan.contains(.searchWorkspace) {
-            skills.append(
-                Skill(
-                    name: "code-reader",
-                    description: "Search for text patterns in the workspace",
-                    allowsDeactivation: true
-                ) {
-                    Instructions {
-                        "Use this skill when you need to search for code patterns with grep. The read_file tool is already active directly."
-                    }
-                    GrepTool(workspaceRoot: workspaceRoot)
                 }
             )
         }

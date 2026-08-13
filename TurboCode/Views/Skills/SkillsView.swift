@@ -276,7 +276,7 @@ struct SkillsView: View {
                 ) {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 8)], spacing: 8) {
                         ForEach(defaultTools) { tool in
-                            capabilityBadge(icon: tool.systemImage, title: tool.name, subtitle: tool.id.rawValue)
+                            capabilityBadge(icon: tool.systemImage, title: tool.name, subtitle: tool.id.runtimeName)
                                 .toolInformationHoverCard(
                                     tool,
                                     availability: "Included in the \(modelID.displayName) default profile",
@@ -783,7 +783,7 @@ struct SkillsView: View {
             subtitle: compatible
                 ? (tool.id == .delegateTask
                     ? "Adds a worker picker"
-                    : tool.id.rawValue)
+                    : tool.id.runtimeName)
                 : "Unavailable for this model",
             compatible: compatible,
             actionIcon: compatible ? "plus.circle" : nil
@@ -810,7 +810,7 @@ struct SkillsView: View {
         return capabilityRow(
             icon: compatible ? tool.systemImage : "exclamationmark.triangle",
             title: tool.name,
-            subtitle: compatible ? tool.id.rawValue : "Not supported by \(option.id.displayName)",
+            subtitle: compatible ? tool.id.runtimeName : "Not supported by \(option.id.displayName)",
             compatible: compatible,
             actionIcon: "minus.circle"
         ) {
@@ -1263,7 +1263,7 @@ private struct ToolInformationCard: View {
             Divider()
 
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 7) {
-                metadataRow("Tool call", value: tool.id.rawValue, monospaced: true)
+                metadataRow("Tool call", value: tool.id.runtimeName, monospaced: true)
                 metadataRow("Category", value: tool.category.rawValue)
                 metadataRow(
                     "Interface",

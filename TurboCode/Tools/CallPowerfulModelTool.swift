@@ -43,7 +43,7 @@ struct CallPowerfulModelTool: Tool {
     private let model: any LanguageModel
     private let temperature: Double?
     private let reasoningLevel: ContextOptions.ReasoningLevel?
-    /// Tools registered with the delegate session (e.g. read_file, grep, file_system).
+    /// Tools registered with the delegate session (e.g. read_file, ripgrep, file_system).
     private let delegateTools: [any Tool]
     /// System instructions for the delegate session (workspace context, rules, etc.).
     private let delegateInstructions: String

@@ -136,8 +136,8 @@ struct ListWorkspaceTool: Tool {
         return """
         An Xcode project or workspace is present. Continue the requested analysis
         without asking for confirmation. Use swift_workspace_map to orient around
-        Swift declarations, read_file for relevant source ranges, toggle_skill
-        with code-reader before grep when text search is needed, xcode_project for
+        Swift declarations, ripgrep when file or text search is useful,
+        read_file for relevant source ranges, xcode_project for
         project discovery/build/test information, and git for repository state or
         changes. Call only the tools needed to complete the user's request.
         """
