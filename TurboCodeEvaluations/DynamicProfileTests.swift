@@ -1,6 +1,5 @@
 import Foundation
 import FoundationModels
-import FoundationModelsUtilities
 import Testing
 @testable import TurboCode
 
@@ -454,7 +453,6 @@ struct DynamicProfileTests {
         )
 
         #expect(plan.registeredIDs == [.writeOnDevice, .git])
-        #expect(!StandaloneSkills.isEnabled(for: plan))
     }
 
     @Test("A one-tool dynamic profile creates exactly one runtime tool")
@@ -485,8 +483,40 @@ struct DynamicProfileTests {
         #expect(tools.map(\.name) == ["write_ondevice"])
     }
 
-    @Test("DeepSeek keeps skill-backed tools directly available")
-    func deepSeekUsesCacheStableToolDefinitions() throws {
+    @Test("Persisted grep capability resolves to the Ripgrep replacement")
+    func persistedGrepCapabilityUsesRipgrepRuntimeName() {
+        let profile = UserDynamicProfile(
+            name: "Search only",
+            baseModelID: .llama,
+            // `grep` is the historical persisted capability value. Runtime
+            // replacement must not require rewriting an existing profile.
+            toolIDs: ["grep"]
+        )
+        let plan = ModelToolCatalog.plan(
+            profile: .standalone,
+            tier: .standard,
+            context: ToolAccessContext(
+                hasWorkspace: true,
+                hasSkills: false,
+                hasDelegateModel: false,
+                repositoryMapDetail: .compact
+            ),
+            selectedIDs: profile.resolvedToolIDs
+        )
+
+        let tools = ModelSessionFactory.toolInstances(
+            for: plan,
+            configuration: makeConfiguration(profile: profile)
+        )
+
+        #expect(profile.resolvedToolIDs == [.searchWorkspace])
+        #expect(tools.map(\.name) == ["ripgrep"])
+        #expect(ToolCapabilityID.searchWorkspace.rawValue == "grep")
+        #expect(ToolCapabilityID.searchWorkspace.runtimeName == "ripgrep")
+    }
+
+    @Test("DeepSeek keeps its selected tools directly available")
+    func deepSeekUsesDirectToolDefinitions() throws {
         let deepSeek = try #require(RemoteModelConfig.defaults.first { $0.id == "deepseek" })
         let session = ModelSessionFactory.makeSession(
             configuration: ModelSessionConfiguration(
@@ -498,7 +528,6 @@ struct DynamicProfileTests {
                 agentTuning: .default,
                 availableSkills: [],
                 activeDynamicProfile: nil,
-                skillActivations: SkillActivations(),
                 reasoningLevel: .deep,
                 delegateReasoningLevel: nil,
                 activeTemperature: nil,
@@ -522,11 +551,11 @@ struct DynamicProfileTests {
         }
         let names = instructions.toolDefinitions.map { $0.name }
         #expect(names.contains("file_system"))
-        #expect(names.contains("grep"))
+        #expect(names.contains("ripgrep"))
         #expect(names.contains("swift_package_manager"))
         #expect(!names.contains("toggle_skill"))
-        // DeepSeek depends on a fixed direct tool surface; skill activation
-        // would change the leading request prefix between otherwise equal turns.
+        // DeepSeek depends on a fixed direct tool surface so otherwise equal
+        // turns retain the same cacheable leading request prefix.
         #expect(Set(names).count == names.count)
     }
 
@@ -668,22 +697,13 @@ struct DynamicProfileTests {
         #expect(tools.map(\.name) == ["file_system"])
     }
 
-    @Test("Native skill activation is registered only for skill-backed tools")
-    func nativeSkillsRequireSkillBackedTool() {
-        let context = ToolAccessContext(
-            hasWorkspace: true,
-            hasSkills: false,
-            hasDelegateModel: false,
-            repositoryMapDetail: nil
-        )
-        let plan = ModelToolCatalog.plan(
-            profile: .standalone,
-            tier: .standard,
-            context: context,
-            selectedIDs: [.fileSystem]
-        )
+    @Test("Built-in Llama exposes file operations without skill activation")
+    func llamaUsesDirectFileSystemTool() throws {
+        let names = try llamaToolNames(profile: nil)
 
-        #expect(StandaloneSkills.isEnabled(for: plan))
+        #expect(names.contains("file_system"))
+        #expect(!names.contains("toggle_skill"))
+        #expect(!names.contains("activate_skill"))
     }
 
     private func makeRoot() throws -> URL {
@@ -704,7 +724,6 @@ struct DynamicProfileTests {
                 agentTuning: .default,
                 availableSkills: [],
                 activeDynamicProfile: profile,
-                skillActivations: SkillActivations(),
                 reasoningLevel: nil,
                 delegateReasoningLevel: nil,
                 activeTemperature: nil,
@@ -738,7 +757,6 @@ struct DynamicProfileTests {
             agentTuning: .default,
             availableSkills: [],
             activeDynamicProfile: profile,
-            skillActivations: SkillActivations(),
             reasoningLevel: nil,
             delegateReasoningLevel: nil,
             activeTemperature: nil,

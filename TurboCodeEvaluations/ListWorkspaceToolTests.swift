@@ -4,44 +4,22 @@ import Testing
 
 @Suite("List workspace tool")
 struct ListWorkspaceToolTests {
-    @Test("Llama receives Xcode analysis guidance after project discovery")
-    func llamaReceivesXcodeAnalysisGuidance() async throws {
+    @Test("Xcode containers are returned as ordinary directory entries")
+    func xcodeContainersRemainListingData() async throws {
         let workspace = try makeWorkspace()
         defer { try? FileManager.default.removeItem(at: workspace) }
         try FileManager.default.createDirectory(
             at: workspace.appendingPathComponent("Game.xcodeproj", isDirectory: true),
             withIntermediateDirectories: true
         )
-        let tool = ListWorkspaceTool(
-            workspaceRoot: workspace.path,
-            suggestsXcodeAnalysisTools: true
-        )
-
-        let output = try await tool.call(arguments: ListWorkspaceArguments(path: "."))
-
-        let guidance = try #require(output.modelGuidance)
-        #expect(guidance.contains("swift_workspace_map"))
-        #expect(guidance.contains("read_file"))
-        #expect(guidance.contains("toggle_skill"))
-        #expect(guidance.contains("grep"))
-        #expect(guidance.contains("xcode_project"))
-        #expect(guidance.contains("git"))
-        #expect(guidance.contains("without asking for confirmation"))
-    }
-
-    @Test("Non-Llama profiles keep Xcode listings free of model guidance")
-    func otherProfilesDoNotReceiveXcodeAnalysisGuidance() async throws {
-        let workspace = try makeWorkspace()
-        defer { try? FileManager.default.removeItem(at: workspace) }
-        try FileManager.default.createDirectory(
-            at: workspace.appendingPathComponent("Game.xcworkspace", isDirectory: true),
-            withIntermediateDirectories: true
-        )
         let tool = ListWorkspaceTool(workspaceRoot: workspace.path)
 
         let output = try await tool.call(arguments: ListWorkspaceArguments(path: "."))
 
-        #expect(output.modelGuidance == nil)
+        let entry = try #require(output.entries.first)
+        #expect(entry.name == "Game.xcodeproj")
+        #expect(entry.kind == "directory")
+        #expect(output.totalCount == 1)
     }
 
     private func makeWorkspace() throws -> URL {

@@ -19,6 +19,12 @@ struct MessageTimelineView: View {
     /// These related flags move through one reducer so geometry and phase
     /// callbacks cannot leave the timeline in a contradictory state.
     @State private var scrollFollowState = TimelineScrollFollowState()
+    /// Fast exploration calls remain legible long enough to communicate intent,
+    /// then briefly acknowledge completion instead of flashing in and out.
+    @State private var retainedExplorationActivity: ToolActivity?
+    @State private var explorationStartedAt: Date?
+    @State private var explorationIsComplete = false
+    @State private var explorationDismissalGeneration = UUID()
 
     var body: some View {
         ScrollView {
@@ -54,8 +60,8 @@ struct MessageTimelineView: View {
                         .id("live-assistant")
                 }
 
-                if chatStore.busy {
-                    ModelActivityIndicator(summary: modelActivitySummary)
+                if chatStore.busy || retainedExplorationActivity != nil {
+                    modelActivityIndicator
                         .padding(.horizontal, 12)
                         .padding(.vertical, 4)
                         .id("model-activity")
@@ -94,6 +100,15 @@ struct MessageTimelineView: View {
             await Task.yield()
             scrollToBottom()
         }
+        .onAppear {
+            updateExplorationPresentation(for: chatStore.activeToolActivity)
+        }
+        .onChange(of: chatStore.activeToolActivity) { _, activity in
+            updateExplorationPresentation(for: activity)
+        }
+        .onDisappear {
+            explorationDismissalGeneration = UUID()
+        }
     }
 
     private var modelActivitySummary: String {
@@ -107,6 +122,71 @@ struct MessageTimelineView: View {
             return "Composing response"
         }
         return "Preparing response"
+    }
+
+    /// File reads and searches share a deliberately quiet terminal affordance
+    /// because fast workspace exploration can look like an idle model pause.
+    @ViewBuilder
+    private var modelActivityIndicator: some View {
+        if let activity = chatStore.activeToolActivity,
+           usesExplorationIndicator(activity) {
+            ExplorationTerminalActivityIndicator(
+                summary: activity.summary,
+                isComplete: false
+            )
+        } else if chatStore.activeToolActivity == nil,
+                  let activity = retainedExplorationActivity {
+            ExplorationTerminalActivityIndicator(
+                summary: activity.summary,
+                isComplete: explorationIsComplete
+            )
+        } else {
+            ModelActivityIndicator(summary: modelActivitySummary)
+        }
+    }
+
+    private func usesExplorationIndicator(_ activity: ToolActivity) -> Bool {
+        activity.toolName == "read_file"
+            || activity.toolName == "ripgrep"
+            || activity.toolName == "grep"
+    }
+
+    private func updateExplorationPresentation(for activity: ToolActivity?) {
+        explorationDismissalGeneration = UUID()
+
+        if let activity, usesExplorationIndicator(activity) {
+            if retainedExplorationActivity?.id != activity.id {
+                explorationStartedAt = Date()
+            }
+            retainedExplorationActivity = activity
+            explorationIsComplete = false
+            return
+        }
+
+        // Another tool is more relevant than an old exploration acknowledgement.
+        guard activity == nil else {
+            retainedExplorationActivity = nil
+            explorationStartedAt = nil
+            explorationIsComplete = false
+            return
+        }
+        guard retainedExplorationActivity != nil else { return }
+
+        explorationIsComplete = true
+        let elapsed = Date().timeIntervalSince(explorationStartedAt ?? Date())
+        let remainingMinimum = max(1.6 - elapsed, 0)
+        let delay = max(remainingMinimum, 0.55)
+        let generation = explorationDismissalGeneration
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(delay))
+            guard generation == explorationDismissalGeneration,
+                  chatStore.activeToolActivity == nil else { return }
+            withAnimation(.easeOut(duration: 0.18)) {
+                retainedExplorationActivity = nil
+                explorationStartedAt = nil
+                explorationIsComplete = false
+            }
+        }
     }
 
     // MARK: - Empty State
@@ -251,6 +331,65 @@ private struct ActivityPulse: View {
     }
 }
 
+/// A low-frequency terminal cursor makes active workspace exploration visible
+/// without competing with streamed reasoning or assistant text.
+private struct ExplorationTerminalActivityIndicator: View {
+    let summary: String
+    let isComplete: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @ViewBuilder
+    var body: some View {
+        if isComplete {
+            content(cursorIsVisible: true)
+        } else {
+            TimelineView(.periodic(from: .now, by: 0.7)) { context in
+                let cursorIsVisible = reduceMotion
+                    || Int(context.date.timeIntervalSinceReferenceDate / 0.7).isMultiple(of: 2)
+                content(cursorIsVisible: cursorIsVisible)
+            }
+        }
+    }
+
+    private func content(cursorIsVisible: Bool) -> some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 1.5) {
+                if isComplete {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 8, weight: .bold))
+                } else {
+                    Text("›")
+                    RoundedRectangle(cornerRadius: 0.75)
+                        .frame(width: 3, height: 8)
+                        .opacity(cursorIsVisible ? 0.82 : 0.2)
+                }
+            }
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .frame(width: 22, height: 17)
+            .background(.secondary.opacity(0.075), in: RoundedRectangle(cornerRadius: 4.5))
+            .overlay {
+                RoundedRectangle(cornerRadius: 4.5)
+                    .stroke(.separator.opacity(0.45), lineWidth: 0.5)
+            }
+
+            Text(summary)
+                .font(AppTypography.metadata)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .opacity(isComplete ? 0.7 : 0.84)
+
+            Spacer()
+        }
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            isComplete ? "\(summary), completed" : "\(summary), in progress"
+        )
+    }
+}
+
 // MARK: - Turn grouping
 
 struct Turn: Identifiable {
@@ -383,7 +522,7 @@ struct LiveAssistantBlock: View {
     @Environment(\.chatFontSize) private var chatFontSize
 
     var body: some View {
-        Markdown(text)
+        Markdown(ChatMarkdownPresentation.cleaned(text))
             .markdownTheme(AppTypography.chatMarkdownTheme(size: chatFontSize))
             .textSelection(.enabled)
             .frame(maxWidth: 1040, alignment: .leading)

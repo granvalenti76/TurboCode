@@ -18,7 +18,7 @@ struct AgentTaskScopeTests {
             workspaceRoot: fixture.root.path,
             taskScope: scope
         )
-        let search = GrepTool(
+        let search = RipgrepTool(
             workspaceRoot: fixture.root.path,
             taskScope: scope
         )
@@ -40,9 +40,17 @@ struct AgentTaskScopeTests {
             )
         )
         let rejectedSearch = try await search.call(
-            arguments: SearchArguments(
+            arguments: RipgrepArguments(
+                action: "search",
                 pattern: "outside",
                 path: ".",
+                filePattern: nil,
+                excludePattern: nil,
+                literal: nil,
+                caseSensitive: nil,
+                contextLines: nil,
+                filesOnly: nil,
+                hidden: nil,
                 maxResults: nil
             )
         )

@@ -24,6 +24,7 @@ final class WorkbenchStore {
     var leftSidebarWidth: CGFloat = 304
     var rightPanelMode: RightPanelMode?
     var rightSidebarWidth: CGFloat = 360
+    var terminalPresented = false
     var inspectedGitCommit: GitCommitBlock?
     var inspectedWorkspaceListingID: String?
     var inspectedDiffPatchReview: DiffPatchReviewPresentation?
@@ -38,7 +39,12 @@ final class WorkbenchStore {
         }
         isCustomProfilesPresented = false
         self.route = route
-        if route != .chat { rightPanelMode = nil }
+        if route != .chat {
+            rightPanelMode = nil
+            // The terminal utility area accompanies the chat canvas. Terminate
+            // its process instead of leaving an invisible shell behind.
+            terminalPresented = false
+        }
     }
 
     /// Opens profile management with a specific creation intent. The request is
@@ -55,6 +61,10 @@ final class WorkbenchStore {
 
     func toggleRightPanel(_ mode: RightPanelMode) {
         rightPanelMode = rightPanelMode == mode ? nil : mode
+    }
+
+    func toggleTerminal() {
+        terminalPresented.toggle()
     }
 
     func toggleLeftSidebar() {

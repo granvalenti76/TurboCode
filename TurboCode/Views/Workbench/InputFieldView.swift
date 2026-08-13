@@ -71,9 +71,11 @@ struct InputFieldView: View {
     // MARK: - Text Field
 
     private var textField: some View {
+        // Keep the invitation workspace-oriented; the active profile and tools
+        // provide specialization without narrowing what users think they can ask.
         return VStack(alignment: .leading, spacing: 8) {
             TextField(
-                "Describe a Swift or SwiftUI task…",
+                "What would you like to do in this project?",
                 text: Binding(
                     get: { chatStore.composerInput },
                     set: { chatStore.composerInput = $0 }

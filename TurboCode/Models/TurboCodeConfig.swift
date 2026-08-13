@@ -376,8 +376,8 @@ public final class TurboCodeConfig {
 
     ## Workspace tools
 
-    - `read_file` reads complete files or focused numbered line ranges.
-    - `grep` searches workspace text.
+    - `read_file` reads numbered line ranges and reports an exact continuation when output reaches its configured ceiling.
+    - `ripgrep` discovers workspace files or searches their text with optional filters.
     - `file_system` lists and manages files inside the workspace.
     - `git` initializes repositories and provides complete structured local and
       remote Git workflows. Git writes are independent from the read-only bash
@@ -432,7 +432,7 @@ public final class TurboCodeConfig {
     ```markdown
     ---
     name: lowercase-kebab-name
-    description: State precisely when the model should activate this skill
+    description: State precisely when the model should load these instructions
     ---
     # Skill Title
 
@@ -440,7 +440,7 @@ public final class TurboCodeConfig {
     ```
 
     Keep the name under 64 characters and use lowercase letters, digits, and hyphens.
-    Make the description specific enough for automatic activation. Keep the body
+    Make the description specific enough for automatic selection and loading. Keep the body
     procedural and focused; avoid repeating general TurboCode behavior. When asked
     to create a skill, validate the name and description, create the directory and
     file when workspace tools are available, then report the exact path. TurboCode

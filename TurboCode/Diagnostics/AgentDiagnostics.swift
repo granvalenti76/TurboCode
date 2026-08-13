@@ -481,6 +481,7 @@ actor AgentDiagnosticsRecorder {
             ("readfiletool", "read_file"),
             ("bashtool", "bash"),
             ("filesystemtool", "file_system"),
+            ("ripgreptool", "ripgrep"),
             ("greptool", "grep"),
             ("loadskilltool", "load_skill"),
             ("callpowerfulmodeltool", "call_powerful_model")

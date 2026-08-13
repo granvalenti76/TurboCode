@@ -23,15 +23,25 @@ struct ReadFileTool: Tool {
     typealias Output = String
 
     let workspaceRoot: String
+    let executionPolicy: ExecutionPolicy
     let taskScope: AgentTaskPathScope?
 
-    init(workspaceRoot: String, taskScope: AgentTaskPathScope? = nil) {
+    init(
+        workspaceRoot: String,
+        executionPolicy: ExecutionPolicy = ExecutionPolicy(),
+        taskScope: AgentTaskPathScope? = nil
+    ) {
         self.workspaceRoot = workspaceRoot
+        self.executionPolicy = executionPolicy
         self.taskScope = taskScope
     }
 
     func restricted(to scope: AgentTaskPathScope) -> Self {
-        Self(workspaceRoot: workspaceRoot, taskScope: scope)
+        Self(
+            workspaceRoot: workspaceRoot,
+            executionPolicy: executionPolicy,
+            taskScope: scope
+        )
     }
 
     var name: String { "read_file" }
@@ -39,8 +49,9 @@ struct ReadFileTool: Tool {
         """
         Read all or a precise inclusive line range from a UTF-8 text file in the workspace.
         Every returned source line is prefixed with its one-based line number, and the
-        response reports a stable content revision, selected range, and total line count.
-        Prefer small ranges around relevant code before calling the structured editing tool.
+        response reports a stable content revision, selected range, total line count, and
+        approximate token cost. Large results stop on a line boundary and report the next
+        range to request. Prefer small relevant ranges before calling the structured editor.
         """
     }
     var includesSchemaInInstructions: Bool { true }
@@ -112,18 +123,92 @@ struct ReadFileTool: Tool {
         }
 
         let endLine = min(requestedEnd, totalLines)
+        return render(
+            lines: lines,
+            content: content,
+            fileURL: fileURL,
+            startLine: startLine,
+            requestedEndLine: endLine,
+            totalLines: totalLines
+        )
+    }
+
+    /// Applies only an infrastructure ceiling: the model still chooses any
+    /// range, while oversized responses expose an exact continuation point.
+    private func render(
+        lines: [String],
+        content: String,
+        fileURL: URL,
+        startLine: Int,
+        requestedEndLine: Int,
+        totalLines: Int
+    ) -> String {
+        let outputLimit = max(executionPolicy.maximumToolOutputCharacters, 1_000)
+        // Metadata includes a revision and continuation. Reserving its space
+        // keeps truncation on source-line boundaries instead of cutting output.
+        let bodyLimit = max(outputLimit - 640, 200)
         let numberWidth = String(totalLines).count
-        let numberedLines = (startLine...endLine).map { lineNumber in
+        var numberedLines: [String] = []
+        var bodyCharacters = 0
+        var renderedEndLine = startLine - 1
+        var clippedOversizedLine = false
+
+        for lineNumber in startLine...requestedEndLine {
             let number = String(format: "%*d", numberWidth, lineNumber)
-            return "\(number) | \(lines[lineNumber - 1])"
+            let rendered = "\(number) | \(lines[lineNumber - 1])"
+            let addition = rendered.count + (numberedLines.isEmpty ? 0 : 1)
+            guard bodyCharacters + addition <= bodyLimit else {
+                if numberedLines.isEmpty {
+                    // A minified file can contain a single enormous line. Give
+                    // useful evidence while stating that this line is partial.
+                    let suffix = " … [line clipped]"
+                    let prefixLimit = max(bodyLimit - suffix.count, 1)
+                    numberedLines.append(String(rendered.prefix(prefixLimit)) + suffix)
+                    renderedEndLine = lineNumber
+                    clippedOversizedLine = true
+                }
+                break
+            }
+            numberedLines.append(rendered)
+            bodyCharacters += addition
+            renderedEndLine = lineNumber
         }
 
-        return """
-        File: \(fileURL.path)
+        let body = numberedLines.joined(separator: "\n")
+        let approximateTokens = Int(ceil(Double(body.utf8.count) / 3.2))
+        let displayPath = concisePath(fileURL)
+        var output = """
+        File: \(displayPath)
         Revision: \(FileRevision.hash(content))
-        Lines: \(startLine)-\(endLine) of \(totalLines)
+        Lines: \(startLine)-\(renderedEndLine) of \(totalLines)
+        Approximate tokens: ~\(approximateTokens)
 
-        \(numberedLines.joined(separator: "\n"))
+        \(body)
         """
+        if clippedOversizedLine {
+            output += "\n\nLine \(renderedEndLine) exceeded the output ceiling and was clipped."
+        }
+        if renderedEndLine < requestedEndLine {
+            output += "\n\nOutput limited to \(outputLimit) characters. "
+            output += "Continue with startLine \(renderedEndLine + 1) and endLine \(requestedEndLine)."
+        }
+        // The reserved metadata budget should make this a no-op. Keep the
+        // final guard as a safety invariant for unusually long filesystem paths.
+        return String(output.prefix(outputLimit))
+    }
+
+    private func concisePath(_ fileURL: URL) -> String {
+        let rootURL = URL(fileURLWithPath: workspaceRoot).standardizedFileURL
+        let path = fileURL.standardizedFileURL.path
+        let rootPath = rootURL.path
+        let relative = path.hasPrefix(rootPath + "/")
+            ? String(path.dropFirst(rootPath.count + 1))
+            : fileURL.lastPathComponent
+        let singleLine = relative
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        guard singleLine.count > 180 else { return singleLine }
+        return "…" + singleLine.suffix(179)
     }
 }

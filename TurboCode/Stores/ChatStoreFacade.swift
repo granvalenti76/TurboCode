@@ -1,6 +1,5 @@
 import Foundation
 import FoundationModels
-import FoundationModelsUtilities
 import SwiftUI
 
 /// Backwards-compatible view API for the decomposed chat domains.
@@ -103,6 +102,11 @@ extension ChatStore {
     public var rightSidebarWidth: CGFloat {
         get { workbenchStore.rightSidebarWidth }
         set { workbenchStore.rightSidebarWidth = newValue }
+    }
+
+    public var terminalPresented: Bool {
+        get { workbenchStore.terminalPresented }
+        set { workbenchStore.terminalPresented = newValue }
     }
 
     public var inspectedGitCommit: GitCommitBlock? {
@@ -218,10 +222,6 @@ extension ChatStore {
         activeBackend != .codex || codexRuntimeStore.canSend
     }
 
-    public var skillActivations: SkillActivations {
-        modelRuntimeStore.skillActivations
-    }
-
     var availableSkills: [TurboCodeSkillDefinition] {
         modelRuntimeStore.availableSkills
     }
@@ -246,6 +246,18 @@ extension ChatStore {
         workspaceStore.diffLoadError
     }
 
+    var reviewComments: [ReviewComment] {
+        reviewDraftStore.comments
+    }
+
+    var outdatedReviewCommentCount: Int {
+        reviewDraftStore.outdatedCount
+    }
+
+    var canSendReviewComments: Bool {
+        reviewDraftStore.canSend && !busy && activeProfileCanSend
+    }
+
     var isGitRepository: Bool {
         workspaceStore.isGitRepository
     }
@@ -260,6 +272,23 @@ extension ChatStore {
 
     public func reloadDiffs() async {
         await workspaceStore.reloadDiffs()
+    }
+
+    @discardableResult
+    func upsertReviewComment(
+        id: UUID?,
+        anchor: ReviewLineAnchor,
+        body: String
+    ) -> ReviewComment? {
+        reviewDraftStore.upsert(id: id, anchor: anchor, body: body)
+    }
+
+    func removeReviewComment(_ id: UUID) {
+        reviewDraftStore.remove(id)
+    }
+
+    func discardReviewComments() {
+        reviewDraftStore.discardAll()
     }
 
     public func refreshGitBranches() async {

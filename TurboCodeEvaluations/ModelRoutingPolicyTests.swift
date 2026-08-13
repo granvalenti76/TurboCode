@@ -104,13 +104,56 @@ struct ModelRoutingPolicyTests {
             ]
         )
 
-        #expect(defaultPlan.registeredIDs == [.turboCodeGuide, .listWorkspace, .readFile, .writeOnDevice, .createSkill])
+        #expect(defaultPlan.registeredIDs == [.turboCodeGuide, .listWorkspace, .readFile, .searchWorkspace, .writeOnDevice, .createSkill])
         #expect(explicitExpansion.registeredIDs == [.writeOnDevice, .readFile, .git, .bash, .delegateTask, .createSkill])
         #expect(defaultPlan.contains(.readFile))
         #expect(!defaultPlan.contains(.git))
         #expect(!defaultPlan.contains(.editFile))
         #expect(!defaultPlan.contains(.delegateTask))
         #expect(!defaultPlan.contains(.callPowerfulModel))
+    }
+
+    @Test("Every default runtime profile receives Ripgrep")
+    func defaultProfilesIncludeRipgrep() {
+        let context = ToolAccessContext(
+            hasWorkspace: true,
+            hasSkills: false,
+            hasDelegateModel: true,
+            repositoryMapDetail: .compact
+        )
+
+        for profile in [
+            ModelRuntimeProfile.microtask,
+            .standalone,
+            .orchestrator,
+            .delegate
+        ] {
+            let plan = ModelToolCatalog.plan(
+                profile: profile,
+                tier: profile == .microtask ? .onDevice : .standard,
+                context: context
+            )
+            #expect(plan.contains(.searchWorkspace))
+        }
+    }
+
+    @Test("Runtime prompt advertises Ripgrep instead of the persisted legacy ID")
+    func promptUsesRipgrepRuntimeName() {
+        let prompt = TurboCodeSystemPromptBuilder.build(
+            TurboCodeSystemPromptContext(
+                role: .standalone,
+                backend: .llamaServer,
+                workspaceRoot: "/tmp/workspace",
+                agentTuning: AgentTuningConfig(),
+                toolIDs: [.searchWorkspace],
+                toolNames: [ToolCapabilityID.searchWorkspace.runtimeName],
+                availableSkills: [],
+                workspaceInstructions: nil
+            )
+        )
+
+        #expect(prompt.contains("- ripgrep"))
+        #expect(!prompt.contains("- grep\n"))
     }
 
     @Test("Prompt does not impose the removed microtask competence barrier")

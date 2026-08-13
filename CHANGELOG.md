@@ -7,6 +7,29 @@ formats continue to evolve before 1.0.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-13
+
+### RELEASE
+
+- Added an integrated project terminal directly inside the workbench.
+- Added syntax-aware inline code review with review comments and draft
+  management.
+- Redesigned the Changes Inspector with improved diff presentation and code
+  review workflows.
+- Added visible activity states for file reads and ripgrep searches.
+- Replaced the legacy `grep` tool with the bounded `ripgrep` tool.
+- Refined Markdown presentation across chat messages, including typography
+  and code rendering.
+- Stabilized Llama prompt caching and model-switch behavior with regression
+  coverage.
+
+### FIX
+
+- Improved scrolling while reviewing change patches.
+- Simplified workspace listing guidance and its result presentation.
+- Simplified the tool surface and bounded file reads to keep tool usage more
+  predictable and safer.
+
 ## [0.3.1] - 2026-08-12
 
 > **Compatibility warning:** This version works only with macOS 27 beta 5.

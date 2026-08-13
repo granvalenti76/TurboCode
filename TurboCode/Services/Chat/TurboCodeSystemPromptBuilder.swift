@@ -139,6 +139,9 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         if tools.contains(.readFile) {
             lines.append("- Use read_file for focused numbered source ranges.")
         }
+        if tools.contains(.searchWorkspace) {
+            lines.append("- Use ripgrep flexibly to discover files or search workspace content; narrow its optional filters only when useful.")
+        }
         if tools.contains(.editFile) {
             lines.append("- Use the structured editor for source and text changes. Before editing an existing file, read the relevant range and pass its revision. Never generate unified diff hunks.")
         }

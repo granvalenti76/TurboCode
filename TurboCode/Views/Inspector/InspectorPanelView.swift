@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // MARK: - Inspector Panel
@@ -1563,37 +1564,101 @@ private enum DiffContextMode: String, CaseIterable, Identifiable {
 
 struct FileInspectorView: View {
     let sections: [FileDiffSection]
+    private let gutterWidth: CGFloat
+    private let minimumContentWidth: CGFloat
+    private let syntaxTokensByLineID: [UUID: [InspectorSyntaxToken]]
 
     @Environment(ChatStore.self) private var chatStore
     @State private var collapsed: Set<String> = []
     @State private var contextMode: DiffContextMode = .focused
+    @State private var editingLineID: UUID?
+    @State private var showsDiscardConfirmation = false
 
     private var additions: Int { sections.reduce(0) { $0 + $1.added } }
     private var deletions: Int { sections.reduce(0) { $0 + $1.removed } }
+
+    init(sections: [FileDiffSection]) {
+        self.sections = sections
+        // Measure the immutable Git snapshot once. Disclosure and collapse
+        // state should not rescan every source line during each animation.
+        let lines = sections.flatMap(\.diffLines)
+        let gutterWidth = InspectorDiffLayout.gutterWidth(for: lines)
+        self.gutterWidth = gutterWidth
+        minimumContentWidth = InspectorDiffLayout.minimumContentWidth(
+            for: lines,
+            gutterWidth: gutterWidth
+        )
+        syntaxTokensByLineID = sections.reduce(into: [:]) { result, section in
+            result.merge(
+                InspectorSyntaxHighlighter.tokens(
+                    for: section.diffLines,
+                    filePath: section.path
+                ),
+                uniquingKeysWith: { _, new in new }
+            )
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             headerBar
             Divider()
 
-            ScrollView(.vertical) {
-                LazyVStack(spacing: 0) {
-                    ForEach(sections) { section in
-                        DiffSectionView(
-                            section: section,
-                            isCollapsed: collapsed.contains(section.id),
-                            contextMode: contextMode,
-                            onToggle: { toggle(section.id) }
-                        )
+            GeometryReader { geometry in
+                let viewportWidth = geometry.size.width
+                let contentWidth = max(viewportWidth, minimumContentWidth)
 
-                        if section.id != sections.last?.id {
-                            Divider()
+                ScrollView([.horizontal, .vertical]) {
+                    LazyVStack(spacing: 0) {
+                        ForEach(sections) { section in
+                            DiffSectionView(
+                                section: section,
+                                isCollapsed: collapsed.contains(section.id),
+                                contextMode: contextMode,
+                                viewportWidth: viewportWidth,
+                                contentWidth: contentWidth,
+                                gutterWidth: gutterWidth,
+                                syntaxTokensByLineID: syntaxTokensByLineID,
+                                comments: chatStore.reviewComments,
+                                editingLineID: $editingLineID,
+                                onToggle: { toggle(section.id) },
+                                onSaveComment: saveComment,
+                                onRemoveComment: removeComment
+                            )
+
+                            if section.id != sections.last?.id {
+                                Divider()
+                                    .frame(width: contentWidth)
+                            }
                         }
                     }
+                    .frame(width: contentWidth, alignment: .leading)
                 }
+                .scrollIndicators(.visible)
+            }
+
+            if !chatStore.reviewComments.isEmpty {
+                Divider()
+                reviewBar
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .confirmationDialog(
+            "Discard all review comments?",
+            isPresented: $showsDiscardConfirmation
+        ) {
+            Button("Discard Comments", role: .destructive) {
+                editingLineID = nil
+                chatStore.discardReviewComments()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("These comments have not been sent to the model.")
+        }
+        .onChange(of: sections.flatMap(\.diffLines).map(\.id)) { _, visibleIDs in
+            guard let editingLineID, !visibleIDs.contains(editingLineID) else { return }
+            self.editingLineID = nil
+        }
     }
 
     private var headerBar: some View {
@@ -1615,15 +1680,20 @@ struct FileInspectorView: View {
 
             Spacer(minLength: 8)
 
-            Picker("Context", selection: $contextMode) {
-                ForEach(DiffContextMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
+            Menu {
+                Picker("Context", selection: $contextMode) {
+                    ForEach(DiffContextMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
                 }
+            } label: {
+                Image(systemName: contextMode == .focused
+                      ? "line.3.horizontal.decrease"
+                      : "text.alignleft")
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-            .frame(width: 126)
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("Context: \(contextMode.rawValue)")
 
             Button {
                 Task { await chatStore.reloadDiffs() }
@@ -1655,6 +1725,83 @@ struct FileInspectorView: View {
             }
         }
     }
+
+    private var reviewBar: some View {
+        HStack(spacing: 10) {
+            Label(
+                "\(chatStore.reviewComments.count) \(chatStore.reviewComments.count == 1 ? "comment" : "comments")",
+                systemImage: "text.bubble"
+            )
+            .font(.system(size: 11.5, weight: .medium))
+
+            if chatStore.outdatedReviewCommentCount > 0 {
+                Menu {
+                    ForEach(chatStore.reviewComments.filter(\.isOutdated)) { comment in
+                        Button(role: .destructive) {
+                            chatStore.removeReviewComment(comment.id)
+                        } label: {
+                            Label(
+                                "Remove \(comment.anchor.filePath):\(comment.anchor.lineNumber)",
+                                systemImage: "trash"
+                            )
+                        }
+                    }
+                } label: {
+                    Label(
+                        "\(chatStore.outdatedReviewCommentCount) outdated",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(AppTypography.metadata)
+                    .foregroundStyle(.orange)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Refresh or remove outdated comments before sending")
+            }
+
+            Spacer(minLength: 8)
+
+            Button("Discard") {
+                showsDiscardConfirmation = true
+            }
+            .buttonStyle(.borderless)
+            .disabled(chatStore.busy)
+
+            Button("Send Review") {
+                editingLineID = nil
+                Task { await chatStore.sendReviewComments() }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(!chatStore.canSendReviewComments)
+            .help(reviewSendHelp)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(.bar)
+    }
+
+    private var reviewSendHelp: String {
+        if chatStore.outdatedReviewCommentCount > 0 {
+            return "Refresh or remove outdated comments before sending"
+        }
+        if chatStore.busy { return "Wait for the current response to finish" }
+        return "Send all review comments as one request"
+    }
+
+    private func saveComment(
+        id: UUID?,
+        anchor: ReviewLineAnchor,
+        body: String
+    ) {
+        _ = chatStore.upsertReviewComment(id: id, anchor: anchor, body: body)
+        editingLineID = nil
+    }
+
+    private func removeComment(_ id: UUID) {
+        chatStore.removeReviewComment(id)
+        editingLineID = nil
+    }
 }
 
 // MARK: - File Section
@@ -1663,7 +1810,16 @@ struct DiffSectionView: View {
     let section: FileDiffSection
     let isCollapsed: Bool
     fileprivate let contextMode: DiffContextMode
+    let viewportWidth: CGFloat
+    let contentWidth: CGFloat
+    let gutterWidth: CGFloat
+    let syntaxTokensByLineID: [UUID: [InspectorSyntaxToken]]
+    let comments: [ReviewComment]
+    @Binding var editingLineID: UUID?
     let onToggle: () -> Void
+    let onSaveComment: (UUID?, ReviewLineAnchor, String) -> Void
+    let onRemoveComment: (UUID) -> Void
+    @State private var revealedContextIndices: Set<Int> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1674,9 +1830,23 @@ struct DiffSectionView: View {
             .buttonStyle(.plain)
 
             if !isCollapsed, !section.diffLines.isEmpty {
-                DiffLinesView(rows: displayRows)
+                DiffLinesView(
+                    rows: displayRows,
+                    allLines: section.diffLines,
+                    filePath: section.path,
+                    viewportWidth: viewportWidth,
+                    contentWidth: contentWidth,
+                    gutterWidth: gutterWidth,
+                    syntaxTokensByLineID: syntaxTokensByLineID,
+                    comments: comments,
+                    editingLineID: $editingLineID,
+                    onRevealOmitted: reveal,
+                    onSaveComment: onSaveComment,
+                    onRemoveComment: onRemoveComment
+                )
             }
         }
+        .frame(width: contentWidth, alignment: .leading)
     }
 
     private var sectionHeader: some View {
@@ -1686,9 +1856,13 @@ struct DiffSectionView: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 12)
 
-            Image(systemName: "doc.text")
+            Image(systemName: InspectorFilePresentation.symbolName(for: section.path))
                 .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(
+                    InspectorFilePresentation.supportsSyntaxHighlighting(section.path)
+                        ? Color.orange
+                        : Color(nsColor: .secondaryLabelColor)
+                )
                 .frame(width: 16)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -1721,27 +1895,50 @@ struct DiffSectionView: View {
             .font(.system(size: 11, weight: .medium, design: .monospaced))
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(minHeight: 46)
-        .background(Color.primary.opacity(0.025))
+        .padding(.vertical, 7)
+        .frame(width: viewportWidth)
+        .frame(minHeight: 42)
     }
 
     private var displayRows: [InspectorDiffRow] {
         switch contextMode {
         case .full:
             return section.diffLines.enumerated().map { index, line in
-                InspectorDiffRow(id: "line-\(index)-\(line.id)", content: .line(line))
+                InspectorDiffRow(
+                    id: "line-\(index)-\(line.id)",
+                    content: .line(index: index, line: line)
+                )
             }
         case .focused:
-            return focusedRows(section.diffLines, contextRadius: 3)
+            return InspectorDiffRowBuilder.focusedRows(
+                section.diffLines,
+                contextRadius: 3,
+                revealedIndices: revealedContextIndices
+            )
         }
     }
 
-    private func focusedRows(_ lines: [DiffLine], contextRadius: Int) -> [InspectorDiffRow] {
+    private func reveal(_ range: ClosedRange<Int>) {
+        withAnimation(.easeInOut(duration: 0.16)) {
+            revealedContextIndices.formUnion(range)
+        }
+    }
+}
+
+// MARK: - Focused diff presentation
+
+/// Builds compact context groups independently from the view so revealing one
+/// omitted region never forces the entire file into Full mode.
+nonisolated enum InspectorDiffRowBuilder {
+    static func focusedRows(
+        _ lines: [DiffLine],
+        contextRadius: Int,
+        revealedIndices: Set<Int> = []
+    ) -> [InspectorDiffRow] {
         let changedIndices = lines.indices.filter { lines[$0].type != .context }
         guard !changedIndices.isEmpty else { return [] }
 
-        var visibleIndices = Set<Int>()
+        var visibleIndices = revealedIndices
         for index in changedIndices {
             let lower = max(lines.startIndex, index - contextRadius)
             let upper = min(lines.endIndex - 1, index + contextRadius)
@@ -1753,10 +1950,11 @@ struct DiffSectionView: View {
 
         func appendOmitted(endingAt end: Int) {
             guard let start = omittedStart else { return }
+            let range = start...end
             rows.append(
                 InspectorDiffRow(
                     id: "omitted-\(start)-\(end)",
-                    content: .omitted(end - start + 1)
+                    content: .omitted(range)
                 )
             )
             omittedStart = nil
@@ -1768,7 +1966,7 @@ struct DiffSectionView: View {
                 rows.append(
                     InspectorDiffRow(
                         id: "line-\(index)-\(lines[index].id)",
-                        content: .line(lines[index])
+                        content: .line(index: index, line: lines[index])
                     )
                 )
             } else if omittedStart == nil {
@@ -1782,10 +1980,10 @@ struct DiffSectionView: View {
 
 // MARK: - Diff Rows
 
-private struct InspectorDiffRow: Identifiable {
-    enum Content {
-        case line(DiffLine)
-        case omitted(Int)
+nonisolated struct InspectorDiffRow: Identifiable, Sendable {
+    nonisolated enum Content: Sendable {
+        case line(index: Int, line: DiffLine)
+        case omitted(ClosedRange<Int>)
     }
 
     let id: String
@@ -1794,72 +1992,191 @@ private struct InspectorDiffRow: Identifiable {
 
 struct DiffLinesView: View {
     fileprivate let rows: [InspectorDiffRow]
+    let allLines: [DiffLine]
+    let filePath: String
+    let viewportWidth: CGFloat
+    let contentWidth: CGFloat
+    let gutterWidth: CGFloat
+    let syntaxTokensByLineID: [UUID: [InspectorSyntaxToken]]
+    let comments: [ReviewComment]
+    @Binding var editingLineID: UUID?
+    let onRevealOmitted: (ClosedRange<Int>) -> Void
+    let onSaveComment: (UUID?, ReviewLineAnchor, String) -> Void
+    let onRemoveComment: (UUID) -> Void
 
     var body: some View {
-        ScrollView(.horizontal) {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(rows) { row in
-                    switch row.content {
-                    case .line(let line):
-                        DiffLineView(line: line)
-                    case .omitted(let count):
-                        omittedRow(count)
-                    }
+        LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(rows) { row in
+                switch row.content {
+                case .line(let index, let line):
+                    lineRow(index: index, line: line)
+                case .omitted(let range):
+                    omittedRow(range)
+                        .frame(width: contentWidth, alignment: .leading)
                 }
             }
-            .font(.system(size: 11.5, design: .monospaced))
-            .textSelection(.enabled)
-            .frame(minWidth: 419, alignment: .leading)
+        }
+        .font(.system(size: 11.5, design: .monospaced))
+        .textSelection(.enabled)
+        .frame(width: contentWidth, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func lineRow(index: Int, line: DiffLine) -> some View {
+        if let anchor = ReviewLineAnchor.make(
+            filePath: filePath,
+            lineIndex: index,
+            lines: allLines
+        ) {
+            let comment = comment(matching: anchor)
+            VStack(alignment: .leading, spacing: 0) {
+                DiffLineView(
+                    line: line,
+                    tokens: syntaxTokensByLineID[line.id] ?? [],
+                    gutterWidth: gutterWidth,
+                    hasComment: comment != nil,
+                    isEditing: editingLineID == line.id,
+                    onRequestComment: { editingLineID = line.id }
+                )
+                .frame(width: contentWidth, alignment: .leading)
+
+                if editingLineID == line.id {
+                    ReviewCommentEditor(
+                        anchor: anchor,
+                        existingComment: comment,
+                        gutterWidth: gutterWidth,
+                        onCancel: { editingLineID = nil },
+                        onSave: { body in
+                            onSaveComment(comment?.id, anchor, body)
+                        },
+                        onRemove: comment.map { existing in
+                            { onRemoveComment(existing.id) }
+                        }
+                    )
+                    .frame(width: viewportWidth, alignment: .leading)
+                }
+            }
+        } else {
+            DiffLineView(
+                line: line,
+                tokens: syntaxTokensByLineID[line.id] ?? [],
+                gutterWidth: gutterWidth,
+                hasComment: false,
+                isEditing: false,
+                onRequestComment: nil
+            )
+            .frame(width: contentWidth, alignment: .leading)
         }
     }
 
-    private func omittedRow(_ count: Int) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 10, weight: .medium))
-            Text("\(count) unchanged \(count == 1 ? "line" : "lines")")
+    private func comment(matching anchor: ReviewLineAnchor) -> ReviewComment? {
+        comments.first {
+            !$0.isOutdated
+                && $0.anchor.filePath == anchor.filePath
+                && $0.anchor.side == anchor.side
+                && $0.anchor.lineNumber == anchor.lineNumber
+                && $0.anchor.content == anchor.content
         }
-        .font(.system(size: 11))
-        .foregroundStyle(.secondary)
-        .padding(.leading, 12)
-        .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
-        .background(Color.primary.opacity(0.035))
+    }
+
+    private func omittedRow(_ range: ClosedRange<Int>) -> some View {
+        let count = range.count
+        return Button {
+            onRevealOmitted(range)
+        } label: {
+            HStack(spacing: 0) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .frame(width: gutterWidth)
+
+                Rectangle()
+                    .fill(Color.primary.opacity(0.07))
+                    .frame(width: 0.5)
+
+                Text("\(count) unmodified \(count == 1 ? "line" : "lines")")
+                    .padding(.leading, 14)
+
+                Spacer(minLength: 8)
+            }
+            .foregroundStyle(.secondary)
+            .frame(width: viewportWidth, alignment: .leading)
+            .frame(minHeight: 34)
+            .background(
+                Color.primary.opacity(0.04),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .help("Show \(count) unmodified \(count == 1 ? "line" : "lines")")
     }
 }
 
 struct DiffLineView: View {
     let line: DiffLine
+    let tokens: [InspectorSyntaxToken]
+    let gutterWidth: CGFloat
+    let hasComment: Bool
+    let isEditing: Bool
+    let onRequestComment: (() -> Void)?
+
+    @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 0) {
-            HStack(spacing: 0) {
-                Text(number(line.oldLineNumber))
-                    .frame(width: 30, alignment: .trailing)
-                Text(number(line.newLineNumber))
-                    .frame(width: 30, alignment: .trailing)
+            ZStack(alignment: .trailing) {
+                Text(number(line.newLineNumber ?? line.oldLineNumber))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.trailing, 9)
+                    .foregroundStyle(isEditing ? Color.accentColor : .secondary)
+
+                if let onRequestComment, isHovering || hasComment || isEditing {
+                    Button(action: onRequestComment) {
+                        Image(systemName: hasComment ? "text.bubble.fill" : "plus")
+                            .font(.system(size: hasComment ? 8 : 10, weight: .bold))
+                            .foregroundStyle(
+                                Color(nsColor: .alternateSelectedControlTextColor)
+                            )
+                            .frame(width: 22, height: 22)
+                            .background(
+                                hasComment || isEditing ? Color.accentColor : Color.primary.opacity(0.8),
+                                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .offset(x: 11)
+                    .zIndex(2)
+                    .help(hasComment ? "Edit line comment" : "Comment on this line")
+                    .accessibilityLabel(
+                        hasComment
+                            ? "Edit comment on line \(number(line.newLineNumber ?? line.oldLineNumber))"
+                            : "Comment on line \(number(line.newLineNumber ?? line.oldLineNumber))"
+                    )
+                }
             }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .frame(height: 20)
-            .background(gutterBackground)
+            .frame(width: gutterWidth, height: 22)
+            .background(resolvedGutterBackground)
 
             Rectangle()
                 .fill(stripeColor)
-                .frame(width: 2, height: 20)
+                .frame(width: 2, height: 22)
 
             Text(prefix)
                 .foregroundStyle(prefixColor)
                 .frame(width: 18, alignment: .center)
 
-            Text(line.content.isEmpty ? " " : line.content)
-                .foregroundStyle(.primary.opacity(0.82))
+            Text(attributedContent)
                 .fixedSize(horizontal: true, vertical: false)
                 .padding(.trailing, 12)
 
             Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
-        .background(contentBackground)
+        .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
+        .background(resolvedContentBackground)
+        .contentShape(Rectangle())
+        .onHover { isHovering = $0 }
     }
 
     private func number(_ value: Int?) -> String {
@@ -1874,11 +2191,49 @@ struct DiffLineView: View {
         }
     }
 
+    private var resolvedGutterBackground: Color {
+        isEditing ? Color.accentColor.opacity(0.17) : gutterBackground
+    }
+
     private var contentBackground: Color {
         switch line.type {
         case .added: return .green.opacity(0.075)
         case .removed: return .red.opacity(0.075)
         case .context: return .clear
+        }
+    }
+
+    private var resolvedContentBackground: Color {
+        isEditing ? Color.accentColor.opacity(0.12) : contentBackground
+    }
+
+    private var attributedContent: AttributedString {
+        let source = tokens.isEmpty
+            ? [InspectorSyntaxToken(text: line.content, kind: .plain)]
+            : tokens
+        var result = AttributedString()
+        for token in source {
+            var segment = AttributedString(token.text)
+            segment.foregroundColor = syntaxColor(token.kind)
+            result.append(segment)
+        }
+        if result.characters.isEmpty {
+            var blank = AttributedString(" ")
+            blank.foregroundColor = syntaxColor(.plain)
+            result.append(blank)
+        }
+        return result
+    }
+
+    private func syntaxColor(_ kind: InspectorSyntaxTokenKind) -> Color {
+        switch kind {
+        case .plain: Color(nsColor: .labelColor).opacity(0.86)
+        case .keyword: Color(nsColor: .systemPurple)
+        case .type: Color(nsColor: .systemTeal)
+        case .attribute: Color(nsColor: .systemPink)
+        case .number: Color(nsColor: .systemBlue)
+        case .string: Color(nsColor: .systemRed)
+        case .comment: Color(nsColor: .secondaryLabelColor)
         }
     }
 
@@ -1904,5 +2259,152 @@ struct DiffLineView: View {
         case .removed: return .red.opacity(0.7)
         case .context: return .clear
         }
+    }
+}
+
+/// Inline editor anchored below one diff row. It mirrors the native review
+/// interaction used by developer tools while keeping comment submission local
+/// until the explicit Send Review action aggregates the complete draft.
+private struct ReviewCommentEditor: View {
+    let anchor: ReviewLineAnchor
+    let existingComment: ReviewComment?
+    let gutterWidth: CGFloat
+    let onCancel: () -> Void
+    let onSave: (String) -> Void
+    let onRemove: (() -> Void)?
+
+    @State private var draft: String
+    @FocusState private var isFocused: Bool
+
+    init(
+        anchor: ReviewLineAnchor,
+        existingComment: ReviewComment?,
+        gutterWidth: CGFloat,
+        onCancel: @escaping () -> Void,
+        onSave: @escaping (String) -> Void,
+        onRemove: (() -> Void)?
+    ) {
+        self.anchor = anchor
+        self.existingComment = existingComment
+        self.gutterWidth = gutterWidth
+        self.onCancel = onCancel
+        self.onSave = onSave
+        self.onRemove = onRemove
+        _draft = State(initialValue: existingComment?.body ?? "")
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            Color.accentColor.opacity(0.15)
+                .frame(width: gutterWidth + 2)
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 9) {
+                    Image(systemName: "text.bubble")
+                        .font(.system(size: 12, weight: .medium))
+                    Text("Local comment")
+                        .font(.system(size: 12.5, weight: .semibold))
+
+                    Spacer(minLength: 8)
+
+                    Text(locationLabel)
+                        .font(AppTypography.metadata)
+                        .foregroundStyle(.secondary)
+
+                    if let onRemove {
+                        Button(role: .destructive, action: onRemove) {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Delete comment")
+                    }
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 42)
+
+                Divider()
+
+                ZStack(alignment: .topLeading) {
+                    if draft.isEmpty {
+                        Text("Request change")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 8)
+                            .allowsHitTesting(false)
+                    }
+
+                    TextEditor(text: $draft)
+                        .font(.system(size: 12.5))
+                        .scrollContentBackground(.hidden)
+                        .focused($isFocused)
+                        .frame(minHeight: 58, maxHeight: 92)
+                }
+                .padding(.horizontal, 8)
+                .padding(.top, 3)
+
+                HStack(spacing: 9) {
+                    Spacer()
+                    Button("Cancel", action: onCancel)
+                        .buttonStyle(.borderless)
+                    Button(existingComment == nil ? "Comment" : "Update") {
+                        onSave(draft)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .keyboardShortcut(.return, modifiers: [.command])
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 10)
+            }
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(.separator, lineWidth: 0.5)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+        }
+        .background(Color.accentColor.opacity(0.055))
+        .onExitCommand(perform: onCancel)
+        .task { isFocused = true }
+    }
+
+    private var locationLabel: String {
+        let side = anchor.side == .current ? "R" : "L"
+        return "Comment on line \(side)\(anchor.lineNumber)"
+    }
+}
+
+/// The inspector is deliberately denser than the document-modal review. One
+/// contextual line number and a measured content canvas keep narrow panes useful
+/// without wrapping or clipping long source lines.
+private enum InspectorDiffLayout {
+    private static let codeFont = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
+    private static let markerWidth: CGFloat = 20
+
+    static func gutterWidth(for lines: [DiffLine]) -> CGFloat {
+        let largest = lines.reduce(0) { partial, line in
+            max(partial, max(line.oldLineNumber ?? 0, line.newLineNumber ?? 0))
+        }
+        let measured = (String(largest) as NSString).size(
+            withAttributes: [.font: codeFont]
+        ).width
+        return max(42, measured + 18)
+    }
+
+    static func minimumContentWidth(
+        for lines: [DiffLine],
+        gutterWidth: CGFloat
+    ) -> CGFloat {
+        let longest = lines.reduce(CGFloat.zero) { width, line in
+            let measured = (line.content as NSString).size(
+                withAttributes: [.font: codeFont]
+            ).width
+            return max(width, measured)
+        }
+        return gutterWidth + markerWidth + longest + 24
     }
 }

@@ -346,6 +346,45 @@ struct CodexProfileTests {
         #expect(request?.arguments["path"]?.stringValue == "TurboCode")
     }
 
+    @Test("Codex Ripgrep activity summarizes the requested operation")
+    func codexRipgrepActivityUsesStructuredArguments() {
+        let call = CodexDynamicToolCall(
+            rpcID: .integer(42),
+            callID: "call-ripgrep",
+            tool: "ripgrep",
+            arguments: .object([
+                "action": .string("search"),
+                "pattern": .string("SessionStore"),
+                "path": .string("TurboCode/Stores"),
+                "filePattern": .string("*.swift")
+            ])
+        )
+
+        #expect(
+            CodexTurboCodeToolBridge.activitySummary(for: call)
+                == "Searching for “SessionStore” · *.swift in TurboCode/Stores"
+        )
+    }
+
+    @Test("Codex read activity includes the requested line range")
+    func codexReadActivityUsesStructuredArguments() {
+        let call = CodexDynamicToolCall(
+            rpcID: .integer(43),
+            callID: "call-read",
+            tool: "read_file",
+            arguments: .object([
+                "filePath": .string("TurboCode/Tools/ReadFileTool.swift"),
+                "startLine": .integer(48),
+                "endLine": .integer(96)
+            ])
+        )
+
+        #expect(
+            CodexTurboCodeToolBridge.activitySummary(for: call)
+                == "Reading ReadFileTool.swift · lines 48–96"
+        )
+    }
+
     @Test("Codex exposes the TurboCode tools with native presentations")
     func codexExposesNativePresentationTools() {
         let specs = CodexTurboCodeToolBridge.specifications(
@@ -355,6 +394,7 @@ struct CodexProfileTests {
         let names = Set(specs.map(\.name))
 
         #expect(names.contains("list_workspace"))
+        #expect(names.contains("ripgrep"))
         #expect(names.contains("apply_edits"))
         #expect(names.contains("git"))
         #expect(names.contains("swift_package_manager"))

@@ -23,7 +23,7 @@ struct WorkbenchSplitView: View {
             // Keeping both panes in one SwiftUI hierarchy also preserves every
             // environment value and avoids a custom NSHostingController bridge.
             HSplitView {
-                MainStageView()
+                workbenchCanvas
                     .frame(minWidth: mainMinWidth, maxWidth: .infinity)
                     .layoutPriority(1)
                     .background {
@@ -34,9 +34,9 @@ struct WorkbenchSplitView: View {
                 if chatStore.rightPanelVisible {
                     InspectorPanelView()
                         .frame(
-                            minWidth: 320,
-                            idealWidth: 420,
-                            maxWidth: 600,
+                            minWidth: 360,
+                            idealWidth: 520,
+                            maxWidth: 720,
                             maxHeight: .infinity
                         )
                 }
@@ -71,6 +71,13 @@ struct WorkbenchSplitView: View {
         .onChange(of: columnVisibility) { _, visibility in
             chatStore.leftSidebarCollapsed = visibility == .detailOnly
         }
+        .onChange(of: chatStore.workspaceRoot) { _, workspaceRoot in
+            // A pseudo-terminal belongs to exactly one workspace. Closing the
+            // project also tears down its utility area and child shell.
+            if workspaceRoot.isEmpty {
+                chatStore.terminalPresented = false
+            }
+        }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button {
@@ -86,6 +93,27 @@ struct WorkbenchSplitView: View {
                 .accessibilityLabel("Delegated task activity")
 
                 Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        chatStore.toggleTerminal()
+                    }
+                } label: {
+                    Image(systemName: chatStore.terminalPresented ? "terminal.fill" : "terminal")
+                }
+                .disabled(chatStore.workspaceRoot.isEmpty || chatStore.route != .chat)
+                .help(
+                    chatStore.workspaceRoot.isEmpty
+                        ? "Choose a workspace to open its terminal"
+                        : chatStore.terminalPresented
+                            ? "Close project terminal"
+                            : "Open project terminal"
+                )
+                .accessibilityLabel(
+                    chatStore.terminalPresented
+                        ? "Close project terminal"
+                        : "Open project terminal"
+                )
+
+                Button {
                     chatStore.toggleRightPanel(.changes)
                 } label: {
                     Image(systemName: "sidebar.right")
@@ -96,6 +124,33 @@ struct WorkbenchSplitView: View {
                         : "Show changes"
                 )
             }
+        }
+    }
+
+    /// Keeps the terminal at the workbench-layout level rather than embedding
+    /// it in the composer. `VSplitView` supplies the same native, draggable
+    /// horizontal divider used by macOS utility and debug areas.
+    @ViewBuilder
+    private var workbenchCanvas: some View {
+        if chatStore.terminalPresented,
+           let configuration = EmbeddedTerminalLaunchConfiguration.resolve(
+               workspacePath: chatStore.workspaceRoot
+           ) {
+            VSplitView {
+                MainStageView()
+                    .frame(minHeight: 280, maxHeight: .infinity)
+                    .layoutPriority(1)
+
+                EmbeddedTerminalPanel(configuration: configuration) {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        chatStore.terminalPresented = false
+                    }
+                }
+                .id(configuration.workingDirectory)
+                .frame(minHeight: 140, idealHeight: 250, maxHeight: 600)
+            }
+        } else {
+            MainStageView()
         }
     }
 

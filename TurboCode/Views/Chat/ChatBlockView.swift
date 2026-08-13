@@ -91,7 +91,7 @@ struct ChatBlockView: View {
 
     private var assistantBubble: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Markdown(visibleAssistantText)
+            Markdown(ChatMarkdownPresentation.cleaned(visibleAssistantText))
                 .markdownTheme(AppTypography.chatMarkdownTheme(size: chatFontSize))
                 .textSelection(.enabled)
                 .multilineTextAlignment(.leading)

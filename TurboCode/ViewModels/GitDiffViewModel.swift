@@ -9,9 +9,11 @@ struct GitFileStatus: Identifiable, Hashable {
     var id: String { path }
 }
 
-enum DiffLineType: Hashable, Sendable { case context; case added; case removed }
+nonisolated enum DiffLineType: Hashable, Sendable { case context; case added; case removed }
 
-struct DiffLine: Identifiable, Hashable, Sendable {
+/// Immutable parsed diff data is shared by the Git service and main-actor UI
+/// presentation helpers; it carries no view-owned state or actor affinity.
+nonisolated struct DiffLine: Identifiable, Hashable, Sendable {
     let id = UUID()
     let oldLineNumber: Int?
     let newLineNumber: Int?

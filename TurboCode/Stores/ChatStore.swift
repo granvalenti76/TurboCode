@@ -48,6 +48,7 @@ public final class ChatStore {
     let agentActivityStore: AgentActivityStore
     let timelineStore: ChatTimelineStore
     let workbenchStore: WorkbenchStore
+    let reviewDraftStore: ReviewDraftStore
     let codexRuntimeStore: CodexRuntimeStore
     let modelRuntimeStore: ModelRuntimeStore
     let responseCoordinator: ChatResponseCoordinator
@@ -99,7 +100,11 @@ public final class ChatStore {
         let timeline = ChatTimelineStore()
         let codexRuntime = CodexRuntimeStore()
         let nativeRunner = NativeResponseRunner()
-        let workspace = WorkspaceStore(gitService: gitService)
+        let reviewDraft = ReviewDraftStore()
+        let workspace = WorkspaceStore(
+            gitService: gitService,
+            reviewDraftStore: reviewDraft
+        )
         let workbench = WorkbenchStore()
         self.conversationStore = ConversationStore(repository: conversationRepository)
         self.workspaceStore = workspace
@@ -107,6 +112,7 @@ public final class ChatStore {
         self.agentActivityStore = agentActivity
         self.timelineStore = timeline
         self.workbenchStore = workbench
+        self.reviewDraftStore = reviewDraft
         self.codexRuntimeStore = codexRuntime
         self.modelRuntimeStore = ModelRuntimeStore()
         self.responseCoordinator = ChatResponseCoordinator(
@@ -525,6 +531,9 @@ public final class ChatStore {
         if id != activeThreadId {
             dismissWorkspaceListingInspector()
             workbenchStore.dismissDiffPatchReview()
+            // Inline review drafts belong to the conversation where the user
+            // authored them; never carry hidden instructions into another chat.
+            reviewDraftStore.discardAll()
         }
         conversationStore.activeThreadID = id
     }
@@ -546,6 +555,7 @@ public final class ChatStore {
         await finishActiveResponseBeforeTransition()
         dismissWorkspaceListingInspector()
         workbenchStore.dismissDiffPatchReview()
+        reviewDraftStore.discardAll()
         conversationStore.createThread(
             title: title,
             workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
@@ -666,6 +676,7 @@ public final class ChatStore {
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
         dismissWorkspaceListingInspector()
         workbenchStore.dismissDiffPatchReview()
+        reviewDraftStore.discardAll()
         conversationStore.activeThreadID = id
         timelineStore.restore(snapshot.blocks)
         resetAgentActivityForConversation()
@@ -784,6 +795,7 @@ public final class ChatStore {
         conversationStore.activeThreadID = nil
         timelineStore.reset()
         resetAgentActivityForConversation()
+        reviewDraftStore.discardAll()
 
         if let nextThreadID {
             await restoreSession(id: nextThreadID)
@@ -896,6 +908,39 @@ public final class ChatStore {
             for: text
         ) else { return }
         await sendMessage(text, promptText: promptText, visibleInTimeline: true)
+    }
+
+    /// Sends all valid inline annotations as one explicit user request. The
+    /// compact timeline text remains readable while the model receives stable
+    /// reviewed excerpts and sides through the provider-neutral prompt path.
+    func sendReviewComments() async {
+        guard !busy, activeProfileCanSend else { return }
+        guard reviewDraftStore.outdatedCount == 0 else {
+            error = "Refresh or remove outdated review comments before sending."
+            return
+        }
+        guard let request = ReviewRequestBuilder.make(
+            comments: reviewDraftStore.comments
+        ) else { return }
+
+        refreshSkillsIfNeeded()
+        if activeBackend != .codex,
+           modelRuntimeStore.workspaceInstructionsChanged(in: workspaceRoot) {
+            rebuildSession()
+        }
+        guard let promptText = modelRuntimeStore.resolvedPrompt(
+            for: request.promptText
+        ) else { return }
+
+        // The visible user block is now the durable receipt for this ephemeral
+        // draft, so clearing before inference cannot lose the authored review.
+        reviewDraftStore.discardAll()
+        workbenchStore.rightPanelMode = nil
+        await sendMessage(
+            request.displayText,
+            promptText: promptText,
+            visibleInTimeline: true
+        )
     }
 
     /// Presents the official guide without starting a model response. The
@@ -1513,6 +1558,12 @@ public final class ChatStore {
 
     public func toggleRightPanel(_ mode: RightPanelMode) {
         workbenchStore.toggleRightPanel(mode)
+    }
+
+    /// Toggles the user-owned project terminal. This presentation command is
+    /// intentionally unrelated to model tool availability or delegation.
+    public func toggleTerminal() {
+        workbenchStore.toggleTerminal()
     }
 
     /// Closes the system inspector without discarding its conversation-local

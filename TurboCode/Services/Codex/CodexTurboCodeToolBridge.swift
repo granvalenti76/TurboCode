@@ -121,8 +121,14 @@ nonisolated enum CodexTurboCodeToolBridge {
             detail: .compact,
             contextWindowTokens: 32_768
         )
-        let readTool = ReadFileTool(workspaceRoot: workspaceRoot)
-        let grepTool = GrepTool(workspaceRoot: workspaceRoot)
+        let readTool = ReadFileTool(
+            workspaceRoot: workspaceRoot,
+            executionPolicy: agentTuning.execution
+        )
+        let ripgrepTool = RipgrepTool(
+            workspaceRoot: workspaceRoot,
+            executionPolicy: agentTuning.execution
+        )
         let editTool = ApplyEditsTool(workspaceRoot: workspaceRoot)
         let swiftPackageTool = SwiftPackageManagerTool(
             workspaceRoot: workspaceRoot,
@@ -178,15 +184,23 @@ nonisolated enum CodexTurboCodeToolBridge {
                 )
             ),
             .init(
-                name: grepTool.name,
-                description: grepTool.description,
+                name: ripgrepTool.name,
+                description: ripgrepTool.description,
                 inputSchema: objectSchema(
                     properties: [
-                        "pattern": stringSchema("Text or regular-expression pattern."),
-                        "path": stringSchema("Workspace-relative file or directory."),
+                        "action": enumSchema(["files", "search"]),
+                        "pattern": nullableStringSchema(),
+                        "path": nullableStringSchema(),
+                        "filePattern": nullableStringSchema(),
+                        "excludePattern": nullableStringSchema(),
+                        "literal": nullableBooleanSchema(),
+                        "caseSensitive": nullableBooleanSchema(),
+                        "contextLines": nullableIntegerSchema(),
+                        "filesOnly": nullableBooleanSchema(),
+                        "hidden": nullableBooleanSchema(),
                         "maxResults": nullableIntegerSchema()
                     ],
-                    required: ["pattern", "path"]
+                    required: ["action"]
                 )
             ),
             .init(
@@ -234,19 +248,32 @@ nonisolated enum CodexTurboCodeToolBridge {
         return specifications
     }
 
-    static func activitySummary(for tool: String) -> String {
-        switch tool {
+    static func activitySummary(for call: CodexDynamicToolCall) -> String {
+        switch call.tool {
         case "list_workspace": "Browsing workspace"
         case "swift_workspace_map": "Mapping Swift workspace"
-        case "read_file": "Reading file"
-        case "grep": "Searching workspace"
+        case "read_file":
+            ReadFileActivitySummary.make(
+                filePath: optionalString("filePath", in: call),
+                startLine: optionalInteger("startLine", in: call),
+                endLine: optionalInteger("endLine", in: call),
+                limit: optionalInteger("limit", in: call)
+            )
+        case "ripgrep":
+            RipgrepActivitySummary.make(
+                action: optionalString("action", in: call),
+                pattern: optionalString("pattern", in: call),
+                path: optionalString("path", in: call),
+                filePattern: optionalString("filePattern", in: call),
+                filesOnly: optionalBoolean("filesOnly", in: call)
+            )
         case "apply_edits": "Editing files"
         case "swift_package_manager": "Working with Swift package"
         case "xcode_project": "Working with Xcode project"
         case "git": "Working with Git"
         case "delegate_task": "Delegating task to worker"
         case "create_skill": "Creating workspace skill"
-        default: "Running \(tool)"
+        default: "Running \(call.tool)"
         }
     }
 
@@ -286,7 +313,10 @@ nonisolated enum CodexTurboCodeToolBridge {
             ))
             return .init(result: .success(text), presentation: nil)
         case "read_file":
-            let text = try await ReadFileTool(workspaceRoot: workspaceRoot)
+            let text = try await ReadFileTool(
+                workspaceRoot: workspaceRoot,
+                executionPolicy: agentTuning.execution
+            )
                 .call(arguments: ReadFileArguments(
                     filePath: try requiredString("filePath", in: call),
                     startLine: optionalInteger("startLine", in: call),
@@ -294,11 +324,21 @@ nonisolated enum CodexTurboCodeToolBridge {
                     limit: optionalInteger("limit", in: call)
                 ))
             return .init(result: .success(text), presentation: nil)
-        case "grep":
-            let text = try await GrepTool(workspaceRoot: workspaceRoot)
-                .call(arguments: SearchArguments(
-                    pattern: try requiredString("pattern", in: call),
-                    path: try requiredString("path", in: call),
+        case "ripgrep":
+            let text = try await RipgrepTool(
+                workspaceRoot: workspaceRoot,
+                executionPolicy: agentTuning.execution
+            ).call(arguments: RipgrepArguments(
+                    action: try requiredString("action", in: call),
+                    pattern: optionalString("pattern", in: call),
+                    path: optionalString("path", in: call),
+                    filePattern: optionalString("filePattern", in: call),
+                    excludePattern: optionalString("excludePattern", in: call),
+                    literal: optionalBoolean("literal", in: call),
+                    caseSensitive: optionalBoolean("caseSensitive", in: call),
+                    contextLines: optionalInteger("contextLines", in: call),
+                    filesOnly: optionalBoolean("filesOnly", in: call),
+                    hidden: optionalBoolean("hidden", in: call),
                     maxResults: optionalInteger("maxResults", in: call)
                 ))
             return .init(result: .success(text), presentation: nil)
@@ -458,6 +498,13 @@ nonisolated enum CodexTurboCodeToolBridge {
         in call: CodexDynamicToolCall
     ) -> Int? {
         call.arguments[key]?.integerValue
+    }
+
+    private static func optionalBoolean(
+        _ key: String,
+        in call: CodexDynamicToolCall
+    ) -> Bool? {
+        call.arguments[key]?.boolValue
     }
 
     private static func invalid(
@@ -670,6 +717,10 @@ nonisolated enum CodexTurboCodeToolBridge {
 
     private static func nullableIntegerSchema() -> CodexJSONValue {
         .object(["type": .array([.string("integer"), .string("null")])])
+    }
+
+    private static func nullableBooleanSchema() -> CodexJSONValue {
+        .object(["type": .array([.string("boolean"), .string("null")])])
     }
 
     private static func enumSchema(_ values: [String]) -> CodexJSONValue {
