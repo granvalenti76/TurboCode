@@ -523,11 +523,6 @@ private actor RipgrepRunner {
 
 nonisolated enum RipgrepExecutableResolver {
     static func resolve() throws -> URL {
-        let bundleCandidates = [
-            Bundle.main.url(forResource: "rg", withExtension: nil, subdirectory: "Tools"),
-            Bundle.main.url(forResource: "rg", withExtension: nil),
-            Bundle.main.executableURL?.deletingLastPathComponent().appendingPathComponent("rg")
-        ].compactMap { $0 }
         let environmentPath = ProcessInfo.processInfo.environment["PATH"] ?? ""
         let pathCandidates = environmentPath.split(separator: ":").map {
             URL(fileURLWithPath: String($0)).appendingPathComponent("rg")
@@ -538,10 +533,9 @@ nonisolated enum RipgrepExecutableResolver {
         ]
         let configuredCandidate = ProcessInfo.processInfo.environment["TURBOCODE_RG_PATH"]
             .map { URL(fileURLWithPath: $0) }
-        // The explicit environment override supports local development while
-        // release builds remain self-contained by resolving the bundle first.
-        let candidates = bundleCandidates
-            + [configuredCandidate].compactMap { $0 }
+        // TurboCode intentionally relies on a user-installed ripgrep for now;
+        // the override also keeps nonstandard development setups supported.
+        let candidates = [configuredCandidate].compactMap { $0 }
             + commonCandidates
             + pathCandidates
         guard let executable = candidates.first(where: {
@@ -557,7 +551,7 @@ private enum RipgrepExecutableError: LocalizedError {
     case notFound
 
     var errorDescription: String? {
-        "Ripgrep executable not found. Bundle rg with TurboCode or install it in an executable PATH location."
+        "Ripgrep executable not found. Install it with 'brew install ripgrep', then relaunch TurboCode."
     }
 }
 

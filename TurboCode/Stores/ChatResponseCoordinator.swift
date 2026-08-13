@@ -95,6 +95,7 @@ final class ChatResponseCoordinator {
                         guard let self else { return }
                         self.toolInteractions.beginActivity(
                             id: call.callID,
+                            toolName: call.tool,
                             summary: self.routedToolSummary(
                                 summary,
                                 toolName: call.tool,
@@ -351,6 +352,7 @@ final class ChatResponseCoordinator {
               call.toolName != "edit_file" else { return }
         toolInteractions.beginActivity(
             id: call.id,
+            toolName: call.toolName,
             summary: routedToolSummary(
                 Self.toolSummary(for: call),
                 toolName: call.toolName,
@@ -498,7 +500,28 @@ final class ChatResponseCoordinator {
         case "read_file":
             return item.map { "Reading \($0)" } ?? "Reading file"
         case "ripgrep", "grep":
-            return item.map { "Searching in \($0)" } ?? "Searching workspace"
+            return RipgrepActivitySummary.make(
+                action: try? call.arguments.value(
+                    String.self,
+                    forProperty: "action"
+                ),
+                pattern: try? call.arguments.value(
+                    String.self,
+                    forProperty: "pattern"
+                ),
+                path: try? call.arguments.value(
+                    String.self,
+                    forProperty: "path"
+                ),
+                filePattern: try? call.arguments.value(
+                    String.self,
+                    forProperty: "filePattern"
+                ),
+                filesOnly: try? call.arguments.value(
+                    Bool.self,
+                    forProperty: "filesOnly"
+                )
+            )
         case "bash":
             return "Running command"
         case "remove_file":

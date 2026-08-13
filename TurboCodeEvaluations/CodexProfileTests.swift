@@ -346,6 +346,26 @@ struct CodexProfileTests {
         #expect(request?.arguments["path"]?.stringValue == "TurboCode")
     }
 
+    @Test("Codex Ripgrep activity summarizes the requested operation")
+    func codexRipgrepActivityUsesStructuredArguments() {
+        let call = CodexDynamicToolCall(
+            rpcID: .integer(42),
+            callID: "call-ripgrep",
+            tool: "ripgrep",
+            arguments: .object([
+                "action": .string("search"),
+                "pattern": .string("SessionStore"),
+                "path": .string("TurboCode/Stores"),
+                "filePattern": .string("*.swift")
+            ])
+        )
+
+        #expect(
+            CodexTurboCodeToolBridge.activitySummary(for: call)
+                == "Searching for “SessionStore” · *.swift in TurboCode/Stores"
+        )
+    }
+
     @Test("Codex exposes the TurboCode tools with native presentations")
     func codexExposesNativePresentationTools() {
         let specs = CodexTurboCodeToolBridge.specifications(

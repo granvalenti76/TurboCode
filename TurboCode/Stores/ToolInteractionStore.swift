@@ -48,9 +48,11 @@ final class ToolInteractionStore {
 
     /// Replaces an activity with the same call identity before appending it as
     /// the most recent item shown by the timeline.
-    func beginActivity(id: String, summary: String) {
+    func beginActivity(id: String, toolName: String? = nil, summary: String) {
         endActivity(id: id)
-        activities.append(ToolActivity(id: id, summary: summary))
+        activities.append(
+            ToolActivity(id: id, toolName: toolName, summary: summary)
+        )
     }
 
     func endActivity(id: String) {

@@ -19,6 +19,12 @@ struct MessageTimelineView: View {
     /// These related flags move through one reducer so geometry and phase
     /// callbacks cannot leave the timeline in a contradictory state.
     @State private var scrollFollowState = TimelineScrollFollowState()
+    /// Fast searches remain legible long enough to communicate intent, then
+    /// briefly acknowledge completion instead of flashing in and out.
+    @State private var retainedRipgrepActivity: ToolActivity?
+    @State private var ripgrepStartedAt: Date?
+    @State private var ripgrepIsComplete = false
+    @State private var ripgrepDismissalGeneration = UUID()
 
     var body: some View {
         ScrollView {
@@ -54,8 +60,8 @@ struct MessageTimelineView: View {
                         .id("live-assistant")
                 }
 
-                if chatStore.busy {
-                    ModelActivityIndicator(summary: modelActivitySummary)
+                if chatStore.busy || retainedRipgrepActivity != nil {
+                    modelActivityIndicator
                         .padding(.horizontal, 12)
                         .padding(.vertical, 4)
                         .id("model-activity")
@@ -94,6 +100,15 @@ struct MessageTimelineView: View {
             await Task.yield()
             scrollToBottom()
         }
+        .onAppear {
+            updateRipgrepPresentation(for: chatStore.activeToolActivity)
+        }
+        .onChange(of: chatStore.activeToolActivity) { _, activity in
+            updateRipgrepPresentation(for: activity)
+        }
+        .onDisappear {
+            ripgrepDismissalGeneration = UUID()
+        }
     }
 
     private var modelActivitySummary: String {
@@ -107,6 +122,66 @@ struct MessageTimelineView: View {
             return "Composing response"
         }
         return "Preparing response"
+    }
+
+    /// Ripgrep receives a distinct but deliberately quiet affordance because
+    /// workspace exploration can otherwise look like an idle model pause.
+    @ViewBuilder
+    private var modelActivityIndicator: some View {
+        if let activity = chatStore.activeToolActivity,
+           activity.toolName == "ripgrep" || activity.toolName == "grep" {
+            RipgrepTerminalActivityIndicator(
+                summary: activity.summary,
+                isComplete: false
+            )
+        } else if chatStore.activeToolActivity == nil,
+                  let activity = retainedRipgrepActivity {
+            RipgrepTerminalActivityIndicator(
+                summary: activity.summary,
+                isComplete: ripgrepIsComplete
+            )
+        } else {
+            ModelActivityIndicator(summary: modelActivitySummary)
+        }
+    }
+
+    private func updateRipgrepPresentation(for activity: ToolActivity?) {
+        ripgrepDismissalGeneration = UUID()
+
+        if let activity,
+           activity.toolName == "ripgrep" || activity.toolName == "grep" {
+            if retainedRipgrepActivity?.id != activity.id {
+                ripgrepStartedAt = Date()
+            }
+            retainedRipgrepActivity = activity
+            ripgrepIsComplete = false
+            return
+        }
+
+        // Another tool is more relevant than an old search acknowledgement.
+        guard activity == nil else {
+            retainedRipgrepActivity = nil
+            ripgrepStartedAt = nil
+            ripgrepIsComplete = false
+            return
+        }
+        guard retainedRipgrepActivity != nil else { return }
+
+        ripgrepIsComplete = true
+        let elapsed = Date().timeIntervalSince(ripgrepStartedAt ?? Date())
+        let remainingMinimum = max(1.6 - elapsed, 0)
+        let delay = max(remainingMinimum, 0.55)
+        let generation = ripgrepDismissalGeneration
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(delay))
+            guard generation == ripgrepDismissalGeneration,
+                  chatStore.activeToolActivity == nil else { return }
+            withAnimation(.easeOut(duration: 0.18)) {
+                retainedRipgrepActivity = nil
+                ripgrepStartedAt = nil
+                ripgrepIsComplete = false
+            }
+        }
     }
 
     // MARK: - Empty State
@@ -248,6 +323,65 @@ private struct ActivityPulse: View {
             }
             .frame(width: 15, height: 12)
         }
+    }
+}
+
+/// A low-frequency terminal cursor makes active workspace search visible
+/// without competing with streamed reasoning or assistant text.
+private struct RipgrepTerminalActivityIndicator: View {
+    let summary: String
+    let isComplete: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @ViewBuilder
+    var body: some View {
+        if isComplete {
+            content(cursorIsVisible: true)
+        } else {
+            TimelineView(.periodic(from: .now, by: 0.7)) { context in
+                let cursorIsVisible = reduceMotion
+                    || Int(context.date.timeIntervalSinceReferenceDate / 0.7).isMultiple(of: 2)
+                content(cursorIsVisible: cursorIsVisible)
+            }
+        }
+    }
+
+    private func content(cursorIsVisible: Bool) -> some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 1.5) {
+                if isComplete {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 8, weight: .bold))
+                } else {
+                    Text("›")
+                    RoundedRectangle(cornerRadius: 0.75)
+                        .frame(width: 3, height: 8)
+                        .opacity(cursorIsVisible ? 0.82 : 0.2)
+                }
+            }
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .frame(width: 22, height: 17)
+            .background(.secondary.opacity(0.075), in: RoundedRectangle(cornerRadius: 4.5))
+            .overlay {
+                RoundedRectangle(cornerRadius: 4.5)
+                    .stroke(.separator.opacity(0.45), lineWidth: 0.5)
+            }
+
+            Text(summary)
+                .font(AppTypography.metadata)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .opacity(isComplete ? 0.7 : 0.84)
+
+            Spacer()
+        }
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            isComplete ? "\(summary), completed" : "\(summary), in progress"
+        )
     }
 }
 

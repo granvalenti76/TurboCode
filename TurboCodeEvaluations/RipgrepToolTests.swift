@@ -169,8 +169,8 @@ struct RipgrepToolTests {
         executionPolicy: ExecutionPolicy = ExecutionPolicy()
     ) throws -> RipgrepTool {
         // Xcode test hosts intentionally receive a sparse PATH. Prefer the
-        // production resolver, then use Codex's bundled executable only as a
-        // local test fixture; TurboCode release packaging remains bundle-first.
+        // production resolver, then use Codex's executable only as a local
+        // test fixture; TurboCode itself intentionally does not bundle rg.
         let fixtureURL = URL(
             fileURLWithPath: "/Applications/ChatGPT.app/Contents/Resources/rg"
         )

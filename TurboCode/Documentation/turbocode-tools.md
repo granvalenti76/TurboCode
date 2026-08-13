@@ -54,10 +54,10 @@ returns workspace-relative evidence without choosing an exploration strategy
 for the model. The persisted capability identifier remains `grep` so existing
 custom profiles automatically receive the replacement tool.
 
-TurboCode resolves `rg` from the application bundle first, then from
-`TURBOCODE_RG_PATH`, common Homebrew locations, or `PATH`. Release archives
-must bundle the executable and its license so the tool does not depend on a
-developer-machine installation.
+Ripgrep is an external prerequisite and is not bundled with TurboCode. Install
+it with `brew install ripgrep`, then relaunch the app. TurboCode resolves `rg`
+from common Homebrew locations or `PATH`; `TURBOCODE_RG_PATH` supports a
+nonstandard executable location.
 
 ## Reading and changing files
 

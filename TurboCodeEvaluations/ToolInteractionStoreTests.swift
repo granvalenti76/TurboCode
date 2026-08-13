@@ -50,18 +50,56 @@ struct ToolInteractionStoreTests {
     @Test("Beginning an existing activity replaces and promotes it")
     func beginningExistingActivityReplacesAndPromotesIt() {
         let store = ToolInteractionStore()
-        store.beginActivity(id: "first", summary: "Old summary")
+        store.beginActivity(
+            id: "first",
+            toolName: "ripgrep",
+            summary: "Old summary"
+        )
         store.beginActivity(id: "second", summary: "Second")
-        store.beginActivity(id: "first", summary: "Updated summary")
+        store.beginActivity(
+            id: "first",
+            toolName: "ripgrep",
+            summary: "Updated summary"
+        )
 
         #expect(store.activities.map(\.id) == ["second", "first"])
         #expect(store.activeActivity?.summary == "Updated summary")
+        #expect(store.activeActivity?.toolName == "ripgrep")
 
         store.endActivity(id: "first")
         #expect(store.activeActivity?.id == "second")
 
         store.clearActivities()
         #expect(store.activities.isEmpty)
+    }
+
+    @Test("Ripgrep activity describes the concrete search without raw payload noise")
+    func ripgrepActivitySummaryUsesInvocationDetails() {
+        let search = RipgrepActivitySummary.make(
+            action: "search",
+            pattern: "SessionStore",
+            path: "Sources/UI",
+            filePattern: "*.swift",
+            filesOnly: false
+        )
+        let discovery = RipgrepActivitySummary.make(
+            action: "files",
+            pattern: nil,
+            path: ".",
+            filePattern: "*.json",
+            filesOnly: nil
+        )
+        let fileMatches = RipgrepActivitySummary.make(
+            action: "search",
+            pattern: "TODO\nFIXME",
+            path: ".",
+            filePattern: nil,
+            filesOnly: true
+        )
+
+        #expect(search == "Searching for “SessionStore” · *.swift in Sources/UI")
+        #expect(discovery == "Finding *.json files")
+        #expect(fileMatches == "Finding files containing “TODO FIXME”")
     }
 
     @Test("ChatStore approval forwarding remains observable")

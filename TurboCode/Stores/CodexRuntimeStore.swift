@@ -324,7 +324,7 @@ final class CodexRuntimeStore {
             case .toolCallRequested(let call):
                 events.activityStarted(
                     call,
-                    CodexTurboCodeToolBridge.activitySummary(for: call.tool)
+                    CodexTurboCodeToolBridge.activitySummary(for: call)
                 )
                 let result: CodexDynamicToolResult
                 do {

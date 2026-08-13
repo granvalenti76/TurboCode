@@ -245,19 +245,26 @@ nonisolated enum CodexTurboCodeToolBridge {
         return specifications
     }
 
-    static func activitySummary(for tool: String) -> String {
-        switch tool {
+    static func activitySummary(for call: CodexDynamicToolCall) -> String {
+        switch call.tool {
         case "list_workspace": "Browsing workspace"
         case "swift_workspace_map": "Mapping Swift workspace"
         case "read_file": "Reading file"
-        case "ripgrep": "Searching workspace"
+        case "ripgrep":
+            RipgrepActivitySummary.make(
+                action: optionalString("action", in: call),
+                pattern: optionalString("pattern", in: call),
+                path: optionalString("path", in: call),
+                filePattern: optionalString("filePattern", in: call),
+                filesOnly: optionalBoolean("filesOnly", in: call)
+            )
         case "apply_edits": "Editing files"
         case "swift_package_manager": "Working with Swift package"
         case "xcode_project": "Working with Xcode project"
         case "git": "Working with Git"
         case "delegate_task": "Delegating task to worker"
         case "create_skill": "Creating workspace skill"
-        default: "Running \(tool)"
+        default: "Running \(call.tool)"
         }
     }
 
