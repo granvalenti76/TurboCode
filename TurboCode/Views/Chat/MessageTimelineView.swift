@@ -522,7 +522,7 @@ struct LiveAssistantBlock: View {
     @Environment(\.chatFontSize) private var chatFontSize
 
     var body: some View {
-        Markdown(text)
+        Markdown(ChatMarkdownPresentation.cleaned(text))
             .markdownTheme(AppTypography.chatMarkdownTheme(size: chatFontSize))
             .textSelection(.enabled)
             .frame(maxWidth: 1040, alignment: .leading)

@@ -17,7 +17,7 @@ struct ProductGuideWidget: View {
             VStack(alignment: .leading, spacing: 16) {
                 header(guide)
 
-                Markdown(block.text)
+                Markdown(ChatMarkdownPresentation.cleaned(block.text))
                     .markdownTheme(AppTypography.chatMarkdownTheme(size: chatFontSize))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
