@@ -1557,7 +1557,15 @@ public final class ChatStore {
     }
 
     public func toggleRightPanel(_ mode: RightPanelMode) {
+        // The Changes panel renders a snapshot of workspace diffs, so refresh it
+        // whenever the panel opens. Files staged or modified outside TurboCode
+        // would otherwise stay invisible until a manual refresh or workspace
+        // switch. Toggling the panel closed must not trigger a reload.
+        let opensChangesPanel = mode == .changes && workbenchStore.rightPanelMode != .changes
         workbenchStore.toggleRightPanel(mode)
+        if opensChangesPanel {
+            Task { await reloadDiffs() }
+        }
     }
 
     /// Toggles the user-owned project terminal. This presentation command is
