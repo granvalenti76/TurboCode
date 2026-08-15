@@ -9,6 +9,27 @@ import FoundationModelsUtilities
 /// navigation; ChatStore decides how the returned outcome is presented.
 @MainActor
 final class NativeResponseRunner: NativeResponseRunning {
+    /// Normalizes reasoning updates that may arrive either as a cumulative
+    /// snapshot or as an incremental fragment, depending on the provider
+    /// bridge and Foundation Models runtime.
+    nonisolated static func accumulatedReasoning(
+        previous: String,
+        incoming: String
+    ) -> String {
+        guard !incoming.isEmpty else { return previous }
+        guard !previous.isEmpty else { return incoming }
+
+        // Cumulative snapshots supersede the previous value. A shorter stale
+        // snapshot is ignored so a transient runtime rollback cannot truncate
+        // the reasoning already visible to the user.
+        if incoming.hasPrefix(previous) || previous.hasPrefix(incoming) {
+            return incoming.count >= previous.count ? incoming : previous
+        }
+
+        // Providers that expose deltas need the new fragment appended.
+        return previous + incoming
+    }
+
     struct Request {
         let prompt: String
         let backend: ModelBackend
@@ -23,11 +44,11 @@ final class NativeResponseRunner: NativeResponseRunning {
         case failed(message: String, partialContent: String, reasoning: String)
     }
 
-    struct Events {
-        let diagnosticsChanged: (String?) -> Void
-        let liveContentChanged: (String) -> Void
-        let liveReasoningChanged: (String) -> Void
-        let approvalRequested: (ApprovalRequest) -> Void
+    struct Events: @unchecked Sendable {
+        let diagnosticsChanged: @MainActor @Sendable (String?) -> Void
+        let liveContentChanged: @MainActor @Sendable (String) -> Void
+        let liveReasoningChanged: @MainActor @Sendable (String) -> Void
+        let approvalRequested: @MainActor @Sendable (ApprovalRequest) -> Void
     }
 
     func run(
@@ -54,6 +75,23 @@ final class NativeResponseRunner: NativeResponseRunning {
         var content = ""
         var reasoning = ""
         var result: Outcome
+        let reasoningRelayID: UUID?
+
+        if request.backend == .llamaServer {
+            reasoningRelayID = await ReasoningStreamRelay.shared.install { delta in
+                events.liveReasoningChanged(delta)
+            }
+        } else {
+            reasoningRelayID = nil
+        }
+
+        defer {
+            if let reasoningRelayID {
+                Task {
+                    await ReasoningStreamRelay.shared.remove(reasoningRelayID)
+                }
+            }
+        }
 
         do {
             for try await snapshot in session.streamResponse(to: request.prompt) {
@@ -82,24 +120,13 @@ final class NativeResponseRunner: NativeResponseRunning {
                     events.liveContentChanged(content)
                 }
 
+                var snapshotReasoning = ""
                 for entry in snapshot.transcriptEntries {
                     switch entry {
                     case .reasoning(let value):
                         for segment in value.segments {
                             guard case .text(let text) = segment else { continue }
-                            if !didRecordFirstToken, !text.content.isEmpty,
-                               let runID {
-                                didRecordFirstToken = true
-                                await AgentDiagnosticsRecorder.shared.markFirstToken(
-                                    runID: runID
-                                )
-                            }
-                            reasoning = text.content
-                            generatedCharacters = max(
-                                generatedCharacters,
-                                reasoning.count
-                            )
-                            events.liveReasoningChanged(reasoning)
+                            snapshotReasoning += text.content
                         }
                     case .toolOutput(let output):
                         let text = output.segments.compactMap { segment -> String? in
@@ -111,6 +138,26 @@ final class NativeResponseRunner: NativeResponseRunning {
                         }
                     default:
                         break
+                    }
+                }
+
+                if !snapshotReasoning.isEmpty {
+                    if !didRecordFirstToken, let runID {
+                        didRecordFirstToken = true
+                        await AgentDiagnosticsRecorder.shared.markFirstToken(
+                            runID: runID
+                        )
+                    }
+                    reasoning = Self.accumulatedReasoning(
+                        previous: reasoning,
+                        incoming: snapshotReasoning
+                    )
+                    generatedCharacters = max(
+                        generatedCharacters,
+                        reasoning.count
+                    )
+                    if request.backend != .llamaServer {
+                        events.liveReasoningChanged(reasoning)
                     }
                 }
             }

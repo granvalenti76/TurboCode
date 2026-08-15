@@ -299,6 +299,7 @@ public struct ChatCompletionsLanguageModel: Sendable, LanguageModel {
       for try await chunk in chunks {
         if let delta = chunk.choices.first?.delta {
           if let reasoning = delta.reasoningContent {
+            await ReasoningStreamRelay.shared.publish(reasoning)
             await channel.send(
               .reasoning(
                 entryID: reasoningEntryID,

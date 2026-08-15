@@ -6,6 +6,28 @@ import Testing
 @MainActor
 @Suite("M4.2 delegated task scenarios")
 struct AgentEndToEndScenarioTests {
+    @Test("Reasoning accumulation accepts cumulative snapshots and deltas")
+    func reasoningAccumulationHandlesProviderUpdateShapes() {
+        var reasoning = "Think"
+        reasoning = NativeResponseRunner.accumulatedReasoning(
+            previous: reasoning,
+            incoming: "Think step"
+        )
+        #expect(reasoning == "Think step")
+
+        reasoning = NativeResponseRunner.accumulatedReasoning(
+            previous: reasoning,
+            incoming: " two"
+        )
+        #expect(reasoning == "Think step two")
+
+        reasoning = NativeResponseRunner.accumulatedReasoning(
+            previous: reasoning,
+            incoming: "Think"
+        )
+        #expect(reasoning == "Think step two")
+    }
+
     @Test("Delegated edit reaches the chat timeline without coordinator policy fields")
     func successfulDelegatedEditCompletesEndToEnd() async throws {
         let fixture = try ScenarioWorkspace()
