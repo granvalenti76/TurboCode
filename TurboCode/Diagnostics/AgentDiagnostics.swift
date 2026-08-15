@@ -88,6 +88,17 @@ nonisolated struct OnDeviceCompactionMetric: Codable, Sendable, Identifiable {
     let retainedCharacters: Int
 }
 
+/// A local Llama context boundary. Kept separate from the historical
+/// on-device JSONL schema so existing Apple diagnostics remain compatible.
+nonisolated struct LocalCompactionMetric: Codable, Sendable, Identifiable {
+    let id: String
+    let createdAt: Date
+    let backend: String
+    let turnCount: Int
+    let sourceCharacters: Int
+    let retainedCharacters: Int
+}
+
 nonisolated private struct ToolFailureKey: Hashable {
     let backend: String
     let tool: String
@@ -344,8 +355,57 @@ actor AgentDiagnosticsRecorder {
         }
     }
 
+    func recordLocalCompaction(
+        backend: ModelBackend,
+        turnCount: Int,
+        sourceCharacters: Int,
+        retainedCharacters: Int
+    ) {
+        let metric = LocalCompactionMetric(
+            id: UUID().uuidString,
+            createdAt: .now,
+            backend: backend.rawValue,
+            turnCount: turnCount,
+            sourceCharacters: sourceCharacters,
+            retainedCharacters: retainedCharacters
+        )
+        Self.appendJSONLine(
+            metric,
+            filename: "local-compactions.jsonl"
+        )
+    }
+
+    func localCompactions() -> [LocalCompactionMetric] {
+        Self.persistedLocalCompactions().sorted { $0.createdAt > $1.createdAt }
+    }
+
     func onDeviceCompactions() -> [OnDeviceCompactionMetric] {
         Self.persistedCompactions().sorted { $0.createdAt > $1.createdAt }
+    }
+
+    nonisolated private static func appendJSONLine<Value: Encodable>(
+        _ value: Value,
+        filename: String
+    ) {
+        do {
+            let directory = diagnosticsDirectoryURL
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let url = directory.appendingPathComponent(filename)
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            var data = try encoder.encode(value)
+            data.append(0x0A)
+            if FileManager.default.fileExists(atPath: url.path) {
+                let handle = try FileHandle(forWritingTo: url)
+                try handle.seekToEnd()
+                try handle.write(contentsOf: data)
+                try handle.close()
+            } else {
+                try data.write(to: url, options: .atomic)
+            }
+        } catch {
+            print("[Diagnostics] Failed to persist local compaction: \(error.localizedDescription)")
+        }
     }
 
     private func milliseconds(since date: Date) -> Int {
@@ -523,6 +583,16 @@ actor AgentDiagnosticsRecorder {
         decoder.dateDecodingStrategy = .iso8601
         return contents.split(whereSeparator: \.isNewline).compactMap { line in
             try? decoder.decode(OnDeviceCompactionMetric.self, from: Data(line.utf8))
+        }
+    }
+
+    nonisolated private static func persistedLocalCompactions() -> [LocalCompactionMetric] {
+        let url = diagnosticsDirectoryURL.appendingPathComponent("local-compactions.jsonl")
+        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return contents.split(whereSeparator: \.isNewline).compactMap { line in
+            try? decoder.decode(LocalCompactionMetric.self, from: Data(line.utf8))
         }
     }
 

@@ -262,6 +262,12 @@ struct InputFieldView: View {
                 insertion: "/skill ",
                 description: "Choose a skill for this request",
                 icon: "bolt"
+            ),
+            SlashCommandSuggestion(
+                command: "/compact",
+                insertion: "/compact",
+                description: "Compact conversation context for local models",
+                icon: "arrow.triangle.2.circle.clockwise"
             )
         ] + chatStore.availableSkills.map {
             SlashCommandSuggestion(

@@ -4,6 +4,15 @@ import FoundationModels
 /// Prepares conversation history for a newly constructed model session. The
 /// destination profile always supplies fresh instructions and tool definitions.
 nonisolated enum SessionRebuildHistory {
+    /// The local handoff carries enough accounting data for the UI and
+    /// diagnostics without changing the Apple on-device compaction contract.
+    nonisolated struct LocalCompaction: Sendable {
+        let summary: String
+        let history: [Transcript.Entry]
+        let sourceCharacters: Int
+        let retainedCharacters: Int
+    }
+
     /// Apple on-device remains reliable for roughly eight conversational turns.
     /// Before the ninth question, rebuild the context from durable outcomes
     /// instead of carrying every completed call and raw output forward.
@@ -20,6 +29,45 @@ nonisolated enum SessionRebuildHistory {
                 count += 1
             }
         }
+    }
+
+    /// Scales the local handoff budget with the declared Llama context window.
+    /// The cap leaves room for runtime instructions, tools, and the next reply.
+    static func localCompactionCharacterLimit(contextWindowTokens: Int?) -> Int {
+        let tokens = max(1, contextWindowTokens ?? 32_768)
+        return max(8_000, min(120_000, tokens * 3 / 8))
+    }
+
+    /// Builds a Llama-specific handoff. This is deliberately separate from
+    /// `onDeviceCompaction` so Apple on-device behavior remains untouched.
+    static func localCompaction(
+        from blocks: [ChatBlock],
+        maximumCharacters: Int
+    ) -> LocalCompaction? {
+        let sourceCharacters = blocks
+            .filter { $0.kind != .compaction }
+            .reduce(0) { $0 + $1.text.count }
+        let fullRender = RuntimeContextHandoff.render(blocks: blocks)
+        guard !fullRender.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        let rendered = RuntimeContextHandoff.render(
+            blocks: blocks,
+            maximumCharacters: maximumCharacters
+        )
+        let summary = """
+        Context compacted by TurboCode for the next local Llama turn.
+        Preserve the user's goals, accepted decisions, and completed workspace outcomes.
+        Completed tool calls and their raw output were omitted.
+
+        \(rendered)
+        """
+        return LocalCompaction(
+            summary: summary,
+            history: RuntimeContextHandoff.transcript(fromSummary: summary),
+            sourceCharacters: max(sourceCharacters, fullRender.count),
+            retainedCharacters: rendered.count
+        )
     }
 
     /// Produces a compact, model-readable handoff that keeps user requests,

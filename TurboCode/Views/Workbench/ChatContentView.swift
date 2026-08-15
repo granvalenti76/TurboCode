@@ -10,6 +10,10 @@ struct ChatContentView: View {
         VStack(spacing: 0) {
             RuntimeBannerView()
 
+            if let error = chatStore.error {
+                errorBanner(error)
+            }
+
             if chatStore.isFirstMessage {
                 firstMessageLayout
                     .transition(.opacity)
@@ -19,6 +23,29 @@ struct ChatContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.4), value: chatStore.isFirstMessage)
+    }
+
+    private func errorBanner(_ message: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            Spacer(minLength: 0)
+            Button {
+                chatStore.error = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss error")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.orange.opacity(0.08))
     }
 
     // MARK: - First Message Layout (centered, narrow input)
@@ -51,6 +78,15 @@ struct ChatContentView: View {
         VStack(spacing: 0) {
             MessageTimelineView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .topTrailing) {
+                    if let notice = chatStore.localCompactionNotice {
+                        LocalCompactionNoticeView(notice: notice) {
+                            chatStore.clearLocalCompactionNotice()
+                        }
+                        .padding(.top, 10)
+                        .padding(.trailing, 14)
+                    }
+                }
 
             if let approval = chatStore.pendingApproval {
                 approvalBanner(approval)
@@ -101,5 +137,45 @@ struct ChatContentView: View {
         .padding(.vertical, 7)
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
+    }
+}
+
+private struct LocalCompactionNoticeView: View {
+    let notice: LocalCompactionNotice
+    let dismiss: () -> Void
+
+    private var text: String {
+        "Context compacted · ~\(shortCharacterCount(notice.sourceCharacters)) → ~\(shortCharacterCount(notice.retainedCharacters)) chars (estimate)"
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 10, weight: .semibold))
+            Text(text)
+                .font(AppTypography.metadata)
+                .lineLimit(1)
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss context compaction status")
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay { Capsule().stroke(.separator.opacity(0.45), lineWidth: 0.5) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "Context compacted, approximately \(notice.sourceCharacters) to \(notice.retainedCharacters) characters"
+        )
+    }
+
+    private func shortCharacterCount(_ count: Int) -> String {
+        if count >= 1_000_000 { return "\(count / 1_000_000)M" }
+        if count >= 1_000 { return "\(count / 1_000)K" }
+        return "\(count)"
     }
 }

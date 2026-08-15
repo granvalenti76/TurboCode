@@ -289,7 +289,9 @@ struct ChatBlockView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Context compacted")
                     .font(.subheadline.weight(.semibold))
-                Text("Earlier tool chatter was summarized so the on-device model can continue with the essential context.")
+                Text(block.text.contains("local Llama")
+                     ? "Earlier tool chatter was summarized so the local Llama model can continue with the essential context."
+                     : "Earlier tool chatter was summarized so the on-device model can continue with the essential context.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
