@@ -107,6 +107,10 @@ struct TurboCodeApp: App {
                     openWindow(id: "on-device-statistics")
                 }
 
+                Button("Llama Statistics") {
+                    openWindow(id: "llama-statistics")
+                }
+
                 if let benchmarkStatus = chatStore.benchmarkStatus {
                     Divider()
                     Button(benchmarkStatus) {}
@@ -123,6 +127,11 @@ struct TurboCodeApp: App {
             OnDeviceStatisticsView()
         }
         .defaultSize(width: 880, height: 700)
+
+        Window("Llama Statistics", id: "llama-statistics") {
+            LlamaStatisticsView()
+        }
+        .defaultSize(width: 720, height: 520)
 #endif
 
         // Native macOS Settings window

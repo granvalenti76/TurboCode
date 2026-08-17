@@ -1328,7 +1328,10 @@ public final class ChatStore {
             backend: activeBackend,
             mode: orchestratorMode,
             workspaceKind: diagnosticsWorkspaceKind,
-            modelName: composerModel
+            modelName: composerModel,
+            serverURL: activeBackend == .llamaServer
+                ? activeRemoteModel?.url
+                : nil
         )
         error = result.errorMessage
         if result.touchedConversation, let conversationID {

@@ -35,6 +35,9 @@ final class NativeResponseRunner: NativeResponseRunning {
         let backend: ModelBackend
         let mode: OrchestratorMode
         let workspaceKind: String
+        /// Llama's runtime context is discovered from the server rather than
+        /// trusting the profile JSON, which may describe a different launch.
+        let serverURL: String?
     }
 
     enum Outcome {
@@ -68,12 +71,20 @@ final class NativeResponseRunner: NativeResponseRunning {
         )
         events.diagnosticsChanged(runID)
 
+        let llamaContextSize = request.backend == .llamaServer
+            ? await LlamaServerRuntimeProbe.contextSize(
+                from: request.serverURL
+            )
+            : nil
+
         var outcome: AgentRunOutcome = .success
         var recordedError: Error?
         var generatedCharacters = 0
         var didRecordFirstToken = false
         var content = ""
         var reasoning = ""
+        var latestInputTokenCount: Int?
+        var latestUsage: LanguageModelSession.Usage?
         var result: Outcome
         let reasoningRelayID: UUID?
 
@@ -102,6 +113,12 @@ final class NativeResponseRunner: NativeResponseRunning {
                         runID: runID,
                         usage: snapshot.usage
                     )
+                } else if request.backend == .llamaServer {
+                    // Llama reports cumulative usage on the stream's trailing
+                    // snapshot. Keep only the latest value locally so metrics
+                    // collection cannot add one actor hop per token.
+                    latestUsage = snapshot.usage
+                    latestInputTokenCount = snapshot.usage.input.totalTokenCount
                 }
 
                 if !snapshot.content.isEmpty {
@@ -198,6 +215,20 @@ final class NativeResponseRunner: NativeResponseRunning {
                     tokenCount: contextTokens,
                     contextSize: contextSize
                 )
+            } else if request.backend == .llamaServer {
+                if let latestUsage {
+                    await AgentDiagnosticsRecorder.shared.recordUsage(
+                        runID: runID,
+                        usage: latestUsage
+                    )
+                }
+                if let llamaContextSize {
+                    await AgentDiagnosticsRecorder.shared.recordContext(
+                        runID: runID,
+                        tokenCount: latestInputTokenCount,
+                        contextSize: llamaContextSize
+                    )
+                }
             }
             await AgentDiagnosticsRecorder.shared.finishRun(
                 runID: runID,
@@ -208,6 +239,33 @@ final class NativeResponseRunner: NativeResponseRunning {
         }
         events.diagnosticsChanged(nil)
         return result
+    }
+}
+
+/// Reads only server-owned runtime metadata. A failed probe is intentionally
+/// ignored: inference must remain available when an older llama-server build
+/// omits the endpoint or the local server is restarting.
+private enum LlamaServerRuntimeProbe {
+    static func contextSize(from baseURL: String?) async -> Int? {
+        guard let baseURL,
+              let base = URL(string: baseURL) else { return nil }
+
+        let endpoint = base.deletingLastPathComponent()
+            .appendingPathComponent("props")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 1.5
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode),
+              let object = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any],
+              let settings = object["default_generation_settings"] as? [String: Any],
+              let value = settings["n_ctx"] as? NSNumber else {
+            return nil
+        }
+        return value.intValue > 0 ? value.intValue : nil
     }
 }
 

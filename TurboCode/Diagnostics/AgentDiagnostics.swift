@@ -327,6 +327,18 @@ actor AgentDiagnosticsRecorder {
             .sorted { $0.startedAt > $1.startedAt }
     }
 
+    /// Returns Llama runs for the dedicated Developer dashboard. Keeping this
+    /// filter here prevents the UI from accidentally mixing provider metrics.
+    func llamaRuns() -> [AgentRunMetric] {
+        let persisted = Self.persistedRuns()
+        let active = runs.values.filter {
+            $0.backend == ModelBackend.llamaServer.rawValue
+        }
+        return (persisted + active)
+            .filter { $0.backend == ModelBackend.llamaServer.rawValue }
+            .sorted { $0.startedAt > $1.startedAt }
+    }
+
     func recordCompaction(turnCount: Int, retainedCharacters: Int) {
         let metric = OnDeviceCompactionMetric(
             id: UUID().uuidString,

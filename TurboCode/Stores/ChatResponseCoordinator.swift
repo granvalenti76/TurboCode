@@ -201,7 +201,8 @@ final class ChatResponseCoordinator {
         backend: ModelBackend,
         mode: OrchestratorMode,
         workspaceKind: String,
-        modelName: String
+        modelName: String,
+        serverURL: String? = nil
     ) async -> Result {
         let modelPrompt = WorkspaceListingFollowUpContext.enriching(
             promptText,
@@ -224,7 +225,8 @@ final class ChatResponseCoordinator {
                 prompt: modelPrompt,
                 backend: backend,
                 mode: mode,
-                workspaceKind: workspaceKind
+                workspaceKind: workspaceKind,
+                serverURL: serverURL
             ),
             events: NativeResponseRunner.Events(
                 diagnosticsChanged: { [weak self] runID in
