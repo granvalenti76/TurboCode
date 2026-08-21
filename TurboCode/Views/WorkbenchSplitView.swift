@@ -26,6 +26,9 @@ struct WorkbenchSplitView: View {
                 workbenchCanvas
                     .frame(minWidth: mainMinWidth, maxWidth: .infinity)
                     .layoutPriority(1)
+                    // Keep interactive chat text behind a nearly opaque edge
+                    // while preserving the sidebar's native toolbar material.
+                    .scrollEdgeEffectStyle(.hard, for: .top)
                     .background {
                         Color(nsColor: .windowBackgroundColor)
                             .ignoresSafeArea(edges: .top)
@@ -43,15 +46,6 @@ struct WorkbenchSplitView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
-        // The unified macOS toolbar otherwise samples the scrolling chat
-        // beneath its Liquid Glass material, leaving message text visible in
-        // the window chrome. Keep the toolbar opaque without changing the
-        // split-view geometry that anchors its trailing controls.
-        .toolbarBackground(
-            Color(nsColor: .windowBackgroundColor),
-            for: .windowToolbar
-        )
-        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         //.containerBackground(Color.white, for: .window)
         .background(alignment: .top) {
             HStack(spacing: 0) {
