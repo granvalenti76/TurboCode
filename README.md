@@ -4,6 +4,32 @@
 
 # TurboCode
 
+## Install with Homebrew
+
+To install TurboCode:
+
+```shell
+brew install --cask granvalenti76/homebrew-tap/turbocode
+```
+
+To update an existing installation:
+
+```shell
+brew upgrade --cask turbocode
+```
+
+To uninstall TurboCode:
+
+```shell
+brew uninstall --cask turbocode
+```
+
+Requires macOS 27 or later.
+
+The distributed application is ad-hoc signed and is not notarized by Apple.
+If macOS blocks the first launch, approve TurboCode in **System Settings →
+Privacy & Security**, or open the application once with **right-click → Open**.
+
 **A native macOS agent harness for Swift and Xcode.**
 
 TurboCode is an open-source agent harness written entirely in Swift for native
@@ -199,30 +225,6 @@ Non-sensitive data such as endpoints and capabilities lives in `~/.turbocode/mod
 - Swift 6
 - A Mac capable of running Apple Foundation Models for the on-device profile
 - An optional local model server or remote provider credential for other profiles
-
-## Install from Homebrew
-
-The current 0.2.0 Alpha build is available through the TurboCode Homebrew tap:
-
-```shell
-brew install --cask granvalenti76/homebrew-tap/turbocode
-```
-
-To update an existing installation:
-
-```shell
-brew upgrade --cask turbocode
-```
-
-To uninstall TurboCode:
-
-```shell
-brew uninstall --cask turbocode
-```
-
-The distributed application is ad-hoc signed and is not notarized by Apple.
-If macOS blocks the first launch, approve TurboCode in **System Settings →
-Privacy & Security**, or open the application once with **right-click → Open**.
 
 ## Build from source
 
