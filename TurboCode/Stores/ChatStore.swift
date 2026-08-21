@@ -1331,7 +1331,8 @@ public final class ChatStore {
             modelName: composerModel,
             serverURL: activeBackend == .llamaServer
                 ? activeRemoteModel?.url
-                : nil
+                : nil,
+            reasoningStreamRelay: modelRuntimeStore.activeReasoningStreamRelay
         )
         error = result.errorMessage
         if result.touchedConversation, let conversationID {

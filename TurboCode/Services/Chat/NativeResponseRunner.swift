@@ -38,6 +38,8 @@ final class NativeResponseRunner: NativeResponseRunning {
         /// Llama's runtime context is discovered from the server rather than
         /// trusting the profile JSON, which may describe a different launch.
         let serverURL: String?
+        /// Session-owned relay installed for this request only.
+        let reasoningStreamRelay: ReasoningStreamRelay?
     }
 
     enum Outcome {
@@ -87,19 +89,28 @@ final class NativeResponseRunner: NativeResponseRunning {
         var latestUsage: LanguageModelSession.Usage?
         var result: Outcome
         let reasoningRelayID: UUID?
+        let relayProjection = ReasoningStreamProjection()
 
-        if request.backend == .llamaServer {
-            reasoningRelayID = await ReasoningStreamRelay.shared.install { delta in
-                events.liveReasoningChanged(delta)
+        if request.backend == .llamaServer,
+           let reasoningStreamRelay = request.reasoningStreamRelay {
+            reasoningRelayID = await reasoningStreamRelay.install { event in
+                guard relayProjection.isActive else { return }
+                events.liveReasoningChanged(
+                    relayProjection.append(event.delta)
+                )
             }
         } else {
             reasoningRelayID = nil
         }
 
         defer {
+            relayProjection.deactivate()
             if let reasoningRelayID {
                 Task {
-                    await ReasoningStreamRelay.shared.remove(reasoningRelayID)
+                    guard let reasoningStreamRelay = request.reasoningStreamRelay else {
+                        return
+                    }
+                    await reasoningStreamRelay.remove(reasoningRelayID)
                 }
             }
         }
@@ -199,6 +210,13 @@ final class NativeResponseRunner: NativeResponseRunning {
             )
         }
 
+        // A cancelled or failed stream may not yield a final Foundation Models
+        // transcript snapshot. Preserve the request-scoped transport projection
+        // so the visible partial response remains complete.
+        if reasoning.isEmpty {
+            reasoning = relayProjection.text
+        }
+
         if let runID {
             if request.backend == .foundationApple {
                 let model = SystemLanguageModel.default
@@ -239,6 +257,25 @@ final class NativeResponseRunner: NativeResponseRunning {
         }
         events.diagnosticsChanged(nil)
         return result
+    }
+}
+
+/// Reconstructs the cumulative live reasoning value from request-scoped
+/// transport deltas. The projection is deliberately separate from the relay;
+/// the vendor emits ordered events while the app owns presentation text.
+@MainActor
+private final class ReasoningStreamProjection {
+    private(set) var text = ""
+    private(set) var isActive = true
+
+    func append(_ delta: String) -> String {
+        guard isActive else { return text }
+        text += delta
+        return text
+    }
+
+    func deactivate() {
+        isActive = false
     }
 }
 

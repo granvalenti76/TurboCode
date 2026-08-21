@@ -21,16 +21,28 @@
 public import Foundation
 
 /// Delivers reasoning deltas without waiting for the Foundation Models
-/// transcript snapshots. The relay is intentionally opt-in and token-scoped so
-/// it cannot alter normal session behavior or clear a newer request's sink.
+/// transcript snapshots. A relay belongs to one model session; each
+/// registration belongs to one request so concurrent sessions cannot share a
+/// process-wide sink or clear a newer request's state.
 public actor ReasoningStreamRelay {
-  public static let shared = ReasoningStreamRelay()
 
-  public typealias Sink = @MainActor @Sendable (String) -> Void
+  public struct Event: Sendable, Equatable {
+    public let requestID: UUID
+    public let sequence: UInt64
+    public let delta: String
+
+    public init(requestID: UUID, sequence: UInt64, delta: String) {
+      self.requestID = requestID
+      self.sequence = sequence
+      self.delta = delta
+    }
+  }
+
+  public typealias Sink = @MainActor @Sendable (Event) -> Void
 
   private var sink: Sink?
   private var registrationID: UUID?
-  private var accumulatedReasoning = ""
+  private var nextSequence: UInt64 = 0
 
   public init() {}
 
@@ -39,7 +51,7 @@ public actor ReasoningStreamRelay {
     let id = UUID()
     registrationID = id
     self.sink = sink
-    accumulatedReasoning = ""
+    nextSequence = 0
     return id
   }
 
@@ -47,18 +59,24 @@ public actor ReasoningStreamRelay {
     guard registrationID == id else { return }
     registrationID = nil
     sink = nil
-    accumulatedReasoning = ""
+    nextSequence = 0
   }
 
   public func publish(_ reasoning: String) {
-    guard let sink else { return }
-    accumulatedReasoning += reasoning
-    let value = accumulatedReasoning
+    guard !reasoning.isEmpty,
+          let sink,
+          let requestID = registrationID else { return }
+    nextSequence &+= 1
+    let event = Event(
+      requestID: requestID,
+      sequence: nextSequence,
+      delta: reasoning
+    )
     // The transport parser must never wait for SwiftUI. Keep the relay
     // observational so a slow main-actor render cannot corrupt or delay the
     // Foundation Models event stream.
     Task { @MainActor in
-      sink(value)
+      sink(event)
     }
   }
 }
