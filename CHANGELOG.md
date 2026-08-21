@@ -9,28 +9,42 @@ formats continue to evolve before 1.0.
 
 ## [0.3.3] - 2026-08-21
 
-> This release focuses on a faster and more robust local Llama workflow, with
-> live reasoning, runtime diagnostics, manual context control, and
-> request-scoped transcript delivery.
+This release improves the backend used by TurboCode's Local LLM profile,
+especially the Llama integration. The goal is simple: a native SwiftUI harness
+should remain responsive and useful with capable local models, including on
+Macs with 16 GB of RAM. The work also puts clearer boundaries around model
+capabilities and optional tools, laying the groundwork for a more modular
+architecture in future releases without changing the current user workflow.
 
-### RELEASE
+### Features
 
-- Added live Llama reasoning updates while a response is streaming.
-- Added Llama runtime statistics, including response timing, token usage, and
-  context information.
-- Added manual local Llama context compaction with a visible transcript event
-  and diagnostic history.
-- Made Llama profiles honor the server URL configured in `models.json` from
-  the first session build, including non-default hosts and ports.
-- Scoped reasoning relay events to the active model session and request,
-  preventing stale transcript updates from crossing requests.
-- Coalesced reasoning relay bursts to reduce main-actor scheduling overhead
-  and improve transcript responsiveness during fast output.
+- Llama responses now show reasoning updates while the model is working and
+  report useful runtime details such as response time, generated tokens, and
+  context usage.
+- Added manual context compaction for local Llama sessions. Compaction reduces
+  older transcript content when the model is running out of room and records a
+  visible event so the conversation remains understandable.
+- Added a Llama-only context ring to the composer. It is updated after a turn
+  completes and shows the used/total context values when hovered; other
+  profiles keep their existing footer.
+- Llama now reads its server URL from `models.json` when the session is first
+  created, so custom hosts and ports work consistently from the start.
+- Reasoning updates are tied to the active model request and grouped when they
+  arrive in quick bursts. This keeps an old request from writing into a new
+  transcript and avoids unnecessary UI work.
+- Added optional Safari browsing through MCP. It is disabled by default because
+  MCP tools, especially web browsing, can add a large amount of text to the
+  context; a few turns can reach roughly 25k tokens. Enable it from
+  `Settings > Agents > Experimental` when using a model with fast token
+  generation, so the extra tool work does not make the interaction feel slow.
 
-### FIX
+### Fixes
 
-- Refreshes workspace diffs when the Changes panel opens, so the inspector
+- The Changes Inspector now refreshes workspace diffs when it opens, so it
   reflects the current repository state.
+- Chat text no longer shows through the macOS window toolbar or the top scroll
+  edge. The fix keeps the existing workbench layout and sidebar alignment
+  intact.
 
 ## [0.3.2] - 2026-08-13
 
