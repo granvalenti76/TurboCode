@@ -203,7 +203,8 @@ final class ChatResponseCoordinator {
         workspaceKind: String,
         modelName: String,
         serverURL: String? = nil,
-        reasoningStreamRelay: ReasoningStreamRelay? = nil
+        reasoningStreamRelay: ReasoningStreamRelay? = nil,
+        contextChanged: @escaping @MainActor @Sendable (LlamaContextUsage?) -> Void = { _ in }
     ) async -> Result {
         let modelPrompt = WorkspaceListingFollowUpContext.enriching(
             promptText,
@@ -234,6 +235,7 @@ final class ChatResponseCoordinator {
                 diagnosticsChanged: { [weak self] runID in
                     self?.activeDiagnosticsRunID = runID
                 },
+                contextChanged: contextChanged,
                 liveContentChanged: { [weak self] content in
                     self?.timeline.liveAssistant =
                         Self.userVisibleAssistantText(content)

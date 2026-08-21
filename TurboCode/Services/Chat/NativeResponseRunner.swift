@@ -51,6 +51,9 @@ final class NativeResponseRunner: NativeResponseRunning {
 
     struct Events: @unchecked Sendable {
         let diagnosticsChanged: @MainActor @Sendable (String?) -> Void
+        /// Published once after a turn so context discovery never adds a
+        /// per-snapshot hop to the main actor.
+        let contextChanged: @MainActor @Sendable (LlamaContextUsage?) -> Void
         let liveContentChanged: @MainActor @Sendable (String) -> Void
         let liveReasoningChanged: @MainActor @Sendable (String) -> Void
         let approvalRequested: @MainActor @Sendable (ApprovalRequest) -> Void
@@ -215,6 +218,17 @@ final class NativeResponseRunner: NativeResponseRunning {
         // so the visible partial response remains complete.
         if reasoning.isEmpty {
             reasoning = relayProjection.text
+        }
+
+        if request.backend == .llamaServer,
+           let llamaContextSize,
+           let latestInputTokenCount {
+            events.contextChanged(
+                LlamaContextUsage(
+                    usedTokens: latestInputTokenCount,
+                    contextSize: llamaContextSize
+                )
+            )
         }
 
         if let runID {

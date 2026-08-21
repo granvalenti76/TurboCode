@@ -39,6 +39,9 @@ public final class ChatStore {
     public var busy: Bool = false
     public var error: String?
     public private(set) var localCompactionNotice: LocalCompactionNotice?
+    /// Updated once after a completed local Llama turn, never per stream
+    /// snapshot, so the composer remains cheap while inference is active.
+    public private(set) var llamaContextUsage: LlamaContextUsage?
 #if DEBUG
     public var benchmarkRunning: Bool = false
     public var benchmarkStatus: String?
@@ -482,6 +485,7 @@ public final class ChatStore {
         discardingCapabilityContext: Bool = false,
         restoringHistory: [Transcript.Entry]? = nil
     ) {
+        llamaContextUsage = nil
         modelRuntimeStore.rebuildSession(
             workspaceRoot: workspaceRoot,
             keepingHistory: keepingHistory,
@@ -1332,7 +1336,11 @@ public final class ChatStore {
             serverURL: activeBackend == .llamaServer
                 ? activeRemoteModel?.url
                 : nil,
-            reasoningStreamRelay: modelRuntimeStore.activeReasoningStreamRelay
+            reasoningStreamRelay: modelRuntimeStore.activeReasoningStreamRelay,
+            contextChanged: { [weak self] usage in
+                guard let self, self.activeBackend == .llamaServer else { return }
+                self.llamaContextUsage = usage
+            }
         )
         error = result.errorMessage
         if result.touchedConversation, let conversationID {
