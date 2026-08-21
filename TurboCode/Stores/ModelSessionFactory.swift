@@ -20,6 +20,9 @@ struct ModelSessionConfiguration {
     let delegateToolIDs: Set<ToolCapabilityID>?
     let dropsCompletedToolCalls: Bool
     let workspaceInstructions: WorkspaceInstructions?
+    /// Relay owned by the active model session; nil disables live transport
+    /// reasoning outside the local Llama path.
+    let reasoningStreamRelay: ReasoningStreamRelay?
 }
 
 struct ModelSessionEvents {
@@ -210,7 +213,8 @@ enum ModelSessionFactory {
                     .xcodeProject,
                     .writeOnDevice,
                     .removeFile,
-                    .createSkill
+                    .createSkill,
+                    .safariMCP
                 ],
             repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
                 ?? 32_768
@@ -243,6 +247,9 @@ enum ModelSessionFactory {
                 toolPlan: standalonePlan,
                 usesExclusiveToolSelection: usesExclusiveToolSelection,
                 supplementalTools: standaloneTools,
+                safariSkillActivations: configuration.agentTuning.experimental.safariMCPEnabled
+                    ? SkillActivations()
+                    : nil,
                 onToolStart: { call in
                     await events.toolStarted(
                         call,
@@ -470,6 +477,11 @@ enum ModelSessionFactory {
                 return WriteOnDeviceTool(workspaceRoot: configuration.workspaceRoot)
             case .removeFile:
                 return RemoveFileTool(workspaceRoot: configuration.workspaceRoot)
+            case .safariMCP:
+                return SafariMCPTool(
+                    client: .shared,
+                    enabled: configuration.agentTuning.experimental.safariMCPEnabled
+                )
             case .loadSkill:
                 guard !configuration.availableSkills.isEmpty else { return nil }
                 return LoadSkillTool(skills: configuration.availableSkills)
@@ -599,6 +611,7 @@ enum ModelSessionFactory {
         ToolAccessContext(
             hasWorkspace: !configuration.workspaceRoot.isEmpty,
             hasSkills: !configuration.availableSkills.isEmpty,
+            safariMCPEnabled: configuration.agentTuning.experimental.safariMCPEnabled,
             hasDelegateModel: configuration.delegateRemoteModel.enabled,
             repositoryMapDetail: repositoryMap?.detail
         )
@@ -623,7 +636,8 @@ enum ModelSessionFactory {
             SystemLanguageModel.default
         case .foundationServe, .llamaServer, .premium:
             providerModel(
-                for: configuration.activeRemoteModel ?? RemoteModelConfig.fallbackLlama
+                for: configuration.activeRemoteModel ?? RemoteModelConfig.fallbackLlama,
+                reasoningStreamRelay: configuration.reasoningStreamRelay
             )
         case .codex:
             // ChatStore dispatches Codex turns before this placeholder session
@@ -632,10 +646,14 @@ enum ModelSessionFactory {
         }
     }
 
-    private static func providerModel(for model: RemoteModelConfig) -> ProviderLanguageModel {
+    private static func providerModel(
+        for model: RemoteModelConfig,
+        reasoningStreamRelay: ReasoningStreamRelay? = nil
+    ) -> ProviderLanguageModel {
         ProviderLanguageModel(
             configuration: model,
-            credential: model.credential
+            credential: model.credential,
+            reasoningStreamRelay: reasoningStreamRelay
         )
     }
 

@@ -9,11 +9,37 @@ import FoundationModelsUtilities
 /// navigation; ChatStore decides how the returned outcome is presented.
 @MainActor
 final class NativeResponseRunner: NativeResponseRunning {
+    /// Normalizes reasoning updates that may arrive either as a cumulative
+    /// snapshot or as an incremental fragment, depending on the provider
+    /// bridge and Foundation Models runtime.
+    nonisolated static func accumulatedReasoning(
+        previous: String,
+        incoming: String
+    ) -> String {
+        guard !incoming.isEmpty else { return previous }
+        guard !previous.isEmpty else { return incoming }
+
+        // Cumulative snapshots supersede the previous value. A shorter stale
+        // snapshot is ignored so a transient runtime rollback cannot truncate
+        // the reasoning already visible to the user.
+        if incoming.hasPrefix(previous) || previous.hasPrefix(incoming) {
+            return incoming.count >= previous.count ? incoming : previous
+        }
+
+        // Providers that expose deltas need the new fragment appended.
+        return previous + incoming
+    }
+
     struct Request {
         let prompt: String
         let backend: ModelBackend
         let mode: OrchestratorMode
         let workspaceKind: String
+        /// Llama's runtime context is discovered from the server rather than
+        /// trusting the profile JSON, which may describe a different launch.
+        let serverURL: String?
+        /// Session-owned relay installed for this request only.
+        let reasoningStreamRelay: ReasoningStreamRelay?
     }
 
     enum Outcome {
@@ -23,11 +49,14 @@ final class NativeResponseRunner: NativeResponseRunning {
         case failed(message: String, partialContent: String, reasoning: String)
     }
 
-    struct Events {
-        let diagnosticsChanged: (String?) -> Void
-        let liveContentChanged: (String) -> Void
-        let liveReasoningChanged: (String) -> Void
-        let approvalRequested: (ApprovalRequest) -> Void
+    struct Events: @unchecked Sendable {
+        let diagnosticsChanged: @MainActor @Sendable (String?) -> Void
+        /// Published once after a turn so context discovery never adds a
+        /// per-snapshot hop to the main actor.
+        let contextChanged: @MainActor @Sendable (LlamaContextUsage?) -> Void
+        let liveContentChanged: @MainActor @Sendable (String) -> Void
+        let liveReasoningChanged: @MainActor @Sendable (String) -> Void
+        let approvalRequested: @MainActor @Sendable (ApprovalRequest) -> Void
     }
 
     func run(
@@ -47,13 +76,47 @@ final class NativeResponseRunner: NativeResponseRunning {
         )
         events.diagnosticsChanged(runID)
 
+        let llamaContextSize = request.backend == .llamaServer
+            ? await LlamaServerRuntimeProbe.contextSize(
+                from: request.serverURL
+            )
+            : nil
+
         var outcome: AgentRunOutcome = .success
         var recordedError: Error?
         var generatedCharacters = 0
         var didRecordFirstToken = false
         var content = ""
         var reasoning = ""
+        var latestInputTokenCount: Int?
+        var latestUsage: LanguageModelSession.Usage?
         var result: Outcome
+        let reasoningRelayID: UUID?
+        let relayProjection = ReasoningStreamProjection()
+
+        if request.backend == .llamaServer,
+           let reasoningStreamRelay = request.reasoningStreamRelay {
+            reasoningRelayID = await reasoningStreamRelay.install { event in
+                guard relayProjection.isActive else { return }
+                events.liveReasoningChanged(
+                    relayProjection.append(event.delta)
+                )
+            }
+        } else {
+            reasoningRelayID = nil
+        }
+
+        defer {
+            relayProjection.deactivate()
+            if let reasoningRelayID {
+                Task {
+                    guard let reasoningStreamRelay = request.reasoningStreamRelay else {
+                        return
+                    }
+                    await reasoningStreamRelay.remove(reasoningRelayID)
+                }
+            }
+        }
 
         do {
             for try await snapshot in session.streamResponse(to: request.prompt) {
@@ -64,6 +127,12 @@ final class NativeResponseRunner: NativeResponseRunning {
                         runID: runID,
                         usage: snapshot.usage
                     )
+                } else if request.backend == .llamaServer {
+                    // Llama reports cumulative usage on the stream's trailing
+                    // snapshot. Keep only the latest value locally so metrics
+                    // collection cannot add one actor hop per token.
+                    latestUsage = snapshot.usage
+                    latestInputTokenCount = snapshot.usage.input.totalTokenCount
                 }
 
                 if !snapshot.content.isEmpty {
@@ -82,24 +151,13 @@ final class NativeResponseRunner: NativeResponseRunning {
                     events.liveContentChanged(content)
                 }
 
+                var snapshotReasoning = ""
                 for entry in snapshot.transcriptEntries {
                     switch entry {
                     case .reasoning(let value):
                         for segment in value.segments {
                             guard case .text(let text) = segment else { continue }
-                            if !didRecordFirstToken, !text.content.isEmpty,
-                               let runID {
-                                didRecordFirstToken = true
-                                await AgentDiagnosticsRecorder.shared.markFirstToken(
-                                    runID: runID
-                                )
-                            }
-                            reasoning = text.content
-                            generatedCharacters = max(
-                                generatedCharacters,
-                                reasoning.count
-                            )
-                            events.liveReasoningChanged(reasoning)
+                            snapshotReasoning += text.content
                         }
                     case .toolOutput(let output):
                         let text = output.segments.compactMap { segment -> String? in
@@ -111,6 +169,26 @@ final class NativeResponseRunner: NativeResponseRunning {
                         }
                     default:
                         break
+                    }
+                }
+
+                if !snapshotReasoning.isEmpty {
+                    if !didRecordFirstToken, let runID {
+                        didRecordFirstToken = true
+                        await AgentDiagnosticsRecorder.shared.markFirstToken(
+                            runID: runID
+                        )
+                    }
+                    reasoning = Self.accumulatedReasoning(
+                        previous: reasoning,
+                        incoming: snapshotReasoning
+                    )
+                    generatedCharacters = max(
+                        generatedCharacters,
+                        reasoning.count
+                    )
+                    if request.backend != .llamaServer {
+                        events.liveReasoningChanged(reasoning)
                     }
                 }
             }
@@ -135,6 +213,24 @@ final class NativeResponseRunner: NativeResponseRunning {
             )
         }
 
+        // A cancelled or failed stream may not yield a final Foundation Models
+        // transcript snapshot. Preserve the request-scoped transport projection
+        // so the visible partial response remains complete.
+        if reasoning.isEmpty {
+            reasoning = relayProjection.text
+        }
+
+        if request.backend == .llamaServer,
+           let llamaContextSize,
+           let latestInputTokenCount {
+            events.contextChanged(
+                LlamaContextUsage(
+                    usedTokens: latestInputTokenCount,
+                    contextSize: llamaContextSize
+                )
+            )
+        }
+
         if let runID {
             if request.backend == .foundationApple {
                 let model = SystemLanguageModel.default
@@ -151,6 +247,20 @@ final class NativeResponseRunner: NativeResponseRunning {
                     tokenCount: contextTokens,
                     contextSize: contextSize
                 )
+            } else if request.backend == .llamaServer {
+                if let latestUsage {
+                    await AgentDiagnosticsRecorder.shared.recordUsage(
+                        runID: runID,
+                        usage: latestUsage
+                    )
+                }
+                if let llamaContextSize {
+                    await AgentDiagnosticsRecorder.shared.recordContext(
+                        runID: runID,
+                        tokenCount: latestInputTokenCount,
+                        contextSize: llamaContextSize
+                    )
+                }
             }
             await AgentDiagnosticsRecorder.shared.finishRun(
                 runID: runID,
@@ -161,6 +271,52 @@ final class NativeResponseRunner: NativeResponseRunning {
         }
         events.diagnosticsChanged(nil)
         return result
+    }
+}
+
+/// Reconstructs the cumulative live reasoning value from request-scoped
+/// transport deltas. The projection is deliberately separate from the relay;
+/// the vendor emits ordered events while the app owns presentation text.
+@MainActor
+private final class ReasoningStreamProjection {
+    private(set) var text = ""
+    private(set) var isActive = true
+
+    func append(_ delta: String) -> String {
+        guard isActive else { return text }
+        text += delta
+        return text
+    }
+
+    func deactivate() {
+        isActive = false
+    }
+}
+
+/// Reads only server-owned runtime metadata. A failed probe is intentionally
+/// ignored: inference must remain available when an older llama-server build
+/// omits the endpoint or the local server is restarting.
+private enum LlamaServerRuntimeProbe {
+    static func contextSize(from baseURL: String?) async -> Int? {
+        guard let baseURL,
+              let base = URL(string: baseURL) else { return nil }
+
+        let endpoint = base.deletingLastPathComponent()
+            .appendingPathComponent("props")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 1.5
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode),
+              let object = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any],
+              let settings = object["default_generation_settings"] as? [String: Any],
+              let value = settings["n_ctx"] as? NSNumber else {
+            return nil
+        }
+        return value.intValue > 0 ? value.intValue : nil
     }
 }
 

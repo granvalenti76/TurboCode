@@ -534,7 +534,8 @@ struct DynamicProfileTests {
                 delegateTemperature: nil,
                 delegateToolIDs: nil,
                 dropsCompletedToolCalls: false,
-                workspaceInstructions: nil
+                workspaceInstructions: nil,
+                reasoningStreamRelay: nil
             ),
             history: [],
             events: ModelSessionEvents(
@@ -730,7 +731,8 @@ struct DynamicProfileTests {
                 delegateTemperature: nil,
                 delegateToolIDs: nil,
                 dropsCompletedToolCalls: false,
-                workspaceInstructions: nil
+                workspaceInstructions: nil,
+                reasoningStreamRelay: nil
             ),
             history: [],
             events: ModelSessionEvents(
@@ -763,7 +765,8 @@ struct DynamicProfileTests {
             delegateTemperature: nil,
             delegateToolIDs: profile.resolvedWorkerToolIDs,
             dropsCompletedToolCalls: true,
-            workspaceInstructions: nil
+            workspaceInstructions: nil,
+            reasoningStreamRelay: nil
         )
     }
 }

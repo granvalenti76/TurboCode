@@ -4,13 +4,20 @@ import FoundationModelsUtilities
 
 struct ProviderLanguageModel: LanguageModel {
     let configuration: RemoteModelConfig
+    /// Session-owned transport relay used only by the active Llama session.
+    let reasoningStreamRelay: ReasoningStreamRelay?
     /// Keeps only the Keychain account reference in the session. The secret is
     /// resolved when a request is sent so app startup never touches Keychain.
     let credential: String?
 
-    init(configuration: RemoteModelConfig, credential: String? = nil) {
+    init(
+        configuration: RemoteModelConfig,
+        credential: String? = nil,
+        reasoningStreamRelay: ReasoningStreamRelay? = nil
+    ) {
         self.configuration = configuration
         self.credential = credential ?? configuration.credential
+        self.reasoningStreamRelay = reasoningStreamRelay
     }
 
     var capabilities: LanguageModelCapabilities {
@@ -77,6 +84,7 @@ struct ProviderLanguageModel: LanguageModel {
                 url: url,
                 additionalHeaders: headers,
                 supportsGuidedGeneration: configuration.model.supportsGuidedGeneration,
+                reasoningStreamRelay: model.reasoningStreamRelay,
                 urlSessionConfiguration: sessionConfiguration
             )
             let executor = ChatCompletionsLanguageModel.Executor(

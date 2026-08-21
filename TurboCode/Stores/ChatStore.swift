@@ -4,6 +4,17 @@ import Observation
 import FoundationModels
 import FoundationModelsUtilities
 
+/// Temporary, non-invasive status shown after a local context compaction.
+public struct LocalCompactionNotice: Equatable, Sendable {
+    public let sourceCharacters: Int
+    public let retainedCharacters: Int
+
+    public init(sourceCharacters: Int, retainedCharacters: Int) {
+        self.sourceCharacters = sourceCharacters
+        self.retainedCharacters = retainedCharacters
+    }
+}
+
 /// Application-level façade that composes the independent chat domains.
 ///
 /// State and provider behavior belong to the injected stores/coordinators.
@@ -27,6 +38,10 @@ public final class ChatStore {
     public var runtimeConnection: RuntimeConnectionState = .ready
     public var busy: Bool = false
     public var error: String?
+    public private(set) var localCompactionNotice: LocalCompactionNotice?
+    /// Updated once after a completed local Llama turn, never per stream
+    /// snapshot, so the composer remains cheap while inference is active.
+    public private(set) var llamaContextUsage: LlamaContextUsage?
 #if DEBUG
     public var benchmarkRunning: Bool = false
     public var benchmarkStatus: String?
@@ -61,6 +76,7 @@ public final class ChatStore {
     // The currently running response task. Keeping the handle makes the Stop
     // button cancel the actual model stream rather than only changing the UI.
     private var responseTask: Task<Void, Never>?
+    private var localCompactionNoticeTask: Task<Void, Never>?
     // Codex selection and handoff are also transition operations. Keeping
     // their handles here prevents navigation from observing half-switched
     // backend state while one of them is suspended at an await.
@@ -469,6 +485,7 @@ public final class ChatStore {
         discardingCapabilityContext: Bool = false,
         restoringHistory: [Transcript.Entry]? = nil
     ) {
+        llamaContextUsage = nil
         modelRuntimeStore.rebuildSession(
             workspaceRoot: workspaceRoot,
             keepingHistory: keepingHistory,
@@ -889,6 +906,10 @@ public final class ChatStore {
             await openDocumentation()
             return
         }
+        if text.trimmingCharacters(in: .whitespacesAndNewlines) == "/compact" {
+            await compactContext()
+            return
+        }
         if let taskGoal = Self.taskCommandGoal(from: text) {
             await runIndependentTask(taskGoal)
             return
@@ -897,6 +918,7 @@ public final class ChatStore {
             error = "Use /task followed by the task instructions."
             return
         }
+        clearLocalCompactionNotice()
         refreshSkillsIfNeeded()
         if activeBackend != .codex,
            modelRuntimeStore.workspaceInstructionsChanged(in: workspaceRoot) {
@@ -967,6 +989,67 @@ public final class ChatStore {
         }
     }
 
+    /// Compacts only the active local Llama conversation. Apple on-device
+    /// compaction has its own automatic path and is intentionally untouched.
+    private func compactContext() async {
+        guard !busy else { return }
+        guard activeBackend == .llamaServer else {
+            error = "/compact is available only for local Llama models."
+            return
+        }
+
+        let turnCount = SessionRebuildHistory.userTurnCount(in: session.transcript)
+        let maximumCharacters = SessionRebuildHistory.localCompactionCharacterLimit(
+            contextWindowTokens: activeRemoteModel?.contextWindowTokens
+        )
+        guard let compaction = SessionRebuildHistory.localCompaction(
+            from: blocks,
+            maximumCharacters: maximumCharacters
+        ) else {
+            error = "Nothing to compact yet."
+            return
+        }
+
+        error = nil
+        ensureActiveThread()
+        timelineStore.presentCompaction(compaction.summary)
+        localCompactionNotice = LocalCompactionNotice(
+            sourceCharacters: compaction.sourceCharacters,
+            retainedCharacters: compaction.retainedCharacters
+        )
+        scheduleLocalCompactionNoticeDismissal()
+        rebuildSession(restoringHistory: compaction.history)
+
+        await AgentDiagnosticsRecorder.shared.recordLocalCompaction(
+            backend: activeBackend,
+            turnCount: turnCount,
+            sourceCharacters: compaction.sourceCharacters,
+            retainedCharacters: compaction.retainedCharacters
+        )
+
+        if let threadID = activeThreadId {
+            conversationStore.touchThread(id: threadID)
+            await persistSession(for: threadID)
+        }
+    }
+
+    private func scheduleLocalCompactionNoticeDismissal() {
+        localCompactionNoticeTask?.cancel()
+        localCompactionNoticeTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(9))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.localCompactionNotice = nil
+            }
+        }
+    }
+
+    public func clearLocalCompactionNotice() {
+        localCompactionNoticeTask?.cancel()
+        localCompactionNoticeTask = nil
+        localCompactionNotice = nil
+    }
+
     func isIncompleteSkillCommand(_ text: String) -> Bool {
         text.trimmingCharacters(in: .whitespacesAndNewlines) == "/skill"
     }
@@ -979,6 +1062,7 @@ public final class ChatStore {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed == "/documentation"
             || trimmed == "/task"
+            || trimmed == "/compact"
             || Self.taskCommandGoal(from: trimmed) != nil
     }
 
@@ -1200,7 +1284,8 @@ public final class ChatStore {
             agentTuning: agentTuning,
             availableSkills: DynamicProfileRuntimeSelection.skills(
                 from: modelRuntimeStore.availableSkills,
-                profile: activeDynamicProfile
+                profile: activeDynamicProfile,
+                safariMCPEnabled: agentTuning.experimental.safariMCPEnabled
             ),
             codexModelID: activeDynamicProfile?.codexModelID,
             codexReasoningEffort:
@@ -1248,7 +1333,15 @@ public final class ChatStore {
             backend: activeBackend,
             mode: orchestratorMode,
             workspaceKind: diagnosticsWorkspaceKind,
-            modelName: composerModel
+            modelName: composerModel,
+            serverURL: activeBackend == .llamaServer
+                ? activeRemoteModel?.url
+                : nil,
+            reasoningStreamRelay: modelRuntimeStore.activeReasoningStreamRelay,
+            contextChanged: { [weak self] usage in
+                guard let self, self.activeBackend == .llamaServer else { return }
+                self.llamaContextUsage = usage
+            }
         )
         error = result.errorMessage
         if result.touchedConversation, let conversationID {
@@ -1557,7 +1650,15 @@ public final class ChatStore {
     }
 
     public func toggleRightPanel(_ mode: RightPanelMode) {
+        // The Changes panel renders a snapshot of workspace diffs, so refresh it
+        // whenever the panel opens. Files staged or modified outside TurboCode
+        // would otherwise stay invisible until a manual refresh or workspace
+        // switch. Toggling the panel closed must not trigger a reload.
+        let opensChangesPanel = mode == .changes && workbenchStore.rightPanelMode != .changes
         workbenchStore.toggleRightPanel(mode)
+        if opensChangesPanel {
+            Task { await reloadDiffs() }
+        }
     }
 
     /// Toggles the user-owned project terminal. This presentation command is

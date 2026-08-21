@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModels
+import FoundationModelsUtilities
 import Observation
 
 /// Owns FoundationModels profile selection and session construction.
@@ -11,7 +12,7 @@ import Observation
 @Observable
 final class ModelRuntimeStore {
     private(set) var agentTuning: AgentTuningConfig = .default
-    private(set) var remoteModels: [RemoteModelConfig] = RemoteModelConfig.defaults
+    private(set) var remoteModels: [RemoteModelConfig]
     private(set) var activeRemoteModelID: String
     private(set) var dynamicProfiles: [UserDynamicProfile]
     private(set) var activeDynamicProfileID: UUID?
@@ -23,6 +24,14 @@ final class ModelRuntimeStore {
     var orchestratorMode: OrchestratorMode
     private(set) var session: LanguageModelSession
     private var skillsWorkspaceRoot: String?
+    /// Lives for the active session and is installed for one request at a time.
+    /// Rebuilding a session replaces this actor so an older response keeps its
+    /// own transport boundary while the new session starts cleanly.
+    private var reasoningStreamRelay: ReasoningStreamRelay
+
+    var activeReasoningStreamRelay: ReasoningStreamRelay? {
+        activeBackend == .llamaServer ? reasoningStreamRelay : nil
+    }
 
     var activeDynamicProfile: UserDynamicProfile? {
         activeDynamicProfileID.flatMap { id in
@@ -72,6 +81,9 @@ final class ModelRuntimeStore {
 
     init() {
         let loadedProfiles = (try? DynamicProfileStore.live.load()) ?? []
+        let configuredRemoteModels = (try? TurboCodeConfig.shared.loadRemoteModels())
+            .flatMap { $0.isEmpty ? nil : $0 }
+            ?? RemoteModelConfig.defaults
         let savedProfileID = UserDefaults.standard.string(
             forKey: "activeDynamicProfileID"
         ).flatMap(UUID.init(uuidString:))
@@ -87,9 +99,10 @@ final class ModelRuntimeStore {
         // Restore the selected provider from configuration only. Credential
         // availability is checked when the user selects the model or sends a
         // request, never while the application is bootstrapping.
-        let initialRemote = RemoteModelConfig.defaults.first {
-            $0.id == selectedID
-        } ?? RemoteModelConfig.fallbackLlama
+        let initialRemote = Self.initialRemoteModel(
+            from: configuredRemoteModels,
+            selectedID: selectedID
+        )
         let restoredProfile = savedProfile.flatMap { profile in
             if profile.baseModelID == .codex { return profile }
             if profile.baseModelID == .onDevice { return profile }
@@ -98,16 +111,21 @@ final class ModelRuntimeStore {
                 : nil
         }
 
+        let reasoningStreamRelay = ReasoningStreamRelay()
+        self.reasoningStreamRelay = reasoningStreamRelay
+
+        remoteModels = configuredRemoteModels
         activeRemoteModelID = initialRemote.id
         dynamicProfiles = loadedProfiles
         activeDynamicProfileID = mode == .standalone
             ? restoredProfile?.id
             : nil
-        activeBackend = restoredProfile?.baseModelID == .codex
+        let initialBackend: ModelBackend = restoredProfile?.baseModelID == .codex
             ? .codex
             : mode == .orchestrator || restoredProfile?.baseModelID == .onDevice
             ? .foundationApple
             : Self.backend(for: initialRemote.role)
+        activeBackend = initialBackend
         orchestratorMode = mode
         composerModel = mode == .orchestrator
             ? "Apple · Orchestrator"
@@ -118,7 +136,10 @@ final class ModelRuntimeStore {
             ? SystemLanguageModel.default
             : ProviderLanguageModel(
                 configuration: initialRemote,
-                credential: initialRemote.credential
+                credential: initialRemote.credential,
+                reasoningStreamRelay: initialBackend == .llamaServer
+                    ? reasoningStreamRelay
+                    : nil
             )
         session = LanguageModelSession(model: initialModel)
 
@@ -127,6 +148,20 @@ final class ModelRuntimeStore {
                 forKey: "activeDynamicProfileID"
             )
         }
+    }
+
+    /// Selects the first session model from persisted configuration before a
+    /// `LanguageModelSession` is created. This prevents startup from briefly
+    /// binding Llama to the built-in localhost fallback when `models.json`
+    /// points at another server.
+    nonisolated static func initialRemoteModel(
+        from models: [RemoteModelConfig],
+        selectedID: String
+    ) -> RemoteModelConfig {
+        models.first(where: { $0.id == selectedID && $0.enabled })
+            ?? models.first(where: { $0.enabled && $0.role == .local })
+            ?? models.first(where: \.enabled)
+            ?? RemoteModelConfig.fallbackLlama
     }
 
     func applyOnboarding(
@@ -331,7 +366,11 @@ final class ModelRuntimeStore {
     ) -> ProviderLanguageModel {
         ProviderLanguageModel(
             configuration: model,
-            credential: model.credential
+            credential: model.credential,
+            reasoningStreamRelay: model.id == activeRemoteModelID
+                && activeBackend == .llamaServer
+                ? reasoningStreamRelay
+                : nil
         )
     }
 
@@ -354,8 +393,10 @@ final class ModelRuntimeStore {
         let delegateModel = delegateRemoteModel
         let sessionSkills = DynamicProfileRuntimeSelection.skills(
             from: availableSkills,
-            profile: activeDynamicProfile
+            profile: activeDynamicProfile,
+            safariMCPEnabled: agentTuning.experimental.safariMCPEnabled
         )
+        reasoningStreamRelay = ReasoningStreamRelay()
         session = ModelSessionFactory.makeSession(
             configuration: ModelSessionConfiguration(
                 backend: activeBackend,
@@ -372,7 +413,8 @@ final class ModelRuntimeStore {
                 delegateTemperature: temperature(for: delegateModel),
                 delegateToolIDs: activeDynamicProfile?.resolvedWorkerToolIDs,
                 dropsCompletedToolCalls: shouldDropCompletedToolCalls,
-                workspaceInstructions: workspaceInstructions
+                workspaceInstructions: workspaceInstructions,
+                reasoningStreamRelay: activeReasoningStreamRelay
             ),
             history: history,
             events: events
@@ -524,7 +566,8 @@ final class ModelRuntimeStore {
             agentTuning: agentTuning,
             availableSkills: DynamicProfileRuntimeSelection.skills(
                 from: availableSkills,
-                profile: activeDynamicProfile
+                profile: activeDynamicProfile,
+                safariMCPEnabled: agentTuning.experimental.safariMCPEnabled
             ),
             activeDynamicProfile: activeDynamicProfile,
             reasoningLevel: reasoningLevel,
@@ -535,7 +578,8 @@ final class ModelRuntimeStore {
             dropsCompletedToolCalls: shouldDropCompletedToolCalls,
             workspaceInstructions: WorkspaceInstructionsLoader.load(
                 from: workspaceRoot
-            )
+            ),
+            reasoningStreamRelay: activeReasoningStreamRelay
         )
     }
 }

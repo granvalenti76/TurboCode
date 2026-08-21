@@ -26,6 +26,9 @@ struct WorkbenchSplitView: View {
                 workbenchCanvas
                     .frame(minWidth: mainMinWidth, maxWidth: .infinity)
                     .layoutPriority(1)
+                    // Keep interactive chat text behind a nearly opaque edge
+                    // while preserving the sidebar's native toolbar material.
+                    .scrollEdgeEffectStyle(.hard, for: .top)
                     .background {
                         Color(nsColor: .windowBackgroundColor)
                             .ignoresSafeArea(edges: .top)

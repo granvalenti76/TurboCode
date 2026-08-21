@@ -247,4 +247,29 @@ struct ModelSwitchRegressionTests {
         """.write(to: url, atomically: true, encoding: .utf8)
         return try TurboCodeSkillDefinition(contentsOf: url)
     }
+
+    @Test("Local Llama compaction preserves outcomes and reports adaptive sizes")
+    func localCompactionKeepsEssentialContext() throws {
+        #expect(SessionRebuildHistory.localCompactionCharacterLimit(contextWindowTokens: 32_768) == 12_288)
+        #expect(SessionRebuildHistory.localCompactionCharacterLimit(contextWindowTokens: 128_000) == 48_000)
+        #expect(SessionRebuildHistory.localCompactionCharacterLimit(contextWindowTokens: 256_000) == 96_000)
+        #expect(SessionRebuildHistory.localCompactionCharacterLimit(contextWindowTokens: nil) == 12_288)
+
+        let compaction = try #require(
+            SessionRebuildHistory.localCompaction(
+                from: [
+                    ChatBlock(kind: .user, text: "Inspect the repository"),
+                    ChatBlock(kind: .tool, text: "raw tool output: secret noise"),
+                    ChatBlock(kind: .assistant, text: "The repository is clean.")
+                ],
+                maximumCharacters: 8_000
+            )
+        )
+
+        #expect(compaction.summary.contains("local Llama"))
+        #expect(compaction.summary.contains("The repository is clean."))
+        #expect(!compaction.summary.contains("secret noise"))
+        #expect(compaction.sourceCharacters > compaction.retainedCharacters)
+        #expect(compaction.history.count == 2)
+    }
 }

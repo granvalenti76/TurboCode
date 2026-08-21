@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5E37CA94303816A70024A2E8 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 		5E5203BF3004E70900C554D4 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203BE3004E70900C554D4 /* MarkdownUI */; };
 		5E5203CD30053A3A00C554D4 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 		5E77E3E630075DF800C3E506 /* turbocode-logo-provisional.png in Resources */ = {isa = PBXBuildFile; fileRef = 5E77E3E530075DF800C3E506 /* turbocode-logo-provisional.png */; };
@@ -56,6 +57,7 @@
 		000000000000000230000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				5E37CA94303816A70024A2E8 /* FoundationModelsUtilities in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -124,6 +126,9 @@
 				000000000000000000000210 /* TurboCodeEvaluations */,
 			);
 			name = TurboCodeEvaluations;
+			packageProductDependencies = (
+				5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */,
+			);
 			productName = TurboCodeEvaluations;
 			productReference = 000000000000000000000220 /* TurboCodeEvaluations.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -375,7 +380,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.3.2;
+				MARKETING_VERSION = 0.3.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -432,7 +437,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.3.2;
+				MARKETING_VERSION = 0.3.3;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";

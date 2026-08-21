@@ -28,6 +28,7 @@ nonisolated enum ToolCapabilityID: String, CaseIterable, Codable, Sendable, Hash
     case editFile = "edit_file"
     case writeOnDevice = "write_ondevice"
     case removeFile = "remove_file"
+    case safariMCP = "safari_mcp"
     case loadSkill = "load_skill"
     case createSkill = "create_skill"
     case delegateTask = "delegate_task"
@@ -64,6 +65,7 @@ nonisolated enum ToolAvailabilityRequirement: Sendable, Hashable {
     case always
     case workspace
     case skills
+    case safariMCP
     case delegateModel
     case repositoryMap
     case capableWorkspace
@@ -72,8 +74,23 @@ nonisolated enum ToolAvailabilityRequirement: Sendable, Hashable {
 nonisolated struct ToolAccessContext: Sendable, Hashable {
     let hasWorkspace: Bool
     let hasSkills: Bool
+    let safariMCPEnabled: Bool
     let hasDelegateModel: Bool
     let repositoryMapDetail: RepositoryMapDetail?
+
+    init(
+        hasWorkspace: Bool,
+        hasSkills: Bool,
+        safariMCPEnabled: Bool = false,
+        hasDelegateModel: Bool,
+        repositoryMapDetail: RepositoryMapDetail?
+    ) {
+        self.hasWorkspace = hasWorkspace
+        self.hasSkills = hasSkills
+        self.safariMCPEnabled = safariMCPEnabled
+        self.hasDelegateModel = hasDelegateModel
+        self.repositoryMapDetail = repositoryMapDetail
+    }
 }
 
 nonisolated struct ModelToolAssignment: Identifiable, Sendable, Hashable {
@@ -210,6 +227,14 @@ nonisolated enum ModelToolCatalog {
             hasNativePresentation: true
         ),
         .init(
+            id: .safariMCP,
+            name: "Safari MCP",
+            summary: "Control Safari through an explicitly enabled safaridriver MCP skill.",
+            category: .execution,
+            systemImage: "safari",
+            hasNativePresentation: false
+        ),
+        .init(
             id: .loadSkill,
             name: "Load Skill",
             summary: "Load a matching workspace skill on demand.",
@@ -274,6 +299,14 @@ nonisolated enum ModelToolCatalog {
            !memberships.contains(where: { $0.0 == .createSkill }) {
             memberships.append((.createSkill, .workspace))
         }
+        // Safari is a global experimental opt-in rather than a default model
+        // capability. Never pass it to delegated workers, which must remain
+        // bounded to workspace-scoped operations.
+        if context.safariMCPEnabled,
+           profile != .delegate,
+           !memberships.contains(where: { $0.0 == .safariMCP }) {
+            memberships.append((.safariMCP, .safariMCP))
+        }
         let assignments = memberships.compactMap { id, requirement -> ModelToolAssignment? in
             if requirement == .repositoryMap,
                (tier == .onDevice || context.repositoryMapDetail == nil) {
@@ -296,6 +329,7 @@ nonisolated enum ModelToolCatalog {
         case .swiftWorkspaceMap: .repositoryMap
         case .xcodeProject: .capableWorkspace
         case .loadSkill: .skills
+        case .safariMCP: .safariMCP
         case .delegateTask, .callPowerfulModel: .delegateModel
         }
     }
@@ -385,6 +419,12 @@ nonisolated enum ModelToolCatalog {
             return .init(id: id, isRegistered: false, unavailableReason: "Choose a workspace")
         case .skills where !context.hasSkills:
             return .init(id: id, isRegistered: false, unavailableReason: "No skills installed")
+        case .safariMCP where !context.safariMCPEnabled:
+            return .init(
+                id: id,
+                isRegistered: false,
+                unavailableReason: "Enable Safari MCP in Settings > Agents > Experimental"
+            )
         case .delegateModel where !context.hasDelegateModel:
             return .init(id: id, isRegistered: false, unavailableReason: "Configure a delegate model")
         case .repositoryMap:

@@ -89,6 +89,7 @@ final class CodexRuntimeStore {
     private var threadIDs: [String: String] = [:]
     private struct ThreadConfiguration: Equatable {
         let includesDelegation: Bool
+        let safariMCPEnabled: Bool
         let modelID: String
         let skillNames: [String]
     }
@@ -255,6 +256,7 @@ final class CodexRuntimeStore {
         let includesDelegation = request.delegationInvoker != nil
         let configuration = ThreadConfiguration(
             includesDelegation: includesDelegation,
+            safariMCPEnabled: request.agentTuning.experimental.safariMCPEnabled,
             modelID: snapshot.selectedModel.id,
             skillNames: request.availableSkills.map(\.name)
         )
@@ -267,7 +269,8 @@ final class CodexRuntimeStore {
                 workspaceRoot: request.workspaceRoot,
                 agentTuning: request.agentTuning,
                 includesDelegation: includesDelegation,
-                availableSkills: request.availableSkills
+                availableSkills: request.availableSkills,
+                safariMCPEnabled: request.agentTuning.experimental.safariMCPEnabled
             )
             let workspaceInstructions = WorkspaceInstructionsLoader.load(
                 from: request.workspaceRoot

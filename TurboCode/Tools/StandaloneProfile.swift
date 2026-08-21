@@ -20,6 +20,9 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let toolPlan: ModelToolPlan
     let usesExclusiveToolSelection: Bool
     let supplementalTools: [any Tool]
+    /// Created only when the experimental Safari gate is enabled. The
+    /// prompt-based skill keeps activation content out of the cacheable prefix.
+    let safariSkillActivations: SkillActivations?
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
 
@@ -34,6 +37,13 @@ struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     private var configuredProfile: some LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
             Instructions(instructions)
+            if let safariSkillActivations {
+                Skills(
+                    activations: safariSkillActivations,
+                    toolName: "activate_safari_skill",
+                    skills: [SafariMCPFeature.skill]
+                )
+            }
             if usesExclusiveToolSelection {
                 // Dynamic profiles are capability boundaries. Register the
                 // resolved instances directly so no implicit capability can

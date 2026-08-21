@@ -53,6 +53,10 @@ public struct ChatCompletionsLanguageModel: Sendable, LanguageModel {
 
   public var supportsGuidedGeneration: Bool
 
+  /// Optional session-owned reasoning sink. Keeping this on the model avoids
+  /// routing transport events through a process-wide singleton.
+  public var reasoningStreamRelay: ReasoningStreamRelay?
+
   // Overridden in tests to inject a URLSession with mock protocol handlers.
   var urlSession: URLSession?
 
@@ -75,12 +79,14 @@ public struct ChatCompletionsLanguageModel: Sendable, LanguageModel {
     url: URL,
     additionalHeaders: [String: String] = [:],
     supportsGuidedGeneration: Bool = true,
+    reasoningStreamRelay: ReasoningStreamRelay? = nil,
     urlSessionConfiguration: URLSessionConfiguration? = nil
   ) {
     self.name = name
     self.url = url
     self.additionalHeaders = additionalHeaders
     self.supportsGuidedGeneration = supportsGuidedGeneration
+    self.reasoningStreamRelay = reasoningStreamRelay
     self.urlSession = urlSessionConfiguration.map { URLSession(configuration: $0) }
   }
 
@@ -273,13 +279,15 @@ public struct ChatCompletionsLanguageModel: Sendable, LanguageModel {
       // Stream the response back into the framework via `channel`.
       try await Self.processChunks(
         client.streamChatCompletions(request: chatRequest),
-        into: channel
+        into: channel,
+        reasoningStreamRelay: model.reasoningStreamRelay
       )
     }
 
     private static func processChunks<ChunkSequence: AsyncSequence>(
       _ chunks: ChunkSequence,
-      into channel: LanguageModelExecutorGenerationChannel
+      into channel: LanguageModelExecutorGenerationChannel,
+      reasoningStreamRelay: ReasoningStreamRelay?
     ) async throws where ChunkSequence.Element == ChatCompletionsClient.ChatCompletionChunk {
       // Per-index `id`/`name` for tool calls. The first delta for a given
       // index supplies them; later deltas at the same index typically carry
@@ -299,6 +307,7 @@ public struct ChatCompletionsLanguageModel: Sendable, LanguageModel {
       for try await chunk in chunks {
         if let delta = chunk.choices.first?.delta {
           if let reasoning = delta.reasoningContent {
+            await reasoningStreamRelay?.publish(reasoning)
             await channel.send(
               .reasoning(
                 entryID: reasoningEntryID,

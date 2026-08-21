@@ -15,6 +15,7 @@ struct InputFieldView: View {
     @Environment(\.chatFontSize) private var chatFontSize
     @FocusState private var isFocused: Bool
     @State private var selectedSlashCommandIndex = 0
+    @State private var isLlamaContextHovering = false
 
     let compact: Bool
 
@@ -262,6 +263,12 @@ struct InputFieldView: View {
                 insertion: "/skill ",
                 description: "Choose a skill for this request",
                 icon: "bolt"
+            ),
+            SlashCommandSuggestion(
+                command: "/compact",
+                insertion: "/compact",
+                description: "Compact conversation context for local models",
+                icon: "arrow.triangle.2.circle.clockwise"
             )
         ] + chatStore.availableSkills.map {
             SlashCommandSuggestion(
@@ -527,11 +534,67 @@ struct InputFieldView: View {
             branchMenu
 
             Spacer()
+
+            if chatStore.activeBackend == .llamaServer,
+               let contextUsage = chatStore.llamaContextUsage {
+                llamaContextIndicator(contextUsage)
+            }
         }
         .font(AppTypography.controlEmphasized)
         .foregroundStyle(.secondary)
         .padding(.horizontal, compact ? 16 : 20)
         .padding(.vertical, compact ? 7 : 8)
+    }
+
+    /// Keeps Llama's runtime pressure visible without adding controls or
+    /// changing the footer for the other provider profiles.
+    private func llamaContextIndicator(_ usage: LlamaContextUsage) -> some View {
+        return ZStack {
+            Circle()
+                .stroke(.secondary.opacity(0.18), lineWidth: 2.5)
+            Circle()
+                .trim(from: 0, to: usage.fraction)
+                .stroke(
+                    contextColor(for: usage.level),
+                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 14, height: 14)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) {
+                isLlamaContextHovering = hovering
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if isLlamaContextHovering {
+                Text(usage.tooltipText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 7)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(.separator.opacity(0.55), lineWidth: 0.5)
+                    }
+                    .shadow(color: .black.opacity(0.16), radius: 5, y: 2)
+                    .fixedSize()
+                    .offset(y: -24)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .allowsHitTesting(false)
+            }
+        }
+        .accessibilityLabel("Llama context usage")
+        .accessibilityValue(usage.accessibilityText)
+    }
+
+    private func contextColor(for level: LlamaContextUsage.Level) -> Color {
+        switch level {
+        case .low: .green
+        case .medium: .orange
+        case .high: .red
+        }
     }
 
     /// Presents the available profile choices. Delegation is a capability of a
