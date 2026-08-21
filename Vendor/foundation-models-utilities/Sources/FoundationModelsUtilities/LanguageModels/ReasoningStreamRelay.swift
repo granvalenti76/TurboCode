@@ -43,6 +43,12 @@ public actor ReasoningStreamRelay {
   private var sink: Sink?
   private var registrationID: UUID?
   private var nextSequence: UInt64 = 0
+  /// Deltas are accumulated until the main actor is ready to receive them.
+  /// This avoids creating one main-actor task for every server token while
+  /// preserving the transport order inside the coalesced event.
+  private var pendingDelta = ""
+  private var pendingSequence: UInt64 = 0
+  private var deliveryScheduled = false
 
   public init() {}
 
@@ -52,6 +58,9 @@ public actor ReasoningStreamRelay {
     registrationID = id
     self.sink = sink
     nextSequence = 0
+    pendingDelta.removeAll(keepingCapacity: true)
+    pendingSequence = 0
+    deliveryScheduled = false
     return id
   }
 
@@ -60,23 +69,64 @@ public actor ReasoningStreamRelay {
     registrationID = nil
     sink = nil
     nextSequence = 0
+    pendingDelta.removeAll(keepingCapacity: true)
+    pendingSequence = 0
+    deliveryScheduled = false
   }
 
   public func publish(_ reasoning: String) {
     guard !reasoning.isEmpty,
-          let sink,
-          let requestID = registrationID else { return }
+          sink != nil,
+          registrationID != nil else { return }
     nextSequence &+= 1
+    pendingDelta += reasoning
+    pendingSequence = nextSequence
+
+    guard !deliveryScheduled else { return }
+    deliveryScheduled = true
+
+    // The transport parser must never wait for SwiftUI. A single drain task
+    // observes all deltas currently available and yields between deliveries,
+    // so a slow render cannot corrupt or block the Foundation Models stream.
+    Task { @MainActor [weak self] in
+      await self?.deliverPendingEvents()
+    }
+  }
+
+  private struct PendingDelivery: Sendable {
+    let sink: Sink
+    let event: Event
+  }
+
+  private func nextPendingDelivery() -> PendingDelivery? {
+    guard !pendingDelta.isEmpty,
+          let sink,
+          let requestID = registrationID else {
+      pendingDelta.removeAll(keepingCapacity: true)
+      pendingSequence = 0
+      deliveryScheduled = false
+      return nil
+    }
+
     let event = Event(
       requestID: requestID,
-      sequence: nextSequence,
-      delta: reasoning
+      sequence: pendingSequence,
+      delta: pendingDelta
     )
-    // The transport parser must never wait for SwiftUI. Keep the relay
-    // observational so a slow main-actor render cannot corrupt or delay the
-    // Foundation Models event stream.
-    Task { @MainActor in
-      sink(event)
+    pendingDelta.removeAll(keepingCapacity: true)
+    pendingSequence = 0
+    return PendingDelivery(sink: sink, event: event)
+  }
+
+  private func deliverPendingEvents() async {
+    while !Task.isCancelled {
+      guard let delivery = nextPendingDelivery() else { return }
+      await delivery.sink(delivery.event)
+      await Task.yield()
     }
+
+    pendingDelta.removeAll(keepingCapacity: true)
+    pendingSequence = 0
+    deliveryScheduled = false
   }
 }

@@ -4,8 +4,8 @@ import Testing
 @MainActor
 @Suite("Request-scoped reasoning relay")
 struct ReasoningStreamRelayTests {
-    @Test("Relay emits ordered deltas for one request")
-    func emitsOrderedRequestScopedDeltas() async {
+    @Test("Relay coalesces ordered deltas without dropping text")
+    func coalescesOrderedRequestScopedDeltas() async {
         let relay = ReasoningStreamRelay()
         let recorder = RelayEventRecorder()
         let requestID = await relay.install { event in
@@ -14,11 +14,11 @@ struct ReasoningStreamRelayTests {
 
         await relay.publish("first")
         await relay.publish(" second")
-        await waitForEvents(recorder, count: 2)
+        await waitForText(recorder, "first second")
 
-        #expect(recorder.events.map(\.requestID) == [requestID, requestID])
-        #expect(recorder.events.map(\.sequence) == [1, 2])
-        #expect(recorder.events.map(\.delta) == ["first", " second"])
+        #expect(recorder.events.allSatisfy { $0.requestID == requestID })
+        #expect(recorder.events.map(\.sequence) == recorder.events.map(\.sequence).sorted())
+        #expect(recorder.events.map(\.delta).joined() == "first second")
 
         await relay.remove(requestID)
         await relay.publish(" stale")
@@ -57,6 +57,16 @@ struct ReasoningStreamRelayTests {
     ) async {
         for _ in 0..<100 {
             if recorder.events.count >= count { return }
+            await Task.yield()
+        }
+    }
+
+    private func waitForText(
+        _ recorder: RelayEventRecorder,
+        _ text: String
+    ) async {
+        for _ in 0..<100 {
+            if recorder.events.map(\.delta).joined() == text { return }
             await Task.yield()
         }
     }
