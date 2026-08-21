@@ -549,19 +549,6 @@ struct InputFieldView: View {
     /// Keeps Llama's runtime pressure visible without adding controls or
     /// changing the footer for the other provider profiles.
     private func llamaContextIndicator(_ usage: LlamaContextUsage) -> some View {
-        let contextDescription = String(usage.percentage)
-            + "% ("
-            + String(usage.usedTokens)
-            + " / "
-            + String(usage.contextSize)
-            + ")"
-        let accessibilityDescription = String(usage.percentage)
-            + " percent, "
-            + String(usage.usedTokens)
-            + " of "
-            + String(usage.contextSize)
-            + " tokens"
-
         return ZStack {
             Circle()
                 .stroke(.secondary.opacity(0.18), lineWidth: 2.5)
@@ -581,7 +568,7 @@ struct InputFieldView: View {
         }
         .overlay(alignment: .bottom) {
             if isLlamaContextHovering {
-                Text(contextDescription)
+                Text(usage.tooltipText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 9)
@@ -599,7 +586,7 @@ struct InputFieldView: View {
             }
         }
         .accessibilityLabel("Llama context usage")
-        .accessibilityValue(accessibilityDescription)
+        .accessibilityValue(usage.accessibilityText)
     }
 
     private func contextColor(for level: LlamaContextUsage.Level) -> Color {

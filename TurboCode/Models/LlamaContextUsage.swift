@@ -27,6 +27,19 @@ nonisolated public struct LlamaContextUsage: Equatable, Sendable {
         Int((fraction * 100).rounded())
     }
 
+    /// Stable compact copy for the composer hover helper. Keeping this format
+    /// in the value type prevents the view from silently changing the user
+    /// facing contract while still allowing accessibility to use fuller prose.
+    public var tooltipText: String {
+        "\(percentage)% (\(usedTokens)/\(contextSize))"
+    }
+
+    /// Full spoken value for VoiceOver; the visual helper intentionally stays
+    /// compact and does not repeat the provider name.
+    public var accessibilityText: String {
+        "\(percentage) percent, \(usedTokens) of \(contextSize) tokens"
+    }
+
     public var level: Level {
         switch fraction {
         case ..<0.60:
