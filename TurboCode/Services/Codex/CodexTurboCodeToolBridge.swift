@@ -80,7 +80,7 @@ nonisolated enum CodexTurboCodeToolBridge {
     ) -> String {
         // Codex owns its agent loop, but receives the same product identity,
         // safety rules, and optional project instructions as native sessions.
-        TurboCodeSystemPromptBuilder.build(
+        let baseInstructions = TurboCodeSystemPromptBuilder.build(
             TurboCodeSystemPromptContext(
                 role: .codex,
                 backend: .codex,
@@ -107,13 +107,19 @@ nonisolated enum CodexTurboCodeToolBridge {
                 workspaceInstructions: workspaceInstructions
             )
         )
+        return dynamicTools.contains(where: {
+            $0.name == ToolCapabilityID.safariMCP.rawValue
+        })
+            ? baseInstructions + "\n\n" + SafariMCPFeature.prompt
+            : baseInstructions
     }
 
     static func specifications(
         workspaceRoot: String,
         agentTuning: AgentTuningConfig,
         includesDelegation: Bool = false,
-        availableSkills: [TurboCodeSkillDefinition] = []
+        availableSkills: [TurboCodeSkillDefinition] = [],
+        safariMCPEnabled: Bool = false
     ) -> [CodexDynamicToolSpec] {
         let listTool = ListWorkspaceTool(workspaceRoot: workspaceRoot)
         let mapTool = SwiftWorkspaceMapTool(
@@ -245,6 +251,9 @@ nonisolated enum CodexTurboCodeToolBridge {
         if !workspaceRoot.isEmpty {
             specifications.append(createSkillSpecification)
         }
+        if safariMCPEnabled {
+            specifications.append(safariMCPSpecification)
+        }
         return specifications
     }
 
@@ -273,6 +282,7 @@ nonisolated enum CodexTurboCodeToolBridge {
         case "git": "Working with Git"
         case "delegate_task": "Delegating task to worker"
         case "create_skill": "Creating workspace skill"
+        case "safari_mcp": "Browsing Safari"
         default: "Running \(call.tool)"
         }
     }
@@ -422,8 +432,58 @@ nonisolated enum CodexTurboCodeToolBridge {
                 )
             )
             return .init(result: .success(text), presentation: nil)
+        case "safari_mcp":
+            guard agentTuning.experimental.safariMCPEnabled else {
+                return .init(
+                    result: .failure(
+                        "Safari MCP is disabled in Settings > Agents > Experimental."
+                    ),
+                    presentation: nil
+                )
+            }
+            return try await executeSafariMCP(call)
         default:
             throw CodexToolBridgeError.unsupportedTool(call.tool)
+        }
+    }
+
+    private static func executeSafariMCP(
+        _ call: CodexDynamicToolCall
+    ) async throws -> CodexToolExecution {
+        let operation = try requiredString("operation", in: call).lowercased()
+        switch operation {
+        case "list_tools", "list", "discover":
+            let tools = try await SafariMCPClient.shared.listTools()
+            let text = tools.map { tool in
+                let schema = tool.inputSchema?.compactJSONString(maxCharacters: 900)
+                    ?? "{}"
+                return "- \(tool.name): \(tool.description ?? "No description provided.")\n  input: \(schema)"
+            }.joined(separator: "\n")
+            return .init(
+                result: .success(text.isEmpty ? "Safari MCP advertised no tools." : text),
+                presentation: nil
+            )
+        case "call":
+            let name = try requiredString("toolName", in: call)
+            let source = optionalString("argumentsJSON", in: call) ?? "{}"
+            guard let data = source.data(using: .utf8),
+                  let value = try? JSONDecoder().decode(
+                      SafariMCPJSONValue.self,
+                      from: data
+                  ),
+                  value.objectValue != nil else {
+                throw CodexToolBridgeError.invalidArguments(
+                    tool: call.tool,
+                    detail: "argumentsJSON must be a valid JSON object"
+                )
+            }
+            let text = try await SafariMCPClient.shared.call(tool: name, arguments: value)
+            return .init(result: .success(text), presentation: nil)
+        default:
+            throw CodexToolBridgeError.invalidArguments(
+                tool: call.tool,
+                detail: "operation must be list_tools or call"
+            )
         }
     }
 
@@ -669,6 +729,19 @@ nonisolated enum CodexTurboCodeToolBridge {
                 "instructions": stringSchema("Complete procedural instructions for the skill body.")
             ],
             required: ["name", "description", "instructions"]
+        )
+    )
+
+    private static let safariMCPSpecification = CodexDynamicToolSpec(
+        name: ToolCapabilityID.safariMCP.rawValue,
+        description: "Discover and call the explicitly enabled safaridriver MCP browser tools.",
+        inputSchema: objectSchema(
+            properties: [
+                "operation": enumSchema(["list_tools", "call"]),
+                "toolName": nullableStringSchema(),
+                "argumentsJSON": nullableStringSchema()
+            ],
+            required: ["operation"]
         )
     )
 

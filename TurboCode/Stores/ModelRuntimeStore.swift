@@ -393,7 +393,8 @@ final class ModelRuntimeStore {
         let delegateModel = delegateRemoteModel
         let sessionSkills = DynamicProfileRuntimeSelection.skills(
             from: availableSkills,
-            profile: activeDynamicProfile
+            profile: activeDynamicProfile,
+            safariMCPEnabled: agentTuning.experimental.safariMCPEnabled
         )
         reasoningStreamRelay = ReasoningStreamRelay()
         session = ModelSessionFactory.makeSession(
@@ -565,7 +566,8 @@ final class ModelRuntimeStore {
             agentTuning: agentTuning,
             availableSkills: DynamicProfileRuntimeSelection.skills(
                 from: availableSkills,
-                profile: activeDynamicProfile
+                profile: activeDynamicProfile,
+                safariMCPEnabled: agentTuning.experimental.safariMCPEnabled
             ),
             activeDynamicProfile: activeDynamicProfile,
             reasoningLevel: reasoningLevel,

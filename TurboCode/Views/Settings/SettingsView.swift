@@ -194,6 +194,14 @@ struct AgentSettingsView: View {
                 Toggle("Discover user skills", isOn: s.agentTuning.skills.discoversUserSkills)
             }
 
+            Section("Experimental") {
+                Toggle("Safari MCP", isOn: s.agentTuning.experimental.safariMCPEnabled)
+
+                Text("Allows an explicitly activated skill to control Safari through safaridriver MCP. Disabled by default.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 Button {
                     settings.reloadAgentTuning()

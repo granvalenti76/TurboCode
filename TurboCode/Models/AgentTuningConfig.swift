@@ -9,6 +9,9 @@ nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
     public var skills: SkillsPolicy
     public var git: GitPolicy
     public var orchestrator: OrchestratorPolicy
+    /// Experimental integrations stay opt-in and are kept out of the default
+    /// dynamic profile surface unless explicitly enabled by the user.
+    public var experimental: ExperimentalPolicy
 
     public init(
         schemaVersion: Int = currentSchemaVersion,
@@ -16,7 +19,8 @@ nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
         execution: ExecutionPolicy = ExecutionPolicy(),
         skills: SkillsPolicy = SkillsPolicy(),
         git: GitPolicy = GitPolicy(),
-        orchestrator: OrchestratorPolicy = OrchestratorPolicy()
+        orchestrator: OrchestratorPolicy = OrchestratorPolicy(),
+        experimental: ExperimentalPolicy = ExperimentalPolicy()
     ) {
         self.schemaVersion = schemaVersion
         self.agent = agent
@@ -24,6 +28,7 @@ nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
         self.skills = skills
         self.git = git
         self.orchestrator = orchestrator
+        self.experimental = experimental
     }
 
     public static var `default`: AgentTuningConfig { AgentTuningConfig() }
@@ -65,7 +70,7 @@ nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, agent, execution, skills, git, orchestrator
+        case schemaVersion, agent, execution, skills, git, orchestrator, experimental
     }
 
     public init(from decoder: Decoder) throws {
@@ -79,6 +84,32 @@ nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
         git = try values.decodeIfPresent(GitPolicy.self, forKey: .git) ?? GitPolicy()
         orchestrator = try values.decodeIfPresent(OrchestratorPolicy.self, forKey: .orchestrator)
             ?? OrchestratorPolicy()
+        experimental = try values.decodeIfPresent(
+            ExperimentalPolicy.self,
+            forKey: .experimental
+        ) ?? ExperimentalPolicy()
+    }
+}
+
+/// User-controlled switches for integrations that can affect external apps.
+/// New fields must default to disabled when decoding older configuration files.
+nonisolated public struct ExperimentalPolicy: Codable, Hashable, Sendable {
+    public var safariMCPEnabled: Bool
+
+    public init(safariMCPEnabled: Bool = false) {
+        self.safariMCPEnabled = safariMCPEnabled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case safariMCPEnabled
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        safariMCPEnabled = try values.decodeIfPresent(
+            Bool.self,
+            forKey: .safariMCPEnabled
+        ) ?? false
     }
 }
 

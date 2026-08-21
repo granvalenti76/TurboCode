@@ -213,7 +213,8 @@ enum ModelSessionFactory {
                     .xcodeProject,
                     .writeOnDevice,
                     .removeFile,
-                    .createSkill
+                    .createSkill,
+                    .safariMCP
                 ],
             repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
                 ?? 32_768
@@ -246,6 +247,9 @@ enum ModelSessionFactory {
                 toolPlan: standalonePlan,
                 usesExclusiveToolSelection: usesExclusiveToolSelection,
                 supplementalTools: standaloneTools,
+                safariSkillActivations: configuration.agentTuning.experimental.safariMCPEnabled
+                    ? SkillActivations()
+                    : nil,
                 onToolStart: { call in
                     await events.toolStarted(
                         call,
@@ -473,6 +477,11 @@ enum ModelSessionFactory {
                 return WriteOnDeviceTool(workspaceRoot: configuration.workspaceRoot)
             case .removeFile:
                 return RemoveFileTool(workspaceRoot: configuration.workspaceRoot)
+            case .safariMCP:
+                return SafariMCPTool(
+                    client: .shared,
+                    enabled: configuration.agentTuning.experimental.safariMCPEnabled
+                )
             case .loadSkill:
                 guard !configuration.availableSkills.isEmpty else { return nil }
                 return LoadSkillTool(skills: configuration.availableSkills)
@@ -602,6 +611,7 @@ enum ModelSessionFactory {
         ToolAccessContext(
             hasWorkspace: !configuration.workspaceRoot.isEmpty,
             hasSkills: !configuration.availableSkills.isEmpty,
+            safariMCPEnabled: configuration.agentTuning.experimental.safariMCPEnabled,
             hasDelegateModel: configuration.delegateRemoteModel.enabled,
             repositoryMapDetail: repositoryMap?.detail
         )

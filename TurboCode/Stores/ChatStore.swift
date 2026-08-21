@@ -1284,7 +1284,8 @@ public final class ChatStore {
             agentTuning: agentTuning,
             availableSkills: DynamicProfileRuntimeSelection.skills(
                 from: modelRuntimeStore.availableSkills,
-                profile: activeDynamicProfile
+                profile: activeDynamicProfile,
+                safariMCPEnabled: agentTuning.experimental.safariMCPEnabled
             ),
             codexModelID: activeDynamicProfile?.codexModelID,
             codexReasoningEffort:
