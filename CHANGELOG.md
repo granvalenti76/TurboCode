@@ -7,6 +7,31 @@ formats continue to evolve before 1.0.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-08-21
+
+> This release focuses on a faster and more robust local Llama workflow, with
+> live reasoning, runtime diagnostics, manual context control, and
+> request-scoped transcript delivery.
+
+### RELEASE
+
+- Added live Llama reasoning updates while a response is streaming.
+- Added Llama runtime statistics, including response timing, token usage, and
+  context information.
+- Added manual local Llama context compaction with a visible transcript event
+  and diagnostic history.
+- Made Llama profiles honor the server URL configured in `models.json` from
+  the first session build, including non-default hosts and ports.
+- Scoped reasoning relay events to the active model session and request,
+  preventing stale transcript updates from crossing requests.
+- Coalesced reasoning relay bursts to reduce main-actor scheduling overhead
+  and improve transcript responsiveness during fast output.
+
+### FIX
+
+- Refreshes workspace diffs when the Changes panel opens, so the inspector
+  reflects the current repository state.
+
 ## [0.3.2] - 2026-08-13
 
 ### RELEASE
