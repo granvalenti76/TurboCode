@@ -1,5 +1,4 @@
 import Foundation
-import FoundationModels
 import SwiftUI
 
 /// Backwards-compatible view API for the decomposed chat domains.
@@ -226,8 +225,8 @@ extension ChatStore {
         modelRuntimeStore.availableSkills
     }
 
-    public var reasoningLevel: ContextOptions.ReasoningLevel? {
-        modelRuntimeStore.reasoningLevel
+    var onDeviceSupportsToolCalling: Bool {
+        modelRuntimeStore.onDeviceSupportsToolCalling
     }
 
     public var isDelegating: Bool {

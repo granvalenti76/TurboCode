@@ -1,7 +1,6 @@
 import Foundation
 import AppKit
 import Observation
-import FoundationModelsUtilities
 
 /// Temporary, non-invasive status shown after a local context compaction.
 public struct LocalCompactionNotice: Equatable, Sendable {

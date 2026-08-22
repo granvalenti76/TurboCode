@@ -1,5 +1,4 @@
 import Foundation
-import FoundationModels
 import Observation
 
 nonisolated struct ToolModelProfileViewState: Identifiable, Sendable, Hashable {
@@ -51,7 +50,7 @@ final class ToolsViewModel {
         installedSkillCount = chatStore.availableSkills.count
         configurationPath = abbreviatedPath(TurboCodeConfig.shared.modelsConfigurationURL.path)
 
-        let onDeviceSupportsTools = SystemLanguageModel.default.capabilities.contains(.toolCalling)
+        let onDeviceSupportsTools = chatStore.onDeviceSupportsToolCalling
         let onDeviceTier: ModelToolTier = onDeviceSupportsTools ? .onDevice : .none
         let onDeviceContext = context(repositoryMap: nil)
         let isOrchestrating = chatStore.orchestratorMode == .orchestrator
@@ -62,7 +61,7 @@ final class ToolsViewModel {
                 id: "apple-on-device-standalone",
                 name: "Apple On-Device",
                 subtitle: "Standalone · Private and immediate",
-                modelIdentifier: "SystemLanguageModel.default",
+                modelIdentifier: "Apple on-device",
                 systemImage: "apple.logo",
                 tierLabel: "On-device",
                 statusLabel: onDeviceSupportsTools ? "Available" : "Tool calling unavailable",

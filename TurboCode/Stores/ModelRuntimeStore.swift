@@ -72,6 +72,12 @@ final class ModelRuntimeStore {
             )
     }
 
+    /// Projects the built-in model capability without exposing Foundation
+    /// Models types to view models or the compatibility facade.
+    var onDeviceSupportsToolCalling: Bool {
+        SystemLanguageModel.default.capabilities.contains(.toolCalling)
+    }
+
     var reasoningLevel: ContextOptions.ReasoningLevel? {
         guard activeBackend != .foundationApple,
               activeBackend != .codex else { return nil }
