@@ -258,6 +258,17 @@ final class ProfileSelectionCoordinator {
         await rebuildSession()
     }
 
+    /// Refreshes workspace-scoped skill capabilities at the model-selection
+    /// boundary. Restore, send, and explicit reload flows all require the same
+    /// capability rebuild and must not depend on one another's coordinators.
+    func refreshSkillsIfNeeded(forceRebuild: Bool = false) async {
+        guard modelRuntime.refreshSkills(
+            force: forceRebuild,
+            workspaceRoot: workspace.root
+        ) else { return }
+        await rebuildSession(discardingCapabilityContext: true)
+    }
+
     func restoreModelSelection(_ identifier: String) async {
         guard modelRuntime.orchestratorMode == .standalone else { return }
         if identifier.hasPrefix("profile:"),

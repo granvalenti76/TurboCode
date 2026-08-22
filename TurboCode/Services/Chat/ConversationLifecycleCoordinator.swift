@@ -1,3 +1,5 @@
+import Foundation
+
 /// Coordinates in-memory conversation boundaries that must update runtime and
 /// presentation together. Durable storage remains in the session coordinator;
 /// model routing remains in the profile coordinator.
@@ -12,6 +14,7 @@ final class ConversationLifecycleCoordinator {
     private let reviewDrafts: ReviewDraftStore
     private let runtime: AgentRuntime
     private let profiles: ProfileSelectionCoordinator
+    private let sessions: ConversationSessionCoordinator
 
     init(
         conversations: ConversationStore,
@@ -22,7 +25,8 @@ final class ConversationLifecycleCoordinator {
         composer: ComposerViewModel,
         reviewDrafts: ReviewDraftStore,
         runtime: AgentRuntime,
-        profiles: ProfileSelectionCoordinator
+        profiles: ProfileSelectionCoordinator,
+        sessions: ConversationSessionCoordinator
     ) {
         self.conversations = conversations
         self.timeline = timeline
@@ -33,6 +37,7 @@ final class ConversationLifecycleCoordinator {
         self.reviewDrafts = reviewDrafts
         self.runtime = runtime
         self.profiles = profiles
+        self.sessions = sessions
     }
 
     /// Selects thread identity only after every provider and profile operation
@@ -69,6 +74,56 @@ final class ConversationLifecycleCoordinator {
         timeline.reset()
         resetActivityPresentation()
         await profiles.rebuildSession(keepingHistory: false)
+    }
+
+    /// Restores one durable conversation as an ordered runtime transition.
+    /// Immutable disk state is installed before model history is rebuilt, so
+    /// presentation, provider selection, and transcript share one thread ID.
+    func restoreSession(id: String) async {
+        let startedAt = Date()
+        await finishActiveResponseBeforeTransition()
+        guard let snapshot = await sessions.load(id: id),
+              conversations.threads.contains(where: { $0.id == id }) else {
+            return
+        }
+
+        workbench.dismissWorkspaceListingInspector()
+        workbench.dismissDiffPatchReview()
+        reviewDrafts.discardAll()
+        conversations.activeThreadID = id
+        _ = await runtime.apply(.restore(threadID: id))
+        timeline.restore(snapshot.blocks)
+        resetActivityPresentation()
+        if let restoredWorkspace = snapshot.conversation.workspace,
+           workspace.root != restoredWorkspace {
+            // Adopt persisted context directly. Running the interactive
+            // workspace transition here would rebuild the provider twice.
+            workspace.root = restoredWorkspace
+        }
+
+        await profiles.refreshSkillsIfNeeded()
+        await profiles.restoreModelSelection(snapshot.modelBackend)
+        let restoredHistory = snapshot.transcript.map {
+            SessionRebuildHistory.prepare(
+                $0,
+                keepingHistory: true,
+                discardingCapabilityContext: false
+            )
+        } ?? SessionRebuildHistory.fromVisibleBlocks(snapshot.blocks)
+        await profiles.rebuildSession(
+            keepingHistory: false,
+            restoringHistory: restoredHistory
+        )
+        await AgentDiagnosticsRecorder.shared.recordBoundary(
+            RuntimeBoundaryMetric(
+                boundary: .restore,
+                backend: snapshot.modelBackend,
+                durationMilliseconds: max(
+                    0,
+                    Int(Date().timeIntervalSince(startedAt) * 1_000)
+                )
+            )
+        )
     }
 
     /// Makes message and application-command entry points safe without losing

@@ -129,11 +129,7 @@ final class MessageSendCoordinator {
     }
 
     func refreshSkillsIfNeeded(forceRebuild: Bool = false) async {
-        guard modelRuntime.refreshSkills(
-            force: forceRebuild,
-            workspaceRoot: workspace.root
-        ) else { return }
-        await profiles.rebuildSession(discardingCapabilityContext: true)
+        await profiles.refreshSkillsIfNeeded(forceRebuild: forceRebuild)
     }
 
     private func compactOnDeviceContextIfNeeded() async {

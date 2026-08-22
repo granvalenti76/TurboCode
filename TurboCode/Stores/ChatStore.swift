@@ -193,7 +193,8 @@ public final class ChatStore {
             composer: composer,
             reviewDrafts: reviewDraft,
             runtime: agentRuntime,
-            profiles: profileSelectionCoordinator
+            profiles: profileSelectionCoordinator,
+            sessions: sessionCoordinator
         )
         self.conversationLifecycleCoordinator = conversationLifecycleCoordinator
         self.independentTaskCoordinator = IndependentTaskCoordinator(
@@ -439,46 +440,7 @@ public final class ChatStore {
 
     /// Fully restores a past session with its blocks.
     public func restoreSession(id: String) async {
-        let startedAt = Date()
-        await finishActiveResponseBeforeTransition()
-        guard let snapshot = await sessionCoordinator.load(id: id),
-              let _ = threads.firstIndex(where: { $0.id == id }) else { return }
-        dismissWorkspaceListingInspector()
-        workbenchStore.dismissDiffPatchReview()
-        reviewDraftStore.discardAll()
-        conversationStore.activeThreadID = id
-        await projectRuntimeCommand(.restore(threadID: id))
-        timelineStore.restore(snapshot.blocks)
-        resetAgentActivityForConversation()
-        if let wp = snapshot.conversation.workspace, workspaceRoot != wp {
-            // Restoration adopts the persisted root without starting the
-            // interactive workspace transition a second time.
-            workspaceStore.root = wp
-        }
-        await refreshSkillsIfNeeded()
-        await restoreModelSelection(snapshot.modelBackend)
-        let restoredHistory = snapshot.transcript.map {
-            SessionRebuildHistory.prepare(
-                $0,
-                keepingHistory: true,
-                discardingCapabilityContext: false
-            )
-        } ?? SessionRebuildHistory.fromVisibleBlocks(snapshot.blocks)
-        await rebuildSession(keepingHistory: false, restoringHistory: restoredHistory)
-        await AgentDiagnosticsRecorder.shared.recordBoundary(
-            RuntimeBoundaryMetric(
-                boundary: .restore,
-                backend: snapshot.modelBackend,
-                durationMilliseconds: max(
-                    0,
-                    Int(Date().timeIntervalSince(startedAt) * 1_000)
-                )
-            )
-        )
-    }
-
-    private func restoreModelSelection(_ identifier: String) async {
-        await profileSelectionCoordinator.restoreModelSelection(identifier)
+        await conversationLifecycleCoordinator.restoreSession(id: id)
     }
 
     public func renameThread(id: String, title: String) async {

@@ -1,8 +1,8 @@
 import Foundation
 
 /// Bridges MainActor conversation projections to UI-neutral persistence use
-/// cases. Runtime navigation remains in `ChatStore`; this coordinator owns the
-/// complete snapshot/metadata/delete plumbing that does not rebuild a model.
+/// cases. The lifecycle coordinator consumes its immutable load/delete results;
+/// this type owns snapshot plumbing and never mutates runtime presentation.
 @MainActor
 final class ConversationSessionCoordinator {
     private let conversations: ConversationStore

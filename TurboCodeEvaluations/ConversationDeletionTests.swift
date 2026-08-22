@@ -108,6 +108,41 @@ struct ConversationDeletionTests {
         #expect(store.blocks.map(\.text) == ["Second saved"])
     }
 
+    @Test("Restoring a session installs one matching runtime and UI context")
+    func restoringSessionInstallsMatchingContext() async {
+        let conversation = Conversation(
+            id: "context",
+            title: "Restored context",
+            workspace: "/Work/Restored"
+        )
+        let repository = DeletionConversationRepository(
+            snapshots: [
+                ConversationSnapshot(
+                    conversation: conversation,
+                    modelBackend: ModelBackend.foundationApple.rawValue,
+                    blocks: [ChatBlock(kind: .assistant, text: "Durable timeline")],
+                    transcript: nil
+                )
+            ]
+        )
+        let store = ChatStore(conversationRepository: repository)
+        await store.restoreSessions()
+        store.timelineStore.restore([
+            ChatBlock(kind: .assistant, text: "Previous timeline")
+        ])
+        store.workbenchStore.rightPanelMode = .workspaceListing
+        store.workbenchStore.inspectedWorkspaceListingID = "previous-receipt"
+
+        await store.restoreSession(id: conversation.id)
+
+        #expect(store.activeThreadId == conversation.id)
+        #expect(store.agentRuntimeProjectionStore.snapshot.activeThreadID == conversation.id)
+        #expect(store.workspaceRoot == "/Work/Restored")
+        #expect(store.blocks.map(\.text) == ["Durable timeline"])
+        #expect(store.workbenchStore.rightPanelMode == nil)
+        #expect(store.workbenchStore.inspectedWorkspaceListingID == nil)
+    }
+
     private func makeSnapshot(_ conversation: Conversation) -> ConversationSnapshot {
         ConversationSnapshot(
             conversation: conversation,
