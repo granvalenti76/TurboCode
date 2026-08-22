@@ -97,7 +97,6 @@ final class SkillsViewModel {
             profiles.append(profile)
             try persist()
             select(.custom(profile.id))
-            ChatStore.shared?.reloadDynamicProfiles(selecting: profile.id)
             return true
         } catch {
             errorMessage = error.localizedDescription
@@ -120,7 +119,6 @@ final class SkillsViewModel {
             draft = value
             baseline = value
             errorMessage = nil
-            ChatStore.shared?.reloadDynamicProfiles()
             return true
         } catch {
             errorMessage = error.localizedDescription
@@ -134,7 +132,6 @@ final class SkillsViewModel {
         do {
             try persist()
             select(.builtIn(draft.baseModelID))
-            ChatStore.shared?.reloadDynamicProfiles()
         } catch {
             errorMessage = error.localizedDescription
             reload()

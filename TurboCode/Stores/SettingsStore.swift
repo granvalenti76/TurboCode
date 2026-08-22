@@ -26,7 +26,6 @@ public final class SettingsStore {
                 let validated = try agentTuning.validated()
                 try TurboCodeConfig.shared.saveAgentTuning(validated)
                 agentTuningError = nil
-                ChatStore.shared?.applyAgentTuning(validated)
             } catch {
                 agentTuningError = error.localizedDescription
             }
@@ -56,7 +55,6 @@ public final class SettingsStore {
                 deepSeekCredentialConfigured = !deepseekAPIKey.isEmpty
                 credentialError = nil
                 reloadRemoteModels()
-                ChatStore.shared?.reloadRemoteModels()
             } catch {
                 credentialError = error.localizedDescription
             }
@@ -112,7 +110,6 @@ public final class SettingsStore {
         reloadRemoteModels()
         // Do not read provider secrets while restoring general settings. The
         // Provider pane loads this value only when the user opens it.
-        ChatStore.shared?.reloadRemoteModels()
     }
 
     /// Loads only credential state for the provider pane.
@@ -154,7 +151,6 @@ public final class SettingsStore {
             let loaded = try TurboCodeConfig.shared.loadAgentTuning()
             agentTuning = loaded
             agentTuningError = nil
-            ChatStore.shared?.applyAgentTuning(loaded)
         } catch {
             agentTuningError = error.localizedDescription
         }

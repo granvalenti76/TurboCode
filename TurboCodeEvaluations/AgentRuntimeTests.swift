@@ -7,7 +7,7 @@ import Testing
 @MainActor
 struct AgentRuntimeTests {
     @Test("Runtime submit preserves every configured backend identity")
-    func submitPreservesBackendIdentity() {
+    func submitPreservesBackendIdentity() async {
         for backend in ModelBackend.allCases {
             let runtime = AgentRuntime(backend: backend)
             let request = TurnRequest(
@@ -18,14 +18,15 @@ struct AgentRuntimeTests {
                 workspaceRoot: "/workspace"
             )
 
-            #expect(runtime.apply(.submit(request)))
-            #expect(runtime.snapshot.backend == backend)
-            #expect(runtime.snapshot.turn?.id == request.id)
+            #expect(await runtime.apply(.submit(request)))
+            let snapshot = await runtime.snapshot
+            #expect(snapshot.backend == backend)
+            #expect(snapshot.turn?.id == request.id)
         }
     }
 
     @Test("AgentRuntime accepts a native submit command")
-    func acceptsSubmitCommand() {
+    func acceptsSubmitCommand() async {
         let turnID = TurnID(rawValue: "agent-runtime-submit")
         let runtime = AgentRuntime()
         let request = TurnRequest(
@@ -36,16 +37,16 @@ struct AgentRuntimeTests {
             workspaceRoot: "/workspace"
         )
 
-        #expect(runtime.apply(.submit(request)))
-        #expect(runtime.currentTurnState?.id == turnID)
-        #expect(runtime.currentTurnState?.phase == .accepted)
-        #expect(runtime.apply(.cancel(turnID: turnID)))
-        #expect(runtime.currentTurnState?.phase == .cancelled)
-        #expect(!runtime.owns(turnID))
+        #expect(await runtime.apply(.submit(request)))
+        #expect(await runtime.currentTurnState?.id == turnID)
+        #expect(await runtime.currentTurnState?.phase == .accepted)
+        #expect(await runtime.apply(.cancel(turnID: turnID)))
+        #expect(await runtime.currentTurnState?.phase == .cancelled)
+        #expect(await !runtime.owns(turnID))
     }
 
     @Test("Runtime start is idempotent and rejects a competing live turn")
-    func guardsTurnAdmission() {
+    func guardsTurnAdmission() async {
         let runtime = AgentRuntime()
         let request = TurnRequest(
             id: TurnID(rawValue: "admitted-turn"),
@@ -62,9 +63,9 @@ struct AgentRuntimeTests {
             workspaceRoot: "/workspace"
         )
 
-        #expect(runtime.apply(.started(request)))
+        #expect(await runtime.apply(.started(request)))
         #expect(
-            runtime.apply(
+            await runtime.apply(
                 .phaseChanged(
                     turnID: request.id,
                     phase: .preparing,
@@ -72,14 +73,14 @@ struct AgentRuntimeTests {
                 )
             )
         )
-        #expect(runtime.apply(.started(request)))
-        #expect(!runtime.apply(.started(competing)))
-        #expect(runtime.currentTurnState?.id == request.id)
-        #expect(runtime.currentTurnState?.phase == .preparing)
+        #expect(await runtime.apply(.started(request)))
+        #expect(await !runtime.apply(.started(competing)))
+        #expect(await runtime.currentTurnState?.id == request.id)
+        #expect(await runtime.currentTurnState?.phase == .preparing)
     }
 
     @Test("Runtime events own tool, approval, and terminal lifecycle")
-    func reducesNormalizedLifecycleEvents() {
+    func reducesNormalizedLifecycleEvents() async {
         let runtime = AgentRuntime()
         let turnID = TurnID(rawValue: "normalized-events")
         let request = TurnRequest(
@@ -90,22 +91,22 @@ struct AgentRuntimeTests {
             workspaceRoot: "/workspace"
         )
 
-        #expect(runtime.apply(.started(request)))
-        #expect(runtime.apply(.phaseChanged(
+        #expect(await runtime.apply(.started(request)))
+        #expect(await runtime.apply(.phaseChanged(
             turnID: turnID,
             phase: .preparing,
             at: Date()
         )))
-        #expect(runtime.apply(.phaseChanged(
+        #expect(await runtime.apply(.phaseChanged(
             turnID: turnID,
             phase: .streaming,
             at: Date()
         )))
-        #expect(runtime.apply(.toolStarted(
+        #expect(await runtime.apply(.toolStarted(
             ToolCall(id: "tool", turnID: turnID, name: "read_file")
         )))
-        #expect(runtime.currentTurnState?.phase == .toolExecuting)
-        #expect(runtime.apply(.approvalRequested(
+        #expect(await runtime.currentTurnState?.phase == .toolExecuting)
+        #expect(await runtime.apply(.approvalRequested(
             Approval(
                 id: "approval",
                 turnID: turnID,
@@ -114,28 +115,28 @@ struct AgentRuntimeTests {
                 summary: "Read one file"
             )
         )))
-        #expect(runtime.currentTurnState?.phase == .awaitingApproval)
-        #expect(runtime.apply(.toolFinished(
+        #expect(await runtime.currentTurnState?.phase == .awaitingApproval)
+        #expect(await runtime.apply(.toolFinished(
             ToolResult(id: "tool", turnID: turnID, status: .succeeded)
         )))
-        #expect(runtime.apply(.phaseChanged(
+        #expect(await runtime.apply(.phaseChanged(
             turnID: turnID,
             phase: .settling,
             at: Date()
         )))
-        #expect(runtime.apply(.completed(
+        #expect(await runtime.apply(.completed(
             turnID: turnID,
             outcome: .succeeded,
             at: Date()
         )))
-        #expect(runtime.currentTurnState?.phase == .completed)
+        #expect(await runtime.currentTurnState?.phase == .completed)
     }
 
     @Test("Runtime context commands replace only a settled turn")
-    func contextCommandsPublishThreadAndBackend() {
+    func contextCommandsPublishThreadAndBackend() async {
         let runtime = AgentRuntime()
         let turnID = TurnID(rawValue: "context-command-turn")
-        runtime.begin(
+        await runtime.begin(
             TurnRequest(
                 id: turnID,
                 prompt: "Switch context",
@@ -145,26 +146,29 @@ struct AgentRuntimeTests {
             )
         )
 
-        #expect(!runtime.apply(.switchThread(threadID: "new-thread")))
-        #expect(runtime.apply(.cancel(turnID: turnID)))
-        #expect(runtime.apply(.switchThread(threadID: "new-thread")))
-        #expect(runtime.snapshot.activeThreadID == "new-thread")
-        #expect(runtime.snapshot.turn == nil)
+        #expect(await !runtime.apply(.switchThread(threadID: "new-thread")))
+        #expect(await runtime.apply(.cancel(turnID: turnID)))
+        #expect(await runtime.apply(.switchThread(threadID: "new-thread")))
+        var snapshot = await runtime.snapshot
+        #expect(snapshot.activeThreadID == "new-thread")
+        #expect(snapshot.turn == nil)
 
         #expect(
-            runtime.apply(
+            await runtime.apply(
                 .switchBackend(
                     RuntimeBackendSelection(backend: .llamaServer)
                 )
             )
         )
-        #expect(runtime.snapshot.backend == .llamaServer)
-        #expect(runtime.apply(.restore(threadID: "restored-thread")))
-        #expect(runtime.snapshot.activeThreadID == "restored-thread")
+        snapshot = await runtime.snapshot
+        #expect(snapshot.backend == .llamaServer)
+        #expect(await runtime.apply(.restore(threadID: "restored-thread")))
+        snapshot = await runtime.snapshot
+        #expect(snapshot.activeThreadID == "restored-thread")
     }
 
     @Test("AgentRuntime publishes lifecycle snapshots without owning provider work")
-    func publishesLifecycleSnapshots() {
+    func publishesLifecycleSnapshots() async {
         let start = Date(timeIntervalSince1970: 500)
         let turnID = TurnID(rawValue: "agent-runtime-turn")
         let runtime = AgentRuntime(
@@ -172,7 +176,7 @@ struct AgentRuntimeTests {
             backend: .foundationApple
         )
 
-        runtime.begin(
+        await runtime.begin(
             TurnRequest(
                 id: turnID,
                 prompt: "Inspect the workspace",
@@ -182,25 +186,26 @@ struct AgentRuntimeTests {
                 createdAt: start
             )
         )
-        #expect(runtime.snapshot.activeThreadID == "thread-1")
-        #expect(runtime.snapshot.backend == .llamaServer)
-        #expect(runtime.snapshot.turn?.phase == .accepted)
+        let acceptedSnapshot = await runtime.snapshot
+        #expect(acceptedSnapshot.activeThreadID == "thread-1")
+        #expect(acceptedSnapshot.backend == .llamaServer)
+        #expect(acceptedSnapshot.turn?.phase == .accepted)
 
-        let advanced = runtime.advance(
+        let advanced = await runtime.advance(
             to: .preparing,
             turnID: turnID,
             at: Date(timeIntervalSince1970: 501)
         )
         #expect(advanced)
-        #expect(runtime.currentTurnState?.phase == .preparing)
-        #expect(runtime.owns(turnID))
+        #expect(await runtime.currentTurnState?.phase == .preparing)
+        #expect(await runtime.owns(turnID))
     }
 
     @Test("AgentRuntime rejects late completion after terminal state")
-    func rejectsLateCompletion() {
+    func rejectsLateCompletion() async {
         let turnID = TurnID(rawValue: "agent-runtime-terminal")
         let runtime = AgentRuntime()
-        runtime.begin(
+        await runtime.begin(
             TurnRequest(
                 id: turnID,
                 prompt: "Complete the turn",
@@ -210,18 +215,18 @@ struct AgentRuntimeTests {
                 createdAt: Date(timeIntervalSince1970: 600)
             )
         )
-        _ = runtime.advance(
+        _ = await runtime.advance(
             to: .preparing,
             turnID: turnID,
             at: Date(timeIntervalSince1970: 601)
         )
 
-        let finished = runtime.finish(
+        let finished = await runtime.finish(
             with: .cancelled(reason: "user"),
             turnID: turnID,
             at: Date(timeIntervalSince1970: 602)
         )
-        let lateFinish = runtime.finish(
+        let lateFinish = await runtime.finish(
             with: .succeeded,
             turnID: turnID,
             at: Date(timeIntervalSince1970: 603)
@@ -229,70 +234,122 @@ struct AgentRuntimeTests {
 
         #expect(finished)
         #expect(!lateFinish)
-        #expect(runtime.snapshot.turn?.phase == .cancelled)
-        #expect(!runtime.owns(turnID))
+        #expect(await runtime.snapshot.turn?.phase == .cancelled)
+        #expect(await !runtime.owns(turnID))
     }
 
     @Test("AgentRuntime keeps nested transition barriers closed")
-    func nestsQuiescenceBarriers() {
+    func nestsQuiescenceBarriers() async {
         let runtime = AgentRuntime()
 
-        runtime.beginQuiescence()
-        runtime.beginQuiescence()
-        #expect(runtime.snapshot.isQuiescing)
+        await runtime.beginQuiescence()
+        await runtime.beginQuiescence()
+        #expect(await runtime.snapshot.isQuiescing)
 
-        runtime.endQuiescence()
-        #expect(runtime.snapshot.isQuiescing)
+        await runtime.endQuiescence()
+        #expect(await runtime.snapshot.isQuiescing)
 
-        runtime.endQuiescence()
-        #expect(!runtime.snapshot.isQuiescing)
+        await runtime.endQuiescence()
+        #expect(await !runtime.snapshot.isQuiescing)
 
         // An unmatched end must not underflow or reopen a future barrier.
-        runtime.endQuiescence()
-        #expect(!runtime.snapshot.isQuiescing)
+        await runtime.endQuiescence()
+        #expect(await !runtime.snapshot.isQuiescing)
     }
 
     @Test("AgentRuntime creates, cancels, awaits, and releases its operation")
     func ownsOperationHandleThroughCancellation() async {
         let turnID = TurnID(rawValue: "agent-runtime-operation")
-        let runtime = AgentRuntime()
+        let (snapshots, continuation) = AsyncStream.makeStream(
+            of: RuntimeSnapshot.self
+        )
+        let runtime = AgentRuntime { snapshot in
+            continuation.yield(snapshot)
+        }
+        var iterator = snapshots.makeAsyncIterator()
         let execution = Task {
             await runtime.runOperation(turnID: turnID) {
                 try? await Task.sleep(for: .seconds(60))
             }
         }
-        await Task.yield()
+        let activeSnapshot = await iterator.next()
 
-        #expect(runtime.hasActiveOperation)
-        #expect(runtime.ownsOperation(turnID))
+        #expect(activeSnapshot?.hasActiveOperation == true)
+        #expect(await runtime.ownsOperation(turnID))
 
         await runtime.cancelAndWaitForOperation()
         _ = await execution.value
 
-        #expect(!runtime.hasActiveOperation)
-        #expect(!runtime.ownsOperation(turnID))
+        #expect(await !runtime.hasActiveOperation)
+        #expect(await !runtime.ownsOperation(turnID))
+        continuation.finish()
     }
 
     @Test("Idle waiters resume when the owned operation settles")
     func resumesIdleWaitersWithoutPolling() async {
         let turnID = TurnID(rawValue: "agent-runtime-idle-waiter")
-        let runtime = AgentRuntime()
+        let (snapshots, continuation) = AsyncStream.makeStream(
+            of: RuntimeSnapshot.self
+        )
+        let runtime = AgentRuntime { snapshot in
+            continuation.yield(snapshot)
+        }
+        var iterator = snapshots.makeAsyncIterator()
         let execution = Task {
             await runtime.runOperation(turnID: turnID) {
                 try? await Task.sleep(for: .seconds(60))
             }
         }
-        await Task.yield()
+        #expect(await iterator.next()?.hasActiveOperation == true)
 
         let waiter = Task {
             await runtime.waitUntilIdle()
-            return runtime.hasActiveOperation
+            return await runtime.hasActiveOperation
         }
         await Task.yield()
         await runtime.cancelAndWaitForOperation()
 
         #expect(await waiter.value == false)
         _ = await execution.value
+        continuation.finish()
+    }
+
+    @Test("Concurrent submissions admit exactly one live turn")
+    func serializesCompetingSubmissions() async {
+        let runtime = AgentRuntime()
+        let requests = [
+            TurnRequest(
+                id: TurnID(rawValue: "concurrent-a"),
+                prompt: "First contender",
+                backend: .foundationApple,
+                modelName: "test-model",
+                workspaceRoot: "/workspace"
+            ),
+            TurnRequest(
+                id: TurnID(rawValue: "concurrent-b"),
+                prompt: "Second contender",
+                backend: .llamaServer,
+                modelName: "test-model",
+                workspaceRoot: "/workspace"
+            )
+        ]
+
+        let admissions = await withTaskGroup(of: Bool.self) { group in
+            for request in requests {
+                group.addTask {
+                    await runtime.apply(.submit(request))
+                }
+            }
+            var values: [Bool] = []
+            for await value in group {
+                values.append(value)
+            }
+            return values
+        }
+        let admittedTurnID = await runtime.currentTurnState?.id
+
+        #expect(admissions.filter { $0 }.count == 1)
+        #expect(requests.map(\.id).contains(admittedTurnID))
     }
 
     @Test("Ancillary work starts only after runtime ownership is released")
@@ -316,8 +373,8 @@ struct AgentRuntimeTests {
 
         // A stuck optional title generator may outlive the response, but it
         // must not keep Stop visible or reject the next provider operation.
-        #expect(!runtime.hasActiveOperation)
-        #expect(!runtime.ownsOperation(turnID))
+        #expect(await !runtime.hasActiveOperation)
+        #expect(await !runtime.ownsOperation(turnID))
 
         execution.cancel()
         continuation.finish()

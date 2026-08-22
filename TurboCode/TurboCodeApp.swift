@@ -29,6 +29,11 @@ struct TurboCodeApp: App {
                     // Restore persisted sessions
                     await chatStore.restoreSessions()
                     settingsStore.loadFromUserDefaults()
+                    // Settings persistence does not reach into the chat facade.
+                    // App composition explicitly synchronizes runtime inputs so
+                    // TurboCodeCore can remain independent of global UI stores.
+                    await chatStore.applyAgentTuning(settingsStore.agentTuning)
+                    await chatStore.reloadRemoteModels()
                 }
         }
         .windowStyle(.titleBar)

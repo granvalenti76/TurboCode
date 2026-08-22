@@ -78,8 +78,6 @@ struct AgentEndToEndScenarioTests {
         #expect(activity.current?.phase == .succeeded)
         #expect(activity.current?.lastOperationalPhase == .workerRunning)
         #expect(activity.current?.finalResult == result)
-        #expect(response.currentTurnState?.id == turnID)
-        #expect(response.currentTurnState?.phase == .completed)
         #expect(timeline.runtimeSnapshot?.turn?.id == turnID)
         #expect(timeline.runtimeSnapshot?.turn?.phase == .completed)
         #expect(timeline.runtimeSnapshot?.isQuiescing == false)
@@ -141,12 +139,11 @@ struct AgentEndToEndScenarioTests {
         #expect(result.receiptIDs.isEmpty)
         #expect(activity.current?.phase == .failed)
         #expect(activity.current?.activeTool == nil)
-        #expect(response.currentTurnState?.id == turnID)
         #expect(timeline.runtimeSnapshot?.turn?.id == turnID)
         #expect(timeline.runtimeSnapshot?.turn?.phase == .completed)
         // The provider turn completed successfully; the embedded delegated
         // task result is the failure surfaced by the scenario above.
-        #expect(response.currentTurnState?.phase == .completed)
+        #expect(timeline.runtimeSnapshot?.turn?.phase == .completed)
         #expect(recovery.action == .prepareRetry)
         #expect(recovery.title == "Prepare New Attempt")
         #expect(await verifier.invocationCount == 0)
@@ -214,8 +211,6 @@ struct AgentEndToEndScenarioTests {
 
         #expect(activity.current?.phase == .cancelled)
         #expect(activity.current?.finalResult?.outcome == .cancelled)
-        #expect(response.currentTurnState?.id == turnID)
-        #expect(response.currentTurnState?.phase == .cancelled)
         #expect(timeline.runtimeSnapshot?.turn?.id == turnID)
         #expect(timeline.runtimeSnapshot?.turn?.phase == .cancelled)
         #expect(activity.current?.activeTool == nil)
@@ -309,10 +304,14 @@ struct AgentEndToEndScenarioTests {
             ),
             codexRuntime: codexRuntime
         )
+        let runtime = AgentRuntime { snapshot in
+            await timeline.applyRuntimeSnapshot(snapshot)
+        }
         return ChatResponseCoordinator(
             timeline: timeline,
             toolInteractions: ToolInteractionStore(),
             agentActivity: activity,
+            agentRuntime: runtime,
             llmRuntime: LLMRuntime(sessionFactory: factory)
         )
     }

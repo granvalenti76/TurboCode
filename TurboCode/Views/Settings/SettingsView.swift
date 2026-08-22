@@ -74,6 +74,7 @@ struct GeneralSettingsView: View {
 
 struct ProviderSettingsView: View {
     @Environment(SettingsStore.self) private var settings
+    @Environment(ChatStore.self) private var chatStore
 
     var body: some View {
         let s = Bindable(settings)
@@ -108,6 +109,14 @@ struct ProviderSettingsView: View {
         .task {
             settings.loadDeepSeekCredentialForSettings()
         }
+        .task(id: settings.deepseekAPIKey) {
+            // Key entry mutates on every keystroke. Debouncing keeps provider
+            // catalog refresh explicit and prevents rebuilding a model session
+            // for intermediate credential values SwiftUI immediately replaces.
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            await chatStore.reloadRemoteModels()
+        }
     }
 }
 
@@ -115,6 +124,7 @@ struct ProviderSettingsView: View {
 
 struct AgentSettingsView: View {
     @Environment(SettingsStore.self) private var settings
+    @Environment(ChatStore.self) private var chatStore
 
     var body: some View {
         let s = Bindable(settings)
@@ -217,6 +227,13 @@ struct AgentSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+        .task(id: settings.agentTuning) {
+            // Slider and stepper edits can arrive in bursts. The cancellable
+            // view task publishes only the settled configuration to runtime.
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            await chatStore.applyAgentTuning(settings.agentTuning)
+        }
     }
 }
 

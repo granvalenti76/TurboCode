@@ -71,7 +71,7 @@ struct SkillsView: View {
                 codexReasoning,
                 delegationEnabled,
                 copyDefaults in
-                viewModel.create(
+                let created = viewModel.create(
                     name: name,
                     summary: summary,
                     baseModelID: model,
@@ -82,11 +82,21 @@ struct SkillsView: View {
                     copyDefaults: copyDefaults,
                     settings: settings
                 )
+                if created,
+                   case .custom(let profileID) = viewModel.selection {
+                    Task {
+                        await chatStore.reloadDynamicProfiles(selecting: profileID)
+                    }
+                }
+                return created
             }
         }
         .alert("Delete Profile?", isPresented: $deleteConfirmationPresented) {
             Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) { viewModel.deleteSelected() }
+            Button("Delete", role: .destructive) {
+                viewModel.deleteSelected()
+                Task { await chatStore.reloadDynamicProfiles() }
+            }
                 .disabled(chatStore.busy)
         } message: {
             Text("This removes the custom profile. Models, tools, and installed skills are not deleted.")
@@ -149,7 +159,9 @@ struct SkillsView: View {
                         )
                         .tag(ProfileLibrarySelection.custom(profile.id))
                         .contextMenu {
-                            Button("Use Profile") { chatStore.selectDynamicProfile(profile.id) }
+                            Button("Use Profile") {
+                                Task { await chatStore.selectDynamicProfile(profile.id) }
+                            }
                                 .disabled(chatStore.busy)
                             Divider()
                             Button("Delete", role: .destructive) {
@@ -183,8 +195,10 @@ struct SkillsView: View {
                 .help("Reveal Skills in Finder")
                 Button {
                     viewModel.reload()
-                    chatStore.reloadSkills()
-                    chatStore.reloadDynamicProfiles()
+                    Task {
+                        await chatStore.reloadSkills()
+                        await chatStore.reloadDynamicProfiles()
+                    }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -258,7 +272,7 @@ struct SkillsView: View {
                         newProfilePresented = true
                     }
                     Button("Use Default") {
-                        chatStore.selectBuiltInProfile(modelID)
+                        Task { await chatStore.selectBuiltInProfile(modelID) }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(!option.isAvailable || chatStore.busy)
@@ -330,12 +344,19 @@ struct SkillsView: View {
                     .disabled(chatStore.busy)
                     Button("Revert") { viewModel.discardChanges() }
                         .disabled(!viewModel.isDirty)
-                    Button("Save") { viewModel.save() }
+                    Button("Save") {
+                        if viewModel.save() {
+                            Task { await chatStore.reloadDynamicProfiles() }
+                        }
+                    }
                         .keyboardShortcut("s", modifiers: .command)
                         .disabled(!viewModel.canSave || chatStore.busy)
                     Button("Use Profile") {
                         if !viewModel.isDirty || viewModel.save() {
-                            chatStore.selectDynamicProfile(draft.id)
+                            Task {
+                                await chatStore.reloadDynamicProfiles()
+                                await chatStore.selectDynamicProfile(draft.id)
+                            }
                         }
                     }
                     .buttonStyle(.borderedProminent)

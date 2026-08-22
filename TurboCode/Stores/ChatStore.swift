@@ -54,11 +54,15 @@ public final class ChatStore {
 
     // Orchestrator mode
     public var orchestratorMode: OrchestratorMode {
-        get { modelRuntimeStore.orchestratorMode }
-        set {
-            modelRuntimeStore.setOrchestratorMode(newValue)
-            rebuildSession(discardingCapabilityContext: true)
-        }
+        modelRuntimeStore.orchestratorMode
+    }
+
+    /// Changes the routing mode as one awaited runtime transition. Swift
+    /// property setters cannot suspend, so keeping mutation in a method avoids
+    /// an untracked Task racing the next profile or send action.
+    public func setOrchestratorMode(_ mode: OrchestratorMode) async {
+        modelRuntimeStore.setOrchestratorMode(mode)
+        await rebuildSession(discardingCapabilityContext: true)
     }
 
     // Internal only so the compatibility façade can forward legacy view API.
@@ -92,7 +96,7 @@ public final class ChatStore {
                 tuning: try TurboCodeConfig.shared.loadAgentTuning(),
                 workspaceRoot: workspaceRoot
             )
-            reloadRemoteModels()
+            await reloadRemoteModels()
         } catch {
             print("[TurboCode] Onboarding failed: \(error.localizedDescription)")
         }
@@ -120,11 +124,10 @@ public final class ChatStore {
         let modelRuntime = ModelRuntimeStore()
         let runtimeProjection = AgentRuntimeProjectionStore()
         let agentRuntime = AgentRuntime { snapshot in
-            runtimeProjection.apply(snapshot)
-            timeline.applyRuntimeSnapshot(snapshot)
+            await runtimeProjection.apply(snapshot)
+            await timeline.applyRuntimeSnapshot(snapshot)
         }
-        runtimeProjection.apply(agentRuntime.snapshot)
-        timeline.applyRuntimeSnapshot(agentRuntime.snapshot)
+        timeline.applyRuntimeSnapshot(runtimeProjection.snapshot)
         let llmSessionFactory = LiveLLMBackendSessionFactory(
             nativeRunner: nativeRunner,
             foundationModelsRuntime: modelRuntime.foundationModelsRuntime,
@@ -173,7 +176,7 @@ public final class ChatStore {
     /// assistant turns while removing model-specific transport entries.
     /// In the experimental compatibility mode the backend is always Apple
     /// on-device, so direct backend switching has no effect.
-    public func switchBackend(to backend: ModelBackend) {
+    public func switchBackend(to backend: ModelBackend) async {
         guard !busy, orchestratorMode == .standalone else { return }
         if backend == .codex {
             scheduleCodexProfileSelection()
@@ -185,10 +188,10 @@ public final class ChatStore {
             return
         }
         guard modelRuntimeStore.selectBackend(backend) else { return }
-        rebuildSession(discardingCapabilityContext: true)
+        await rebuildSession(discardingCapabilityContext: true)
     }
 
-    public func switchRemoteModel(to id: String) {
+    public func switchRemoteModel(to id: String) async {
         guard !busy, orchestratorMode == .standalone else { return }
         cancelCodexSelection()
         if activeBackend == .codex {
@@ -196,7 +199,7 @@ public final class ChatStore {
             return
         }
         guard modelRuntimeStore.selectRemoteModel(id: id) else { return }
-        rebuildSession(discardingCapabilityContext: true)
+        await rebuildSession(discardingCapabilityContext: true)
     }
 
     /// Selects Codex immediately, then verifies ChatGPT authentication and
@@ -318,7 +321,7 @@ public final class ChatStore {
         }
     }
 
-    func selectBuiltInProfile(_ id: ProfileBaseModelID) {
+    func selectBuiltInProfile(_ id: ProfileBaseModelID) async {
         guard !busy, orchestratorMode == .standalone else { return }
         if id == .codex {
             scheduleCodexProfileSelection()
@@ -330,10 +333,10 @@ public final class ChatStore {
             return
         }
         guard modelRuntimeStore.selectBuiltInProfile(id) else { return }
-        rebuildSession(discardingCapabilityContext: true)
+        await rebuildSession(discardingCapabilityContext: true)
     }
 
-    func selectDynamicProfile(_ id: UUID) {
+    func selectDynamicProfile(_ id: UUID) async {
         guard !busy, orchestratorMode == .standalone else { return }
         if let profile = dynamicProfiles.first(where: { $0.id == id }),
            profile.baseModelID == .codex {
@@ -349,7 +352,7 @@ public final class ChatStore {
             return
         }
         guard modelRuntimeStore.selectDynamicProfile(id) else { return }
-        rebuildSession(discardingCapabilityContext: true)
+        await rebuildSession(discardingCapabilityContext: true)
     }
 
     /// Selects a profile with `delegate_task` as one atomic runtime change.
@@ -357,7 +360,7 @@ public final class ChatStore {
     /// The historical global "orchestrator" mode is the on-device compatibility
     /// path; production coordinator profiles run in standalone transport mode.
     /// Centralizing this transition keeps that implementation detail out of UI.
-    func selectCoordinatorProfile(_ id: UUID) {
+    func selectCoordinatorProfile(_ id: UUID) async {
         guard !busy,
               let profile = dynamicProfiles.first(where: {
                   $0.id == id && $0.usesDelegation
@@ -374,11 +377,11 @@ public final class ChatStore {
         }
         cancelCodexSelection()
         guard modelRuntimeStore.selectDynamicProfile(profile.id) else { return }
-        rebuildSession(discardingCapabilityContext: true)
+        await rebuildSession(discardingCapabilityContext: true)
     }
 
     /// Leaves a custom profile and returns to the current built-in model.
-    func selectDirectExecution() {
+    func selectDirectExecution() async {
         guard !busy else { return }
         guard orchestratorMode != .standalone
                 || activeDynamicProfile != nil else {
@@ -394,7 +397,7 @@ public final class ChatStore {
         }
         cancelCodexSelection()
         guard modelRuntimeStore.selectBuiltInProfile(baseModel) else { return }
-        rebuildSession(discardingCapabilityContext: true)
+        await rebuildSession(discardingCapabilityContext: true)
     }
 
     /// Freezes profile selection while Codex prepares any required compact
@@ -416,7 +419,7 @@ public final class ChatStore {
     ) async {
         guard let turboThreadID = activeThreadId else {
             _ = applyTurboCodeSelection(selection)
-            rebuildSession(discardingCapabilityContext: true)
+            await rebuildSession(discardingCapabilityContext: true)
             return
         }
         let handoffWorkspaceRoot = workspaceRoot
@@ -445,7 +448,7 @@ public final class ChatStore {
             turboThreadID: turboThreadID,
             boundaryBlockID: blocks.last?.id
         )
-        rebuildSession(
+        await rebuildSession(
             keepingHistory: false,
             discardingCapabilityContext: true,
             restoringHistory: handoff.history
@@ -470,28 +473,28 @@ public final class ChatStore {
         }
     }
 
-    func reloadDynamicProfiles(selecting id: UUID? = nil) {
+    func reloadDynamicProfiles(selecting id: UUID? = nil) async {
         do {
             if try modelRuntimeStore.reloadDynamicProfiles(selecting: id) {
-                rebuildSession(discardingCapabilityContext: true)
+                await rebuildSession(discardingCapabilityContext: true)
             }
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    public func reloadRemoteModels() {
+    public func reloadRemoteModels() async {
         guard modelRuntimeStore.reloadRemoteModels() else { return }
-        rebuildSession(discardingCapabilityContext: true)
+        await rebuildSession(discardingCapabilityContext: true)
     }
 
     public func isConfigured(_ model: RemoteModelConfig) -> Bool {
         modelRuntimeStore.isConfigured(model)
     }
 
-    func setReasoningEffort(_ effort: ReasoningEffort) {
+    func setReasoningEffort(_ effort: ReasoningEffort) async {
         modelRuntimeStore.setReasoningEffort(effort)
-        rebuildSession()
+        await rebuildSession()
     }
 
     func setCodexReasoningEffort(_ effort: CodexReasoningEffort) {
@@ -505,9 +508,9 @@ public final class ChatStore {
         keepingHistory: Bool = true,
         discardingCapabilityContext: Bool = false,
         restoringHistory: [ModelRuntimeStore.RestoredTranscriptEntry]? = nil
-    ) {
+    ) async {
         llamaContextUsage = nil
-        projectRuntimeCommand(
+        await projectRuntimeCommand(
             .switchBackend(
                 RuntimeBackendSelection(
                     backend: activeBackend,
@@ -547,7 +550,7 @@ public final class ChatStore {
             reviewDraftStore.discardAll()
         }
         conversationStore.activeThreadID = id
-        projectRuntimeCommand(.switchThread(threadID: id))
+        await projectRuntimeCommand(.switchThread(threadID: id))
     }
 
     /// Opens a conversation as one navigation transition. Restoring first keeps
@@ -573,17 +576,17 @@ public final class ChatStore {
             workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
             mode: mode
         )
-        projectRuntimeCommand(.switchThread(threadID: thread.id))
+        await projectRuntimeCommand(.switchThread(threadID: thread.id))
         timelineStore.reset()
         resetAgentActivityForConversation()
-        rebuildSession(keepingHistory: false)
+        await rebuildSession(keepingHistory: false)
     }
 
     /// Makes every message entry point safe to use without requiring the user
     /// to press New Chat first. If an older buggy flow already produced blocks
     /// without a thread, attach them to the new metadata instead of discarding
     /// the visible conversation.
-    private func ensureActiveThread() {
+    private func ensureActiveThread() async {
         let hasOrphanedBlocks = !blocks.isEmpty
         let created = conversationStore.ensureActiveThread(
             workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
@@ -592,12 +595,12 @@ public final class ChatStore {
         guard created else { return }
 
         if let threadID = activeThreadId {
-            projectRuntimeCommand(.switchThread(threadID: threadID))
+            await projectRuntimeCommand(.switchThread(threadID: threadID))
         }
         guard !hasOrphanedBlocks else { return }
         timelineStore.reset()
         resetAgentActivityForConversation()
-        rebuildSession(keepingHistory: false)
+        await rebuildSession(keepingHistory: false)
     }
 
     /// Generates a concise title from the first user prompt using the Apple
@@ -699,7 +702,7 @@ public final class ChatStore {
         workbenchStore.dismissDiffPatchReview()
         reviewDraftStore.discardAll()
         conversationStore.activeThreadID = id
-        projectRuntimeCommand(.restore(threadID: id))
+        await projectRuntimeCommand(.restore(threadID: id))
         timelineStore.restore(snapshot.blocks)
         resetAgentActivityForConversation()
         if let wp = snapshot.conversation.workspace, workspaceRoot != wp {
@@ -707,7 +710,7 @@ public final class ChatStore {
             // interactive workspace transition a second time.
             workspaceStore.root = wp
         }
-        refreshSkillsIfNeeded()
+        await refreshSkillsIfNeeded()
         await restoreModelSelection(snapshot.modelBackend)
         let restoredHistory = snapshot.transcript.map {
             SessionRebuildHistory.prepare(
@@ -716,7 +719,7 @@ public final class ChatStore {
                 discardingCapabilityContext: false
             )
         } ?? SessionRebuildHistory.fromVisibleBlocks(snapshot.blocks)
-        rebuildSession(keepingHistory: false, restoringHistory: restoredHistory)
+        await rebuildSession(keepingHistory: false, restoringHistory: restoredHistory)
         await AgentDiagnosticsRecorder.shared.recordBoundary(
             RuntimeBoundaryMetric(
                 boundary: .restore,
@@ -824,7 +827,7 @@ public final class ChatStore {
         guard deletesActiveThread else { return }
 
         conversationStore.activeThreadID = nil
-        projectRuntimeCommand(.switchThread(threadID: nil))
+        await projectRuntimeCommand(.switchThread(threadID: nil))
         timelineStore.reset()
         resetAgentActivityForConversation()
         reviewDraftStore.discardAll()
@@ -835,10 +838,10 @@ public final class ChatStore {
                 // A never-persisted draft has no snapshot to restore but remains
                 // a valid next selection with a fresh model session.
                 conversationStore.activeThreadID = nextThreadID
-                rebuildSession(keepingHistory: false)
+                await rebuildSession(keepingHistory: false)
             }
         } else {
-            rebuildSession(keepingHistory: false)
+            await rebuildSession(keepingHistory: false)
         }
     }
 
@@ -850,14 +853,14 @@ public final class ChatStore {
         let removedActiveWorkspace = workspaceStore.removeWorkspace(path)
 
         if conversationRemoval.removedActiveThread {
-            projectRuntimeCommand(.switchThread(threadID: nil))
+            await projectRuntimeCommand(.switchThread(threadID: nil))
             timelineStore.reset()
             resetAgentActivityForConversation()
         }
 
         if removedActiveWorkspace {
             workbenchStore.rightPanelMode = nil
-            rebuildSession(keepingHistory: false)
+            await rebuildSession(keepingHistory: false)
         }
 
         if !conversationRemoval.deletionErrors.isEmpty {
@@ -896,8 +899,8 @@ public final class ChatStore {
         await finishActiveResponseBeforeTransition()
         workspaceStore.selectWorkspace(path)
 
-        refreshSkillsIfNeeded()
-        rebuildSession(discardingCapabilityContext: true)
+        await refreshSkillsIfNeeded()
+        await rebuildSession(discardingCapabilityContext: true)
         // The inspector is opt-in: changing workspace must not open it.
         workbenchStore.rightPanelMode = nil
         Task { await reloadDiffs() }
@@ -909,7 +912,7 @@ public final class ChatStore {
         Task {
             await finishActiveResponseBeforeTransition()
             workspaceStore.clearWorkspace()
-            rebuildSession(discardingCapabilityContext: true)
+            await rebuildSession(discardingCapabilityContext: true)
             workbenchStore.rightPanelMode = nil
         }
     }
@@ -935,12 +938,12 @@ public final class ChatStore {
             return
         }
         clearLocalCompactionNotice()
-        refreshSkillsIfNeeded()
+        await refreshSkillsIfNeeded()
         if activeBackend != .codex,
            modelRuntimeStore.workspaceInstructionsChanged(in: workspaceRoot) {
             // LanguageModelSession instructions are immutable. Preserve visible
             // history while replacing only the stale system-instruction prefix.
-            rebuildSession()
+            await rebuildSession()
         }
         guard let promptText = modelRuntimeStore.resolvedPrompt(
             for: text
@@ -961,10 +964,10 @@ public final class ChatStore {
             comments: reviewDraftStore.comments
         ) else { return }
 
-        refreshSkillsIfNeeded()
+        await refreshSkillsIfNeeded()
         if activeBackend != .codex,
            modelRuntimeStore.workspaceInstructionsChanged(in: workspaceRoot) {
-            rebuildSession()
+            await rebuildSession()
         }
         guard let promptText = modelRuntimeStore.resolvedPrompt(
             for: request.promptText
@@ -991,7 +994,7 @@ public final class ChatStore {
             try documentation.installBundledDocumentation()
             let resolution = try TurboCodeGuideTool(store: documentation)
                 .resolve(query: "What can TurboCode do?")
-            ensureActiveThread()
+            await ensureActiveThread()
             timelineStore.presentProductGuide(
                 resolution.presentation,
                 markdown: resolution.markdown
@@ -1029,14 +1032,14 @@ public final class ChatStore {
         }
 
         error = nil
-        ensureActiveThread()
+        await ensureActiveThread()
         timelineStore.presentCompaction(compaction.summary)
         localCompactionNotice = LocalCompactionNotice(
             sourceCharacters: compaction.sourceCharacters,
             retainedCharacters: compaction.retainedCharacters
         )
         scheduleLocalCompactionNoticeDismissal()
-        rebuildSession(restoringHistory: compaction.history)
+        await rebuildSession(restoringHistory: compaction.history)
 
         await AgentDiagnosticsRecorder.shared.recordLocalCompaction(
             backend: activeBackend,
@@ -1101,7 +1104,7 @@ public final class ChatStore {
             return
         }
 
-        ensureActiveThread()
+        await ensureActiveThread()
         let invoker = modelRuntimeStore.makeIndependentTaskInvoker(
             workspaceRoot: workspaceRoot,
             events: responseCoordinator.modelSessionEvents
@@ -1115,14 +1118,14 @@ public final class ChatStore {
             modelName: composerModel,
             workspaceRoot: workspaceRoot
         )
-        guard projectRuntimeEvent(.started(request)) else { return }
-        _ = projectRuntimeEvent(
+        guard await projectRuntimeEvent(.started(request)) else { return }
+        _ = await projectRuntimeEvent(
             .phaseChanged(turnID: turnID, phase: .preparing, at: Date())
         )
         responseCoordinator.delegationChanged(true)
         await agentRuntime.runOperation(turnID: turnID) { [weak self] in
             guard let self else { return }
-            _ = self.projectRuntimeEvent(
+            _ = await self.projectRuntimeEvent(
                 .phaseChanged(turnID: turnID, phase: .streaming, at: Date())
             )
             let result = await AgentTaskInvocation.invoke(
@@ -1131,7 +1134,7 @@ public final class ChatStore {
                 parentTurnID: turnID
             )
             guard !Task.isCancelled else {
-                _ = self.projectRuntimeEvent(
+                _ = await self.projectRuntimeEvent(
                     .completed(
                         turnID: turnID,
                         outcome: .cancelled(reason: "Independent task cancelled."),
@@ -1140,7 +1143,7 @@ public final class ChatStore {
                 )
                 return
             }
-            _ = self.projectRuntimeEvent(
+            _ = await self.projectRuntimeEvent(
                 .phaseChanged(turnID: turnID, phase: .settling, at: Date())
             )
             await self.finishIndependentTask(
@@ -1148,7 +1151,7 @@ public final class ChatStore {
                 result: result,
                 turnID: turnID
             )
-            _ = self.projectRuntimeEvent(
+            _ = await self.projectRuntimeEvent(
                 .completed(
                     turnID: turnID,
                     outcome: Self.runtimeOutcome(for: result),
@@ -1168,12 +1171,12 @@ public final class ChatStore {
     ) async {
         guard TurnCompletionPolicy.accepts(
             turnID: turnID,
-            activeTurnID: agentRuntime.ownsOperation(turnID) ? turnID : nil,
+            activeTurnID: await agentRuntime.ownsOperation(turnID) ? turnID : nil,
             isCancelled: Task.isCancelled
         ) else { return }
         let response = Self.renderIndependentTaskResult(result)
         timelineStore.presentTaskTurn(command: command, response: response)
-        appendIndependentTaskToTranscript(command: command, response: response)
+        await appendIndependentTaskToTranscript(command: command, response: response)
         if let threadID = activeThreadId {
             conversationStore.touchThread(id: threadID)
             if activeBackend == .codex {
@@ -1191,7 +1194,7 @@ public final class ChatStore {
     private func appendIndependentTaskToTranscript(
         command: String,
         response: String
-    ) {
+    ) async {
         guard activeBackend != .codex else { return }
         let additions = RuntimeContextHandoff.transcript(from: [
             ChatBlock(kind: .user, text: command),
@@ -1202,7 +1205,7 @@ public final class ChatStore {
             keepingHistory: true,
             discardingCapabilityContext: false
         )
-        rebuildSession(restoringHistory: existing + additions)
+        await rebuildSession(restoringHistory: existing + additions)
     }
 
     private static func renderIndependentTaskResult(
@@ -1261,21 +1264,21 @@ public final class ChatStore {
         return goal.isEmpty ? nil : goal
     }
 
-    public func reloadSkills() {
-        refreshSkillsIfNeeded(forceRebuild: true)
+    public func reloadSkills() async {
+        await refreshSkillsIfNeeded(forceRebuild: true)
     }
 
-    func applyAgentTuning(_ value: AgentTuningConfig) {
+    func applyAgentTuning(_ value: AgentTuningConfig) async {
         guard modelRuntimeStore.applyAgentTuning(value) else { return }
-        rebuildSession(discardingCapabilityContext: true)
+        await rebuildSession(discardingCapabilityContext: true)
     }
 
-    private func refreshSkillsIfNeeded(forceRebuild: Bool = false) {
+    private func refreshSkillsIfNeeded(forceRebuild: Bool = false) async {
         guard modelRuntimeStore.refreshSkills(
             force: forceRebuild,
             workspaceRoot: workspaceRoot
         ) else { return }
-        rebuildSession(discardingCapabilityContext: true)
+        await rebuildSession(discardingCapabilityContext: true)
     }
 
     private func sendMessage(
@@ -1287,18 +1290,22 @@ public final class ChatStore {
               !busy,
               activeProfileCanSend else { return }
 
-        compactOnDeviceContextIfNeeded()
+        await compactOnDeviceContextIfNeeded()
         let effectivePrompt = promptText ?? text
-        ensureActiveThread()
+        await ensureActiveThread()
         // One identity follows the accepted prompt through either provider so
         // late callbacks cannot be mistaken for the next user turn.
         let turnID = TurnID()
         let titleThreadID = activeThreadId
+        // Capture routing before detached execution. The provider task receives
+        // an immutable value and never reaches back into MainActor UI state to
+        // decide which backend owns this turn.
+        let responseBackend = activeBackend
         await agentRuntime.runOperation(
             turnID: turnID,
             operation: { [weak self] in
                 guard let self else { return }
-                if self.activeBackend == .codex {
+                if responseBackend == .codex {
                     await self.performCodexSendMessage(
                         displayText: text,
                         promptText: effectivePrompt,
@@ -1330,7 +1337,7 @@ public final class ChatStore {
     /// Compacts only at a turn boundary, when the previous on-device context
     /// has reached eight question/answer turns. The active session is rebuilt
     /// from a concise handoff so the ninth question starts with usable context.
-    private func compactOnDeviceContextIfNeeded() {
+    private func compactOnDeviceContextIfNeeded() async {
         guard activeBackend == .foundationApple else { return }
         let turnCount = SessionRebuildHistory.userTurnCount(
             in: modelRuntimeStore.transcript
@@ -1340,7 +1347,7 @@ public final class ChatStore {
         else { return }
 
         timelineStore.presentCompaction(compaction.summary)
-        rebuildSession(restoringHistory: compaction.history)
+        await rebuildSession(restoringHistory: compaction.history)
         Task {
             await AgentDiagnosticsRecorder.shared.recordCompaction(
                 turnCount: turnCount,
@@ -1398,7 +1405,7 @@ public final class ChatStore {
         }
         // A skill created by skill-creator becomes available to the next turn
         // without requiring an app restart or a manual Skills reload.
-        refreshSkillsIfNeeded()
+        await refreshSkillsIfNeeded()
         await persistSession(for: turboThreadID)
     }
 
@@ -1436,38 +1443,36 @@ public final class ChatStore {
         }
         // A skill created by skill-creator becomes available to the next turn
         // without requiring an app restart or a manual Skills reload.
-        refreshSkillsIfNeeded()
+        await refreshSkillsIfNeeded()
         if let conversationID, activeThreadId == conversationID {
             await persistSession(for: conversationID)
         }
     }
 
-    public func interrupt() {
-        agentRuntime.requestOperationCancellation()
+    public func interrupt() async {
+        await agentRuntime.requestOperationCancellation()
         let shouldInterruptCodex = activeBackend == .codex
         let approvals = toolInteractionStore.takeAllApprovals()
         toolInteractionStore.clearActivities()
-        Task {
-            if shouldInterruptCodex {
-                await codexRuntimeStore.interrupt()
-            }
-            // Stop is terminal for the current response. Reject every approval
-            // removed from its transient UI so neither a native continuation
-            // nor a Codex server request remains orphaned.
-            for request in approvals {
-                do {
-                    if try await codexRuntimeStore.resolveApproval(
-                        id: request.id,
-                        approved: false
-                    ) {
-                        continue
-                    }
-                } catch {
-                    // The local registry remains the fallback when the request
-                    // did not originate from Codex or its turn already ended.
+        if shouldInterruptCodex {
+            await codexRuntimeStore.interrupt()
+        }
+        // Stop is terminal for the current response. Reject every approval
+        // removed from its transient UI so neither a native continuation
+        // nor a Codex server request remains orphaned.
+        for request in approvals {
+            do {
+                if try await codexRuntimeStore.resolveApproval(
+                    id: request.id,
+                    approved: false
+                ) {
+                    continue
                 }
-                _ = await ToolApprovalRegistry.shared.reject(id: request.id)
+            } catch {
+                // The local registry remains the fallback when the request
+                // did not originate from Codex or its turn already ended.
             }
+            _ = await ToolApprovalRegistry.shared.reject(id: request.id)
         }
     }
 
@@ -1759,19 +1764,16 @@ public final class ChatStore {
 
     /// Projects context transitions through the runtime owner so the timeline
     /// never retains a stale thread or backend after navigation settles.
-    private func projectRuntimeCommand(_ command: RuntimeCommand) {
-        guard agentRuntime.apply(command) else { return }
-        timelineStore.applyRuntimeSnapshot(agentRuntime.snapshot)
+    private func projectRuntimeCommand(_ command: RuntimeCommand) async {
+        _ = await agentRuntime.apply(command)
     }
 
     /// Projects only events accepted by the runtime owner. `/task` is an app
     /// command rather than a backend session, so the facade is its adapter and
     /// must still pass through the same stale-TurnID gate as native and Codex.
     @discardableResult
-    private func projectRuntimeEvent(_ event: AgentRuntimeEvent) -> Bool {
-        guard agentRuntime.apply(event) else { return false }
-        timelineStore.applyRuntimeSnapshot(agentRuntime.snapshot)
-        return true
+    private func projectRuntimeEvent(_ event: AgentRuntimeEvent) async -> Bool {
+        await agentRuntime.apply(event)
     }
 
     private func cancelCodexSelection() {
@@ -1784,12 +1786,7 @@ public final class ChatStore {
     /// persistence pass target the old conversation before the new timeline or
     /// workspace is installed.
     private func finishActiveResponseBeforeTransition() async {
-        agentRuntime.beginQuiescence()
-        timelineStore.applyRuntimeSnapshot(agentRuntime.snapshot)
-        defer {
-            agentRuntime.endQuiescence()
-            timelineStore.applyRuntimeSnapshot(agentRuntime.snapshot)
-        }
+        await agentRuntime.beginQuiescence()
 
         if let selectionTask = codexSelectionTask {
             selectionTask.cancel()
@@ -1802,6 +1799,7 @@ public final class ChatStore {
             await handoffTask.value
             codexHandoffTask = nil
         }
+        await agentRuntime.endQuiescence()
     }
 
     private func activityReceiptBlock(for receiptID: String) -> ChatBlock? {

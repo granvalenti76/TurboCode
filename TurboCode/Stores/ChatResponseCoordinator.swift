@@ -33,10 +33,6 @@ final class ChatResponseCoordinator {
     private var completedRootWrite: String?
     private var pendingCoordinatorTool: AgentActivityTool?
     private var runtimeToolStartedAt: [String: Date] = [:]
-    var currentTurnState: TurnState? {
-        agentRuntime.currentTurnState
-    }
-
     init(
         timeline: ChatTimelineStore,
         toolInteractions: ToolInteractionStore,
@@ -62,7 +58,7 @@ final class ChatResponseCoordinator {
     var modelSessionEvents: ModelSessionEvents {
         ModelSessionEvents(
             currentTurnID: { [weak self] in
-                self?.currentTurnState?.id
+                await self?.currentTurnState()?.id
             },
             toolStarted: { [weak self] call, backend, owner in
                 await self?.toolStarted(
@@ -100,19 +96,23 @@ final class ChatResponseCoordinator {
     /// Keeps the runtime identity at the coordinator boundary while the
     /// existing provider runners remain unchanged. A later callback may still
     /// arrive after cancellation, so presentation code can reject it by ID.
-    func ownsTurn(_ turnID: TurnID) -> Bool {
-        agentRuntime.owns(turnID)
+    func ownsTurn(_ turnID: TurnID) async -> Bool {
+        await agentRuntime.owns(turnID)
     }
 
-    private func beginTurn(_ request: TurnRequest) {
-        guard acceptRuntimeEvent(.started(request)) else { return }
+    private func currentTurnState() async -> TurnState? {
+        await agentRuntime.currentTurnState
+    }
+
+    private func beginTurn(_ request: TurnRequest) async {
+        guard await acceptRuntimeEvent(.started(request)) else { return }
         runtimeToolStartedAt.removeAll(keepingCapacity: true)
-        _ = advanceTurn(to: .preparing, turnID: request.id)
+        _ = await advanceTurn(to: .preparing, turnID: request.id)
     }
 
     @discardableResult
-    private func advanceTurn(to phase: TurnPhase, turnID: TurnID) -> Bool {
-        acceptRuntimeEvent(
+    private func advanceTurn(to phase: TurnPhase, turnID: TurnID) async -> Bool {
+        await acceptRuntimeEvent(
             .phaseChanged(turnID: turnID, phase: phase, at: Date())
         )
     }
@@ -120,24 +120,20 @@ final class ChatResponseCoordinator {
     private func finishTurn(
         _ outcome: TurnOutcome,
         turnID: TurnID
-    ) {
-        _ = acceptRuntimeEvent(
+    ) async {
+        _ = await acceptRuntimeEvent(
             .completed(turnID: turnID, outcome: outcome, at: Date())
         )
         runtimeToolStartedAt.removeAll(keepingCapacity: true)
     }
 
     /// Accepts lifecycle and ownership changes before any event reaches a UI
-    /// projection. Snapshot equality suppresses idempotent backend `.started`
-    /// echoes and content-only events, preserving the publication baseline.
+    /// projection. The actor publishes changed snapshots through its output
+    /// port; content-only events still pass the TurnID gate without invalidating
+    /// presentation state on every streamed token.
     @discardableResult
-    private func acceptRuntimeEvent(_ event: AgentRuntimeEvent) -> Bool {
-        let previous = agentRuntime.snapshot
-        guard agentRuntime.apply(event) else { return false }
-        if agentRuntime.snapshot != previous {
-            projectRuntimeSnapshot()
-        }
-        return true
+    private func acceptRuntimeEvent(_ event: AgentRuntimeEvent) async -> Bool {
+        await agentRuntime.apply(event)
     }
 
     /// Backend completion is settled after the coordinator has finalized its
@@ -145,17 +141,13 @@ final class ChatResponseCoordinator {
     /// so stale content, tool, and approval callbacks are rejected uniformly.
     /// A redundant phase is not a reason to drop a current tool payload: native
     /// widgets remain presentation projections, independent of reducer idempotency.
-    private func acceptBackendEvent(_ event: AgentRuntimeEvent) -> Bool {
-        guard ownsTurn(event.turnID) else { return false }
+    private func acceptBackendEvent(_ event: AgentRuntimeEvent) async -> Bool {
+        guard await ownsTurn(event.turnID) else { return false }
         if case .completed = event {
             return true
         }
-        _ = acceptRuntimeEvent(event)
+        _ = await acceptRuntimeEvent(event)
         return true
-    }
-
-    private func projectRuntimeSnapshot() {
-        timeline.applyRuntimeSnapshot(agentRuntime.snapshot)
     }
 
     /// Carries profile-owned Codex choices across the timeline boundary while
@@ -178,7 +170,7 @@ final class ChatResponseCoordinator {
         modelName: String
     ) async -> Result {
         let placeholderID = UUID().uuidString
-        beginTurn(
+        await beginTurn(
             TurnRequest(
                 id: turnID,
                 prompt: promptText,
@@ -187,7 +179,7 @@ final class ChatResponseCoordinator {
                 workspaceRoot: workspaceRoot
             )
         )
-        _ = advanceTurn(to: .streaming, turnID: turnID)
+        _ = await advanceTurn(to: .streaming, turnID: turnID)
         timeline.beginResponse(
             displayText: visibleInTimeline ? displayText : nil,
             placeholderID: placeholderID,
@@ -224,7 +216,7 @@ final class ChatResponseCoordinator {
                 reasoningEffort: codexReasoningEffort,
                 delegationInvoker: delegationInvoker,
                 activityStarted: { [weak self] call, summary in
-                    guard let self, self.ownsTurn(turnID) else { return }
+                    guard let self, await self.ownsTurn(turnID) else { return }
                     self.toolInteractions.beginActivity(
                         id: call.callID,
                         toolName: call.tool,
@@ -242,17 +234,17 @@ final class ChatResponseCoordinator {
                     )
                 },
                 activityEnded: { [weak self] id in
-                    guard let self, self.ownsTurn(turnID) else { return }
+                    guard let self, await self.ownsTurn(turnID) else { return }
                     self.toolInteractions.endActivity(id: id)
                     self.coordinatorToolFinished(callID: id)
                 },
                 presentationRequested: { [weak self] presentation in
-                    guard let self, self.ownsTurn(turnID) else { return }
+                    guard let self, await self.ownsTurn(turnID) else { return }
                     self.present(presentation)
                 },
                 approvalRequested: { [weak self] request in
-                    guard let self, self.ownsTurn(turnID) else { return }
-                    _ = self.acceptRuntimeEvent(
+                    guard let self, await self.ownsTurn(turnID) else { return }
+                    _ = await self.acceptRuntimeEvent(
                         .approvalRequested(
                             Self.runtimeApproval(from: request, turnID: turnID)
                         )
@@ -263,7 +255,7 @@ final class ChatResponseCoordinator {
             events: BackendSessionEvents { [weak self] event in
                 guard let self,
                       event.turnID == turnID,
-                      self.acceptBackendEvent(event) else {
+                      await self.acceptBackendEvent(event) else {
                     return
                 }
                 switch event {
@@ -291,7 +283,7 @@ final class ChatResponseCoordinator {
             outcome: backendResult.outcome
         )
 
-        guard ownsTurn(turnID) else {
+        guard await ownsTurn(turnID) else {
             await recordResponseBoundaries(
                 backend: .codex,
                 settlementStartedAt: settlementStartedAt,
@@ -324,8 +316,8 @@ final class ChatResponseCoordinator {
                 assistantBlock: assistantBlock,
                 reasoningBlock: reasoningBlock
             )
-            _ = advanceTurn(to: .settling, turnID: turnID)
-            finishTurn(.succeeded, turnID: turnID)
+            _ = await advanceTurn(to: .settling, turnID: turnID)
+            await finishTurn(.succeeded, turnID: turnID)
             result = Result(errorMessage: nil, touchedConversation: true)
         case .cancelled:
             let partialText = backendResult.assistantText.isEmpty
@@ -342,7 +334,7 @@ final class ChatResponseCoordinator {
                     model: modelName
                 )
             )
-            finishTurn(.cancelled(reason: "The turn was interrupted."), turnID: turnID)
+            await finishTurn(.cancelled(reason: "The turn was interrupted."), turnID: turnID)
         case .failed(let failure) where failure.code == "codex.authentication":
             timeline.replaceBlock(
                 id: placeholderID,
@@ -353,7 +345,7 @@ final class ChatResponseCoordinator {
                     model: modelName
                 )
             )
-            finishTurn(
+            await finishTurn(
                 .failed(
                     TurnFailure(
                         code: "codex.authentication",
@@ -377,7 +369,7 @@ final class ChatResponseCoordinator {
                 errorMessage: failure.message,
                 touchedConversation: false
             )
-            finishTurn(
+            await finishTurn(
                 .failed(
                     TurnFailure(
                         code: "codex.request",
@@ -388,7 +380,8 @@ final class ChatResponseCoordinator {
             )
         }
 
-        guard ownsTurn(turnID) || currentTurnState?.id == turnID else {
+        let settledTurnID = await currentTurnState()?.id
+        guard await ownsTurn(turnID) || settledTurnID == turnID else {
             return Result(errorMessage: nil, touchedConversation: false)
         }
         timeline.finishResponse(placeholderID: placeholderID)
@@ -422,7 +415,7 @@ final class ChatResponseCoordinator {
         let editGroupID = UUID().uuidString
         activeEditGroupID = editGroupID
         let placeholderID = UUID().uuidString
-        beginTurn(
+        await beginTurn(
             TurnRequest(
                 id: turnID,
                 prompt: promptText,
@@ -453,16 +446,16 @@ final class ChatResponseCoordinator {
                 workspaceKind: workspaceKind,
                 serverURL: serverURL,
                 diagnosticsChanged: { [weak self] runID in
-                    guard let self, self.ownsTurn(turnID) else { return }
+                    guard let self, await self.ownsTurn(turnID) else { return }
                     self.activeDiagnosticsRunID = runID
                 },
                 contextChanged: { [weak self] usage in
-                    guard let self, self.ownsTurn(turnID) else { return }
+                    guard let self, await self.ownsTurn(turnID) else { return }
                     contextChanged(usage)
                 },
                 approvalRequested: { [weak self] request in
-                    guard let self, self.ownsTurn(turnID) else { return }
-                    _ = self.acceptRuntimeEvent(
+                    guard let self, await self.ownsTurn(turnID) else { return }
+                    _ = await self.acceptRuntimeEvent(
                         .approvalRequested(
                             Self.runtimeApproval(from: request, turnID: turnID)
                         )
@@ -473,7 +466,7 @@ final class ChatResponseCoordinator {
             events: BackendSessionEvents { [weak self] event in
                 guard let self,
                       event.turnID == turnID,
-                      self.acceptBackendEvent(event) else {
+                      await self.acceptBackendEvent(event) else {
                     return
                 }
                 switch event {
@@ -490,9 +483,9 @@ final class ChatResponseCoordinator {
             }
         )
         let settlementStartedAt = Date()
-        _ = advanceTurn(to: .streaming, turnID: turnID)
+        _ = await advanceTurn(to: .streaming, turnID: turnID)
         isDelegating = false
-        guard ownsTurn(turnID) else {
+        guard await ownsTurn(turnID) else {
             await recordResponseBoundaries(
                 backend: backend,
                 settlementStartedAt: settlementStartedAt,
@@ -537,8 +530,8 @@ final class ChatResponseCoordinator {
                 assistantBlock: assistantBlock,
                 reasoningBlock: reasoningBlock
             )
-            _ = advanceTurn(to: .settling, turnID: turnID)
-            finishTurn(.succeeded, turnID: turnID)
+            _ = await advanceTurn(to: .settling, turnID: turnID)
+            await finishTurn(.succeeded, turnID: turnID)
             result = Result(errorMessage: nil, touchedConversation: true)
         case .failed(let failure) where failure.code == "native.repetitiveOutput":
             let stoppedText = completedRootWrite.map { "Created `\($0)`." }
@@ -552,7 +545,7 @@ final class ChatResponseCoordinator {
                     model: modelName
                 )
             )
-            finishTurn(
+            await finishTurn(
                 .failed(
                     TurnFailure(
                         code: "model.repetitiveOutput",
@@ -577,7 +570,7 @@ final class ChatResponseCoordinator {
                     model: modelName
                 )
             )
-            finishTurn(
+            await finishTurn(
                 .cancelled(reason: "The turn was interrupted."),
                 turnID: turnID
             )
@@ -596,7 +589,7 @@ final class ChatResponseCoordinator {
                 errorMessage: message,
                 touchedConversation: false
             )
-            finishTurn(
+            await finishTurn(
                 .failed(TurnFailure(code: "provider.request", message: message)),
                 turnID: turnID
             )
@@ -704,10 +697,10 @@ final class ChatResponseCoordinator {
         backend: ModelBackend,
         owner: AgentActivityToolOwner
     ) async {
-        guard let turnID = currentTurnState?.id else { return }
+        guard let turnID = await currentTurnState()?.id else { return }
         let startedAt = Date()
-        guard ownsTurn(turnID) else { return }
-        _ = acceptRuntimeEvent(
+        guard await ownsTurn(turnID) else { return }
+        _ = await acceptRuntimeEvent(
             .toolStarted(
                 ToolCall(
                     id: call.id,
@@ -751,7 +744,7 @@ final class ChatResponseCoordinator {
         owner: AgentActivityToolOwner,
         workspaceName: String?
     ) async {
-        guard let turnID = currentTurnState?.id else { return }
+        guard let turnID = await currentTurnState()?.id else { return }
         let outputText = output.segments.compactMap { segment -> String? in
             switch segment {
             case .text(let value):
@@ -763,8 +756,8 @@ final class ChatResponseCoordinator {
             }
         }.joined()
         let startedAt = runtimeToolStartedAt.removeValue(forKey: call.id)
-        guard ownsTurn(turnID) else { return }
-        _ = acceptRuntimeEvent(
+        guard await ownsTurn(turnID) else { return }
+        _ = await acceptRuntimeEvent(
             .toolFinished(
                 ToolResult(
                     id: call.id,

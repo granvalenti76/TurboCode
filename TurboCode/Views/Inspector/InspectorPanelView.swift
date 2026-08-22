@@ -514,7 +514,7 @@ private struct AgentActivityInspectorView: View {
 
             if !activity.phase.isTerminal, chatStore.busy {
                 Button {
-                    chatStore.interrupt()
+                    Task { await chatStore.interrupt() }
                 } label: {
                     Image(systemName: "stop.fill")
                 }

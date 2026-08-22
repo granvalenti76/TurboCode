@@ -299,7 +299,7 @@ struct InputFieldView: View {
                 Menu {
                     Section("Default Profiles") {
                         Button {
-                            chatStore.selectBuiltInProfile(.onDevice)
+                            Task { await chatStore.selectBuiltInProfile(.onDevice) }
                         } label: {
                             if chatStore.activeDynamicProfileID == nil,
                                chatStore.activeBackend == .foundationApple {
@@ -313,7 +313,7 @@ struct InputFieldView: View {
 
                         ForEach(chatStore.enabledRemoteModels) { model in
                             Button {
-                                chatStore.switchRemoteModel(to: model.id)
+                                Task { await chatStore.switchRemoteModel(to: model.id) }
                             } label: {
                                 if chatStore.activeDynamicProfileID == nil,
                                    chatStore.activeRemoteModelID == model.id,
@@ -331,7 +331,7 @@ struct InputFieldView: View {
                         Section("Custom Profiles") {
                             ForEach(chatStore.dynamicProfiles) { profile in
                                 Button {
-                                    chatStore.selectDynamicProfile(profile.id)
+                                    Task { await chatStore.selectDynamicProfile(profile.id) }
                                 } label: {
                                     if chatStore.activeDynamicProfileID == profile.id {
                                         Label(profile.name, systemImage: "checkmark")
@@ -350,7 +350,7 @@ struct InputFieldView: View {
                             ForEach(ReasoningEffort.allCases, id: \.self) { effort in
                                 Button {
                                     reasoningEffort = effort
-                                    chatStore.setReasoningEffort(effort)
+                                    Task { await chatStore.setReasoningEffort(effort) }
                                 } label: {
                                     if reasoningEffort == effort {
                                         Label(
@@ -496,7 +496,7 @@ struct InputFieldView: View {
 
     private func sendComposerInput() {
         if chatStore.busy {
-            chatStore.interrupt()
+            Task { await chatStore.interrupt() }
             return
         }
         let text = chatStore.composerInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -603,7 +603,7 @@ struct InputFieldView: View {
         Menu {
             Section("Profiles") {
                 Button {
-                    chatStore.selectDirectExecution()
+                    Task { await chatStore.selectDirectExecution() }
                 } label: {
                     if chatStore.activeDynamicProfile == nil,
                        chatStore.orchestratorMode == .standalone {
@@ -614,7 +614,7 @@ struct InputFieldView: View {
                 }
                 ForEach(chatStore.dynamicProfiles) { profile in
                     Button {
-                        chatStore.selectDynamicProfile(profile.id)
+                        Task { await chatStore.selectDynamicProfile(profile.id) }
                     } label: {
                         if chatStore.activeDynamicProfileID == profile.id,
                            chatStore.orchestratorMode == .standalone {
@@ -632,7 +632,7 @@ struct InputFieldView: View {
 
             Section("Compatibility") {
                 Button {
-                    chatStore.orchestratorMode = .orchestrator
+                    Task { await chatStore.setOrchestratorMode(.orchestrator) }
                 } label: {
                     if chatStore.orchestratorMode == .orchestrator {
                         Label(
