@@ -66,6 +66,7 @@ public final class ChatStore {
     let reviewDraftStore: ReviewDraftStore
     let codexRuntimeStore: CodexRuntimeStore
     let modelRuntimeStore: ModelRuntimeStore
+    let agentRuntime: AgentRuntime
     let responseCoordinator: ChatResponseCoordinator
     private let reviewCoordinator: ReviewCoordinator
 
@@ -132,12 +133,14 @@ public final class ChatStore {
         self.reviewDraftStore = reviewDraft
         self.codexRuntimeStore = codexRuntime
         self.modelRuntimeStore = ModelRuntimeStore()
+        self.agentRuntime = AgentRuntime()
         self.responseCoordinator = ChatResponseCoordinator(
             timeline: timeline,
             toolInteractions: toolInteractions,
             agentActivity: agentActivity,
             codexRuntime: codexRuntime,
-            nativeRunner: nativeRunner
+            nativeRunner: nativeRunner,
+            agentRuntime: agentRuntime
         )
         self.reviewCoordinator = ReviewCoordinator(
             timeline: timeline,

@@ -21,6 +21,7 @@ final class ChatResponseCoordinator {
     private let agentActivity: AgentActivityStore
     private let codexRuntime: CodexRuntimeStore
     private let nativeRunner: any NativeResponseRunning
+    private let agentRuntime: AgentRuntime
 
     private(set) var isDelegating = false
     private(set) var activeEditGroupID: String?
@@ -28,11 +29,8 @@ final class ChatResponseCoordinator {
     private var productGuidePresentation: ProductGuideBlock?
     private var completedRootWrite: String?
     private var pendingCoordinatorTool: AgentActivityTool?
-    /// The reducer owns lifecycle transitions; the coordinator only exposes
-    /// the current value while it continues to own timeline/tool projection.
-    private var turnReducer = TurnStateReducer()
     var currentTurnState: TurnState? {
-        turnReducer.state
+        agentRuntime.currentTurnState
     }
 
     init(
@@ -40,37 +38,39 @@ final class ChatResponseCoordinator {
         toolInteractions: ToolInteractionStore,
         agentActivity: AgentActivityStore,
         codexRuntime: CodexRuntimeStore,
-        nativeRunner: any NativeResponseRunning
+        nativeRunner: any NativeResponseRunning,
+        agentRuntime: AgentRuntime = AgentRuntime()
     ) {
         self.timeline = timeline
         self.toolInteractions = toolInteractions
         self.agentActivity = agentActivity
         self.codexRuntime = codexRuntime
         self.nativeRunner = nativeRunner
+        self.agentRuntime = agentRuntime
     }
 
     /// Keeps the runtime identity at the coordinator boundary while the
     /// existing provider runners remain unchanged. A later callback may still
     /// arrive after cancellation, so presentation code can reject it by ID.
     func ownsTurn(_ turnID: TurnID) -> Bool {
-        turnReducer.owns(turnID)
+        agentRuntime.owns(turnID)
     }
 
     private func beginTurn(_ request: TurnRequest) {
-        turnReducer.begin(request)
+        agentRuntime.begin(request)
         _ = advanceTurn(to: .preparing, turnID: request.id)
     }
 
     @discardableResult
     private func advanceTurn(to phase: TurnPhase, turnID: TurnID) -> Bool {
-        turnReducer.advance(to: phase, turnID: turnID, at: Date())
+        agentRuntime.advance(to: phase, turnID: turnID, at: Date())
     }
 
     private func finishTurn(
         _ outcome: TurnOutcome,
         turnID: TurnID
     ) {
-        _ = turnReducer.finish(with: outcome, turnID: turnID, at: Date())
+        _ = agentRuntime.finish(with: outcome, turnID: turnID, at: Date())
     }
 
     /// Carries profile-owned Codex choices across the timeline boundary while
