@@ -500,6 +500,9 @@ public final class ChatStore {
     /// transport, including Codex's dynamically advertised delegation tool.
     private var modelSessionEvents: ModelSessionEvents {
         ModelSessionEvents(
+            currentTurnID: { [weak self] in
+                self?.responseCoordinator.currentTurnState?.id
+            },
             toolStarted: { [weak self] call, backend, owner in
                 await self?.responseCoordinator.toolStarted(
                     call,
@@ -1096,7 +1099,11 @@ public final class ChatStore {
         busy = true
         let task = Task<Void, Never> { [weak self] in
             guard let self else { return }
-            let result = await invoker.invoke(envelope)
+            let result = await AgentTaskInvocation.invoke(
+                invoker,
+                envelope: envelope,
+                parentTurnID: turnID
+            )
             guard !Task.isCancelled else { return }
             await self.finishIndependentTask(
                 command: command,

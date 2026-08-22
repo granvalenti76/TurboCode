@@ -72,6 +72,30 @@ struct AgentActivityRuntimeIntegrationTests {
         #expect(store.current?.finalResult == result)
     }
 
+    @Test("Turn-aware invocation carries parent ownership into the worker envelope")
+    func turnAwareInvocationCarriesParentOwnership() async throws {
+        let recorder = ParentTurnRecorder()
+        let invoker = ConfiguredAgentTaskInvoker(
+            runner: ParentTurnRecordingRunner(recorder: recorder),
+            context: AgentTaskRunContext(
+                model: SystemLanguageModel.default,
+                tools: [],
+                instructions: "Test worker.",
+                temperature: nil,
+                reasoningLevel: nil
+            ),
+            events: .none
+        )
+        let parent = TurnID(rawValue: "parent-turn")
+
+        _ = await invoker.invoke(
+            try makeEnvelope(),
+            parentTurnID: parent
+        )
+
+        #expect(await recorder.value == parent)
+    }
+
     @Test("Foundation Models and Codex tool calls share the Activity shape")
     func providerToolCallsShareMapping() {
         let foundationCall = Transcript.ToolCall(
@@ -182,6 +206,33 @@ struct AgentActivityRuntimeIntegrationTests {
             attemptID: attemptID,
             goal: "Exercise Activity event wiring.",
             acceptanceCriteria: ["Activity reaches the matching terminal state."]
+        )
+    }
+}
+
+private actor ParentTurnRecorder {
+    private(set) var value: TurnID?
+
+    func record(_ value: TurnID?) {
+        self.value = value
+    }
+}
+
+private nonisolated struct ParentTurnRecordingRunner: AgentTaskRunning {
+    let recorder: ParentTurnRecorder
+
+    @MainActor
+    func run(
+        envelope: AgentTaskEnvelope,
+        context: AgentTaskRunContext,
+        events: AgentTaskRunnerEvents
+    ) async -> AgentTaskResult {
+        await recorder.record(envelope.parentTurnID)
+        return try! AgentTaskResult(
+            taskID: envelope.taskID,
+            attemptID: envelope.attemptID,
+            outcome: .completed,
+            technicalSummary: "Parent turn recorded."
         )
     }
 }

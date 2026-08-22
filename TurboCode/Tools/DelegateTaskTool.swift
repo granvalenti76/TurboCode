@@ -52,8 +52,36 @@ nonisolated protocol AgentTaskInvoking: Sendable {
     func invoke(_ envelope: AgentTaskEnvelope) async -> AgentTaskResult
 }
 
+/// Optional extension of the invocation boundary for adapters that can carry
+/// the owning application turn into a worker envelope. Keeping this separate
+/// preserves older test and provider invokers while the harness migrates them.
+nonisolated protocol TurnAwareAgentTaskInvoking: AgentTaskInvoking {
+    @MainActor
+    func invoke(
+        _ envelope: AgentTaskEnvelope,
+        parentTurnID: TurnID?
+    ) async -> AgentTaskResult
+}
+
+nonisolated enum AgentTaskInvocation {
+    @MainActor
+    static func invoke(
+        _ invoker: any AgentTaskInvoking,
+        envelope: AgentTaskEnvelope,
+        parentTurnID: TurnID?
+    ) async -> AgentTaskResult {
+        if let turnAware = invoker as? any TurnAwareAgentTaskInvoking {
+            return await turnAware.invoke(
+                envelope,
+                parentTurnID: parentTurnID
+            )
+        }
+        return await invoker.invoke(envelope)
+    }
+}
+
 /// Binds a routed worker context to the bounded task runner.
-nonisolated struct ConfiguredAgentTaskInvoker: AgentTaskInvoking {
+nonisolated struct ConfiguredAgentTaskInvoker: TurnAwareAgentTaskInvoking {
     let runner: any AgentTaskRunning
     let context: AgentTaskRunContext
     let events: AgentTaskRunnerEvents
@@ -81,10 +109,21 @@ nonisolated struct ConfiguredAgentTaskInvoker: AgentTaskInvoking {
 
     @MainActor
     func invoke(_ envelope: AgentTaskEnvelope) async -> AgentTaskResult {
+        return await invoke(envelope, parentTurnID: envelope.parentTurnID)
+    }
+
+    @MainActor
+    func invoke(
+        _ envelope: AgentTaskEnvelope,
+        parentTurnID: TurnID?
+    ) async -> AgentTaskResult {
+        let scopedEnvelope = (try? envelope.withParentTurnID(
+            parentTurnID ?? envelope.parentTurnID
+        )) ?? envelope
         if let coordinator, let worker {
             await activityChanged(
                 .started(
-                    envelope: envelope,
+                    envelope: scopedEnvelope,
                     coordinator: coordinator,
                     worker: worker,
                     startedAt: .now
@@ -92,8 +131,8 @@ nonisolated struct ConfiguredAgentTaskInvoker: AgentTaskInvoking {
             )
             await activityChanged(
                 .phaseChanged(
-                    taskID: envelope.taskID,
-                    attemptID: envelope.attemptID,
+                    taskID: scopedEnvelope.taskID,
+                    attemptID: scopedEnvelope.attemptID,
                     phase: .delegating
                 )
             )
@@ -101,15 +140,15 @@ nonisolated struct ConfiguredAgentTaskInvoker: AgentTaskInvoking {
             // it is the deterministic handoff boundary.
             await activityChanged(
                 .phaseChanged(
-                    taskID: envelope.taskID,
-                    attemptID: envelope.attemptID,
+                    taskID: scopedEnvelope.taskID,
+                    attemptID: scopedEnvelope.attemptID,
                     phase: .workerRunning
                 )
             )
         }
 
         let result = await runner.run(
-            envelope: envelope,
+            envelope: scopedEnvelope,
             context: context,
             events: events
         )
@@ -129,6 +168,15 @@ struct DelegateTaskTool: Tool {
     typealias Output = String
 
     let invoker: any AgentTaskInvoking
+    let currentTurnID: @MainActor @Sendable () -> TurnID?
+
+    init(
+        invoker: any AgentTaskInvoking,
+        currentTurnID: @escaping @MainActor @Sendable () -> TurnID? = { nil }
+    ) {
+        self.invoker = invoker
+        self.currentTurnID = currentTurnID
+    }
 
     var name: String { "delegate_task" }
     var description: String {
@@ -145,7 +193,11 @@ struct DelegateTaskTool: Tool {
 
     func call(arguments: DelegateTaskArguments) async throws -> String {
         let envelope = try arguments.envelope()
-        let result = await invoker.invoke(envelope)
+        let result = await AgentTaskInvocation.invoke(
+            invoker,
+            envelope: envelope,
+            parentTurnID: currentTurnID()
+        )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(result)

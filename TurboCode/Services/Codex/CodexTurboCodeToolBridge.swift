@@ -293,7 +293,8 @@ nonisolated enum CodexTurboCodeToolBridge {
         workspaceName: String?,
         agentTuning: AgentTuningConfig,
         availableSkills: [TurboCodeSkillDefinition] = [],
-        delegationInvoker: (any AgentTaskInvoking)? = nil
+        delegationInvoker: (any AgentTaskInvoking)? = nil,
+        parentTurnID: TurnID? = nil
     ) async throws -> CodexToolExecution {
         switch call.tool {
         case "list_workspace":
@@ -410,7 +411,11 @@ nonisolated enum CodexTurboCodeToolBridge {
                 throw CodexToolBridgeError.unsupportedTool(call.tool)
             }
             let arguments = try delegateTaskArguments(call)
-            let result = await delegationInvoker.invoke(try arguments.envelope())
+            let result = await AgentTaskInvocation.invoke(
+                delegationInvoker,
+                envelope: try arguments.envelope(),
+                parentTurnID: parentTurnID
+            )
             let data = try JSONEncoder().encode(result)
             guard let json = String(data: data, encoding: .utf8) else {
                 throw AgentTaskWorkerError.invalidEnvelopeEncoding

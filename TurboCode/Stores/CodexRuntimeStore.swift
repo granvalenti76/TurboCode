@@ -13,6 +13,8 @@ import FoundationModels
 @Observable
 final class CodexRuntimeStore {
     struct TurnRequest {
+        /// Harness-owned identity used to scope nested delegate_task work.
+        let turnID: TurnID
         let turboThreadID: String
         let prompt: String
         let workspaceRoot: String
@@ -337,7 +339,8 @@ final class CodexRuntimeStore {
                         workspaceName: request.workspaceName,
                         agentTuning: request.agentTuning,
                         availableSkills: request.availableSkills,
-                        delegationInvoker: request.delegationInvoker
+                        delegationInvoker: request.delegationInvoker,
+                        parentTurnID: request.turnID
                     )
                     if let presentation = execution.presentation {
                         events.presentationRequested(presentation)

@@ -26,6 +26,10 @@ struct ModelSessionConfiguration {
 }
 
 struct ModelSessionEvents {
+    /// Reads the currently admitted application turn at tool invocation time.
+    /// Sessions can outlive individual turns, so this must be a provider and
+    /// not a value captured while the session is being built.
+    let currentTurnID: @MainActor @Sendable () -> TurnID?
     let toolStarted: @Sendable (
         Transcript.ToolCall,
         ModelBackend,
@@ -43,6 +47,7 @@ struct ModelSessionEvents {
     ) async -> Void
 
     init(
+        currentTurnID: @escaping @MainActor @Sendable () -> TurnID? = { nil },
         toolStarted: @escaping @Sendable (
             Transcript.ToolCall,
             ModelBackend,
@@ -59,6 +64,7 @@ struct ModelSessionEvents {
             AgentActivityRuntimeEvent
         ) async -> Void = { _ in }
     ) {
+        self.currentTurnID = currentTurnID
         self.toolStarted = toolStarted
         self.toolFinished = toolFinished
         self.delegationChanged = delegationChanged
@@ -227,7 +233,8 @@ enum ModelSessionFactory {
                     invoker: makeDelegateInvoker(
                         configuration: configuration,
                         events: events
-                    )
+                    ),
+                    currentTurnID: events.currentTurnID
                 )
             )
         }

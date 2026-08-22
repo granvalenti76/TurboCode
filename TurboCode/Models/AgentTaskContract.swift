@@ -104,6 +104,10 @@ nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
     let verificationRequest: VerificationRequest
     let verificationParameters: AgentVerificationParameters?
     let budget: DelegationBudget
+    /// Links a worker task to the application turn that owns its result.
+    /// This is runtime bookkeeping and is never exposed in model-generated
+    /// delegate_task arguments.
+    let parentTurnID: TurnID?
 
     init(
         schemaVersion: Int = currentSchemaVersion,
@@ -115,7 +119,8 @@ nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
         suggestedScope: [String] = [],
         verificationRequest: VerificationRequest = .none,
         verificationParameters: AgentVerificationParameters? = nil,
-        budget: DelegationBudget = .default
+        budget: DelegationBudget = .default,
+        parentTurnID: TurnID? = nil
     ) throws {
         self.schemaVersion = schemaVersion
         self.taskID = taskID
@@ -127,6 +132,7 @@ nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
         self.verificationRequest = verificationRequest
         self.verificationParameters = verificationParameters
         self.budget = budget
+        self.parentTurnID = parentTurnID
         try validate()
     }
 
@@ -155,6 +161,7 @@ nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
             forKey: .verificationParameters
         )
         budget = try values.decodeIfPresent(DelegationBudget.self, forKey: .budget) ?? .default
+        parentTurnID = try values.decodeIfPresent(TurnID.self, forKey: .parentTurnID)
 
         do {
             try validate()
@@ -172,6 +179,25 @@ nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
     func validated() throws -> Self {
         try validate()
         return self
+    }
+
+    /// Adds runtime ownership after a model-facing tool has produced the
+    /// envelope. Keeping this separate prevents provider schemas from
+    /// authoring application lifecycle identifiers.
+    func withParentTurnID(_ parentTurnID: TurnID?) throws -> Self {
+        try Self(
+            schemaVersion: schemaVersion,
+            taskID: taskID,
+            attemptID: attemptID,
+            mode: mode,
+            goal: goal,
+            acceptanceCriteria: acceptanceCriteria,
+            suggestedScope: suggestedScope,
+            verificationRequest: verificationRequest,
+            verificationParameters: verificationParameters,
+            budget: budget,
+            parentTurnID: parentTurnID
+        )
     }
 
     private func validate() throws {

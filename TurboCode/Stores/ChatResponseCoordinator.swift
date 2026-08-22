@@ -128,6 +128,7 @@ final class ChatResponseCoordinator {
         do {
             let response = try await codexRuntime.runTurn(
                 request: CodexRuntimeStore.TurnRequest(
+                    turnID: turnID,
                     turboThreadID: turboThreadID,
                     prompt: promptText,
                     workspaceRoot: workspaceRoot,

@@ -79,6 +79,28 @@ struct RuntimeContractsTests {
         )
     }
 
+    @Test("Worker envelopes preserve parent turn ownership without changing tool input")
+    func preservesWorkerParentTurnOwnership() throws {
+        let parent = TurnID(rawValue: "parent-turn")
+        let envelope = try AgentTaskEnvelope(
+            taskID: "task-1",
+            attemptID: "attempt-1",
+            goal: "Inspect the workspace.",
+            acceptanceCriteria: ["Return a result."],
+            parentTurnID: parent
+        )
+
+        let data = try JSONEncoder().encode(envelope)
+        let decoded = try JSONDecoder().decode(
+            AgentTaskEnvelope.self,
+            from: data
+        )
+
+        #expect(decoded.parentTurnID == parent)
+        #expect(decoded.goal == envelope.goal)
+        #expect(decoded.mode == .coding)
+    }
+
     @Test("Independent task completions reject stale and cancelled results")
     func guardsIndependentTaskCompletion() {
         let active = TurnID(rawValue: "active")
