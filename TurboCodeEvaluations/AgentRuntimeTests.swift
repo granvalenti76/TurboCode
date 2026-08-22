@@ -38,7 +38,41 @@ struct AgentRuntimeTests {
         #expect(runtime.apply(.submit(request)))
         #expect(runtime.currentTurnState?.id == turnID)
         #expect(runtime.currentTurnState?.phase == .accepted)
-        #expect(!runtime.apply(.cancel(turnID: turnID)))
+        #expect(runtime.apply(.cancel(turnID: turnID)))
+        #expect(runtime.currentTurnState?.phase == .cancelled)
+        #expect(!runtime.owns(turnID))
+    }
+
+    @Test("Runtime context commands replace only a settled turn")
+    func contextCommandsPublishThreadAndBackend() {
+        let runtime = AgentRuntime()
+        let turnID = TurnID(rawValue: "context-command-turn")
+        runtime.begin(
+            TurnRequest(
+                id: turnID,
+                prompt: "Switch context",
+                backend: .foundationApple,
+                modelName: "test-model",
+                workspaceRoot: "/workspace"
+            )
+        )
+
+        #expect(!runtime.apply(.switchThread(threadID: "new-thread")))
+        #expect(runtime.apply(.cancel(turnID: turnID)))
+        #expect(runtime.apply(.switchThread(threadID: "new-thread")))
+        #expect(runtime.snapshot.activeThreadID == "new-thread")
+        #expect(runtime.snapshot.turn == nil)
+
+        #expect(
+            runtime.apply(
+                .switchBackend(
+                    RuntimeBackendSelection(backend: .llamaServer)
+                )
+            )
+        )
+        #expect(runtime.snapshot.backend == .llamaServer)
+        #expect(runtime.apply(.restore(threadID: "restored-thread")))
+        #expect(runtime.snapshot.activeThreadID == "restored-thread")
     }
 
     @Test("AgentRuntime publishes lifecycle snapshots without owning provider work")

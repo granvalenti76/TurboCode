@@ -125,7 +125,7 @@ nonisolated struct RuntimeBackendSelection: Codable, Hashable, Sendable {
 nonisolated enum RuntimeCommand: Codable, Hashable, Sendable {
     case submit(TurnRequest)
     case cancel(turnID: TurnID)
-    case switchThread(threadID: String)
+    case switchThread(threadID: String?)
     case switchBackend(RuntimeBackendSelection)
     case restore(threadID: String)
 }
@@ -257,6 +257,10 @@ nonisolated struct TurnStateReducer: Sendable {
             id: request.id,
             startedAt: request.createdAt
         )
+    }
+
+    mutating func reset() {
+        state = nil
     }
 
     @discardableResult

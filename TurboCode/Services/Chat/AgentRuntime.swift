@@ -28,18 +28,36 @@ final class AgentRuntime {
         snapshot.turn
     }
 
-    /// Accepts the first command routed through the runtime boundary.
-    ///
-    /// The native response path uses this entry point so command translation
-    /// is no longer coupled to the coordinator's lifecycle helper. The other
-    /// declared commands remain explicit until their transition side effects
-    /// can be moved here without pretending that provider cancellation or
-    /// persistence has already been transferred to this service.
+    /// Applies provider-neutral lifecycle and context commands. Provider work
+    /// still settles outside this service, but every transition clears the
+    /// previous turn before publishing the new runtime context.
     @discardableResult
     func apply(_ command: RuntimeCommand) -> Bool {
-        guard case .submit(let request) = command else { return false }
-        begin(request)
-        return true
+        switch command {
+        case .submit(let request):
+            begin(request)
+            return true
+        case .cancel(let turnID):
+            return finish(
+                with: .cancelled(reason: "Runtime transition cancelled the turn."),
+                turnID: turnID
+            )
+        case .switchThread(let threadID):
+            return resetContext(
+                activeThreadID: threadID,
+                backend: snapshot.backend
+            )
+        case .switchBackend(let selection):
+            return resetContext(
+                activeThreadID: snapshot.activeThreadID,
+                backend: selection.backend
+            )
+        case .restore(let threadID):
+            return resetContext(
+                activeThreadID: threadID,
+                backend: snapshot.backend
+            )
+        }
     }
 
     func begin(_ request: TurnRequest) {
@@ -106,5 +124,24 @@ final class AgentRuntime {
             isQuiescing: isQuiescing ?? snapshot.isQuiescing,
             updatedAt: date
         )
+    }
+
+    @discardableResult
+    private func resetContext(
+        activeThreadID: String?,
+        backend: ModelBackend,
+        at date: Date = Date()
+    ) -> Bool {
+        guard snapshot.turn?.outcome != nil || snapshot.turn == nil else {
+            return false
+        }
+        turnReducer.reset()
+        snapshot = RuntimeSnapshot(
+            activeThreadID: activeThreadID,
+            backend: backend,
+            isQuiescing: snapshot.isQuiescing,
+            updatedAt: date
+        )
+        return true
     }
 }

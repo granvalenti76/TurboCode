@@ -494,6 +494,14 @@ public final class ChatStore {
         restoringHistory: [ModelRuntimeStore.RestoredTranscriptEntry]? = nil
     ) {
         llamaContextUsage = nil
+        projectRuntimeCommand(
+            .switchBackend(
+                RuntimeBackendSelection(
+                    backend: activeBackend,
+                    modelName: composerModel
+                )
+            )
+        )
         modelRuntimeStore.rebuildSession(
             workspaceRoot: workspaceRoot,
             keepingHistory: keepingHistory,
@@ -526,6 +534,7 @@ public final class ChatStore {
             reviewDraftStore.discardAll()
         }
         conversationStore.activeThreadID = id
+        projectRuntimeCommand(.switchThread(threadID: id))
     }
 
     /// Opens a conversation as one navigation transition. Restoring first keeps
@@ -546,11 +555,12 @@ public final class ChatStore {
         dismissWorkspaceListingInspector()
         workbenchStore.dismissDiffPatchReview()
         reviewDraftStore.discardAll()
-        conversationStore.createThread(
+        let thread = conversationStore.createThread(
             title: title,
             workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
             mode: mode
         )
+        projectRuntimeCommand(.switchThread(threadID: thread.id))
         timelineStore.reset()
         resetAgentActivityForConversation()
         rebuildSession(keepingHistory: false)
@@ -566,8 +576,12 @@ public final class ChatStore {
             workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
             mode: composerMode
         )
-        guard created, !hasOrphanedBlocks else { return }
+        guard created else { return }
 
+        if let threadID = activeThreadId {
+            projectRuntimeCommand(.switchThread(threadID: threadID))
+        }
+        guard !hasOrphanedBlocks else { return }
         timelineStore.reset()
         resetAgentActivityForConversation()
         rebuildSession(keepingHistory: false)
@@ -660,6 +674,7 @@ public final class ChatStore {
         workbenchStore.dismissDiffPatchReview()
         reviewDraftStore.discardAll()
         conversationStore.activeThreadID = id
+        projectRuntimeCommand(.restore(threadID: id))
         timelineStore.restore(snapshot.blocks)
         resetAgentActivityForConversation()
         if let wp = snapshot.conversation.workspace, workspaceRoot != wp {
@@ -784,6 +799,7 @@ public final class ChatStore {
         guard deletesActiveThread else { return }
 
         conversationStore.activeThreadID = nil
+        projectRuntimeCommand(.switchThread(threadID: nil))
         timelineStore.reset()
         resetAgentActivityForConversation()
         reviewDraftStore.discardAll()
@@ -809,6 +825,7 @@ public final class ChatStore {
         let removedActiveWorkspace = workspaceStore.removeWorkspace(path)
 
         if conversationRemoval.removedActiveThread {
+            projectRuntimeCommand(.switchThread(threadID: nil))
             timelineStore.reset()
             resetAgentActivityForConversation()
         }
@@ -1687,6 +1704,13 @@ public final class ChatStore {
         if workbenchStore.rightPanelMode == .activity {
             workbenchStore.rightPanelMode = nil
         }
+    }
+
+    /// Projects context transitions through the runtime owner so the timeline
+    /// never retains a stale thread or backend after navigation settles.
+    private func projectRuntimeCommand(_ command: RuntimeCommand) {
+        guard agentRuntime.apply(command) else { return }
+        timelineStore.applyRuntimeSnapshot(agentRuntime.snapshot)
     }
 
     private func cancelCodexSelection() {
