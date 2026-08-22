@@ -3,11 +3,11 @@ import FoundationModels
 import FoundationModelsUtilities
 import Observation
 
-/// Owns FoundationModels profile selection and session construction.
+/// Owns observable Foundation Models configuration and profile selection.
 ///
-/// This store is the single boundary for configured models, dynamic profiles,
-/// skills, sampling options, and transcript-preserving session rebuilds. Codex
-/// process lifecycle and chat presentation intentionally live elsewhere.
+/// This store resolves models, skills, sampling options, and rebuild policy.
+/// Concrete session and reasoning-relay lifetime belongs to the non-observable
+/// ``FoundationModelsSessionRuntime`` so UI state cannot own provider objects.
 @MainActor
 @Observable
 final class ModelRuntimeStore {
@@ -26,22 +26,18 @@ final class ModelRuntimeStore {
     var composerModel: String
     var activeBackend: ModelBackend
     var orchestratorMode: OrchestratorMode
-    private(set) var session: LanguageModelSession
+    let foundationModelsRuntime: FoundationModelsSessionRuntime
     private var skillsWorkspaceRoot: String?
-    /// Lives for the active session and is installed for one request at a time.
-    /// Rebuilding a session replaces this actor so an older response keeps its
-    /// own transport boundary while the new session starts cleanly.
-    private var reasoningStreamRelay: ReasoningStreamRelay
 
     var activeReasoningStreamRelay: ReasoningStreamRelay? {
-        activeBackend == .llamaServer ? reasoningStreamRelay : nil
+        foundationModelsRuntime.activeReasoningStreamRelay(for: activeBackend)
     }
 
     /// Read-only transcript projection for persistence and context helpers.
-    /// Session construction and replacement remain owned by this store; UI
-    /// facades should not retain or pass the concrete session object around.
+    /// Session construction and replacement remain behind the runtime boundary;
+    /// UI facades should not retain or pass the concrete session object around.
     var transcript: Transcript {
-        session.transcript
+        foundationModelsRuntime.transcript
     }
 
     var activeDynamicProfile: UserDynamicProfile? {
@@ -128,9 +124,6 @@ final class ModelRuntimeStore {
                 : nil
         }
 
-        let reasoningStreamRelay = ReasoningStreamRelay()
-        self.reasoningStreamRelay = reasoningStreamRelay
-
         remoteModels = configuredRemoteModels
         activeRemoteModelID = initialRemote.id
         dynamicProfiles = loadedProfiles
@@ -148,17 +141,19 @@ final class ModelRuntimeStore {
             ? "Apple · Orchestrator"
             : (restoredProfile?.name ?? initialRemote.name)
 
-        let initialModel: any LanguageModel =
-            mode == .orchestrator || restoredProfile?.baseModelID == .onDevice
-            ? SystemLanguageModel.default
-            : ProviderLanguageModel(
+        foundationModelsRuntime = FoundationModelsSessionRuntime(
+            backend: initialBackend
+        ) { reasoningStreamRelay in
+            if mode == .orchestrator
+                || restoredProfile?.baseModelID == .onDevice {
+                return SystemLanguageModel.default
+            }
+            return ProviderLanguageModel(
                 configuration: initialRemote,
                 credential: initialRemote.credential,
-                reasoningStreamRelay: initialBackend == .llamaServer
-                    ? reasoningStreamRelay
-                    : nil
+                reasoningStreamRelay: reasoningStreamRelay
             )
-        session = LanguageModelSession(model: initialModel)
+        }
 
         if savedProfile != nil, restoredProfile == nil {
             UserDefaults.standard.removeObject(
@@ -386,7 +381,7 @@ final class ModelRuntimeStore {
             credential: model.credential,
             reasoningStreamRelay: model.id == activeRemoteModelID
                 && activeBackend == .llamaServer
-                ? reasoningStreamRelay
+                ? activeReasoningStreamRelay
             : nil
         )
     }
@@ -462,7 +457,7 @@ final class ModelRuntimeStore {
         events: ModelSessionEvents
     ) {
         let history = restoringHistory ?? SessionRebuildHistory.prepare(
-            session.transcript,
+            foundationModelsRuntime.transcript,
             keepingHistory: keepingHistory,
             discardingCapabilityContext: discardingCapabilityContext
         )
@@ -476,9 +471,12 @@ final class ModelRuntimeStore {
             profile: activeDynamicProfile,
             safariMCPEnabled: agentTuning.experimental.safariMCPEnabled
         )
-        reasoningStreamRelay = ReasoningStreamRelay()
-        session = ModelSessionFactory.makeSession(
-            configuration: ModelSessionConfiguration(
+        foundationModelsRuntime.rebuild(
+            backend: activeBackend,
+            history: history,
+            events: events
+        ) { reasoningStreamRelay in
+            ModelSessionConfiguration(
                 backend: activeBackend,
                 activeRemoteModel: activeRemoteModel,
                 delegateRemoteModel: delegateModel,
@@ -494,11 +492,9 @@ final class ModelRuntimeStore {
                 delegateToolIDs: activeDynamicProfile?.resolvedWorkerToolIDs,
                 dropsCompletedToolCalls: shouldDropCompletedToolCalls,
                 workspaceInstructions: workspaceInstructions,
-                reasoningStreamRelay: activeReasoningStreamRelay
-            ),
-            history: history,
-            events: events
-        )
+                reasoningStreamRelay: reasoningStreamRelay
+            )
+        }
     }
 
     /// Detects instruction edits without rebuilding stable sessions on every turn.

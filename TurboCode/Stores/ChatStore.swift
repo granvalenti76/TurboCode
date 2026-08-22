@@ -118,10 +118,7 @@ public final class ChatStore {
         let agentRuntime = AgentRuntime()
         let llmSessionFactory = LiveLLMBackendSessionFactory(
             nativeRunner: nativeRunner,
-            nativeSessionProvider: { modelRuntime.session },
-            reasoningStreamRelayProvider: {
-                modelRuntime.activeReasoningStreamRelay
-            },
+            foundationModelsRuntime: modelRuntime.foundationModelsRuntime,
             codexRuntime: codexRuntime
         )
         let llmRuntime = LLMRuntime(sessionFactory: llmSessionFactory)

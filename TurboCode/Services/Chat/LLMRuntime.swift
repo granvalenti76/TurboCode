@@ -60,19 +60,16 @@ protocol LLMBackendSessionBuilding: AnyObject {
 @MainActor
 final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
     private let nativeRunner: any NativeResponseRunning
-    private let nativeSessionProvider: @MainActor @Sendable () -> LanguageModelSession
-    private let reasoningStreamRelayProvider: @MainActor @Sendable () -> ReasoningStreamRelay?
+    private let foundationModelsRuntime: FoundationModelsSessionRuntime
     private let codexRuntime: CodexRuntimeStore
 
     init(
         nativeRunner: any NativeResponseRunning,
-        nativeSessionProvider: @escaping @MainActor @Sendable () -> LanguageModelSession,
-        reasoningStreamRelayProvider: @escaping @MainActor @Sendable () -> ReasoningStreamRelay?,
+        foundationModelsRuntime: FoundationModelsSessionRuntime,
         codexRuntime: CodexRuntimeStore
     ) {
         self.nativeRunner = nativeRunner
-        self.nativeSessionProvider = nativeSessionProvider
-        self.reasoningStreamRelayProvider = reasoningStreamRelayProvider
+        self.foundationModelsRuntime = foundationModelsRuntime
         self.codexRuntime = codexRuntime
     }
 
@@ -83,11 +80,12 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
         NativeBackendSession(
             backend: request.backend,
             runner: nativeRunner,
-            session: nativeSessionProvider(),
+            session: foundationModelsRuntime.session,
             mode: configuration.mode,
             workspaceKind: configuration.workspaceKind,
             serverURL: configuration.serverURL,
-            reasoningStreamRelay: reasoningStreamRelayProvider(),
+            reasoningStreamRelay: foundationModelsRuntime
+                .activeReasoningStreamRelay(for: request.backend),
             diagnosticsChanged: configuration.diagnosticsChanged,
             contextChanged: configuration.contextChanged,
             approvalRequested: configuration.approvalRequested

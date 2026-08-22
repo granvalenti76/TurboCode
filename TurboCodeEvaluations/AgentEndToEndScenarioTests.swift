@@ -303,10 +303,10 @@ struct AgentEndToEndScenarioTests {
         let codexRuntime = CodexRuntimeStore()
         let factory = LiveLLMBackendSessionFactory(
             nativeRunner: ScenarioNativeResponseRunner(operation: operation),
-            nativeSessionProvider: {
-                LanguageModelSession(model: SystemLanguageModel.default)
-            },
-            reasoningStreamRelayProvider: { nil },
+            foundationModelsRuntime: FoundationModelsSessionRuntime(
+                backend: .foundationApple,
+                modelBuilder: { _ in SystemLanguageModel.default }
+            ),
             codexRuntime: codexRuntime
         )
         return ChatResponseCoordinator(
