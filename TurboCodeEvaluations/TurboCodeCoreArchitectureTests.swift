@@ -122,6 +122,52 @@ struct TurboCodeCoreArchitectureTests {
         #expect(!nativeSource.contains("Task { @MainActor in"))
     }
 
+    /// Codex transport state must remain usable without constructing the
+    /// observable application facade. Source tripwires complement actor tests
+    /// until these files become separate Swift targets.
+    @Test("Codex execution engine is independent from its UI facade")
+    func codexExecutionEngineIsIndependentFromUIFacade() throws {
+        let storeSource = try source(at: "TurboCode/Stores/CodexRuntimeStore.swift")
+        let engineSource = try source(
+            at: "TurboCode/Services/Codex/CodexExecutionEngine.swift"
+        )
+        let adapterSource = try source(
+            at: "TurboCode/Services/Codex/CodexBackendSession.swift"
+        )
+
+        let forbiddenStoreOwnership = [
+            "private let client:",
+            "threadIDs",
+            "threadConfigurations",
+            "tokenUsageByThread",
+            "importedContexts",
+            "handoffBoundaryBlockIDs",
+            "approvals:",
+            "func runTurn("
+        ]
+        for token in forbiddenStoreOwnership {
+            #expect(!storeSource.contains(token))
+        }
+
+        let forbiddenEngineDependencies = [
+            "import AppKit",
+            "import SwiftUI",
+            "import Observation",
+            "@Observable",
+            "@MainActor",
+            "CodexRuntimeStore",
+            "UserDefaults.",
+            "NSWorkspace."
+        ]
+        for token in forbiddenEngineDependencies {
+            #expect(!engineSource.contains(token))
+        }
+
+        #expect(engineSource.contains("actor CodexExecutionEngine"))
+        #expect(adapterSource.contains("actor CodexBackendSession"))
+        #expect(!adapterSource.contains("Task { @MainActor in"))
+    }
+
     private func source(at relativePath: String) throws -> String {
         try String(
             contentsOf: Self.repositoryRoot.appendingPathComponent(relativePath),

@@ -102,15 +102,25 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
         request: TurnRequest,
         configuration: CodexLLMExecutionConfiguration
     ) async -> any BackendSession {
-        CodexBackendSession(
-            runtime: codexRuntime,
+        let persistsModelPreference = configuration.modelID == nil
+        return CodexBackendSession(
+            runtime: codexRuntime.executionEngine,
             turboThreadID: configuration.turboThreadID,
             workspaceName: configuration.workspaceName,
             agentTuning: configuration.agentTuning,
             availableSkills: configuration.availableSkills,
-            modelID: configuration.modelID,
-            reasoningEffort: configuration.reasoningEffort,
+            modelID: configuration.modelID
+                ?? codexRuntime.preferredExecutionModelID,
+            reasoningEffort: configuration.reasoningEffort
+                ?? codexRuntime.reasoningEffort,
+            persistsModelPreference: persistsModelPreference,
             delegationInvoker: configuration.delegationInvoker,
+            runtimeSnapshotChanged: { [weak codexRuntime] snapshot, persists in
+                codexRuntime?.applyExecutionSnapshot(
+                    snapshot,
+                    persistsPreference: persists
+                )
+            },
             activityStarted: configuration.activityStarted,
             activityEnded: configuration.activityEnded,
             approvalRequested: configuration.approvalRequested

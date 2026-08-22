@@ -86,14 +86,14 @@ final class ProfileSelectionCoordinator {
         let routeChanged = modelRuntime.activeDynamicProfileID != dynamicProfileID
         if (isEnteringFromTurboCode || routeChanged),
            let threadID = conversations.activeThreadID {
-            codexRuntime.captureImportedContext(
+            await codexRuntime.captureImportedContext(
                 turboThreadID: threadID,
                 blocks: timeline.blocks
             )
             if !isEnteringFromTurboCode {
                 // Dynamic tools are fixed when an App Server thread starts.
                 // Recreate only that hidden boundary for a route change.
-                codexRuntime.resetThread(turboThreadID: threadID)
+                await codexRuntime.resetThread(turboThreadID: threadID)
             }
         }
         modelRuntime.selectCodex(
@@ -285,7 +285,7 @@ final class ProfileSelectionCoordinator {
            let id = UUID(uuidString: String(identifier.dropFirst("profile:".count))),
            let profile = modelRuntime.dynamicProfiles.first(where: { $0.id == id }) {
             if profile.baseModelID == .codex {
-                restoreCodexImportedContext()
+                await restoreCodexImportedContext()
                 await scheduleCodexProfileSelection(
                     modelID: profile.codexModelID,
                     dynamicProfileID: profile.id
@@ -298,7 +298,7 @@ final class ProfileSelectionCoordinator {
         }
         if identifier == ModelBackend.codex.rawValue {
             modelRuntime.selectCodex(displayName: codexRuntime.displayName)
-            restoreCodexImportedContext()
+            await restoreCodexImportedContext()
             await scheduleCodexProfileSelection().value
             return
         }
@@ -416,7 +416,7 @@ final class ProfileSelectionCoordinator {
                 )
             )
         }
-        codexRuntime.completeHandoff(
+        await codexRuntime.completeHandoff(
             turboThreadID: threadID,
             boundaryBlockID: timeline.blocks.last?.id
         )
@@ -438,9 +438,9 @@ final class ProfileSelectionCoordinator {
         }
     }
 
-    private func restoreCodexImportedContext() {
+    private func restoreCodexImportedContext() async {
         guard let threadID = conversations.activeThreadID else { return }
-        codexRuntime.restoreImportedContext(
+        await codexRuntime.restoreImportedContext(
             turboThreadID: threadID,
             blocks: timeline.blocks
         )

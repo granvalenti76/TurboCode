@@ -141,7 +141,7 @@ final class IndependentTaskCoordinator {
         if let threadID = conversations.activeThreadID {
             conversations.touchThread(id: threadID)
             if modelRuntime.activeBackend == .codex {
-                codexRuntime.captureImportedContext(
+                await codexRuntime.captureImportedContext(
                     turboThreadID: threadID,
                     blocks: timeline.blocks
                 )

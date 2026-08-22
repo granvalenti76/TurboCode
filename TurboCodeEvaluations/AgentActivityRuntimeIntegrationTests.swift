@@ -335,12 +335,12 @@ struct AgentActivityRuntimeIntegrationTests {
             )
         }
 
-        await Task.yield()
+        await runtime.waitUntilStarted()
         task.cancel()
         let result = await task.value
 
         #expect(result.outcome == .cancelled(reason: "The turn was interrupted."))
-        #expect(runtime.interrupted)
+        #expect(await runtime.interrupted)
     }
 
     @Test("Foundation Models and Codex tool calls share the Activity shape")
@@ -501,8 +501,7 @@ private final class AdapterNativeRunner: NativeResponseRunning {
     }
 }
 
-@MainActor
-private final class AdapterCodexRuntime: CodexTurnRunning {
+nonisolated private final class AdapterCodexRuntime: CodexTurnRunning, Sendable {
     private let toolResult: CodexDynamicToolResult
     private let receipt: ToolReceipt?
 
@@ -515,9 +514,9 @@ private final class AdapterCodexRuntime: CodexTurnRunning {
     }
 
     func runTurn(
-        request: CodexRuntimeStore.TurnRequest,
-        events: CodexRuntimeStore.TurnEvents
-    ) async throws -> CodexRuntimeStore.TurnResult {
+        request: CodexTurnRequest,
+        events: CodexTurnEvents
+    ) async throws -> CodexTurnResult {
         await events.liveAssistantChanged("Codex result.")
         await events.liveReasoningChanged("Codex reasoning.")
         let call = CodexDynamicToolCall(
@@ -532,7 +531,7 @@ private final class AdapterCodexRuntime: CodexTurnRunning {
         // remains responsible for preserving structured tool output.
         await events.toolFinished(call, toolResult, receipt)
         await events.activityEnded(call.callID)
-        return CodexRuntimeStore.TurnResult(
+        return CodexTurnResult(
             assistantText: "Codex result.",
             reasoningText: "Codex reasoning."
         )
@@ -544,8 +543,7 @@ private final class AdapterCodexRuntime: CodexTurnRunning {
 /// Provider doubles for terminal error and cancellation paths. The blocking
 /// runtime deliberately ignores task cancellation until the adapter forwards
 /// its explicit provider interrupt, which keeps that boundary observable.
-@MainActor
-private final class FailingAdapterCodexRuntime: CodexTurnRunning {
+private actor FailingAdapterCodexRuntime: CodexTurnRunning {
     let error: any Error
 
     init(error: any Error) {
@@ -553,29 +551,41 @@ private final class FailingAdapterCodexRuntime: CodexTurnRunning {
     }
 
     func runTurn(
-        request: CodexRuntimeStore.TurnRequest,
-        events: CodexRuntimeStore.TurnEvents
-    ) async throws -> CodexRuntimeStore.TurnResult {
+        request: CodexTurnRequest,
+        events: CodexTurnEvents
+    ) async throws -> CodexTurnResult {
         throw error
     }
 
     func interrupt() async {}
 }
 
-@MainActor
-private final class BlockingAdapterCodexRuntime: CodexTurnRunning {
+private actor BlockingAdapterCodexRuntime: CodexTurnRunning {
     private var continuation: CheckedContinuation<
-        CodexRuntimeStore.TurnResult,
+        CodexTurnResult,
         Error
     >?
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var hasStarted = false
     private(set) var interrupted = false
 
     func runTurn(
-        request: CodexRuntimeStore.TurnRequest,
-        events: CodexRuntimeStore.TurnEvents
-    ) async throws -> CodexRuntimeStore.TurnResult {
-        try await withCheckedThrowingContinuation { continuation in
+        request: CodexTurnRequest,
+        events: CodexTurnEvents
+    ) async throws -> CodexTurnResult {
+        hasStarted = true
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        return try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
+        }
+    }
+
+    func waitUntilStarted() async {
+        guard !hasStarted else { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
         }
     }
 
