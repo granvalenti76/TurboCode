@@ -22,6 +22,10 @@ final class ChatResponseCoordinator {
     private let codexRuntime: CodexRuntimeStore
     private let nativeRunner: any NativeResponseRunning
     private let agentRuntime: AgentRuntime
+    /// Concrete backend adapters execute behind this non-observable boundary.
+    /// The coordinator maps accepted events to presentation, but it is no
+    /// longer the lifetime owner of the provider session it configures.
+    private let llmRuntime: LLMRuntime
     private let nativeSessionProvider: @MainActor @Sendable () -> LanguageModelSession
     private let workspaceNameProvider: @MainActor @Sendable () -> String?
     private let activityPresentationRequested: @MainActor @Sendable () -> Void
@@ -44,6 +48,7 @@ final class ChatResponseCoordinator {
         codexRuntime: CodexRuntimeStore,
         nativeRunner: any NativeResponseRunning,
         agentRuntime: AgentRuntime = AgentRuntime(),
+        llmRuntime: LLMRuntime = LLMRuntime(),
         nativeSessionProvider: @escaping @MainActor @Sendable () -> LanguageModelSession = {
             LanguageModelSession()
         },
@@ -56,6 +61,7 @@ final class ChatResponseCoordinator {
         self.codexRuntime = codexRuntime
         self.nativeRunner = nativeRunner
         self.agentRuntime = agentRuntime
+        self.llmRuntime = llmRuntime
         self.nativeSessionProvider = nativeSessionProvider
         self.workspaceNameProvider = workspaceNameProvider
         self.activityPresentationRequested = activityPresentationRequested
@@ -259,7 +265,7 @@ final class ChatResponseCoordinator {
                 self.toolInteractions.enqueueApproval(request)
             }
         )
-        let backendResult = await backendSession.run(
+        let backendResult = await llmRuntime.execute(
             request: TurnRequest(
                 id: turnID,
                 prompt: promptText,
@@ -267,6 +273,7 @@ final class ChatResponseCoordinator {
                 modelName: modelName,
                 workspaceRoot: workspaceRoot
             ),
+            using: backendSession,
             events: BackendSessionEvents { [weak self] event in
                 guard let self,
                       event.turnID == turnID,
@@ -476,7 +483,7 @@ final class ChatResponseCoordinator {
                 self.toolInteractions.enqueueApproval(request)
             }
         )
-        let backendResult = await backendSession.run(
+        let backendResult = await llmRuntime.execute(
             request: TurnRequest(
                 id: turnID,
                 prompt: modelPrompt,
@@ -484,6 +491,7 @@ final class ChatResponseCoordinator {
                 modelName: modelName,
                 workspaceRoot: workspaceRoot
             ),
+            using: backendSession,
             events: BackendSessionEvents { [weak self] event in
                 guard let self,
                       event.turnID == turnID,
