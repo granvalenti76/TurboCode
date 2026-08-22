@@ -99,12 +99,11 @@ final class ChatTimelineStore {
     /// Ends only the matching response so a stale asynchronous completion
     /// cannot clear a newer response's placeholder identity.
     func finishResponse(placeholderID: String) {
+        guard activeAssistantPlaceholderID == placeholderID else { return }
         liveReasoning = ""
         liveAssistant = ""
         workspaceListingPresentations = []
-        if activeAssistantPlaceholderID == placeholderID {
-            activeAssistantPlaceholderID = nil
-        }
+        activeAssistantPlaceholderID = nil
     }
 
     func block(id: String) -> ChatBlock? {

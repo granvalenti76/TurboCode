@@ -94,6 +94,31 @@ struct ChatTimelineStoreTests {
         #expect(store.isFirstMessage)
     }
 
+    @Test("Stale response cleanup cannot clear a newer response")
+    func staleResponseCleanupPreservesCurrentResponse() {
+        let store = ChatTimelineStore()
+        store.beginResponse(
+            displayText: "Old request",
+            placeholderID: "old-response",
+            model: "test-model"
+        )
+        store.beginResponse(
+            displayText: "New request",
+            placeholderID: "new-response",
+            model: "test-model"
+        )
+        store.liveAssistant = "New partial answer"
+        store.liveReasoning = "New reasoning"
+
+        // A late settlement from the superseded turn must not clean the
+        // transient state that belongs to the currently active response.
+        store.finishResponse(placeholderID: "old-response")
+
+        #expect(store.activeAssistantPlaceholderID == "new-response")
+        #expect(store.liveAssistant == "New partial answer")
+        #expect(store.liveReasoning == "New reasoning")
+    }
+
     @Test("Grouped edits retain first before-state and final after-state")
     func groupedEditsMergeReviewReceipts() throws {
         let store = ChatTimelineStore()
