@@ -4,6 +4,7 @@ import SwiftUI
 
 struct InputFieldView: View {
     @Environment(ChatStore.self) private var chatStore
+    @Environment(ComposerCommandRouter.self) private var commandRouter
     @Environment(ComposerViewModel.self) private var composer
     @Environment(ChatPresentationViewModel.self) private var presentation
     @Environment(\.chatFontSize) private var chatFontSize
@@ -209,7 +210,11 @@ struct InputFieldView: View {
         let command = suggestion.command
         composer.reset()
         isFocused = false
-        Task { await chatStore.sendMessage(command) }
+        Task {
+            if await commandRouter.execute(command) == false {
+                await chatStore.sendMessage(command)
+            }
+        }
     }
 
     private var slashSuggestions: [SlashCommandSuggestion] {
@@ -263,6 +268,12 @@ struct InputFieldView: View {
                 insertion: "/compact",
                 description: "Compact conversation context for local models",
                 icon: "arrow.triangle.2.circle.clockwise"
+            ),
+            SlashCommandSuggestion(
+                command: "/reload",
+                insertion: "/reload",
+                description: "Reload profiles without rebuilding this session",
+                icon: "arrow.clockwise"
             )
         ] + chatStore.availableSkills.map {
             SlashCommandSuggestion(
@@ -476,11 +487,11 @@ struct InputFieldView: View {
                     composer.messageText
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .isEmpty
-                    || chatStore.isIncompleteSkillCommand(composer.messageText)
-                    || chatStore.isIncompleteTaskCommand(composer.messageText)
+                    || commandRouter.isIncompleteSkillCommand(composer.messageText)
+                    || commandRouter.isIncompleteTaskCommand(composer.messageText)
                     || (
                         !chatStore.activeProfileCanSend
-                            && !chatStore.isLocalCommand(composer.messageText)
+                            && !commandRouter.isLocalCommand(composer.messageText)
                     )
                 )
         )
@@ -495,12 +506,12 @@ struct InputFieldView: View {
         }
         let text = composer.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        if chatStore.isIncompleteSkillCommand(text) {
+        if commandRouter.isIncompleteSkillCommand(text) {
             composer.messageText = "/skill "
             isFocused = true
             return
         }
-        if chatStore.isIncompleteTaskCommand(text) {
+        if commandRouter.isIncompleteTaskCommand(text) {
             composer.messageText = "/task "
             isFocused = true
             return
@@ -508,13 +519,17 @@ struct InputFieldView: View {
         // Clear the shared draft before starting inference so recovery drafts
         // and ordinary composer input follow the same lifecycle.
         composer.reset()
-        Task { await chatStore.sendMessage(text) }
+        Task {
+            if await commandRouter.execute(text) == false {
+                await chatStore.sendMessage(text)
+            }
+        }
     }
 
     private var sendButtonHelp: String {
         if chatStore.busy { return "Stop response" }
         if !chatStore.activeProfileCanSend
-            && !chatStore.isLocalCommand(composer.messageText) {
+            && !commandRouter.isLocalCommand(composer.messageText) {
             return "Wait for Codex to connect or sign in first"
         }
         return "Send message"

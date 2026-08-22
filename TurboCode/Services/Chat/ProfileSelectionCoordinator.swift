@@ -251,6 +251,17 @@ final class ProfileSelectionCoordinator {
         }
     }
 
+    /// Reloads profile metadata only. The active runtime/session remains the
+    /// immutable capability snapshot until the user explicitly activates a
+    /// changed profile.
+    func reloadDynamicProfilesPreservingSession() async {
+        do {
+            try modelRuntime.reloadDynamicProfilesPreservingSession()
+        } catch {
+            presentation.errorMessage = error.localizedDescription
+        }
+    }
+
     func reloadRemoteModels() async {
         guard modelRuntime.reloadRemoteModels() else { return }
         await rebuildSession(discardingCapabilityContext: true)

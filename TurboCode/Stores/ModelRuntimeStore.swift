@@ -249,6 +249,13 @@ final class ModelRuntimeStore {
         return false
     }
 
+    /// Refreshes the profile catalog without selecting a profile or changing
+    /// the active provider session. `/reload` uses this path so disk changes do
+    /// not rebuild the open conversation or disturb its KV-cache prefix.
+    func reloadDynamicProfilesPreservingSession() throws {
+        dynamicProfiles = try DynamicProfileStore.live.load()
+    }
+
     func reloadRemoteModels() -> Bool {
         guard let loaded = try? TurboCodeConfig.shared.loadRemoteModels(),
               !loaded.isEmpty else { return false }

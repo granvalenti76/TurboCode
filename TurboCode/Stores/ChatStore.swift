@@ -82,6 +82,32 @@ public final class ChatStore {
     private let independentTaskCoordinator: IndependentTaskCoordinator
     private let messageSendCoordinator: MessageSendCoordinator
     private let reviewCoordinator: ReviewCoordinator
+
+    /// Composition-only command router. Command parsing and dispatch live in
+    /// the composer service; this facade property only wires those actions to
+    /// the existing application coordinators without owning their logic.
+    @ObservationIgnored
+    private(set) lazy var composerCommandRouter: ComposerCommandRouter = {
+        ComposerCommandRouter(
+            actions: ComposerCommandActions(
+                openDocumentation: { [weak self] in
+                    await self?.openDocumentation()
+                },
+                compact: { [weak self] in
+                    await self?.compactContext()
+                },
+                reload: { [weak self] in
+                    await self?.reloadProfilesPreservingSession()
+                },
+                runTask: { [weak self] goal in
+                    await self?.runIndependentTask(goal)
+                },
+                reportError: { [weak self] message in
+                    self?.presentComposerError(message)
+                }
+            )
+        )
+    }()
     // MARK: - Onboarding
 
     /// Ensures the current `~/.turbocode/` layout exists and applies additive migrations.
@@ -364,6 +390,12 @@ public final class ChatStore {
         await profileSelectionCoordinator.reloadDynamicProfiles(selecting: id)
     }
 
+    /// Refreshes profile metadata without rebuilding the active provider
+    /// session. Composer-owned `/reload` uses this non-invalidating path.
+    func reloadProfilesPreservingSession() async {
+        await profileSelectionCoordinator.reloadDynamicProfilesPreservingSession()
+    }
+
     public func reloadRemoteModels() async {
         await profileSelectionCoordinator.reloadRemoteModels()
     }
@@ -530,25 +562,6 @@ public final class ChatStore {
     }
 
     public func sendMessage(_ text: String) async {
-        // Slash commands are application actions. Handling them here keeps
-        // local documentation and worker execution independent of the active
-        // profile's model-facing tool catalog.
-        if text.trimmingCharacters(in: .whitespacesAndNewlines) == "/documentation" {
-            await openDocumentation()
-            return
-        }
-        if text.trimmingCharacters(in: .whitespacesAndNewlines) == "/compact" {
-            await compactContext()
-            return
-        }
-        if let taskGoal = Self.taskCommandGoal(from: text) {
-            await runIndependentTask(taskGoal)
-            return
-        }
-        if text.trimmingCharacters(in: .whitespacesAndNewlines) == "/task" {
-            error = "Use /task followed by the task instructions."
-            return
-        }
         presentationViewModel.clearCompactionNotice()
         guard let promptText = await messageSendCoordinator.preparePrompt(
             for: text
@@ -610,7 +623,7 @@ public final class ChatStore {
 
     /// Compacts only the active local Llama conversation. Apple on-device
     /// compaction has its own automatic path and is intentionally untouched.
-    private func compactContext() async {
+    func compactContext() async {
         guard !busy else { return }
         guard activeBackend == .llamaServer else {
             error = "/compact is available only for local Llama models."
@@ -657,35 +670,15 @@ public final class ChatStore {
         }
     }
 
-    func isIncompleteSkillCommand(_ text: String) -> Bool {
-        text.trimmingCharacters(in: .whitespacesAndNewlines) == "/skill"
-    }
-
-    func isIncompleteTaskCommand(_ text: String) -> Bool {
-        text.trimmingCharacters(in: .whitespacesAndNewlines) == "/task"
-    }
-
-    func isLocalCommand(_ text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed == "/documentation"
-            || trimmed == "/task"
-            || trimmed == "/compact"
-            || Self.taskCommandGoal(from: trimmed) != nil
-    }
-
     /// Runs `/task <instructions>` through the configured worker directly.
     /// The active profile does not need to advertise `delegate_task`, because
     /// this is an explicit application command rather than model tool use.
-    private func runIndependentTask(_ goal: String) async {
+    func runIndependentTask(_ goal: String) async {
         await independentTaskCoordinator.run(goal: goal)
     }
 
-    private static func taskCommandGoal(from text: String) -> String? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("/task ") else { return nil }
-        let goal = String(trimmed.dropFirst("/task ".count))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return goal.isEmpty ? nil : goal
+    func presentComposerError(_ message: String) {
+        error = message
     }
 
     public func reloadSkills() async {
