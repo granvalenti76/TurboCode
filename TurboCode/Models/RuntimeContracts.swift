@@ -216,12 +216,14 @@ nonisolated struct TurnState: Codable, Hashable, Sendable {
 ///
 /// This is deliberately smaller than a transcript or a SwiftUI store. The
 /// active thread and backend identify the runtime context, while `turn` and
-/// `isQuiescing` describe lifecycle ownership needed to reject stale work and
-/// coordinate transitions. Timeline blocks remain a separate projection.
+/// the operation flags describe lifecycle ownership needed to reject stale work,
+/// drive presentation controls, and coordinate transitions. Timeline blocks
+/// remain a separate projection.
 nonisolated struct RuntimeSnapshot: Codable, Hashable, Sendable {
     let activeThreadID: String?
     let backend: ModelBackend
     let turn: TurnState?
+    let hasActiveOperation: Bool
     let isQuiescing: Bool
     let updatedAt: Date
 
@@ -229,12 +231,14 @@ nonisolated struct RuntimeSnapshot: Codable, Hashable, Sendable {
         activeThreadID: String? = nil,
         backend: ModelBackend,
         turn: TurnState? = nil,
+        hasActiveOperation: Bool = false,
         isQuiescing: Bool = false,
         updatedAt: Date = Date()
     ) {
         self.activeThreadID = activeThreadID
         self.backend = backend
         self.turn = turn
+        self.hasActiveOperation = hasActiveOperation
         self.isQuiescing = isQuiescing
         self.updatedAt = updatedAt
     }

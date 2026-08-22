@@ -1,5 +1,4 @@
 import Foundation
-import Observation
 
 /// Transitional runtime owner for provider-neutral turn lifecycle state.
 ///
@@ -9,11 +8,9 @@ import Observation
 /// timeline state; those boundaries move only after the compatibility path is
 /// covered. The service can therefore become an actor in a later slice without
 /// changing the `TurnStateReducer` contract.
-/// Observation exposes ownership changes to facade projections such as
-/// `ChatStore.busy`. The runtime remains the sole authority; the UI observes
-/// this state instead of maintaining a second flag that could drift.
+/// Immutable snapshot publication exposes ownership changes to presentation;
+/// the runtime itself has no Observation or view-layer dependency.
 @MainActor
-@Observable
 final class AgentRuntime {
     private var turnReducer = TurnStateReducer()
     private var quiescenceDepth = 0
@@ -24,15 +21,24 @@ final class AgentRuntime {
     private var operationTurnID: TurnID?
     private var idleWaiters: [CheckedContinuation<Void, Never>] = []
     private(set) var snapshot: RuntimeSnapshot
+    /// Presentation receives complete immutable values and never observes this
+    /// runtime object or its task handles directly.
+    private let snapshotChanged: @MainActor @Sendable (
+        RuntimeSnapshot
+    ) -> Void
 
     init(
         activeThreadID: String? = nil,
-        backend: ModelBackend = .foundationApple
+        backend: ModelBackend = .foundationApple,
+        snapshotChanged: @escaping @MainActor @Sendable (
+            RuntimeSnapshot
+        ) -> Void = { _ in }
     ) {
         snapshot = RuntimeSnapshot(
             activeThreadID: activeThreadID,
             backend: backend
         )
+        self.snapshotChanged = snapshotChanged
     }
 
     var currentTurnState: TurnState? {
@@ -66,6 +72,7 @@ final class AgentRuntime {
         let task = Task { await operation() }
         operationTask = task
         operationTurnID = turnID
+        publish(hasActiveOperation: true)
         await task.value
         finishOperation(for: turnID)
         await afterRelease()
@@ -108,6 +115,7 @@ final class AgentRuntime {
         guard operationTurnID == turnID else { return }
         operationTask = nil
         operationTurnID = nil
+        publish(hasActiveOperation: false)
         let waiters = idleWaiters
         idleWaiters.removeAll(keepingCapacity: true)
         for waiter in waiters {
@@ -249,15 +257,19 @@ final class AgentRuntime {
     private func publish(
         backend: ModelBackend? = nil,
         isQuiescing: Bool? = nil,
+        hasActiveOperation: Bool? = nil,
         at date: Date = Date()
     ) {
         snapshot = RuntimeSnapshot(
             activeThreadID: snapshot.activeThreadID,
             backend: backend ?? snapshot.backend,
             turn: turnReducer.state,
+            hasActiveOperation: hasActiveOperation
+                ?? snapshot.hasActiveOperation,
             isQuiescing: isQuiescing ?? snapshot.isQuiescing,
             updatedAt: date
         )
+        snapshotChanged(snapshot)
     }
 
     @discardableResult
@@ -273,9 +285,11 @@ final class AgentRuntime {
         snapshot = RuntimeSnapshot(
             activeThreadID: activeThreadID,
             backend: backend,
+            hasActiveOperation: snapshot.hasActiveOperation,
             isQuiescing: snapshot.isQuiescing,
             updatedAt: date
         )
+        snapshotChanged(snapshot)
         return true
     }
 }

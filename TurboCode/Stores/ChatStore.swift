@@ -35,10 +35,12 @@ public final class ChatStore {
     public var runtimeStatus: RuntimeStatus = .ready
     public var runtimeConnection: RuntimeConnectionState = .ready
     /// UI projection of runtime-owned work. Response and `/task` operations
-    /// are tracked by `AgentRuntime`; Codex handoff remains a separate
-    /// transition until that profile boundary is extracted in a later slice.
+    /// arrive as immutable snapshots; the UI never observes the runtime task.
+    /// Codex handoff remains a separate transition until that profile boundary
+    /// is extracted in a later slice.
     public var busy: Bool {
-        agentRuntime.hasActiveOperation || codexHandoffTask != nil
+        agentRuntimeProjectionStore.hasActiveOperation
+            || codexHandoffTask != nil
     }
     public var error: String?
     public private(set) var localCompactionNotice: LocalCompactionNotice?
@@ -64,6 +66,7 @@ public final class ChatStore {
     let conversationStore: ConversationStore
     let toolInteractionStore: ToolInteractionStore
     let agentActivityStore: AgentActivityStore
+    let agentRuntimeProjectionStore: AgentRuntimeProjectionStore
     let timelineStore: ChatTimelineStore
     let workbenchStore: WorkbenchStore
     let reviewDraftStore: ReviewDraftStore
@@ -115,7 +118,13 @@ public final class ChatStore {
         let nativeRunner = NativeResponseRunner()
         let reviewDraft = ReviewDraftStore()
         let modelRuntime = ModelRuntimeStore()
-        let agentRuntime = AgentRuntime()
+        let runtimeProjection = AgentRuntimeProjectionStore()
+        let agentRuntime = AgentRuntime { snapshot in
+            runtimeProjection.apply(snapshot)
+            timeline.applyRuntimeSnapshot(snapshot)
+        }
+        runtimeProjection.apply(agentRuntime.snapshot)
+        timeline.applyRuntimeSnapshot(agentRuntime.snapshot)
         let llmSessionFactory = LiveLLMBackendSessionFactory(
             nativeRunner: nativeRunner,
             foundationModelsRuntime: modelRuntime.foundationModelsRuntime,
@@ -131,6 +140,7 @@ public final class ChatStore {
         self.workspaceStore = workspace
         self.toolInteractionStore = toolInteractions
         self.agentActivityStore = agentActivity
+        self.agentRuntimeProjectionStore = runtimeProjection
         self.timelineStore = timeline
         self.workbenchStore = workbench
         self.reviewDraftStore = reviewDraft

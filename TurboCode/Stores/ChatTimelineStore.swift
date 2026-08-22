@@ -44,6 +44,10 @@ final class ChatTimelineStore {
     /// Applies a provider-neutral runtime snapshot without importing or
     /// retaining a provider session, task, or lifecycle reducer.
     func applyRuntimeSnapshot(_ snapshot: RuntimeSnapshot) {
+        // Shared composition and compatibility coordinators may observe the
+        // same runtime edge. Equality suppression keeps that harmless overlap
+        // from invalidating the transcript view twice.
+        guard runtimeSnapshot != snapshot else { return }
         runtimeSnapshot = snapshot
     }
 
