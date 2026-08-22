@@ -71,7 +71,7 @@ struct ConversationStoreTests {
     }
 
     @Test("Metadata persistence preserves an inactive thread timeline")
-    func metadataPersistencePreservesInactiveTimeline() throws {
+    func metadataPersistencePreservesInactiveTimeline() async throws {
         let originalConversation = Conversation(
             id: "thread",
             title: "Original",
@@ -100,7 +100,7 @@ struct ConversationStoreTests {
             )
         ]
 
-        try store.persistMetadata(id: "thread")
+        try await store.persistMetadata(id: "thread")
         let saved = try #require(repository.snapshots["thread"])
 
         #expect(saved.conversation.title == "Renamed")
@@ -126,6 +126,101 @@ struct ConversationStoreTests {
 
         #expect(store.threads.map(\.title) == ["Observed"])
         #expect(store.activeThreadId == store.threads.first?.id)
+    }
+
+    @Test("Disk repository round trips and deletes a complete session")
+    func diskRepositoryRoundTripsAndDeletesSession() async throws {
+        let directoryURL = temporarySessionDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let repository = DiskConversationRepository(directoryURL: directoryURL)
+        let conversation = Conversation(
+            id: "round-trip",
+            title: "Persisted session",
+            isPinned: true,
+            workspace: "/Work/TurboCode",
+            mode: .plan
+        )
+        let block = ChatBlock(kind: .assistant, text: "Persisted response")
+        let snapshot = ConversationSnapshot(
+            conversation: conversation,
+            modelBackend: ModelBackend.foundationApple.rawValue,
+            blocks: [block],
+            transcript: nil
+        )
+
+        try await repository.save(snapshot)
+
+        let loadedSnapshot = try await repository.load(id: conversation.id)
+        let loaded = try #require(loadedSnapshot)
+        #expect(loaded.conversation == conversation)
+        #expect(loaded.modelBackend == ModelBackend.foundationApple.rawValue)
+        #expect(loaded.blocks == [block])
+        #expect(try await repository.list().map(\.conversation.id) == [conversation.id])
+
+        try await repository.delete(id: conversation.id)
+        #expect(try await repository.load(id: conversation.id) == nil)
+    }
+
+    @Test("Disk repository rejects session IDs containing path syntax")
+    func diskRepositoryRejectsPathTraversal() async {
+        let directoryURL = temporarySessionDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let repository = DiskConversationRepository(directoryURL: directoryURL)
+        let invalidID = "../outside"
+        let snapshot = ConversationSnapshot(
+            conversation: Conversation(id: invalidID, title: "Invalid"),
+            modelBackend: ModelBackend.foundationApple.rawValue,
+            blocks: [],
+            transcript: nil
+        )
+
+        do {
+            try await repository.save(snapshot)
+            Issue.record("Expected the repository to reject a path-like session ID")
+        } catch let error as ConversationRepositoryError {
+            #expect(error == .invalidSessionID(invalidID))
+        } catch {
+            Issue.record("Unexpected repository error: \(error)")
+        }
+    }
+
+    @Test("Concurrent saves leave one complete decodable session")
+    func concurrentDiskSavesRemainDecodable() async throws {
+        let directoryURL = temporarySessionDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let repository = DiskConversationRepository(directoryURL: directoryURL)
+        let titles = (0..<20).map { "Revision \($0)" }
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for title in titles {
+                group.addTask {
+                    let snapshot = ConversationSnapshot(
+                        conversation: Conversation(id: "shared", title: title),
+                        modelBackend: ModelBackend.foundationApple.rawValue,
+                        blocks: [ChatBlock(kind: .assistant, text: title)],
+                        transcript: nil
+                    )
+                    try await repository.save(snapshot)
+                }
+            }
+            try await group.waitForAll()
+        }
+
+        let loadedSnapshot = try await repository.load(id: "shared")
+        let loaded = try #require(loadedSnapshot)
+        #expect(titles.contains(loaded.conversation.title))
+        #expect(loaded.blocks.first?.text == loaded.conversation.title)
+        #expect(try await repository.list().count == 1)
+    }
+
+    private func temporarySessionDirectory() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent(
+            "turbocode-session-repository-\(UUID().uuidString)",
+            isDirectory: true
+        )
     }
 }
 

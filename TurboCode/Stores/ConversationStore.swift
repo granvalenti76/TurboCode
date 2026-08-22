@@ -60,29 +60,29 @@ final class ConversationStore {
         threads[index].updatedAt = .now
     }
 
-    func persist(_ snapshot: ConversationSnapshot) throws {
-        try repository.save(snapshot)
+    func persist(_ snapshot: ConversationSnapshot) async throws {
+        try await repository.save(snapshot)
     }
 
     /// Updates durable catalog metadata without loading the thread's timeline
     /// into the active UI. This keeps rename, pin, and archive actions safe for
     /// inactive conversations while preserving their original runtime state.
-    func persistMetadata(id: String) throws {
+    func persistMetadata(id: String) async throws {
         guard let conversation = threads.first(where: { $0.id == id }) else { return }
-        let existing = try repository.load(id: id)
+        let existing = try await repository.load(id: id)
         let snapshot = ConversationSnapshot(
             conversation: conversation,
             modelBackend: existing?.modelBackend ?? ModelBackend.foundationApple.rawValue,
             blocks: existing?.blocks ?? [],
             transcript: existing?.transcript
         )
-        try repository.save(snapshot)
+        try await repository.save(snapshot)
     }
 
     /// Merges durable sessions without duplicating drafts already present in
     /// memory, such as a thread created during application startup.
-    func restoreCatalog() throws {
-        let snapshots = try repository.list()
+    func restoreCatalog() async throws {
+        let snapshots = try await repository.list()
         guard !snapshots.isEmpty else { return }
         let existingIDs = Set(threads.map(\.id))
         threads.append(
@@ -92,8 +92,8 @@ final class ConversationStore {
         )
     }
 
-    func snapshot(id: String) throws -> ConversationSnapshot? {
-        try repository.load(id: id)
+    func snapshot(id: String) async throws -> ConversationSnapshot? {
+        try await repository.load(id: id)
     }
 
     func renameThread(id: String, title: String) {
@@ -126,8 +126,8 @@ final class ConversationStore {
     /// Deletes durable data before mutating the observable catalog. This
     /// ordering ensures a failed filesystem operation cannot appear successful
     /// until the next application launch.
-    func deleteThread(id: String) throws -> String? {
-        try repository.delete(id: id)
+    func deleteThread(id: String) async throws -> String? {
+        try await repository.delete(id: id)
         threads.removeAll { $0.id == id }
         if activeThreadID == id {
             activeThreadID = nil
@@ -137,13 +137,13 @@ final class ConversationStore {
 
     /// Deletes every persisted conversation associated with a workspace while
     /// leaving the workspace directory itself untouched.
-    func removeWorkspace(_ path: String) -> WorkspaceConversationRemoval {
+    func removeWorkspace(_ path: String) async -> WorkspaceConversationRemoval {
         var sessionIDs = Set(
             threads
                 .filter { $0.workspace == path }
                 .map(\.id)
         )
-        if let storedSessions = try? repository.list() {
+        if let storedSessions = try? await repository.list() {
             sessionIDs.formUnion(
                 storedSessions
                     .filter { $0.conversation.workspace == path }
@@ -154,7 +154,7 @@ final class ConversationStore {
         var deletionErrors: [String] = []
         for id in sessionIDs {
             do {
-                try repository.delete(id: id)
+                try await repository.delete(id: id)
             } catch {
                 deletionErrors.append(error.localizedDescription)
             }

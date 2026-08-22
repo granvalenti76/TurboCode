@@ -1,5 +1,4 @@
 import Foundation
-import FoundationModels
 
 // MARK: - TurboCode Configuration
 
@@ -547,57 +546,6 @@ public final class TurboCodeConfig {
         try encoder.encode(models).write(to: modelsURL, options: .atomic)
     }
 
-    // MARK: - Per-Session Persistence
-
-    /// Saves one session to `~/.turbocode/sessions/<id>.json`.
-    /// Creates the sessions directory if needed.
-    public func saveSession(_ session: StoredSession) throws {
-        let dir = sessionsDir
-        if !FileManager.default.fileExists(atPath: dir.path) {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
-        let url = sessionURL(for: session.id)
-        try encoder.encode(session).write(to: url, options: .atomic)
-        print("[TurboCode] Saved session \(session.id) → \(url.path)")
-    }
-
-    /// Loads one session by id.
-    public func loadSession(id: String) throws -> StoredSession? {
-        let url = sessionURL(for: id)
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return try JSONDecoder().decode(StoredSession.self, from: Data(contentsOf: url))
-    }
-
-    /// Lists all session files, optionally filtered by project name.
-    public func listSessions(project: String? = nil) throws -> [StoredSession] {
-        guard FileManager.default.fileExists(atPath: sessionsDir.path) else {
-            try FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
-            return []
-        }
-        let files = try FileManager.default.contentsOfDirectory(at: sessionsDir,
-            includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "json" }
-
-        let all: [StoredSession] = try files.compactMap { url in
-            try JSONDecoder().decode(StoredSession.self, from: Data(contentsOf: url))
-        }
-        if let project {
-            return all.filter { $0.projectName == project }
-        }
-        return all
-    }
-
-    /// Deletes a session file.
-    public func deleteSession(id: String) throws {
-        let url = sessionURL(for: id)
-        if FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.removeItem(at: url)
-        }
-    }
-
-    private func sessionURL(for id: String) -> URL {
-        sessionsDir.appendingPathComponent("\(id).json")
-    }
 }
 
 // MARK: - Remote Model Configuration
@@ -748,108 +696,5 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
 
     public static var fallbackLlama: RemoteModelConfig {
         defaults.first(where: { $0.id == "llama" })!
-    }
-}
-
-// MARK: - Stored Session
-
-/// A full persisted session: metadata + conversation blocks.
-public struct StoredSession: Codable, Hashable, Sendable, Identifiable {
-    public static let currentSchemaVersion = 1
-
-    /// Versioning lets new catalog metadata be added without making older
-    /// session files unreadable during app upgrades.
-    public var schemaVersion: Int
-    public let id: String
-    public var title: String
-    public var projectName: String
-    public var workspacePath: String?
-    public var createdAt: Date
-    public var updatedAt: Date
-    public var isPinned: Bool
-    public var isArchived: Bool
-    public var mode: ConversationMode
-    public var modelBackend: String
-    public var blocks: [StoredBlock]
-    /// The semantic model history. Optional so sessions written by older
-    /// TurboCode versions remain decodable.
-    public var transcript: Transcript?
-
-    public init(id: String = UUID().uuidString, title: String,
-                projectName: String, workspacePath: String? = nil,
-                createdAt: Date = .now, updatedAt: Date = .now,
-                isPinned: Bool = false, isArchived: Bool = false,
-                mode: ConversationMode = .agent,
-                modelBackend: String = "Llama-server",
-                blocks: [StoredBlock] = [], transcript: Transcript? = nil) {
-        self.schemaVersion = Self.currentSchemaVersion
-        self.id = id; self.title = title; self.projectName = projectName
-        self.workspacePath = workspacePath; self.createdAt = createdAt
-        self.updatedAt = updatedAt; self.modelBackend = modelBackend
-        self.isPinned = isPinned; self.isArchived = isArchived; self.mode = mode
-        self.blocks = blocks
-        self.transcript = transcript
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case schemaVersion, id, title, projectName, workspacePath
-        case createdAt, updatedAt, isPinned, isArchived, mode
-        case modelBackend, blocks, transcript
-    }
-
-    public init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try values.decodeIfPresent(Int.self, forKey: .schemaVersion)
-            ?? Self.currentSchemaVersion
-        id = try values.decode(String.self, forKey: .id)
-        title = try values.decode(String.self, forKey: .title)
-        projectName = try values.decode(String.self, forKey: .projectName)
-        workspacePath = try values.decodeIfPresent(String.self, forKey: .workspacePath)
-        createdAt = try values.decode(Date.self, forKey: .createdAt)
-        updatedAt = try values.decode(Date.self, forKey: .updatedAt)
-        isPinned = try values.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
-        isArchived = try values.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
-        mode = try values.decodeIfPresent(ConversationMode.self, forKey: .mode) ?? .agent
-        modelBackend = try values.decode(String.self, forKey: .modelBackend)
-        blocks = try values.decodeIfPresent([StoredBlock].self, forKey: .blocks) ?? []
-        transcript = try values.decodeIfPresent(Transcript.self, forKey: .transcript)
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        // The stable session identity is sufficient for collection hashing;
-        // Transcript is Equatable and Codable but intentionally not Hashable.
-        hasher.combine(id)
-    }
-}
-
-// MARK: - Stored Block
-
-/// Codable snapshot of a ChatBlock.
-public struct StoredBlock: Codable, Hashable, Sendable, Identifiable {
-    public let id: String
-    public let kind: String     // ChatBlockKind rawValue
-    public let text: String
-    public let createdAt: Date
-    public var model: String?
-    public var providerId: String?
-    public var diffPatch: DiffPatchBlock?
-    public var gitCommit: GitCommitBlock?
-    public var gitStatus: GitStatusBlock?
-    public var productGuide: ProductGuideBlock?
-    public var workspaceListing: WorkspaceListingBlock?
-
-    public init(id: String = UUID().uuidString, kind: String, text: String,
-                createdAt: Date = .now, model: String? = nil, providerId: String? = nil,
-                diffPatch: DiffPatchBlock? = nil, gitCommit: GitCommitBlock? = nil,
-                gitStatus: GitStatusBlock? = nil,
-                productGuide: ProductGuideBlock? = nil,
-                workspaceListing: WorkspaceListingBlock? = nil) {
-        self.id = id; self.kind = kind; self.text = text
-        self.createdAt = createdAt; self.model = model; self.providerId = providerId
-        self.diffPatch = diffPatch
-        self.gitCommit = gitCommit
-        self.gitStatus = gitStatus
-        self.productGuide = productGuide
-        self.workspaceListing = workspaceListing
     }
 }

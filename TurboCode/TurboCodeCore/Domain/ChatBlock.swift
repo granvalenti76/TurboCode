@@ -2,7 +2,11 @@ import Foundation
 
 // MARK: - ChatBlock — a single message or event block in the timeline
 
-public struct ChatBlock: Identifiable, Sendable, Hashable {
+/// Immutable timeline data emitted by the core and rendered by an arbitrary
+/// client. Structured receipts stay values rather than views so third-party
+/// hosts can choose their own presentation without losing tool semantics.
+
+nonisolated public struct ChatBlock: Identifiable, Sendable, Hashable {
     public let id: String
     public let kind: ChatBlockKind
     public let text: String
@@ -42,7 +46,7 @@ public struct ChatBlock: Identifiable, Sendable, Hashable {
     }
 }
 
-public enum ChatBlockKind: String, Sendable, Hashable, CaseIterable {
+nonisolated public enum ChatBlockKind: String, Sendable, Hashable, CaseIterable {
     case user
     case assistant
     case reasoning
@@ -133,7 +137,7 @@ nonisolated public enum GitCommitStatus: String, Sendable, Hashable, Codable {
 
 // MARK: - Diff Patch Block
 
-public struct DiffPatchBlock: Sendable, Hashable, Codable {
+nonisolated public struct DiffPatchBlock: Sendable, Hashable, Codable {
     public var workspaceRoot: String
     public var patch: String
     public var patches: [String]?
@@ -164,7 +168,7 @@ nonisolated public struct DiffReviewFileSnapshot: Identifiable, Sendable, Hashab
     }
 }
 
-public struct DiffPatchFileChange: Identifiable, Sendable, Hashable, Codable {
+nonisolated public struct DiffPatchFileChange: Identifiable, Sendable, Hashable, Codable {
     public let path: String
     public let additions: Int
     public let deletions: Int
@@ -172,7 +176,7 @@ public struct DiffPatchFileChange: Identifiable, Sendable, Hashable, Codable {
     public var id: String { path }
 }
 
-public enum DiffPatchStatus: String, Sendable, Hashable, Codable {
+nonisolated public enum DiffPatchStatus: String, Sendable, Hashable, Codable {
     case awaitingApproval
     case running
     case applied
@@ -184,7 +188,7 @@ public enum DiffPatchStatus: String, Sendable, Hashable, Codable {
 
 // MARK: - ToolBlock — tool call / execution result
 
-public struct ToolBlock: Identifiable, Sendable, Hashable {
+nonisolated public struct ToolBlock: Identifiable, Sendable, Hashable {
     public let id: String
     public let kind: ToolBlockKind
     public var summary: String
@@ -215,7 +219,7 @@ public struct ToolBlock: Identifiable, Sendable, Hashable {
     }
 }
 
-public enum ToolBlockKind: String, Sendable, Hashable, CaseIterable {
+nonisolated public enum ToolBlockKind: String, Sendable, Hashable, CaseIterable {
     case toolCall = "tool_call"
     case commandExecution = "command_execution"
     case fileChange = "file_change"
@@ -223,7 +227,7 @@ public enum ToolBlockKind: String, Sendable, Hashable, CaseIterable {
     case delegateTask = "delegate_task"
 }
 
-public enum ToolBlockStatus: String, Sendable, Hashable {
+nonisolated public enum ToolBlockStatus: String, Sendable, Hashable {
     case running
     case success
     case error

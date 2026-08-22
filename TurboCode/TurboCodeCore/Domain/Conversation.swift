@@ -2,7 +2,11 @@ import Foundation
 
 // MARK: - Thread — Sendable model for a conversation thread
 
-public struct Conversation: Identifiable, Sendable, Hashable {
+/// Provider- and presentation-neutral metadata for one conversation.
+/// Keeping this value free of UI frameworks lets the same contract cross the
+/// future TurboCodeCore package boundary without actor or rendering concerns.
+
+nonisolated public struct Conversation: Identifiable, Sendable, Hashable {
     public let id: String
     public var title: String
     public var createdAt: Date
@@ -33,7 +37,7 @@ public struct Conversation: Identifiable, Sendable, Hashable {
     }
 }
 
-public enum ConversationMode: String, Codable, Sendable, Hashable, CaseIterable {
+nonisolated public enum ConversationMode: String, Codable, Sendable, Hashable, CaseIterable {
     case agent
     case plan
 }

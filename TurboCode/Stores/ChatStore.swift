@@ -643,7 +643,7 @@ public final class ChatStore {
                 : modelRuntimeStore.transcript
         )
         do {
-            try conversationStore.persist(snapshot)
+            try await conversationStore.persist(snapshot)
         } catch {
             print("[TurboCode] Failed to persist session: \(error.localizedDescription)")
         }
@@ -668,7 +668,7 @@ public final class ChatStore {
             return
         }
         do {
-            try conversationStore.persistMetadata(id: threadID)
+            try await conversationStore.persistMetadata(id: threadID)
         } catch {
             print("[TurboCode] Failed to persist conversation metadata: \(error.localizedDescription)")
         }
@@ -680,7 +680,7 @@ public final class ChatStore {
     /// completion from capturing a newer turn while that turn is streaming.
     private func persistGeneratedTitleMetadata(for threadID: String) async {
         do {
-            try conversationStore.persistMetadata(id: threadID)
+            try await conversationStore.persistMetadata(id: threadID)
         } catch {
             print("[TurboCode] Failed to persist generated title: \(error.localizedDescription)")
         }
@@ -688,14 +688,14 @@ public final class ChatStore {
 
     /// Loads all session files and populates the thread list.
     public func restoreSessions() async {
-        try? conversationStore.restoreCatalog()
+        try? await conversationStore.restoreCatalog()
     }
 
     /// Fully restores a past session with its blocks.
     public func restoreSession(id: String) async {
         let startedAt = Date()
         await finishActiveResponseBeforeTransition()
-        guard let snapshot = try? conversationStore.snapshot(id: id),
+        guard let snapshot = try? await conversationStore.snapshot(id: id),
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
         dismissWorkspaceListingInspector()
         workbenchStore.dismissDiffPatchReview()
@@ -812,7 +812,7 @@ public final class ChatStore {
 
         let nextThreadID: String?
         do {
-            nextThreadID = try conversationStore.deleteThread(id: id)
+            nextThreadID = try await conversationStore.deleteThread(id: id)
         } catch {
             // Keep the visible row when durable deletion fails; pretending the
             // operation succeeded would make it reappear on the next launch.
@@ -848,7 +848,7 @@ public final class ChatStore {
     /// The workspace directory and all project files are left untouched.
     public func removeWorkspace(_ path: String) async {
         await finishActiveResponseBeforeTransition()
-        let conversationRemoval = conversationStore.removeWorkspace(path)
+        let conversationRemoval = await conversationStore.removeWorkspace(path)
         let removedActiveWorkspace = workspaceStore.removeWorkspace(path)
 
         if conversationRemoval.removedActiveThread {
