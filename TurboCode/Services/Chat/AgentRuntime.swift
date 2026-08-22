@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Transitional runtime owner for provider-neutral turn lifecycle state.
 ///
@@ -8,7 +9,11 @@ import Foundation
 /// timeline state; those boundaries move only after the compatibility path is
 /// covered. The service can therefore become an actor in a later slice without
 /// changing the `TurnStateReducer` contract.
+/// Observation exposes ownership changes to facade projections such as
+/// `ChatStore.busy`. The runtime remains the sole authority; the UI observes
+/// this state instead of maintaining a second flag that could drift.
 @MainActor
+@Observable
 final class AgentRuntime {
     private var turnReducer = TurnStateReducer()
     private var quiescenceDepth = 0

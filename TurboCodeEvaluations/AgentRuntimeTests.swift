@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 @testable import TurboCode
 
@@ -322,4 +323,52 @@ struct AgentRuntimeTests {
         continuation.finish()
         _ = await execution.value
     }
+
+    @Test("ChatStore busy projection observes runtime ownership changes")
+    func busyProjectionInvalidatesForRuntimeOperation() async {
+        let store = ChatStore(
+            conversationRepository: RuntimeObservationConversationRepository()
+        )
+        let turnID = TurnID(rawValue: "observable-runtime-operation")
+        let (changes, continuation) = AsyncStream.makeStream(of: Void.self)
+        var iterator = changes.makeAsyncIterator()
+
+        withObservationTracking {
+            _ = store.busy
+        } onChange: {
+            continuation.yield()
+        }
+
+        let execution = Task { @MainActor in
+            await store.agentRuntime.runOperation(turnID: turnID) {
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+        _ = await iterator.next()
+        #expect(store.busy)
+
+        // Observation tracking is one-shot. Register again while the operation
+        // is active so the release edge must invalidate the same UI projection.
+        withObservationTracking {
+            _ = store.busy
+        } onChange: {
+            continuation.yield()
+        }
+
+        await store.agentRuntime.cancelAndWaitForOperation()
+        _ = await iterator.next()
+        #expect(!store.busy)
+
+        continuation.finish()
+        _ = await execution.value
+    }
+}
+
+/// Keeps the Observation regression isolated from the user's session files;
+/// the test exercises only runtime ownership and the facade's computed view.
+private struct RuntimeObservationConversationRepository: ConversationRepository {
+    func save(_ snapshot: ConversationSnapshot) throws {}
+    func load(id: String) throws -> ConversationSnapshot? { nil }
+    func list() throws -> [ConversationSnapshot] { [] }
+    func delete(id: String) throws {}
 }
