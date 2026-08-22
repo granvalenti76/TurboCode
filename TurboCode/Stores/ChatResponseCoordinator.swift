@@ -22,6 +22,8 @@ final class ChatResponseCoordinator {
     private let codexRuntime: CodexRuntimeStore
     private let nativeRunner: any NativeResponseRunning
     private let agentRuntime: AgentRuntime
+    private let workspaceNameProvider: @MainActor @Sendable () -> String?
+    private let activityPresentationRequested: @MainActor @Sendable () -> Void
 
     private(set) var isDelegating = false
     private(set) var activeEditGroupID: String?
@@ -39,7 +41,9 @@ final class ChatResponseCoordinator {
         agentActivity: AgentActivityStore,
         codexRuntime: CodexRuntimeStore,
         nativeRunner: any NativeResponseRunning,
-        agentRuntime: AgentRuntime = AgentRuntime()
+        agentRuntime: AgentRuntime = AgentRuntime(),
+        workspaceNameProvider: @escaping @MainActor @Sendable () -> String? = { nil },
+        activityPresentationRequested: @escaping @MainActor @Sendable () -> Void = {}
     ) {
         self.timeline = timeline
         self.toolInteractions = toolInteractions
@@ -47,6 +51,50 @@ final class ChatResponseCoordinator {
         self.codexRuntime = codexRuntime
         self.nativeRunner = nativeRunner
         self.agentRuntime = agentRuntime
+        self.workspaceNameProvider = workspaceNameProvider
+        self.activityPresentationRequested = activityPresentationRequested
+    }
+
+    /// Provider sessions use this router for tool, delegation, and Activity
+    /// callbacks. Keeping construction here prevents the UI facade from
+    /// becoming the owner of provider stream closures; the injected closures
+    /// are presentation requests, not provider lifecycle ownership.
+    var modelSessionEvents: ModelSessionEvents {
+        ModelSessionEvents(
+            currentTurnID: { [weak self] in
+                self?.currentTurnState?.id
+            },
+            toolStarted: { [weak self] call, backend, owner in
+                await self?.toolStarted(
+                    call,
+                    backend: backend,
+                    owner: owner
+                )
+            },
+            toolFinished: { [weak self] call, output, backend, owner in
+                guard let self else { return }
+                let workspaceName = await MainActor.run {
+                    self.workspaceNameProvider()
+                }
+                await self.toolFinished(
+                    call,
+                    output: output,
+                    backend: backend,
+                    owner: owner,
+                    workspaceName: workspaceName
+                )
+            },
+            delegationChanged: { [weak self] isDelegating in
+                await MainActor.run {
+                    self?.delegationChanged(isDelegating)
+                }
+            },
+            agentActivityChanged: { [weak self] event in
+                await MainActor.run {
+                    self?.agentActivityChanged(event)
+                }
+            }
+        )
     }
 
     /// Keeps the runtime identity at the coordinator boundary while the
@@ -718,6 +766,9 @@ final class ChatResponseCoordinator {
     /// task and attempt identifiers.
     func agentActivityChanged(_ event: AgentActivityRuntimeEvent) {
         guard agentActivity.apply(event) else { return }
+        if case .started = event {
+            activityPresentationRequested()
+        }
         switch event {
         case .started:
             if let pendingCoordinatorTool,

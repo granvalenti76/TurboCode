@@ -140,7 +140,13 @@ public final class ChatStore {
             agentActivity: agentActivity,
             codexRuntime: codexRuntime,
             nativeRunner: nativeRunner,
-            agentRuntime: agentRuntime
+            agentRuntime: agentRuntime,
+            workspaceNameProvider: {
+                workspace.label.isEmpty ? nil : workspace.label
+            },
+            activityPresentationRequested: {
+                workbench.rightPanelMode = .activity
+            }
         )
         self.reviewCoordinator = ReviewCoordinator(
             timeline: timeline,
@@ -495,45 +501,7 @@ public final class ChatStore {
             keepingHistory: keepingHistory,
             discardingCapabilityContext: discardingCapabilityContext,
             restoringHistory: restoringHistory,
-            events: modelSessionEvents
-        )
-    }
-
-    /// Shares native tool and Activity presentation with every coordinator
-    /// transport, including Codex's dynamically advertised delegation tool.
-    private var modelSessionEvents: ModelSessionEvents {
-        ModelSessionEvents(
-            currentTurnID: { [weak self] in
-                self?.responseCoordinator.currentTurnState?.id
-            },
-            toolStarted: { [weak self] call, backend, owner in
-                await self?.responseCoordinator.toolStarted(
-                    call,
-                    backend: backend,
-                    owner: owner
-                )
-            },
-            toolFinished: { [weak self] call, output, backend, owner in
-                guard let self else { return }
-                await self.responseCoordinator.toolFinished(
-                    call,
-                    output: output,
-                    backend: backend,
-                    owner: owner,
-                    workspaceName: self.workspaceRoot.isEmpty
-                        ? nil
-                        : self.workspaceLabel
-                )
-            },
-            delegationChanged: { [weak self] isDelegating in
-                await MainActor.run {
-                    self?.responseCoordinator.delegationChanged(isDelegating)
-                }
-            },
-            agentActivityChanged: { [weak self] event in
-                guard let self else { return }
-                await self.handleAgentActivityEvent(event)
-            }
+            events: responseCoordinator.modelSessionEvents
         )
     }
 
@@ -1115,7 +1083,7 @@ public final class ChatStore {
         ensureActiveThread()
         let invoker = modelRuntimeStore.makeIndependentTaskInvoker(
             workspaceRoot: workspaceRoot,
-            events: modelSessionEvents
+            events: responseCoordinator.modelSessionEvents
         )
         error = nil
         let turnID = TurnID()
@@ -1347,7 +1315,7 @@ public final class ChatStore {
                 activeDynamicProfile?.codexReasoningEffort,
             delegationInvoker: modelRuntimeStore.makeDelegateInvoker(
                 workspaceRoot: workspaceRoot,
-                events: modelSessionEvents
+                events: responseCoordinator.modelSessionEvents
             ),
             modelName: composerModel
         )

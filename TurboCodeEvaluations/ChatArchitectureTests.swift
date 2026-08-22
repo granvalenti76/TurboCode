@@ -75,7 +75,7 @@ struct ChatArchitectureTests {
     }
 
     @Test("A delegation opens Activity once and closing preserves its summary")
-    func activityInspectorFollowsUserControl() throws {
+    func activityInspectorFollowsUserControl() async throws {
         let store = ChatStore(
             conversationRepository: ArchitectureConversationRepository()
         )
@@ -94,6 +94,13 @@ struct ChatArchitectureTests {
             modelName: "On-device worker",
             role: .codingWorker
         )
+        let callbackEnvelope = try AgentTaskEnvelope(
+            taskID: "task-inspector-callback",
+            attemptID: "attempt-inspector-callback",
+            goal: "Open the Activity projection from a runtime callback.",
+            acceptanceCriteria: ["The Activity projection is visible."],
+            verificationRequest: .none
+        )
 
         store.handleAgentActivityEvent(
             .started(
@@ -106,6 +113,19 @@ struct ChatArchitectureTests {
 
         #expect(store.rightPanelMode == .activity)
         #expect(store.currentAgentActivity?.goal == envelope.goal)
+
+        let callbackStore = ChatStore(
+            conversationRepository: ArchitectureConversationRepository()
+        )
+        await callbackStore.responseCoordinator.modelSessionEvents.agentActivityChanged(
+            .started(
+                envelope: callbackEnvelope,
+                coordinator: coordinator,
+                worker: worker,
+                startedAt: .now
+            )
+        )
+        #expect(callbackStore.rightPanelMode == .activity)
 
         store.closeRightPanel()
         store.handleAgentActivityEvent(
