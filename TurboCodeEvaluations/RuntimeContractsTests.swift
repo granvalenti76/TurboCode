@@ -78,4 +78,32 @@ struct RuntimeContractsTests {
             ).turnID == id
         )
     }
+
+    @Test("Independent task completions reject stale and cancelled results")
+    func guardsIndependentTaskCompletion() {
+        let active = TurnID(rawValue: "active")
+        let stale = TurnID(rawValue: "stale")
+
+        #expect(
+            TurnCompletionPolicy.accepts(
+                turnID: active,
+                activeTurnID: active,
+                isCancelled: false
+            )
+        )
+        #expect(
+            !TurnCompletionPolicy.accepts(
+                turnID: stale,
+                activeTurnID: active,
+                isCancelled: false
+            )
+        )
+        #expect(
+            !TurnCompletionPolicy.accepts(
+                turnID: active,
+                activeTurnID: active,
+                isCancelled: true
+            )
+        )
+    }
 }

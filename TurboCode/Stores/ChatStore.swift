@@ -76,6 +76,7 @@ public final class ChatStore {
     // The currently running response task. Keeping the handle makes the Stop
     // button cancel the actual model stream rather than only changing the UI.
     private var responseTask: Task<Void, Never>?
+    private var activeIndependentTurnID: TurnID?
     private var localCompactionNoticeTask: Task<Void, Never>?
     // Codex selection and handoff are also transition operations. Keeping
     // their handles here prevents navigation from observing half-switched
@@ -1089,18 +1090,25 @@ public final class ChatStore {
             events: modelSessionEvents
         )
         error = nil
+        let turnID = TurnID()
+        activeIndependentTurnID = turnID
         responseCoordinator.delegationChanged(true)
         busy = true
         let task = Task<Void, Never> { [weak self] in
             guard let self else { return }
             let result = await invoker.invoke(envelope)
+            guard !Task.isCancelled else { return }
             await self.finishIndependentTask(
                 command: command,
-                result: result
+                result: result,
+                turnID: turnID
             )
         }
         responseTask = task
         await task.value
+        if activeIndependentTurnID == turnID {
+            activeIndependentTurnID = nil
+        }
         responseTask = nil
         busy = false
         responseCoordinator.delegationChanged(false)
@@ -1110,8 +1118,14 @@ public final class ChatStore {
     /// turn and refreshes the current model transcript with that outcome.
     private func finishIndependentTask(
         command: String,
-        result: AgentTaskResult
+        result: AgentTaskResult,
+        turnID: TurnID
     ) async {
+        guard TurnCompletionPolicy.accepts(
+            turnID: turnID,
+            activeTurnID: activeIndependentTurnID,
+            isCancelled: Task.isCancelled
+        ) else { return }
         let response = Self.renderIndependentTaskResult(result)
         timelineStore.presentTaskTurn(command: command, response: response)
         appendIndependentTaskToTranscript(command: command, response: response)
@@ -1211,19 +1225,24 @@ public final class ChatStore {
         let effectivePrompt = promptText ?? text
         ensureActiveThread()
         busy = true
+        // One identity follows the accepted prompt through either provider so
+        // late callbacks cannot be mistaken for the next user turn.
+        let turnID = TurnID()
         let task = Task<Void, Never> { [weak self] in
             guard let self else { return }
             if self.activeBackend == .codex {
                 await self.performCodexSendMessage(
                     displayText: text,
                     promptText: effectivePrompt,
-                    visibleInTimeline: visibleInTimeline
+                    visibleInTimeline: visibleInTimeline,
+                    turnID: turnID
                 )
             } else {
                 await self.performSendMessage(
                     displayText: text,
                     promptText: effectivePrompt,
-                    visibleInTimeline: visibleInTimeline
+                    visibleInTimeline: visibleInTimeline,
+                    turnID: turnID
                 )
             }
         }
@@ -1261,7 +1280,8 @@ public final class ChatStore {
     private func performCodexSendMessage(
         displayText: String,
         promptText: String,
-        visibleInTimeline: Bool
+        visibleInTimeline: Bool,
+        turnID: TurnID
     ) async {
         let titleThreadID = activeThreadId
         let titleTask: Task<Void, Never>? = visibleInTimeline ? Task { [weak self] in
@@ -1278,6 +1298,7 @@ public final class ChatStore {
             displayText: displayText,
             promptText: promptText,
             visibleInTimeline: visibleInTimeline,
+            turnID: turnID,
             turboThreadID: turboThreadID,
             workspaceRoot: workspaceRoot,
             workspaceName: workspaceRoot.isEmpty ? nil : workspaceLabel,
@@ -1314,7 +1335,8 @@ public final class ChatStore {
     private func performSendMessage(
         displayText: String,
         promptText: String,
-        visibleInTimeline: Bool
+        visibleInTimeline: Bool,
+        turnID: TurnID
     ) async {
         let conversationID = activeThreadId
         let titleThreadID = conversationID
@@ -1328,11 +1350,13 @@ public final class ChatStore {
             displayText: displayText,
             promptText: promptText,
             visibleInTimeline: visibleInTimeline,
+            turnID: turnID,
             blocks: blocks,
             session: session,
             backend: activeBackend,
             mode: orchestratorMode,
             workspaceKind: diagnosticsWorkspaceKind,
+            workspaceRoot: workspaceRoot,
             modelName: composerModel,
             serverURL: activeBackend == .llamaServer
                 ? activeRemoteModel?.url
@@ -1362,6 +1386,7 @@ public final class ChatStore {
 
     public func interrupt() {
         responseTask?.cancel()
+        activeIndependentTurnID = nil
         let shouldInterruptCodex = activeBackend == .codex
         let approvals = toolInteractionStore.takeAllApprovals()
         toolInteractionStore.clearActivities()

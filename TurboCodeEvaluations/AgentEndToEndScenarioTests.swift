@@ -56,15 +56,18 @@ struct AgentEndToEndScenarioTests {
             return .completed(content: output, reasoning: "")
         }
 
+        let turnID = TurnID(rawValue: "turn-success")
         let responseResult = await response.performNative(
             displayText: "Increment the fixture value and run its focused test.",
             promptText: "Delegate the focused edit.",
             visibleInTimeline: true,
+            turnID: turnID,
             blocks: [],
             session: LanguageModelSession(),
             backend: .foundationApple,
             mode: .standalone,
             workspaceKind: "swift-fixture",
+            workspaceRoot: fixture.root.path,
             modelName: "Scenario Coordinator"
         )
 
@@ -76,6 +79,8 @@ struct AgentEndToEndScenarioTests {
         #expect(activity.current?.phase == .succeeded)
         #expect(activity.current?.lastOperationalPhase == .workerRunning)
         #expect(activity.current?.finalResult == result)
+        #expect(response.currentTurnState?.id == turnID)
+        #expect(response.currentTurnState?.phase == .completed)
         #expect(timeline.activeAssistantPlaceholderID == nil)
         #expect(try String(contentsOf: fixture.fileURL, encoding: .utf8)
             == ScenarioWorkspace.editedContent)
@@ -107,15 +112,18 @@ struct AgentEndToEndScenarioTests {
             return .completed(content: output, reasoning: "")
         }
 
+        let turnID = TurnID(rawValue: "turn-empty")
         _ = await response.performNative(
             displayText: "Delegate the focused edit.",
             promptText: "Delegate the focused edit.",
             visibleInTimeline: true,
+            turnID: turnID,
             blocks: [],
             session: LanguageModelSession(),
             backend: .foundationApple,
             mode: .standalone,
             workspaceKind: "swift-fixture",
+            workspaceRoot: fixture.root.path,
             modelName: "Scenario Coordinator"
         )
 
@@ -132,6 +140,10 @@ struct AgentEndToEndScenarioTests {
         #expect(result.receiptIDs.isEmpty)
         #expect(activity.current?.phase == .failed)
         #expect(activity.current?.activeTool == nil)
+        #expect(response.currentTurnState?.id == turnID)
+        // The provider turn completed successfully; the embedded delegated
+        // task result is the failure surfaced by the scenario above.
+        #expect(response.currentTurnState?.phase == .completed)
         #expect(recovery.action == .prepareRetry)
         #expect(recovery.title == "Prepare New Attempt")
         #expect(await verifier.invocationCount == 0)
@@ -173,16 +185,19 @@ struct AgentEndToEndScenarioTests {
             }
             return .completed(content: output, reasoning: "")
         }
+        let turnID = TurnID(rawValue: "turn-cancel")
         let task = Task { @MainActor in
             await response.performNative(
                 displayText: "Delegate and stop the focused edit.",
                 promptText: "Delegate the focused edit.",
                 visibleInTimeline: true,
+                turnID: turnID,
                 blocks: [],
                 session: LanguageModelSession(),
                 backend: .foundationApple,
                 mode: .standalone,
                 workspaceKind: "swift-fixture",
+                workspaceRoot: fixture.root.path,
                 modelName: "Scenario Coordinator"
             )
         }
@@ -197,6 +212,8 @@ struct AgentEndToEndScenarioTests {
 
         #expect(activity.current?.phase == .cancelled)
         #expect(activity.current?.finalResult?.outcome == .cancelled)
+        #expect(response.currentTurnState?.id == turnID)
+        #expect(response.currentTurnState?.phase == .cancelled)
         #expect(activity.current?.activeTool == nil)
         #expect(timeline.activeAssistantPlaceholderID == nil)
         #expect(timeline.liveAssistant.isEmpty)

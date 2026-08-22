@@ -28,6 +28,7 @@ final class ChatResponseCoordinator {
     private var productGuidePresentation: ProductGuideBlock?
     private var completedRootWrite: String?
     private var pendingCoordinatorTool: AgentActivityTool?
+    private(set) var currentTurnState: TurnState?
 
     init(
         timeline: ChatTimelineStore,
@@ -43,12 +44,57 @@ final class ChatResponseCoordinator {
         self.nativeRunner = nativeRunner
     }
 
+    /// Keeps the runtime identity at the coordinator boundary while the
+    /// existing provider runners remain unchanged. A later callback may still
+    /// arrive after cancellation, so presentation code can reject it by ID.
+    func ownsTurn(_ turnID: TurnID) -> Bool {
+        currentTurnState?.id == turnID && currentTurnState?.outcome == nil
+    }
+
+    private func beginTurn(_ request: TurnRequest) {
+        currentTurnState = TurnState(
+            id: request.id,
+            startedAt: request.createdAt
+        )
+        _ = advanceTurn(to: .preparing, turnID: request.id)
+    }
+
+    @discardableResult
+    private func advanceTurn(to phase: TurnPhase, turnID: TurnID) -> Bool {
+        guard let currentTurnState,
+              currentTurnState.id == turnID,
+              let next = currentTurnState.transitioning(
+                  to: phase,
+                  at: Date()
+              ) else {
+            return false
+        }
+        self.currentTurnState = next
+        return true
+    }
+
+    private func finishTurn(
+        _ outcome: TurnOutcome,
+        turnID: TurnID
+    ) {
+        guard let currentTurnState,
+              currentTurnState.id == turnID,
+              let next = currentTurnState.finishing(
+                  with: outcome,
+                  at: Date()
+              ) else {
+            return
+        }
+        self.currentTurnState = next
+    }
+
     /// Carries profile-owned Codex choices across the timeline boundary while
     /// leaving provider selection and persistence in their owning stores.
     func performCodex(
         displayText: String,
         promptText: String,
         visibleInTimeline: Bool,
+        turnID: TurnID,
         turboThreadID: String,
         workspaceRoot: String,
         workspaceName: String?,
@@ -60,6 +106,16 @@ final class ChatResponseCoordinator {
         modelName: String
     ) async -> Result {
         let placeholderID = UUID().uuidString
+        beginTurn(
+            TurnRequest(
+                id: turnID,
+                prompt: promptText,
+                backend: .codex,
+                modelName: modelName,
+                workspaceRoot: workspaceRoot
+            )
+        )
+        _ = advanceTurn(to: .streaming, turnID: turnID)
         timeline.beginResponse(
             displayText: visibleInTimeline ? displayText : nil,
             placeholderID: placeholderID,
@@ -84,15 +140,21 @@ final class ChatResponseCoordinator {
                 ),
                 events: CodexRuntimeStore.TurnEvents(
                     liveAssistantChanged: { [weak self] text in
+                        guard let self, self.ownsTurn(turnID) else { return }
                         assistantText = text
-                        self?.timeline.liveAssistant = text
+                        self.timeline.liveAssistant = text
                     },
                     liveReasoningChanged: { [weak self] text in
+                        guard let self, self.ownsTurn(turnID) else { return }
                         reasoningText = text
-                        self?.timeline.liveReasoning = text
+                        self.timeline.liveReasoning = text
                     },
                     activityStarted: { [weak self] call, summary in
-                        guard let self else { return }
+                        guard let self, self.ownsTurn(turnID) else { return }
+                        _ = self.advanceTurn(
+                            to: .toolExecuting,
+                            turnID: turnID
+                        )
                         self.toolInteractions.beginActivity(
                             id: call.callID,
                             toolName: call.tool,
@@ -110,17 +172,28 @@ final class ChatResponseCoordinator {
                         )
                     },
                     activityEnded: { [weak self] id in
-                        self?.toolInteractions.endActivity(id: id)
-                        self?.coordinatorToolFinished(callID: id)
+                        guard let self, self.ownsTurn(turnID) else { return }
+                        self.toolInteractions.endActivity(id: id)
+                        self.coordinatorToolFinished(callID: id)
+                        _ = self.advanceTurn(to: .streaming, turnID: turnID)
                     },
                     presentationRequested: { [weak self] presentation in
-                        self?.present(presentation)
+                        guard let self, self.ownsTurn(turnID) else { return }
+                        self.present(presentation)
                     },
                     approvalRequested: { [weak self] request in
-                        self?.toolInteractions.enqueueApproval(request)
+                        guard let self, self.ownsTurn(turnID) else { return }
+                        _ = self.advanceTurn(
+                            to: .awaitingApproval,
+                            turnID: turnID
+                        )
+                        self.toolInteractions.enqueueApproval(request)
                     }
                 )
             )
+            guard ownsTurn(turnID) else {
+                return Result(errorMessage: nil, touchedConversation: false)
+            }
             assistantText = response.assistantText
             reasoningText = response.reasoningText
             let assistantBlock = assistantText.trimmingCharacters(
@@ -144,8 +217,13 @@ final class ChatResponseCoordinator {
                 assistantBlock: assistantBlock,
                 reasoningBlock: reasoningBlock
             )
+            _ = advanceTurn(to: .settling, turnID: turnID)
+            finishTurn(.succeeded, turnID: turnID)
             result = Result(errorMessage: nil, touchedConversation: true)
         } catch where error is CancellationError || Task.isCancelled {
+            guard ownsTurn(turnID) else {
+                return Result(errorMessage: nil, touchedConversation: false)
+            }
             await codexRuntime.interrupt()
             timeline.replaceBlock(
                 id: placeholderID,
@@ -158,8 +236,12 @@ final class ChatResponseCoordinator {
                     model: modelName
                 )
             )
+            finishTurn(.cancelled(reason: "The turn was interrupted."), turnID: turnID)
         } catch let codexError as CodexAppServerError
             where codexError.requiresChatGPTLogin {
+            guard ownsTurn(turnID) else {
+                return Result(errorMessage: nil, touchedConversation: false)
+            }
             codexRuntime.markSignedOut()
             timeline.replaceBlock(
                 id: placeholderID,
@@ -170,7 +252,20 @@ final class ChatResponseCoordinator {
                     model: modelName
                 )
             )
+            finishTurn(
+                .failed(
+                    TurnFailure(
+                        code: "codex.authentication",
+                        message: "Codex authentication is required.",
+                        isRecoverable: true
+                    )
+                ),
+                turnID: turnID
+            )
         } catch {
+            guard ownsTurn(turnID) else {
+                return Result(errorMessage: nil, touchedConversation: false)
+            }
             codexRuntime.markFailed(error.localizedDescription)
             timeline.replaceBlock(
                 id: placeholderID,
@@ -185,8 +280,20 @@ final class ChatResponseCoordinator {
                 errorMessage: error.localizedDescription,
                 touchedConversation: false
             )
+            finishTurn(
+                .failed(
+                    TurnFailure(
+                        code: "codex.request",
+                        message: error.localizedDescription
+                    )
+                ),
+                turnID: turnID
+            )
         }
 
+        guard ownsTurn(turnID) || currentTurnState?.id == turnID else {
+            return Result(errorMessage: nil, touchedConversation: false)
+        }
         timeline.finishResponse(placeholderID: placeholderID)
         toolInteractions.clearActivities()
         return result
@@ -196,11 +303,13 @@ final class ChatResponseCoordinator {
         displayText: String,
         promptText: String,
         visibleInTimeline: Bool,
+        turnID: TurnID,
         blocks: [ChatBlock],
         session: LanguageModelSession,
         backend: ModelBackend,
         mode: OrchestratorMode,
         workspaceKind: String,
+        workspaceRoot: String,
         modelName: String,
         serverURL: String? = nil,
         reasoningStreamRelay: ReasoningStreamRelay? = nil,
@@ -213,6 +322,15 @@ final class ChatResponseCoordinator {
         let editGroupID = UUID().uuidString
         activeEditGroupID = editGroupID
         let placeholderID = UUID().uuidString
+        beginTurn(
+            TurnRequest(
+                id: turnID,
+                prompt: promptText,
+                backend: backend,
+                modelName: modelName,
+                workspaceRoot: workspaceRoot
+            )
+        )
         timeline.beginResponse(
             displayText: visibleInTimeline ? displayText : nil,
             placeholderID: placeholderID,
@@ -233,22 +351,37 @@ final class ChatResponseCoordinator {
             ),
             events: NativeResponseRunner.Events(
                 diagnosticsChanged: { [weak self] runID in
-                    self?.activeDiagnosticsRunID = runID
+                    guard let self, self.ownsTurn(turnID) else { return }
+                    self.activeDiagnosticsRunID = runID
                 },
-                contextChanged: contextChanged,
+                contextChanged: { [weak self] usage in
+                    guard let self, self.ownsTurn(turnID) else { return }
+                    contextChanged(usage)
+                },
                 liveContentChanged: { [weak self] content in
-                    self?.timeline.liveAssistant =
+                    guard let self, self.ownsTurn(turnID) else { return }
+                    self.timeline.liveAssistant =
                         Self.userVisibleAssistantText(content)
                 },
                 liveReasoningChanged: { [weak self] reasoning in
-                    self?.timeline.liveReasoning = reasoning
+                    guard let self, self.ownsTurn(turnID) else { return }
+                    self.timeline.liveReasoning = reasoning
                 },
                 approvalRequested: { [weak self] request in
-                    self?.toolInteractions.enqueueApproval(request)
+                    guard let self, self.ownsTurn(turnID) else { return }
+                    _ = self.advanceTurn(
+                        to: .awaitingApproval,
+                        turnID: turnID
+                    )
+                    self.toolInteractions.enqueueApproval(request)
                 }
             )
         )
+        _ = advanceTurn(to: .streaming, turnID: turnID)
         isDelegating = false
+        guard ownsTurn(turnID) else {
+            return Result(errorMessage: nil, touchedConversation: false)
+        }
         toolInteractions.clearActivities()
         var result = Result(errorMessage: nil, touchedConversation: false)
 
@@ -284,6 +417,8 @@ final class ChatResponseCoordinator {
                 assistantBlock: assistantBlock,
                 reasoningBlock: reasoningBlock
             )
+            _ = advanceTurn(to: .settling, turnID: turnID)
+            finishTurn(.succeeded, turnID: turnID)
             result = Result(errorMessage: nil, touchedConversation: true)
         case .repetitiveOutput:
             let stoppedText = completedRootWrite.map { "Created `\($0)`." }
@@ -296,6 +431,16 @@ final class ChatResponseCoordinator {
                     text: stoppedText,
                     model: modelName
                 )
+            )
+            finishTurn(
+                .failed(
+                    TurnFailure(
+                        code: "model.repetitiveOutput",
+                        message: stoppedText,
+                        isRecoverable: true
+                    )
+                ),
+                turnID: turnID
             )
         case .cancelled(let content, let reasoning):
             let partialText = content.isEmpty ? reasoning : content
@@ -310,6 +455,10 @@ final class ChatResponseCoordinator {
                     model: modelName
                 )
             )
+            finishTurn(
+                .cancelled(reason: "The turn was interrupted."),
+                turnID: turnID
+            )
         case .failed(let message, _, _):
             timeline.replaceBlock(
                 id: placeholderID,
@@ -323,6 +472,10 @@ final class ChatResponseCoordinator {
             result = Result(
                 errorMessage: message,
                 touchedConversation: false
+            )
+            finishTurn(
+                .failed(TurnFailure(code: "provider.request", message: message)),
+                turnID: turnID
             )
         }
 
@@ -341,6 +494,9 @@ final class ChatResponseCoordinator {
         backend: ModelBackend,
         owner: AgentActivityToolOwner
     ) async {
+        if let turnID = currentTurnState?.id {
+            _ = advanceTurn(to: .toolExecuting, turnID: turnID)
+        }
         if let activeDiagnosticsRunID {
             await AgentDiagnosticsRecorder.shared.toolStarted(
                 runID: activeDiagnosticsRunID,
@@ -405,6 +561,9 @@ final class ChatResponseCoordinator {
             coordinatorToolFinished(callID: call.id)
         }
         toolInteractions.endActivity(id: call.id)
+        if let turnID = currentTurnState?.id {
+            _ = advanceTurn(to: .streaming, turnID: turnID)
+        }
     }
 
     /// Applies the provider-neutral delegation event stream and attaches a

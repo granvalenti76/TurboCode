@@ -53,6 +53,7 @@ nonisolated enum TurnPhase: String, Codable, Hashable, Sendable {
              (.toolExecuting, .settling),
              (.awaitingApproval, .toolExecuting),
              (.awaitingApproval, .streaming),
+             (.awaitingApproval, .settling),
              (.settling, .completed):
             true
         case (.accepted, .cancelled),
@@ -337,5 +338,17 @@ nonisolated enum AgentRuntimeEvent: Sendable {
         case .approvalRequested(let approval):
             approval.turnID
         }
+    }
+}
+
+/// Prevents an independent worker result from being published after its turn
+/// was cancelled or replaced by a newer application command.
+nonisolated enum TurnCompletionPolicy {
+    static func accepts(
+        turnID: TurnID,
+        activeTurnID: TurnID?,
+        isCancelled: Bool
+    ) -> Bool {
+        !isCancelled && activeTurnID == turnID
     }
 }
