@@ -650,6 +650,7 @@ public final class ChatStore {
 
     /// Saves the active thread and its blocks to `~/.turbocode/sessions/<id>.json`.
     public func persistSession(for threadId: String) async {
+        let startedAt = Date()
         guard threadId == activeThreadId,
               let thread = threads.first(where: { $0.id == threadId }) else {
             assertionFailure("persistSession can only persist the active thread")
@@ -668,6 +669,16 @@ public final class ChatStore {
         } catch {
             print("[TurboCode] Failed to persist session: \(error.localizedDescription)")
         }
+        await AgentDiagnosticsRecorder.shared.recordBoundary(
+            RuntimeBoundaryMetric(
+                boundary: .persistence,
+                backend: activeBackend.rawValue,
+                durationMilliseconds: max(
+                    0,
+                    Int(Date().timeIntervalSince(startedAt) * 1_000)
+                )
+            )
+        )
     }
 
     /// Persists catalog-only changes without replacing a non-active thread's
@@ -692,6 +703,7 @@ public final class ChatStore {
 
     /// Fully restores a past session with its blocks.
     public func restoreSession(id: String) async {
+        let startedAt = Date()
         await finishActiveResponseBeforeTransition()
         guard let snapshot = try? conversationStore.snapshot(id: id),
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
@@ -716,6 +728,16 @@ public final class ChatStore {
             )
         } ?? SessionRebuildHistory.fromVisibleBlocks(snapshot.blocks)
         rebuildSession(keepingHistory: false, restoringHistory: restoredHistory)
+        await AgentDiagnosticsRecorder.shared.recordBoundary(
+            RuntimeBoundaryMetric(
+                boundary: .restore,
+                backend: snapshot.modelBackend,
+                durationMilliseconds: max(
+                    0,
+                    Int(Date().timeIntervalSince(startedAt) * 1_000)
+                )
+            )
+        )
     }
 
     private func restoreModelSelection(_ identifier: String) async {

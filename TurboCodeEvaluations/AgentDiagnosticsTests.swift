@@ -49,6 +49,19 @@ struct AgentDiagnosticsTests {
         #expect(AgentDiagnosticsRecorder.classifyFailure(detail) == expected)
     }
 
+    @Test("Runtime boundary metrics clamp baseline values")
+    func runtimeBoundaryMetricsClampBaselineValues() {
+        let metric = RuntimeBoundaryMetric(
+            boundary: .restore,
+            backend: "foundationApple",
+            durationMilliseconds: -10,
+            eventCount: -2
+        )
+
+        #expect(metric.durationMilliseconds == 0)
+        #expect(metric.eventCount == 0)
+    }
+
     private func metric(startedAt: Date) -> AgentRunMetric {
         AgentRunMetric(
             id: "run",

@@ -212,6 +212,8 @@ final class ChatResponseCoordinator {
             }
         )
 
+        let settlementStartedAt = Date()
+
         await finishCodexDiagnostics(
             runID: diagnosticsRunID,
             capture: diagnostics,
@@ -219,6 +221,11 @@ final class ChatResponseCoordinator {
         )
 
         guard ownsTurn(turnID) else {
+            await recordResponseBoundaries(
+                backend: .codex,
+                settlementStartedAt: settlementStartedAt,
+                publicationCount: diagnostics.publicationCount
+            )
             return Result(errorMessage: nil, touchedConversation: false)
         }
         switch backendResult.outcome {
@@ -317,6 +324,11 @@ final class ChatResponseCoordinator {
         }
         timeline.finishResponse(placeholderID: placeholderID)
         toolInteractions.clearActivities()
+        await recordResponseBoundaries(
+            backend: .codex,
+            settlementStartedAt: settlementStartedAt,
+            publicationCount: diagnostics.publicationCount
+        )
         return result
     }
 
@@ -359,6 +371,7 @@ final class ChatResponseCoordinator {
         )
         productGuidePresentation = nil
         completedRootWrite = nil
+        let publications = ResponsePublicationCapture()
 
         let backendSession = NativeBackendSession(
             backend: backend,
@@ -399,9 +412,11 @@ final class ChatResponseCoordinator {
                 }
                 switch event {
                 case .assistantTextChanged(_, let content):
+                    publications.record()
                     self.timeline.liveAssistant =
                         Self.userVisibleAssistantText(content)
                 case .reasoningTextChanged(_, let reasoning):
+                    publications.record()
                     self.timeline.liveReasoning = reasoning
                 case .phaseChanged(_, let phase, _):
                     _ = self.advanceTurn(to: phase, turnID: turnID)
@@ -410,9 +425,15 @@ final class ChatResponseCoordinator {
                 }
             }
         )
+        let settlementStartedAt = Date()
         _ = advanceTurn(to: .streaming, turnID: turnID)
         isDelegating = false
         guard ownsTurn(turnID) else {
+            await recordResponseBoundaries(
+                backend: backend,
+                settlementStartedAt: settlementStartedAt,
+                publicationCount: publications.count
+            )
             return Result(errorMessage: nil, touchedConversation: false)
         }
         toolInteractions.clearActivities()
@@ -524,7 +545,39 @@ final class ChatResponseCoordinator {
         }
         timeline.finishResponse(placeholderID: placeholderID)
         timeline.clearEditGroup(editGroupID)
+        await recordResponseBoundaries(
+            backend: backend,
+            settlementStartedAt: settlementStartedAt,
+            publicationCount: publications.count
+        )
         return result
+    }
+
+    /// Records only the provider-neutral timing/count baseline; detailed
+    /// provider diagnostics remain owned by their existing runtime recorders.
+    private func recordResponseBoundaries(
+        backend: ModelBackend,
+        settlementStartedAt: Date,
+        publicationCount: Int
+    ) async {
+        let duration = max(
+            0,
+            Int(Date().timeIntervalSince(settlementStartedAt) * 1_000)
+        )
+        await AgentDiagnosticsRecorder.shared.recordBoundary(
+            RuntimeBoundaryMetric(
+                boundary: .settlement,
+                backend: backend.rawValue,
+                durationMilliseconds: duration
+            )
+        )
+        await AgentDiagnosticsRecorder.shared.recordBoundary(
+            RuntimeBoundaryMetric(
+                boundary: .mainActorPublication,
+                backend: backend.rawValue,
+                eventCount: publicationCount
+            )
+        )
     }
 
     /// Flushes the Codex projection after the provider task settles. The
@@ -892,11 +945,13 @@ private final class CodexDiagnosticsCapture {
 
     private(set) var firstTokenAt: Date?
     private(set) var generatedCharacters = 0
+    private(set) var publicationCount = 0
     private(set) var startedTools: [ToolCall] = []
     private(set) var completedTools: [CompletedTool] = []
 
     func textChanged(_ text: String) {
         guard !text.isEmpty else { return }
+        publicationCount += 1
         firstTokenAt = firstTokenAt ?? Date()
         generatedCharacters = max(generatedCharacters, text.count)
     }
@@ -910,5 +965,15 @@ private final class CodexDiagnosticsCapture {
             return
         }
         completedTools.append(CompletedTool(call: call, result: result))
+    }
+}
+
+/// Counts visible response publications without retaining their content.
+@MainActor
+private final class ResponsePublicationCapture {
+    private(set) var count = 0
+
+    func record() {
+        count += 1
     }
 }

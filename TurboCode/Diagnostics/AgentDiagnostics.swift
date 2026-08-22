@@ -79,6 +79,41 @@ nonisolated struct AgentRunMetric: Codable, Sendable {
     var contextSize: Int?
 }
 
+/// Boundaries measured by the 0.3.4 harness foundation. These metrics stay
+/// outside the normal UI so persistence and MainActor publication costs can be
+/// compared without exposing provider transport details.
+nonisolated enum RuntimeBoundary: String, Codable, Sendable {
+    case settlement
+    case persistence
+    case restore
+    case mainActorPublication
+}
+
+nonisolated struct RuntimeBoundaryMetric: Codable, Sendable {
+    let id: String
+    let createdAt: Date
+    let boundary: RuntimeBoundary
+    let backend: String?
+    let durationMilliseconds: Int?
+    let eventCount: Int?
+
+    init(
+        id: String = UUID().uuidString,
+        createdAt: Date = .now,
+        boundary: RuntimeBoundary,
+        backend: String? = nil,
+        durationMilliseconds: Int? = nil,
+        eventCount: Int? = nil
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.boundary = boundary
+        self.backend = backend
+        self.durationMilliseconds = durationMilliseconds.map { max(0, $0) }
+        self.eventCount = eventCount.map { max(0, $0) }
+    }
+}
+
 /// A persisted on-device context boundary, shown separately from inference
 /// runs so diagnostics can distinguish summarization from model failures.
 nonisolated struct OnDeviceCompactionMetric: Codable, Sendable, Identifiable {
@@ -486,6 +521,12 @@ actor AgentDiagnosticsRecorder {
             metric,
             filename: "local-compactions.jsonl"
         )
+    }
+
+    /// Persists one provider-neutral boundary sample for the 0.3.4 baseline.
+    func recordBoundary(_ metric: RuntimeBoundaryMetric) {
+        guard Self.isEnabled else { return }
+        Self.appendJSONLine(metric, filename: "boundaries.jsonl")
     }
 
     func localCompactions() -> [LocalCompactionMetric] {
