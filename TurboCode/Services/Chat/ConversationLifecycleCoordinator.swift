@@ -16,6 +16,7 @@ final class ConversationLifecycleCoordinator {
     private let runtime: AgentRuntime
     private let profiles: ProfileSelectionCoordinator
     private let sessions: ConversationSessionCoordinator
+    private let transitionBarrier: RuntimeTransitionBarrier
 
     init(
         conversations: ConversationStore,
@@ -28,7 +29,8 @@ final class ConversationLifecycleCoordinator {
         presentation: ChatPresentationViewModel,
         runtime: AgentRuntime,
         profiles: ProfileSelectionCoordinator,
-        sessions: ConversationSessionCoordinator
+        sessions: ConversationSessionCoordinator,
+        transitionBarrier: RuntimeTransitionBarrier
     ) {
         self.conversations = conversations
         self.timeline = timeline
@@ -41,20 +43,33 @@ final class ConversationLifecycleCoordinator {
         self.runtime = runtime
         self.profiles = profiles
         self.sessions = sessions
+        self.transitionBarrier = transitionBarrier
     }
 
     /// Selects thread identity only after every provider and profile operation
     /// has settled. Presentation owned by the previous conversation is cleared
     /// before the runtime can publish events under the new identity.
     func selectThread(_ id: String) async {
-        await finishActiveResponseBeforeTransition()
-        if id != conversations.activeThreadID {
-            workbench.dismissWorkspaceListingInspector()
-            workbench.dismissDiffPatchReview()
-            reviewDrafts.discardAll()
+        await transitionBarrier.performContextChange {
+            if id != conversations.activeThreadID {
+                workbench.dismissWorkspaceListingInspector()
+                workbench.dismissDiffPatchReview()
+                reviewDrafts.discardAll()
+            }
+            conversations.activeThreadID = id
+            _ = await runtime.apply(.switchThread(threadID: id))
         }
-        conversations.activeThreadID = id
-        _ = await runtime.apply(.switchThread(threadID: id))
+    }
+
+    /// Opens one conversation and publishes the final chat route only after
+    /// its matching runtime/timeline context is installed.
+    func openThread(_ id: String) async {
+        if timeline.blocks.isEmpty || conversations.activeThreadID != id {
+            await restoreSession(id: id)
+        } else {
+            await selectThread(id)
+        }
+        workbench.setRoute(.chat)
     }
 
     /// Creates one empty conversation boundary and installs its runtime
@@ -64,27 +79,33 @@ final class ConversationLifecycleCoordinator {
         title: String = "New Chat",
         mode: ConversationMode = .agent
     ) async {
-        await finishActiveResponseBeforeTransition()
-        workbench.dismissWorkspaceListingInspector()
-        workbench.dismissDiffPatchReview()
-        reviewDrafts.discardAll()
-        let thread = conversations.createThread(
-            title: title,
-            workspace: workspace.root.isEmpty ? nil : workspace.root,
-            mode: mode
-        )
-        _ = await runtime.apply(.switchThread(threadID: thread.id))
-        timeline.reset()
-        resetActivityPresentation()
-        await profiles.rebuildSession(keepingHistory: false)
+        await transitionBarrier.performContextChange {
+            workbench.dismissWorkspaceListingInspector()
+            workbench.dismissDiffPatchReview()
+            reviewDrafts.discardAll()
+            let thread = conversations.createThread(
+                title: title,
+                workspace: workspace.root.isEmpty ? nil : workspace.root,
+                mode: mode
+            )
+            _ = await runtime.apply(.switchThread(threadID: thread.id))
+            timeline.reset()
+            resetActivityPresentation()
+            await profiles.rebuildSession(keepingHistory: false)
+        }
     }
 
     /// Restores one durable conversation as an ordered runtime transition.
     /// Immutable disk state is installed before model history is rebuilt, so
     /// presentation, provider selection, and transcript share one thread ID.
     func restoreSession(id: String) async {
+        await transitionBarrier.performContextChange {
+            await restoreSettledSession(id: id)
+        }
+    }
+
+    private func restoreSettledSession(id: String) async {
         let startedAt = Date()
-        await finishActiveResponseBeforeTransition()
         guard let snapshot = await sessions.load(id: id),
               conversations.threads.contains(where: { $0.id == id }) else {
             return
@@ -137,9 +158,18 @@ final class ConversationLifecycleCoordinator {
         if deletesActiveThread {
             // The old operation may still perform its final persistence pass;
             // release it before deleting the file that pass belongs to.
-            await finishActiveResponseBeforeTransition()
+            await transitionBarrier.performContextChange {
+                await deleteSettledThread(id: id, deletesActiveThread: true)
+            }
+        } else {
+            await deleteSettledThread(id: id, deletesActiveThread: false)
         }
+    }
 
+    private func deleteSettledThread(
+        id: String,
+        deletesActiveThread: Bool
+    ) async {
         let nextThreadID: String?
         do {
             nextThreadID = try await sessions.delete(id: id)
@@ -160,7 +190,7 @@ final class ConversationLifecycleCoordinator {
         reviewDrafts.discardAll()
 
         if let nextThreadID {
-            await restoreSession(id: nextThreadID)
+            await restoreSettledSession(id: nextThreadID)
             if conversations.activeThreadID == nil {
                 // A new draft may not have reached disk yet. It remains a valid
                 // catalog selection but starts with a fresh provider context.
@@ -191,16 +221,6 @@ final class ConversationLifecycleCoordinator {
         timeline.reset()
         resetActivityPresentation()
         await profiles.rebuildSession(keepingHistory: false)
-    }
-
-    /// Navigation is a transaction boundary: release the old operation before
-    /// changing identity so its final persistence pass cannot target the new
-    /// conversation.
-    private func finishActiveResponseBeforeTransition() async {
-        await runtime.beginQuiescence()
-        await profiles.cancelAndWaitForTransitions()
-        await runtime.cancelAndWaitForOperation()
-        await runtime.endQuiescence()
     }
 
     private func resetActivityPresentation() {

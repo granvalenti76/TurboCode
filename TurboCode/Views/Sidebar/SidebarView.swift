@@ -310,7 +310,7 @@ struct SidebarView: View {
         // Sidebar project selection is the single workspace navigation path.
         // Reuse the established transition so model, Git, diffs, recency,
         // and inspector state remain consistent with the former toolbar menu.
-        chatStore.switchToWorkspace(path)
+        Task { await chatStore.switchToWorkspace(path) }
         expandedWorkspacePath = path
         visibleChatLimit = SidebarConversationDisclosure.batchSize
     }

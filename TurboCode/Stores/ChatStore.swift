@@ -76,6 +76,7 @@ public final class ChatStore {
     private let sessionCoordinator: ConversationSessionCoordinator
     private let profileSelectionCoordinator: ProfileSelectionCoordinator
     private let conversationLifecycleCoordinator: ConversationLifecycleCoordinator
+    private let workspaceLifecycleCoordinator: WorkspaceLifecycleCoordinator
     private let independentTaskCoordinator: IndependentTaskCoordinator
     private let messageSendCoordinator: MessageSendCoordinator
     private let reviewCoordinator: ReviewCoordinator
@@ -106,7 +107,8 @@ public final class ChatStore {
     init(
         conversationRepository: any ConversationRepository,
         gitService: any GitRepositoryServicing = GitDiffService(),
-        diffPatchService: any DiffPatchApplying = DiffPatchService()
+        diffPatchService: any DiffPatchApplying = DiffPatchService(),
+        workspaceDefaults: UserDefaults = .standard
     ) {
         let toolInteractions = ToolInteractionStore()
         let agentActivity = AgentActivityStore()
@@ -131,7 +133,8 @@ public final class ChatStore {
         let llmRuntime = LLMRuntime(sessionFactory: llmSessionFactory)
         let workspace = WorkspaceStore(
             gitService: gitService,
-            reviewDraftStore: reviewDraft
+            reviewDraftStore: reviewDraft,
+            defaults: workspaceDefaults
         )
         let workbench = WorkbenchStore()
         let conversations = ConversationStore()
@@ -184,6 +187,10 @@ public final class ChatStore {
             responseCoordinator: responseCoordinator
         )
         self.profileSelectionCoordinator = profileSelectionCoordinator
+        let transitionBarrier = RuntimeTransitionBarrier(
+            runtime: agentRuntime,
+            profiles: profileSelectionCoordinator
+        )
         let conversationLifecycleCoordinator = ConversationLifecycleCoordinator(
             conversations: conversations,
             timeline: timeline,
@@ -195,9 +202,22 @@ public final class ChatStore {
             presentation: presentation,
             runtime: agentRuntime,
             profiles: profileSelectionCoordinator,
-            sessions: sessionCoordinator
+            sessions: sessionCoordinator,
+            transitionBarrier: transitionBarrier
         )
         self.conversationLifecycleCoordinator = conversationLifecycleCoordinator
+        self.workspaceLifecycleCoordinator = WorkspaceLifecycleCoordinator(
+            workspace: workspace,
+            conversations: conversations,
+            timeline: timeline,
+            activity: agentActivity,
+            workbench: workbench,
+            presentation: presentation,
+            runtime: agentRuntime,
+            profiles: profileSelectionCoordinator,
+            sessions: sessionCoordinator,
+            transitionBarrier: transitionBarrier
+        )
         self.independentTaskCoordinator = IndependentTaskCoordinator(
             runtime: agentRuntime,
             runtimeProjection: runtimeProjection,
@@ -380,13 +400,7 @@ public final class ChatStore {
     /// SwiftUI from building the previous, potentially large timeline merely to
     /// replace it one run-loop later when leaving a utility destination.
     public func openThread(_ id: String) async {
-        await finishActiveResponseBeforeTransition()
-        if blocks.isEmpty || activeThreadId != id {
-            await restoreSession(id: id)
-        } else {
-            await selectThread(id)
-        }
-        setRoute(.chat)
+        await conversationLifecycleCoordinator.openThread(id)
     }
 
     public func createThread(title: String = "New Chat", mode: ConversationMode = .agent) async {
@@ -466,29 +480,7 @@ public final class ChatStore {
     /// Removes a workspace from TurboCode and deletes only its persisted chats.
     /// The workspace directory and all project files are left untouched.
     public func removeWorkspace(_ path: String) async {
-        await finishActiveResponseBeforeTransition()
-        let activeThreadBeforeRemoval = activeThreadId
-        let persistenceRemoval = await sessionCoordinator.removeWorkspace(path)
-        let removedActiveThread = activeThreadBeforeRemoval.map(
-            persistenceRemoval.deletedConversationIDs.contains
-        ) ?? false
-        let removedActiveWorkspace = workspaceStore.removeWorkspace(path)
-
-        if removedActiveThread {
-            await projectRuntimeCommand(.switchThread(threadID: nil))
-            timelineStore.reset()
-            resetAgentActivityForConversation()
-        }
-
-        if removedActiveWorkspace {
-            workbenchStore.rightPanelMode = nil
-            await rebuildSession(keepingHistory: false)
-        }
-
-        if !persistenceRemoval.deletionErrors.isEmpty {
-            let details = persistenceRemoval.deletionErrors.joined(separator: "; ")
-            error = "Some workspace chats could not be removed: \(details)"
-        }
+        await workspaceLifecycleCoordinator.removeWorkspace(path)
     }
 
     public func restoreThread(id: String) async {
@@ -508,35 +500,17 @@ public final class ChatStore {
             panel.directoryURL = URL(fileURLWithPath: workspaceRoot)
         }
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        Task { await setWorkspace(url.path) }
+        Task { await switchToWorkspace(url.path) }
     }
 
     /// Switch to a previously opened workspace by path.
-    public func switchToWorkspace(_ path: String) {
-        Task { await setWorkspace(path) }
-    }
-
-    /// Internal: configure workspace, rebuild session, refresh git state.
-    private func setWorkspace(_ path: String) async {
-        await finishActiveResponseBeforeTransition()
-        workspaceStore.selectWorkspace(path)
-
-        await refreshSkillsIfNeeded()
-        await rebuildSession(discardingCapabilityContext: true)
-        // The inspector is opt-in: changing workspace must not open it.
-        workbenchStore.rightPanelMode = nil
-        Task { await reloadDiffs() }
-        Task { await refreshGitBranches() }
+    public func switchToWorkspace(_ path: String) async {
+        await workspaceLifecycleCoordinator.selectWorkspace(path)
     }
 
     /// Clear the workspace selection.
-    public func clearWorkspace() {
-        Task {
-            await finishActiveResponseBeforeTransition()
-            workspaceStore.clearWorkspace()
-            await rebuildSession(discardingCapabilityContext: true)
-            workbenchStore.rightPanelMode = nil
-        }
+    public func clearWorkspace() async {
+        await workspaceLifecycleCoordinator.clearWorkspace()
     }
 
     public func sendMessage(_ text: String) async {
@@ -1022,36 +996,12 @@ public final class ChatStore {
         workbenchStore.toggleLeftSidebar()
     }
 
-    private func resetAgentActivityForConversation() {
-        agentActivityStore.reset()
-        if workbenchStore.rightPanelMode == .activity {
-            workbenchStore.rightPanelMode = nil
-        }
-    }
-
-    /// Projects context transitions through the runtime owner so the timeline
-    /// never retains a stale thread or backend after navigation settles.
-    private func projectRuntimeCommand(_ command: RuntimeCommand) async {
-        _ = await agentRuntime.apply(command)
-    }
-
     /// Projects only events accepted by the runtime owner. `/task` is an app
     /// command rather than a backend session, so the facade is its adapter and
     /// must still pass through the same stale-TurnID gate as native and Codex.
     @discardableResult
     private func projectRuntimeEvent(_ event: AgentRuntimeEvent) async -> Bool {
         await agentRuntime.apply(event)
-    }
-
-    /// Navigation and workspace changes are transaction boundaries for a live
-    /// response. Waiting for the cancelled task to finish lets its final
-    /// persistence pass target the old conversation before the new timeline or
-    /// workspace is installed.
-    private func finishActiveResponseBeforeTransition() async {
-        await agentRuntime.beginQuiescence()
-        await profileSelectionCoordinator.cancelAndWaitForTransitions()
-        await agentRuntime.cancelAndWaitForOperation()
-        await agentRuntime.endQuiescence()
     }
 
     private func activityReceiptBlock(for receiptID: String) -> ChatBlock? {

@@ -262,11 +262,18 @@ final class ProfileSelectionCoordinator {
     /// boundary. Restore, send, and explicit reload flows all require the same
     /// capability rebuild and must not depend on one another's coordinators.
     func refreshSkillsIfNeeded(forceRebuild: Bool = false) async {
-        guard modelRuntime.refreshSkills(
-            force: forceRebuild,
-            workspaceRoot: workspace.root
-        ) else { return }
+        guard refreshSkills(force: forceRebuild) else { return }
         await rebuildSession(discardingCapabilityContext: true)
+    }
+
+    /// Updates the selected capability set without rebuilding. Context-change
+    /// coordinators use this before their one mandatory provider rebuild.
+    @discardableResult
+    func refreshSkills(force: Bool = false) -> Bool {
+        modelRuntime.refreshSkills(
+            force: force,
+            workspaceRoot: workspace.root
+        )
     }
 
     func restoreModelSelection(_ identifier: String) async {
