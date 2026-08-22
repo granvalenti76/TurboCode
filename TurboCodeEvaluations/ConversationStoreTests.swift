@@ -133,6 +133,24 @@ struct ConversationStoreTests {
         #expect(store.activeThreadId == store.threads.first?.id)
     }
 
+    @Test("Creating a chat replaces conversation-local presentation atomically")
+    func creatingChatReplacesConversationPresentation() async {
+        let store = ChatStore(conversationRepository: ConversationStoreRepository())
+        store.timelineStore.restore([
+            ChatBlock(kind: .assistant, text: "Previous conversation")
+        ])
+        store.workbenchStore.rightPanelMode = .workspaceListing
+        store.workbenchStore.inspectedWorkspaceListingID = "previous-receipt"
+
+        await store.createThread(title: "Fresh conversation")
+
+        #expect(store.blocks.isEmpty)
+        #expect(store.threads.map(\.title) == ["Fresh conversation"])
+        #expect(store.activeThreadId == store.threads.first?.id)
+        #expect(store.workbenchStore.rightPanelMode == nil)
+        #expect(store.workbenchStore.inspectedWorkspaceListingID == nil)
+    }
+
     @Test("Disk repository round trips and deletes a complete session")
     func diskRepositoryRoundTripsAndDeletesSession() async throws {
         let directoryURL = temporarySessionDirectory()

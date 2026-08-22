@@ -191,6 +191,7 @@ public final class ChatStore {
             workbench: workbench,
             workspace: workspace,
             composer: composer,
+            reviewDrafts: reviewDraft,
             runtime: agentRuntime,
             profiles: profileSelectionCoordinator
         )
@@ -370,16 +371,7 @@ public final class ChatStore {
     }
 
     public func selectThread(_ id: String) async {
-        await finishActiveResponseBeforeTransition()
-        if id != activeThreadId {
-            dismissWorkspaceListingInspector()
-            workbenchStore.dismissDiffPatchReview()
-            // Inline review drafts belong to the conversation where the user
-            // authored them; never carry hidden instructions into another chat.
-            reviewDraftStore.discardAll()
-        }
-        conversationStore.activeThreadID = id
-        await projectRuntimeCommand(.switchThread(threadID: id))
+        await conversationLifecycleCoordinator.selectThread(id)
     }
 
     /// Opens a conversation as one navigation transition. Restoring first keeps
@@ -396,19 +388,10 @@ public final class ChatStore {
     }
 
     public func createThread(title: String = "New Chat", mode: ConversationMode = .agent) async {
-        await finishActiveResponseBeforeTransition()
-        dismissWorkspaceListingInspector()
-        workbenchStore.dismissDiffPatchReview()
-        reviewDraftStore.discardAll()
-        let thread = conversationStore.createThread(
+        await conversationLifecycleCoordinator.createThread(
             title: title,
-            workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
             mode: mode
         )
-        await projectRuntimeCommand(.switchThread(threadID: thread.id))
-        timelineStore.reset()
-        resetAgentActivityForConversation()
-        await rebuildSession(keepingHistory: false)
     }
 
     /// Makes every message entry point safe to use without requiring the user
