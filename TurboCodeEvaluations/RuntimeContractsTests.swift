@@ -91,6 +91,71 @@ struct RuntimeContractsTests {
         #expect(decoded.isQuiescing)
     }
 
+    @Test("The lifecycle reducer rejects stale and invalid callbacks")
+    func reducesLifecycleWithoutProviderState() {
+        let id = TurnID(rawValue: "reducer-turn")
+        let request = TurnRequest(
+            id: id,
+            prompt: "Run the reducer",
+            backend: .foundationApple,
+            modelName: "test-model",
+            workspaceRoot: "/workspace",
+            createdAt: Date(timeIntervalSince1970: 300)
+        )
+        var reducer = TurnStateReducer()
+
+        reducer.begin(request)
+        let advanced = reducer.advance(
+            to: .preparing,
+            turnID: id,
+            at: Date(timeIntervalSince1970: 301)
+        )
+        #expect(advanced)
+        let staleAdvance = reducer.advance(
+            to: .streaming,
+            turnID: TurnID(rawValue: "stale-turn"),
+            at: Date(timeIntervalSince1970: 302)
+        )
+        #expect(!staleAdvance)
+        #expect(reducer.state?.phase == .preparing)
+        let invalidFinish = reducer.finish(
+            with: .succeeded,
+            turnID: id,
+            at: Date(timeIntervalSince1970: 303)
+        )
+        #expect(!invalidFinish)
+        #expect(reducer.state?.outcome == nil)
+        #expect(reducer.owns(id))
+    }
+
+    @Test("The lifecycle reducer stores one terminal outcome")
+    func reducesTerminalOutcome() {
+        let id = TurnID(rawValue: "terminal-turn")
+        var reducer = TurnStateReducer(
+            state: TurnState(
+                id: id,
+                phase: .settling,
+                startedAt: Date(timeIntervalSince1970: 400),
+                updatedAt: Date(timeIntervalSince1970: 401)
+            )
+        )
+
+        let finished = reducer.finish(
+            with: .succeeded,
+            turnID: id,
+            at: Date(timeIntervalSince1970: 402)
+        )
+        #expect(finished)
+        #expect(reducer.state?.phase == .completed)
+        #expect(!reducer.owns(id))
+        let lateFinish = reducer.finish(
+            with: .cancelled(reason: "late"),
+            turnID: id,
+            at: Date(timeIntervalSince1970: 403)
+        )
+        #expect(!lateFinish)
+    }
+
     @Test("Runtime measurements clamp invalid values")
     func clampsMeasurements() {
         let usage = Usage(

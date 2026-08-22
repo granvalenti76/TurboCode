@@ -28,7 +28,12 @@ final class ChatResponseCoordinator {
     private var productGuidePresentation: ProductGuideBlock?
     private var completedRootWrite: String?
     private var pendingCoordinatorTool: AgentActivityTool?
-    private(set) var currentTurnState: TurnState?
+    /// The reducer owns lifecycle transitions; the coordinator only exposes
+    /// the current value while it continues to own timeline/tool projection.
+    private var turnReducer = TurnStateReducer()
+    var currentTurnState: TurnState? {
+        turnReducer.state
+    }
 
     init(
         timeline: ChatTimelineStore,
@@ -48,44 +53,24 @@ final class ChatResponseCoordinator {
     /// existing provider runners remain unchanged. A later callback may still
     /// arrive after cancellation, so presentation code can reject it by ID.
     func ownsTurn(_ turnID: TurnID) -> Bool {
-        currentTurnState?.id == turnID && currentTurnState?.outcome == nil
+        turnReducer.owns(turnID)
     }
 
     private func beginTurn(_ request: TurnRequest) {
-        currentTurnState = TurnState(
-            id: request.id,
-            startedAt: request.createdAt
-        )
+        turnReducer.begin(request)
         _ = advanceTurn(to: .preparing, turnID: request.id)
     }
 
     @discardableResult
     private func advanceTurn(to phase: TurnPhase, turnID: TurnID) -> Bool {
-        guard let currentTurnState,
-              currentTurnState.id == turnID,
-              let next = currentTurnState.transitioning(
-                  to: phase,
-                  at: Date()
-              ) else {
-            return false
-        }
-        self.currentTurnState = next
-        return true
+        turnReducer.advance(to: phase, turnID: turnID, at: Date())
     }
 
     private func finishTurn(
         _ outcome: TurnOutcome,
         turnID: TurnID
     ) {
-        guard let currentTurnState,
-              currentTurnState.id == turnID,
-              let next = currentTurnState.finishing(
-                  with: outcome,
-                  at: Date()
-              ) else {
-            return
-        }
-        self.currentTurnState = next
+        _ = turnReducer.finish(with: outcome, turnID: turnID, at: Date())
     }
 
     /// Carries profile-owned Codex choices across the timeline boundary while

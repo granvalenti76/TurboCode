@@ -239,6 +239,61 @@ nonisolated struct RuntimeSnapshot: Codable, Hashable, Sendable {
     }
 }
 
+/// Pure lifecycle reducer used by runtime owners before they publish a
+/// `RuntimeSnapshot`.
+///
+/// The reducer owns no tasks, provider sessions, or UI state. Callers provide
+/// event times explicitly so lifecycle tests remain deterministic and a stale
+/// callback can be rejected without mutating the current turn.
+nonisolated struct TurnStateReducer: Sendable {
+    private(set) var state: TurnState?
+
+    init(state: TurnState? = nil) {
+        self.state = state
+    }
+
+    mutating func begin(_ request: TurnRequest) {
+        state = TurnState(
+            id: request.id,
+            startedAt: request.createdAt
+        )
+    }
+
+    @discardableResult
+    mutating func advance(
+        to phase: TurnPhase,
+        turnID: TurnID,
+        at date: Date
+    ) -> Bool {
+        guard let state,
+              state.id == turnID,
+              let next = state.transitioning(to: phase, at: date) else {
+            return false
+        }
+        self.state = next
+        return true
+    }
+
+    @discardableResult
+    mutating func finish(
+        with outcome: TurnOutcome,
+        turnID: TurnID,
+        at date: Date
+    ) -> Bool {
+        guard let state,
+              state.id == turnID,
+              let next = state.finishing(with: outcome, at: date) else {
+            return false
+        }
+        self.state = next
+        return true
+    }
+
+    func owns(_ turnID: TurnID) -> Bool {
+        state?.id == turnID && state?.outcome == nil
+    }
+}
+
 /// A provider-neutral tool invocation captured at the harness boundary.
 nonisolated struct ToolCall: Codable, Hashable, Sendable {
     let id: String
