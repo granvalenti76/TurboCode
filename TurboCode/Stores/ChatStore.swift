@@ -31,7 +31,7 @@ public final class ChatStore {
     /// is extracted in a later slice.
     public var busy: Bool {
         agentRuntimeProjectionStore.hasActiveOperation
-            || codexHandoffTask != nil
+            || presentationViewModel.isProfileTransitioning
     }
 #if DEBUG
     public var benchmarkRunning: Bool = false
@@ -55,8 +55,7 @@ public final class ChatStore {
     /// property setters cannot suspend, so keeping mutation in a method avoids
     /// an untracked Task racing the next profile or send action.
     public func setOrchestratorMode(_ mode: OrchestratorMode) async {
-        modelRuntimeStore.setOrchestratorMode(mode)
-        await rebuildSession(discardingCapabilityContext: true)
+        await profileSelectionCoordinator.setOrchestratorMode(mode)
     }
 
     // Internal only so the compatibility façade can forward legacy view API.
@@ -75,13 +74,8 @@ public final class ChatStore {
     let agentRuntime: AgentRuntime
     let responseCoordinator: ChatResponseCoordinator
     private let sessionCoordinator: ConversationSessionCoordinator
+    private let profileSelectionCoordinator: ProfileSelectionCoordinator
     private let reviewCoordinator: ReviewCoordinator
-
-    // Codex selection and handoff are also transition operations. Keeping
-    // their handles here prevents navigation from observing half-switched
-    // backend state while one of them is suspended at an await.
-    private var codexSelectionTask: Task<Void, Never>?
-    private var codexHandoffTask: Task<Void, Never>?
     // MARK: - Onboarding
 
     /// Ensures the current `~/.turbocode/` layout exists and applies additive migrations.
@@ -160,7 +154,7 @@ public final class ChatStore {
         self.codexRuntimeStore = codexRuntime
         self.modelRuntimeStore = modelRuntime
         self.agentRuntime = agentRuntime
-        self.responseCoordinator = ChatResponseCoordinator(
+        let responseCoordinator = ChatResponseCoordinator(
             timeline: timeline,
             toolInteractions: toolInteractions,
             agentActivity: agentActivity,
@@ -172,6 +166,18 @@ public final class ChatStore {
             activityPresentationRequested: {
                 workbench.rightPanelMode = .activity
             }
+        )
+        self.responseCoordinator = responseCoordinator
+        self.profileSelectionCoordinator = ProfileSelectionCoordinator(
+            modelRuntime: modelRuntime,
+            codexRuntime: codexRuntime,
+            conversations: conversations,
+            timeline: timeline,
+            workspace: workspace,
+            presentation: presentation,
+            agentRuntime: agentRuntime,
+            runtimeProjection: runtimeProjection,
+            responseCoordinator: responseCoordinator
         )
         self.reviewCoordinator = ReviewCoordinator(
             timeline: timeline,
@@ -187,29 +193,11 @@ public final class ChatStore {
     /// In the experimental compatibility mode the backend is always Apple
     /// on-device, so direct backend switching has no effect.
     public func switchBackend(to backend: ModelBackend) async {
-        guard !busy, orchestratorMode == .standalone else { return }
-        if backend == .codex {
-            scheduleCodexProfileSelection()
-            return
-        }
-        cancelCodexSelection()
-        if activeBackend == .codex {
-            beginCodexHandoff(to: .backend(backend))
-            return
-        }
-        guard modelRuntimeStore.selectBackend(backend) else { return }
-        await rebuildSession(discardingCapabilityContext: true)
+        await profileSelectionCoordinator.switchBackend(to: backend)
     }
 
     public func switchRemoteModel(to id: String) async {
-        guard !busy, orchestratorMode == .standalone else { return }
-        cancelCodexSelection()
-        if activeBackend == .codex {
-            beginCodexHandoff(to: .remoteModel(id))
-            return
-        }
-        guard modelRuntimeStore.selectRemoteModel(id: id) else { return }
-        await rebuildSession(discardingCapabilityContext: true)
+        await profileSelectionCoordinator.switchRemoteModel(to: id)
     }
 
     /// Selects Codex immediately, then verifies ChatGPT authentication and
@@ -219,50 +207,10 @@ public final class ChatStore {
         modelID: String? = nil,
         dynamicProfileID: UUID? = nil
     ) async {
-        guard !busy, orchestratorMode == .standalone else { return }
-        let isEnteringFromTurboCode = activeBackend != .codex
-        let routeChanged = activeDynamicProfileID != dynamicProfileID
-        if (isEnteringFromTurboCode || routeChanged),
-           let turboThreadID = activeThreadId {
-            codexRuntimeStore.captureImportedContext(
-                turboThreadID: turboThreadID,
-                blocks: blocks
-            )
-            if !isEnteringFromTurboCode {
-                // Dynamic tools are fixed when an App Server thread starts.
-                // Preserve visible context, then recreate only that hidden
-                // runtime boundary for a direct/coordinator route change.
-                codexRuntimeStore.resetThread(turboThreadID: turboThreadID)
-            }
-        }
-        modelRuntimeStore.selectCodex(
-            displayName: codexDisplayName,
-            profileID: dynamicProfileID
+        await profileSelectionCoordinator.selectCodexProfile(
+            modelID: modelID,
+            dynamicProfileID: dynamicProfileID
         )
-        error = nil
-
-        do {
-            try await codexRuntimeStore.select(modelID: modelID)
-            guard !Task.isCancelled,
-                  activeBackend == .codex,
-                  activeDynamicProfileID == dynamicProfileID else { return }
-            modelRuntimeStore.composerModel = activeDynamicProfile?.name
-                ?? "Codex · \(codexDisplayName)"
-        } catch is CancellationError {
-            return
-        } catch CodexAppServerError.chatGPTLoginRequired {
-            guard !Task.isCancelled else { return }
-            codexRuntimeStore.markSignedOut()
-        } catch let codexError as CodexAppServerError
-            where codexError.requiresChatGPTLogin {
-            guard !Task.isCancelled else { return }
-            codexRuntimeStore.markSignedOut()
-            self.error = nil
-        } catch {
-            guard !Task.isCancelled else { return }
-            codexRuntimeStore.markFailed(error.localizedDescription)
-            self.error = error.localizedDescription
-        }
     }
 
     /// Starts a cancellable Codex selection for UI callers. A later model
@@ -273,16 +221,10 @@ public final class ChatStore {
         modelID: String? = nil,
         dynamicProfileID: UUID? = nil
     ) -> Task<Void, Never> {
-        codexSelectionTask?.cancel()
-        let task = Task { [weak self] in
-            guard let self else { return }
-            await self.selectCodexProfile(
-                modelID: modelID,
-                dynamicProfileID: dynamicProfileID
-            )
-        }
-        codexSelectionTask = task
-        return task
+        profileSelectionCoordinator.scheduleCodexProfileSelection(
+            modelID: modelID,
+            dynamicProfileID: dynamicProfileID
+        )
     }
 
     /// Compatibility entry point for callers that only need to request a
@@ -300,69 +242,25 @@ public final class ChatStore {
     /// Rechecks the App Server and Luna catalog without changing the selected
     /// profile. This is used by the visible Retry action after runtime errors.
     func retryCodexConnection() {
-        guard activeBackend == .codex else { return }
-        let profileID = activeDynamicProfileID
-        scheduleCodexProfileSelection(
-            modelID: activeDynamicProfile?.codexModelID,
-            dynamicProfileID: profileID
-        )
+        profileSelectionCoordinator.retryCodexConnection()
     }
 
     /// Starts ChatGPT OAuth through App Server, opens the system default
     /// browser, and automatically finishes setup when the callback arrives.
     func signInToCodex() {
-        guard activeBackend == .codex else { return }
-        Task {
-            error = nil
-            do {
-                try await codexRuntimeStore.signIn()
-                modelRuntimeStore.composerModel = activeDynamicProfile?.name
-                    ?? "Codex · \(codexDisplayName)"
-            } catch {
-                codexRuntimeStore.markFailed(error.localizedDescription)
-                self.error = error.localizedDescription
-            }
-        }
+        profileSelectionCoordinator.signInToCodex()
     }
 
     func reopenCodexLoginPage() {
-        if !codexRuntimeStore.reopenLoginPage() {
-            error = "The Codex authorization page could not be opened."
-        }
+        profileSelectionCoordinator.reopenCodexLoginPage()
     }
 
     func selectBuiltInProfile(_ id: ProfileBaseModelID) async {
-        guard !busy, orchestratorMode == .standalone else { return }
-        if id == .codex {
-            scheduleCodexProfileSelection()
-            return
-        }
-        cancelCodexSelection()
-        if activeBackend == .codex {
-            beginCodexHandoff(to: .builtIn(id))
-            return
-        }
-        guard modelRuntimeStore.selectBuiltInProfile(id) else { return }
-        await rebuildSession(discardingCapabilityContext: true)
+        await profileSelectionCoordinator.selectBuiltInProfile(id)
     }
 
     func selectDynamicProfile(_ id: UUID) async {
-        guard !busy, orchestratorMode == .standalone else { return }
-        if let profile = dynamicProfiles.first(where: { $0.id == id }),
-           profile.baseModelID == .codex {
-            scheduleCodexProfileSelection(
-                modelID: profile.codexModelID,
-                dynamicProfileID: profile.id
-            )
-            return
-        }
-        cancelCodexSelection()
-        if activeBackend == .codex {
-            beginCodexHandoff(to: .dynamic(id))
-            return
-        }
-        guard modelRuntimeStore.selectDynamicProfile(id) else { return }
-        await rebuildSession(discardingCapabilityContext: true)
+        await profileSelectionCoordinator.selectDynamicProfile(id)
     }
 
     /// Selects a profile with `delegate_task` as one atomic runtime change.
@@ -371,131 +269,20 @@ public final class ChatStore {
     /// path; production coordinator profiles run in standalone transport mode.
     /// Centralizing this transition keeps that implementation detail out of UI.
     func selectCoordinatorProfile(_ id: UUID) async {
-        guard !busy,
-              let profile = dynamicProfiles.first(where: {
-                  $0.id == id && $0.usesDelegation
-              }) else {
-            return
-        }
-        modelRuntimeStore.setOrchestratorMode(.standalone)
-        if profile.baseModelID == .codex {
-            scheduleCodexProfileSelection(
-                modelID: profile.codexModelID,
-                dynamicProfileID: profile.id
-            )
-            return
-        }
-        cancelCodexSelection()
-        guard modelRuntimeStore.selectDynamicProfile(profile.id) else { return }
-        await rebuildSession(discardingCapabilityContext: true)
+        await profileSelectionCoordinator.selectCoordinatorProfile(id)
     }
 
     /// Leaves a custom profile and returns to the current built-in model.
     func selectDirectExecution() async {
-        guard !busy else { return }
-        guard orchestratorMode != .standalone
-                || activeDynamicProfile != nil else {
-            // Codex and ordinary base-model selections are already direct;
-            // choosing the checked menu item must not switch their backend.
-            return
-        }
-        let baseModel = activeDynamicProfile?.baseModelID ?? activeBaseModelID
-        modelRuntimeStore.setOrchestratorMode(.standalone)
-        if baseModel == .codex {
-            scheduleCodexProfileSelection()
-            return
-        }
-        cancelCodexSelection()
-        guard modelRuntimeStore.selectBuiltInProfile(baseModel) else { return }
-        await rebuildSession(discardingCapabilityContext: true)
-    }
-
-    /// Freezes profile selection while Codex prepares any required compact
-    /// context. The destination session is installed only after the handoff is
-    /// ready, preventing a half-switched UI/runtime state.
-    private func beginCodexHandoff(to selection: TurboCodeProfileSelection) {
-        guard !busy, activeBackend == .codex else { return }
-        cancelCodexSelection()
-        codexHandoffTask?.cancel()
-        codexHandoffTask = Task { [weak self] in
-            guard let self else { return }
-            await completeCodexHandoff(to: selection)
-            self.codexHandoffTask = nil
-        }
-    }
-
-    private func completeCodexHandoff(
-        to selection: TurboCodeProfileSelection
-    ) async {
-        guard let turboThreadID = activeThreadId else {
-            _ = applyTurboCodeSelection(selection)
-            await rebuildSession(discardingCapabilityContext: true)
-            return
-        }
-        let handoffWorkspaceRoot = workspaceRoot
-
-        let handoff = await codexRuntimeStore.prepareHandoff(
-            turboThreadID: turboThreadID,
-            blocks: blocks,
-            workspaceRoot: handoffWorkspaceRoot
-        )
-
-        guard !Task.isCancelled,
-              activeThreadId == turboThreadID,
-              workspaceRoot == handoffWorkspaceRoot else {
-            return
-        }
-        guard applyTurboCodeSelection(selection) else { return }
-        if handoff.didSummarize {
-            timelineStore.blocks.append(
-                ChatBlock(
-                    kind: .compaction,
-                    text: "Codex context summarized for the selected TurboCode profile."
-                )
-            )
-        }
-        codexRuntimeStore.completeHandoff(
-            turboThreadID: turboThreadID,
-            boundaryBlockID: blocks.last?.id
-        )
-        await rebuildSession(
-            keepingHistory: false,
-            discardingCapabilityContext: true,
-            restoringHistory: handoff.history
-        )
-    }
-
-    /// Applies a captured menu choice without rebuilding. This is separated
-    /// from the public selectors so a Codex handoff can inject one precise
-    /// transcript into the newly configured FoundationModels session.
-    private func applyTurboCodeSelection(
-        _ selection: TurboCodeProfileSelection
-    ) -> Bool {
-        switch selection {
-        case .backend(let backend):
-            return modelRuntimeStore.selectBackend(backend)
-        case .remoteModel(let id):
-            return modelRuntimeStore.selectRemoteModel(id: id)
-        case .builtIn(let id):
-            return modelRuntimeStore.selectBuiltInProfile(id)
-        case .dynamic(let id):
-            return modelRuntimeStore.selectDynamicProfile(id)
-        }
+        await profileSelectionCoordinator.selectDirectExecution()
     }
 
     func reloadDynamicProfiles(selecting id: UUID? = nil) async {
-        do {
-            if try modelRuntimeStore.reloadDynamicProfiles(selecting: id) {
-                await rebuildSession(discardingCapabilityContext: true)
-            }
-        } catch {
-            self.error = error.localizedDescription
-        }
+        await profileSelectionCoordinator.reloadDynamicProfiles(selecting: id)
     }
 
     public func reloadRemoteModels() async {
-        guard modelRuntimeStore.reloadRemoteModels() else { return }
-        await rebuildSession(discardingCapabilityContext: true)
+        await profileSelectionCoordinator.reloadRemoteModels()
     }
 
     public func isConfigured(_ model: RemoteModelConfig) -> Bool {
@@ -503,8 +290,7 @@ public final class ChatStore {
     }
 
     func setReasoningEffort(_ effort: ReasoningEffort) async {
-        modelRuntimeStore.setReasoningEffort(effort)
-        await rebuildSession()
+        await profileSelectionCoordinator.setReasoningEffort(effort)
     }
 
     func setCodexReasoningEffort(_ effort: CodexReasoningEffort) {
@@ -519,21 +305,10 @@ public final class ChatStore {
         discardingCapabilityContext: Bool = false,
         restoringHistory: [ModelRuntimeStore.RestoredTranscriptEntry]? = nil
     ) async {
-        presentationViewModel.setLlamaContextUsage(nil)
-        await projectRuntimeCommand(
-            .switchBackend(
-                RuntimeBackendSelection(
-                    backend: activeBackend,
-                    modelName: composerModel
-                )
-            )
-        )
-        modelRuntimeStore.rebuildSession(
-            workspaceRoot: workspaceRoot,
+        await profileSelectionCoordinator.rebuildSession(
             keepingHistory: keepingHistory,
             discardingCapabilityContext: discardingCapabilityContext,
-            restoringHistory: restoringHistory,
-            events: responseCoordinator.modelSessionEvents
+            restoringHistory: restoringHistory
         )
     }
 
@@ -701,58 +476,7 @@ public final class ChatStore {
     }
 
     private func restoreModelSelection(_ identifier: String) async {
-        guard orchestratorMode == .standalone else { return }
-        if identifier.hasPrefix("profile:"),
-           let id = UUID(uuidString: String(identifier.dropFirst("profile:".count))),
-           let profile = dynamicProfiles.first(where: { $0.id == id }) {
-            if profile.baseModelID == .codex {
-                if let turboThreadID = activeThreadId {
-                    codexRuntimeStore.restoreImportedContext(
-                        turboThreadID: turboThreadID,
-                        blocks: blocks
-                    )
-                }
-                let task = scheduleCodexProfileSelection(
-                    modelID: profile.codexModelID,
-                    dynamicProfileID: profile.id
-                )
-                await task.value
-            } else {
-                cancelCodexSelection()
-                _ = modelRuntimeStore.selectDynamicProfile(id)
-            }
-            return
-        }
-        if identifier == ModelBackend.codex.rawValue {
-            modelRuntimeStore.selectCodex(displayName: codexDisplayName)
-            if let turboThreadID = activeThreadId {
-                codexRuntimeStore.restoreImportedContext(
-                    turboThreadID: turboThreadID,
-                    blocks: blocks
-                )
-            }
-            let task = scheduleCodexProfileSelection()
-            await task.value
-            return
-        }
-        cancelCodexSelection()
-        if identifier == ModelBackend.foundationApple.rawValue {
-            _ = modelRuntimeStore.selectBuiltInProfile(.onDevice)
-            modelRuntimeStore.composerModel = ModelBackend.foundationApple.rawValue
-            return
-        }
-
-        let legacyRole: RemoteModelRole? = switch identifier {
-        case ModelBackend.llamaServer.rawValue: .local
-        case ModelBackend.foundationServe.rawValue: .pcc
-        default: nil
-        }
-        let model = remoteModels.first(where: {
-            $0.enabled && ($0.id == identifier || $0.role == legacyRole)
-        })
-        if let model, isConfigured(model) {
-            _ = modelRuntimeStore.selectRemoteModel(id: model.id)
-        }
+        await profileSelectionCoordinator.restoreModelSelection(identifier)
     }
 
     public func renameThread(id: String, title: String) async {
@@ -1732,29 +1456,14 @@ public final class ChatStore {
         await agentRuntime.apply(event)
     }
 
-    private func cancelCodexSelection() {
-        codexSelectionTask?.cancel()
-        codexSelectionTask = nil
-    }
-
     /// Navigation and workspace changes are transaction boundaries for a live
     /// response. Waiting for the cancelled task to finish lets its final
     /// persistence pass target the old conversation before the new timeline or
     /// workspace is installed.
     private func finishActiveResponseBeforeTransition() async {
         await agentRuntime.beginQuiescence()
-
-        if let selectionTask = codexSelectionTask {
-            selectionTask.cancel()
-            await selectionTask.value
-            codexSelectionTask = nil
-        }
+        await profileSelectionCoordinator.cancelAndWaitForTransitions()
         await agentRuntime.cancelAndWaitForOperation()
-        if let handoffTask = codexHandoffTask {
-            handoffTask.cancel()
-            await handoffTask.value
-            codexHandoffTask = nil
-        }
         await agentRuntime.endQuiescence()
     }
 

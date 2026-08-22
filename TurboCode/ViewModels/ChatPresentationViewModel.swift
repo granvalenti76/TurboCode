@@ -11,6 +11,10 @@ import Observation
 final class ChatPresentationViewModel {
     var runtimeStatus: RuntimeStatus = .ready
     var errorMessage: String?
+    /// Profile handoff is UI-visible transition state, not provider ownership.
+    /// The selection coordinator publishes it so composer observation remains
+    /// correct after task lifetime moves out of the compatibility facade.
+    private(set) var isProfileTransitioning = false
     private(set) var localCompactionNotice: LocalCompactionNotice?
     private(set) var llamaContextUsage: LlamaContextUsage?
 
@@ -18,6 +22,10 @@ final class ChatPresentationViewModel {
 
     func setLlamaContextUsage(_ usage: LlamaContextUsage?) {
         llamaContextUsage = usage
+    }
+
+    func setProfileTransitioning(_ value: Bool) {
+        isProfileTransitioning = value
     }
 
     /// Replaces any older notice and owns its cancellable presentation lifetime.

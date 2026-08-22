@@ -107,6 +107,26 @@ struct ChatArchitectureTests {
         #expect(store.isDelegating)
     }
 
+    @Test("Profile handoff busy state remains an observable UI projection")
+    func profileHandoffBusyStateRemainsObservable() async {
+        let store = ChatStore(
+            conversationRepository: ArchitectureConversationRepository()
+        )
+
+        await confirmation("Busy projection change is observed") { observed in
+            withObservationTracking {
+                _ = store.busy
+            } onChange: {
+                observed()
+            }
+            store.presentationViewModel.setProfileTransitioning(true)
+        }
+
+        #expect(store.busy)
+        store.presentationViewModel.setProfileTransitioning(false)
+        #expect(!store.busy)
+    }
+
     @Test("A delegation opens Activity once and closing preserves its summary")
     func activityInspectorFollowsUserControl() async throws {
         let store = ChatStore(
