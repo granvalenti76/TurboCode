@@ -5,6 +5,24 @@ import Testing
 @Suite("Agent runtime")
 @MainActor
 struct AgentRuntimeTests {
+    @Test("AgentRuntime accepts a native submit command")
+    func acceptsSubmitCommand() {
+        let turnID = TurnID(rawValue: "agent-runtime-submit")
+        let runtime = AgentRuntime()
+        let request = TurnRequest(
+            id: turnID,
+            prompt: "Inspect the workspace",
+            backend: .foundationApple,
+            modelName: "test-model",
+            workspaceRoot: "/workspace"
+        )
+
+        #expect(runtime.apply(.submit(request)))
+        #expect(runtime.currentTurnState?.id == turnID)
+        #expect(runtime.currentTurnState?.phase == .accepted)
+        #expect(!runtime.apply(.cancel(turnID: turnID)))
+    }
+
     @Test("AgentRuntime publishes lifecycle snapshots without owning provider work")
     func publishesLifecycleSnapshots() {
         let start = Date(timeIntervalSince1970: 500)

@@ -28,6 +28,20 @@ final class AgentRuntime {
         snapshot.turn
     }
 
+    /// Accepts the first command routed through the runtime boundary.
+    ///
+    /// The native response path uses this entry point so command translation
+    /// is no longer coupled to the coordinator's lifecycle helper. The other
+    /// declared commands remain explicit until their transition side effects
+    /// can be moved here without pretending that provider cancellation or
+    /// persistence has already been transferred to this service.
+    @discardableResult
+    func apply(_ command: RuntimeCommand) -> Bool {
+        guard case .submit(let request) = command else { return false }
+        begin(request)
+        return true
+    }
+
     func begin(_ request: TurnRequest) {
         turnReducer.begin(request)
         publish(
