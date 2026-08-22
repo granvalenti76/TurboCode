@@ -659,6 +659,18 @@ public final class ChatStore {
         }
     }
 
+    /// Persists a delayed generated title without resnapshotting the active
+    /// timeline. The response operation has already saved its durable blocks
+    /// before releasing ownership; updating only metadata prevents a title
+    /// completion from capturing a newer turn while that turn is streaming.
+    private func persistGeneratedTitleMetadata(for threadID: String) async {
+        do {
+            try conversationStore.persistMetadata(id: threadID)
+        } catch {
+            print("[TurboCode] Failed to persist generated title: \(error.localizedDescription)")
+        }
+    }
+
     /// Loads all session files and populates the thread list.
     public func restoreSessions() async {
         try? conversationStore.restoreCatalog()
@@ -1268,24 +1280,38 @@ public final class ChatStore {
         // One identity follows the accepted prompt through either provider so
         // late callbacks cannot be mistaken for the next user turn.
         let turnID = TurnID()
-        await agentRuntime.runOperation(turnID: turnID) { [weak self] in
-            guard let self else { return }
-            if self.activeBackend == .codex {
-                await self.performCodexSendMessage(
-                    displayText: text,
-                    promptText: effectivePrompt,
-                    visibleInTimeline: visibleInTimeline,
-                    turnID: turnID
-                )
-            } else {
-                await self.performSendMessage(
-                    displayText: text,
-                    promptText: effectivePrompt,
-                    visibleInTimeline: visibleInTimeline,
-                    turnID: turnID
-                )
+        let titleThreadID = activeThreadId
+        await agentRuntime.runOperation(
+            turnID: turnID,
+            operation: { [weak self] in
+                guard let self else { return }
+                if self.activeBackend == .codex {
+                    await self.performCodexSendMessage(
+                        displayText: text,
+                        promptText: effectivePrompt,
+                        visibleInTimeline: visibleInTimeline,
+                        turnID: turnID
+                    )
+                } else {
+                    await self.performSendMessage(
+                        displayText: text,
+                        promptText: effectivePrompt,
+                        visibleInTimeline: visibleInTimeline,
+                        turnID: turnID
+                    )
+                }
+            },
+            afterRelease: { [weak self] in
+                guard visibleInTimeline,
+                      let self,
+                      let titleThreadID else { return }
+                // Title inference is optional catalog polish. It deliberately
+                // starts after response ownership is released so a stalled
+                // Apple title session cannot leave the composer on Stop.
+                await self.generateTitle(from: text, for: titleThreadID)
+                await self.persistGeneratedTitleMetadata(for: titleThreadID)
             }
-        }
+        )
     }
 
     /// Compacts only at a turn boundary, when the previous on-device context
@@ -1321,12 +1347,6 @@ public final class ChatStore {
         visibleInTimeline: Bool,
         turnID: TurnID
     ) async {
-        let titleThreadID = activeThreadId
-        let titleTask: Task<Void, Never>? = visibleInTimeline ? Task { [weak self] in
-            guard let self else { return }
-            await self.generateTitle(from: displayText, for: titleThreadID)
-        } : nil
-
         error = nil
         guard let turboThreadID = activeThreadId else {
             self.error = "TurboCode could not create the conversation."
@@ -1363,9 +1383,6 @@ public final class ChatStore {
         if result.touchedConversation {
             conversationStore.touchThread(id: turboThreadID)
         }
-        if let titleTask {
-            await titleTask.value
-        }
         // A skill created by skill-creator becomes available to the next turn
         // without requiring an app restart or a manual Skills reload.
         refreshSkillsIfNeeded()
@@ -1379,11 +1396,6 @@ public final class ChatStore {
         turnID: TurnID
     ) async {
         let conversationID = activeThreadId
-        let titleThreadID = conversationID
-        let titleTask: Task<Void, Never>? = visibleInTimeline ? Task { [weak self] in
-            guard let self else { return }
-            await self.generateTitle(from: displayText, for: titleThreadID)
-        } : nil
         runtimeStatus = .ready
         error = nil
         let result = await responseCoordinator.performNative(
@@ -1409,11 +1421,6 @@ public final class ChatStore {
         error = result.errorMessage
         if result.touchedConversation, let conversationID {
             conversationStore.touchThread(id: conversationID)
-        }
-        // Persist after the title task finishes so the JSON never races with
-        // the Apple on-device title generator and stores a stale "New Chat".
-        if let titleTask {
-            await titleTask.value
         }
         // A skill created by skill-creator becomes available to the next turn
         // without requiring an app restart or a manual Skills reload.

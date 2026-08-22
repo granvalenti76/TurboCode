@@ -46,10 +46,15 @@ final class AgentRuntime {
     /// settlement. Callers provide provider work but never retain its concrete
     /// task, so the UI facade cannot release ownership before cancellation has
     /// finished unwinding.
+    ///
+    /// Optional ancillary work runs only after ownership is released. Title
+    /// generation and similar catalog polish must never keep the composer busy
+    /// or turn Stop into a cancellation request for unrelated background work.
     @discardableResult
     func runOperation(
         turnID: TurnID,
-        operation: @escaping @MainActor @Sendable () async -> Void
+        operation: @escaping @MainActor @Sendable () async -> Void,
+        afterRelease: @escaping @MainActor @Sendable () async -> Void = {}
     ) async -> Bool {
         guard operationTask == nil, !snapshot.isQuiescing else { return false }
 
@@ -58,6 +63,7 @@ final class AgentRuntime {
         operationTurnID = turnID
         await task.value
         finishOperation(for: turnID)
+        await afterRelease()
         return true
     }
 

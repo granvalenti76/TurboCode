@@ -293,4 +293,33 @@ struct AgentRuntimeTests {
         #expect(await waiter.value == false)
         _ = await execution.value
     }
+
+    @Test("Ancillary work starts only after runtime ownership is released")
+    func releasesOperationBeforeAncillaryWork() async {
+        let turnID = TurnID(rawValue: "agent-runtime-ancillary-work")
+        let runtime = AgentRuntime()
+        let (ancillaryStarted, continuation) = AsyncStream.makeStream(of: Void.self)
+        let execution = Task { @MainActor in
+            await runtime.runOperation(
+                turnID: turnID,
+                operation: {},
+                afterRelease: {
+                    continuation.yield()
+                    try? await Task.sleep(for: .seconds(60))
+                }
+            )
+        }
+        var iterator = ancillaryStarted.makeAsyncIterator()
+
+        _ = await iterator.next()
+
+        // A stuck optional title generator may outlive the response, but it
+        // must not keep Stop visible or reject the next provider operation.
+        #expect(!runtime.hasActiveOperation)
+        #expect(!runtime.ownsOperation(turnID))
+
+        execution.cancel()
+        continuation.finish()
+        _ = await execution.value
+    }
 }
