@@ -38,7 +38,9 @@ public actor ReasoningStreamRelay {
     }
   }
 
-  public typealias Sink = @MainActor @Sendable (Event) -> Void
+  /// Async delivery preserves backpressure when the consumer is an actor-backed
+  /// runtime. A later reasoning delta cannot overtake an earlier UI projection.
+  public typealias Sink = @MainActor @Sendable (Event) async -> Void
 
   private var sink: Sink?
   private var registrationID: UUID?

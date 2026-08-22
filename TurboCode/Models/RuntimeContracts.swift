@@ -485,10 +485,14 @@ nonisolated struct BackendSessionResult: Codable, Hashable, Sendable {
 nonisolated struct BackendSessionEvents: Sendable {
     static let none = BackendSessionEvents()
 
-    let emit: @MainActor @Sendable (AgentRuntimeEvent) -> Void
+    /// Backpressure is intentional: a provider must not overtake lifecycle
+    /// reduction or publish completion before earlier stream/tool events settle.
+    let emit: @MainActor @Sendable (AgentRuntimeEvent) async -> Void
 
     init(
-        emit: @escaping @MainActor @Sendable (AgentRuntimeEvent) -> Void = { _ in }
+        emit: @escaping @MainActor @Sendable (
+            AgentRuntimeEvent
+        ) async -> Void = { _ in }
     ) {
         self.emit = emit
     }

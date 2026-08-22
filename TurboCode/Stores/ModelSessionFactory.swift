@@ -29,7 +29,7 @@ struct ModelSessionEvents {
     /// Reads the currently admitted application turn at tool invocation time.
     /// Sessions can outlive individual turns, so this must be a provider and
     /// not a value captured while the session is being built.
-    let currentTurnID: @MainActor @Sendable () -> TurnID?
+    let currentTurnID: @MainActor @Sendable () async -> TurnID?
     let toolStarted: @Sendable (
         Transcript.ToolCall,
         ModelBackend,
@@ -47,7 +47,7 @@ struct ModelSessionEvents {
     ) async -> Void
 
     init(
-        currentTurnID: @escaping @MainActor @Sendable () -> TurnID? = { nil },
+        currentTurnID: @escaping @MainActor @Sendable () async -> TurnID? = { nil },
         toolStarted: @escaping @Sendable (
             Transcript.ToolCall,
             ModelBackend,

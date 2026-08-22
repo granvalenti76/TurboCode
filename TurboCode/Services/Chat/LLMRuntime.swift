@@ -12,9 +12,9 @@ struct NativeLLMExecutionConfiguration {
     let mode: OrchestratorMode
     let workspaceKind: String
     let serverURL: String?
-    let diagnosticsChanged: @MainActor @Sendable (String?) -> Void
-    let contextChanged: @MainActor @Sendable (LlamaContextUsage?) -> Void
-    let approvalRequested: @MainActor @Sendable (ApprovalRequest) -> Void
+    let diagnosticsChanged: @MainActor @Sendable (String?) async -> Void
+    let contextChanged: @MainActor @Sendable (LlamaContextUsage?) async -> Void
+    let approvalRequested: @MainActor @Sendable (ApprovalRequest) async -> Void
 }
 
 /// Provider configuration needed to build one Codex backend adapter.
@@ -29,10 +29,17 @@ struct CodexLLMExecutionConfiguration {
     let modelID: String?
     let reasoningEffort: CodexReasoningEffort?
     let delegationInvoker: (any AgentTaskInvoking)?
-    let activityStarted: @MainActor @Sendable (CodexDynamicToolCall, String) -> Void
-    let activityEnded: @MainActor @Sendable (String) -> Void
-    let presentationRequested: @MainActor @Sendable (CodexToolPresentation) -> Void
-    let approvalRequested: @MainActor @Sendable (ApprovalRequest) -> Void
+    let activityStarted: @MainActor @Sendable (
+        CodexDynamicToolCall,
+        String
+    ) async -> Void
+    let activityEnded: @MainActor @Sendable (String) async -> Void
+    let presentationRequested: @MainActor @Sendable (
+        CodexToolPresentation
+    ) async -> Void
+    let approvalRequested: @MainActor @Sendable (
+        ApprovalRequest
+    ) async -> Void
 }
 
 /// Builds concrete provider adapters exclusively inside the LLM runtime layer.

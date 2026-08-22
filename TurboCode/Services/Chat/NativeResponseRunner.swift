@@ -49,14 +49,18 @@ final class NativeResponseRunner: NativeResponseRunning {
         case failed(message: String, partialContent: String, reasoning: String)
     }
 
-    struct Events: @unchecked Sendable {
-        let diagnosticsChanged: @MainActor @Sendable (String?) -> Void
+    struct Events: Sendable {
+        let diagnosticsChanged: @MainActor @Sendable (String?) async -> Void
         /// Published once after a turn so context discovery never adds a
         /// per-snapshot hop to the main actor.
-        let contextChanged: @MainActor @Sendable (LlamaContextUsage?) -> Void
-        let liveContentChanged: @MainActor @Sendable (String) -> Void
-        let liveReasoningChanged: @MainActor @Sendable (String) -> Void
-        let approvalRequested: @MainActor @Sendable (ApprovalRequest) -> Void
+        let contextChanged: @MainActor @Sendable (
+            LlamaContextUsage?
+        ) async -> Void
+        let liveContentChanged: @MainActor @Sendable (String) async -> Void
+        let liveReasoningChanged: @MainActor @Sendable (String) async -> Void
+        let approvalRequested: @MainActor @Sendable (
+            ApprovalRequest
+        ) async -> Void
     }
 
     func run(
@@ -74,7 +78,7 @@ final class NativeResponseRunner: NativeResponseRunning {
             workspaceKind: request.workspaceKind,
             promptCharacters: request.prompt.count
         )
-        events.diagnosticsChanged(runID)
+        await events.diagnosticsChanged(runID)
 
         let llamaContextSize = request.backend == .llamaServer
             ? await LlamaServerRuntimeProbe.contextSize(
@@ -98,7 +102,7 @@ final class NativeResponseRunner: NativeResponseRunning {
            let reasoningStreamRelay = request.reasoningStreamRelay {
             reasoningRelayID = await reasoningStreamRelay.install { event in
                 guard relayProjection.isActive else { return }
-                events.liveReasoningChanged(
+                await events.liveReasoningChanged(
                     relayProjection.append(event.delta)
                 )
             }
@@ -148,7 +152,7 @@ final class NativeResponseRunner: NativeResponseRunning {
                         throw OnDeviceStreamingGuard.Failure.repetitiveOutput
                     }
                     generatedCharacters = max(generatedCharacters, content.count)
-                    events.liveContentChanged(content)
+                    await events.liveContentChanged(content)
                 }
 
                 var snapshotReasoning = ""
@@ -165,7 +169,7 @@ final class NativeResponseRunner: NativeResponseRunning {
                             return value.content
                         }.joined()
                         if let request = ApprovalRequest(toolOutput: text) {
-                            events.approvalRequested(request)
+                            await events.approvalRequested(request)
                         }
                     default:
                         break
@@ -188,7 +192,7 @@ final class NativeResponseRunner: NativeResponseRunning {
                         reasoning.count
                     )
                     if request.backend != .llamaServer {
-                        events.liveReasoningChanged(reasoning)
+                        await events.liveReasoningChanged(reasoning)
                     }
                 }
             }
@@ -223,7 +227,7 @@ final class NativeResponseRunner: NativeResponseRunning {
         if request.backend == .llamaServer,
            let llamaContextSize,
            let latestInputTokenCount {
-            events.contextChanged(
+            await events.contextChanged(
                 LlamaContextUsage(
                     usedTokens: latestInputTokenCount,
                     contextSize: llamaContextSize
@@ -269,7 +273,7 @@ final class NativeResponseRunner: NativeResponseRunning {
                 error: recordedError
             )
         }
-        events.diagnosticsChanged(nil)
+        await events.diagnosticsChanged(nil)
         return result
     }
 }
@@ -349,9 +353,13 @@ final class NativeBackendSession: BackendSession {
     private let workspaceKind: String
     private let serverURL: String?
     private let reasoningStreamRelay: ReasoningStreamRelay?
-    private let diagnosticsChanged: @MainActor @Sendable (String?) -> Void
-    private let contextChanged: @MainActor @Sendable (LlamaContextUsage?) -> Void
-    private let approvalRequested: @MainActor @Sendable (ApprovalRequest) -> Void
+    private let diagnosticsChanged: @MainActor @Sendable (String?) async -> Void
+    private let contextChanged: @MainActor @Sendable (
+        LlamaContextUsage?
+    ) async -> Void
+    private let approvalRequested: @MainActor @Sendable (
+        ApprovalRequest
+    ) async -> Void
     private var activeRun: Task<BackendSessionResult, Never>?
 
     init(
@@ -362,9 +370,15 @@ final class NativeBackendSession: BackendSession {
         workspaceKind: String,
         serverURL: String? = nil,
         reasoningStreamRelay: ReasoningStreamRelay? = nil,
-        diagnosticsChanged: @escaping @MainActor @Sendable (String?) -> Void = { _ in },
-        contextChanged: @escaping @MainActor @Sendable (LlamaContextUsage?) -> Void = { _ in },
-        approvalRequested: @escaping @MainActor @Sendable (ApprovalRequest) -> Void = { _ in }
+        diagnosticsChanged: @escaping @MainActor @Sendable (
+            String?
+        ) async -> Void = { _ in },
+        contextChanged: @escaping @MainActor @Sendable (
+            LlamaContextUsage?
+        ) async -> Void = { _ in },
+        approvalRequested: @escaping @MainActor @Sendable (
+            ApprovalRequest
+        ) async -> Void = { _ in }
     ) {
         self.backend = backend
         self.runner = runner
@@ -394,8 +408,8 @@ final class NativeBackendSession: BackendSession {
         let approvalRequested = self.approvalRequested
 
         let task = Task { @MainActor in
-            events.emit(.started(request))
-            events.emit(
+            await events.emit(.started(request))
+            await events.emit(
                 .phaseChanged(
                     turnID: request.id,
                     phase: .streaming,
@@ -417,7 +431,7 @@ final class NativeBackendSession: BackendSession {
                     diagnosticsChanged: diagnosticsChanged,
                     contextChanged: contextChanged,
                     liveContentChanged: { content in
-                        events.emit(
+                        await events.emit(
                             .assistantTextChanged(
                                 turnID: request.id,
                                 text: content
@@ -425,7 +439,7 @@ final class NativeBackendSession: BackendSession {
                         )
                     },
                     liveReasoningChanged: { reasoning in
-                        events.emit(
+                        await events.emit(
                             .reasoningTextChanged(
                                 turnID: request.id,
                                 text: reasoning
@@ -436,7 +450,7 @@ final class NativeBackendSession: BackendSession {
                 )
             )
             let result = Self.result(from: outcome)
-            events.emit(
+            await events.emit(
                 .completed(
                     turnID: request.id,
                     outcome: result.outcome,

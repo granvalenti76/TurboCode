@@ -37,14 +37,24 @@ final class CodexRuntimeStore {
         let reasoningText: String
     }
 
-    struct TurnEvents {
-        let liveAssistantChanged: (String) -> Void
-        let liveReasoningChanged: (String) -> Void
-        let activityStarted: (CodexDynamicToolCall, String) -> Void
-        let activityEnded: (String) -> Void
-        let toolFinished: (CodexDynamicToolCall, CodexDynamicToolResult) -> Void
-        let presentationRequested: (CodexToolPresentation) -> Void
-        let approvalRequested: (ApprovalRequest) -> Void
+    struct TurnEvents: Sendable {
+        let liveAssistantChanged: @MainActor @Sendable (String) async -> Void
+        let liveReasoningChanged: @MainActor @Sendable (String) async -> Void
+        let activityStarted: @MainActor @Sendable (
+            CodexDynamicToolCall,
+            String
+        ) async -> Void
+        let activityEnded: @MainActor @Sendable (String) async -> Void
+        let toolFinished: @MainActor @Sendable (
+            CodexDynamicToolCall,
+            CodexDynamicToolResult
+        ) async -> Void
+        let presentationRequested: @MainActor @Sendable (
+            CodexToolPresentation
+        ) async -> Void
+        let approvalRequested: @MainActor @Sendable (
+            ApprovalRequest
+        ) async -> Void
     }
 
     struct Handoff {
@@ -319,16 +329,16 @@ final class CodexRuntimeStore {
             switch event {
             case .agentDelta(let delta):
                 assistantText += delta
-                events.liveAssistantChanged(assistantText)
+                await events.liveAssistantChanged(assistantText)
             case .reasoningDelta(let delta):
                 reasoningText += delta
-                events.liveReasoningChanged(reasoningText)
+                await events.liveReasoningChanged(reasoningText)
             case .diffUpdated:
                 // Supported edits use apply_edits, whose review transaction is
                 // authoritative in TurboCode.
                 break
             case .toolCallRequested(let call):
-                events.activityStarted(
+                await events.activityStarted(
                     call,
                     CodexTurboCodeToolBridge.activitySummary(for: call)
                 )
@@ -344,18 +354,18 @@ final class CodexRuntimeStore {
                         parentTurnID: request.turnID
                     )
                     if let presentation = execution.presentation {
-                        events.presentationRequested(presentation)
+                        await events.presentationRequested(presentation)
                     }
                     result = execution.result
                 } catch {
                     result = .failure(error.localizedDescription)
                 }
-                events.toolFinished(call, result)
-                events.activityEnded(call.callID)
+                await events.toolFinished(call, result)
+                await events.activityEnded(call.callID)
                 try await client.resolveToolCall(call, result: result)
             case .approvalRequested(let approval):
                 approvals[approval.presentationID] = approval
-                events.approvalRequested(
+                await events.approvalRequested(
                     ApprovalRequest(
                         id: approval.presentationID,
                         operation: approval.operation,
@@ -511,10 +521,17 @@ final class CodexBackendSession: BackendSession {
     private let modelID: String?
     private let reasoningEffort: CodexReasoningEffort?
     private let delegationInvoker: (any AgentTaskInvoking)?
-    private let activityStarted: @MainActor @Sendable (CodexDynamicToolCall, String) -> Void
-    private let activityEnded: @MainActor @Sendable (String) -> Void
-    private let presentationRequested: @MainActor @Sendable (CodexToolPresentation) -> Void
-    private let approvalRequested: @MainActor @Sendable (ApprovalRequest) -> Void
+    private let activityStarted: @MainActor @Sendable (
+        CodexDynamicToolCall,
+        String
+    ) async -> Void
+    private let activityEnded: @MainActor @Sendable (String) async -> Void
+    private let presentationRequested: @MainActor @Sendable (
+        CodexToolPresentation
+    ) async -> Void
+    private let approvalRequested: @MainActor @Sendable (
+        ApprovalRequest
+    ) async -> Void
     private var activeRun: Task<BackendSessionResult, Never>?
 
     init(
@@ -526,10 +543,19 @@ final class CodexBackendSession: BackendSession {
         modelID: String? = nil,
         reasoningEffort: CodexReasoningEffort? = nil,
         delegationInvoker: (any AgentTaskInvoking)? = nil,
-        activityStarted: @escaping @MainActor @Sendable (CodexDynamicToolCall, String) -> Void = { _, _ in },
-        activityEnded: @escaping @MainActor @Sendable (String) -> Void = { _ in },
-        presentationRequested: @escaping @MainActor @Sendable (CodexToolPresentation) -> Void = { _ in },
-        approvalRequested: @escaping @MainActor @Sendable (ApprovalRequest) -> Void = { _ in }
+        activityStarted: @escaping @MainActor @Sendable (
+            CodexDynamicToolCall,
+            String
+        ) async -> Void = { _, _ in },
+        activityEnded: @escaping @MainActor @Sendable (
+            String
+        ) async -> Void = { _ in },
+        presentationRequested: @escaping @MainActor @Sendable (
+            CodexToolPresentation
+        ) async -> Void = { _ in },
+        approvalRequested: @escaping @MainActor @Sendable (
+            ApprovalRequest
+        ) async -> Void = { _ in }
     ) {
         self.runtime = runtime
         self.turboThreadID = turboThreadID
@@ -565,8 +591,8 @@ final class CodexBackendSession: BackendSession {
         var toolStartTimes: [String: Date] = [:]
 
         let task = Task { @MainActor in
-            events.emit(.started(request))
-            events.emit(
+            await events.emit(.started(request))
+            await events.emit(
                 .phaseChanged(
                     turnID: request.id,
                     phase: .streaming,
@@ -591,7 +617,7 @@ final class CodexBackendSession: BackendSession {
                     ),
                     events: CodexRuntimeStore.TurnEvents(
                         liveAssistantChanged: { text in
-                            events.emit(
+                            await events.emit(
                                 .assistantTextChanged(
                                     turnID: request.id,
                                     text: text
@@ -599,7 +625,7 @@ final class CodexBackendSession: BackendSession {
                             )
                         },
                         liveReasoningChanged: { text in
-                            events.emit(
+                            await events.emit(
                                 .reasoningTextChanged(
                                     turnID: request.id,
                                     text: text
@@ -607,13 +633,13 @@ final class CodexBackendSession: BackendSession {
                             )
                         },
                         activityStarted: { call, summary in
-                            activityStarted(call, summary)
+                            await activityStarted(call, summary)
                             let startedAt = Date()
                             toolStartTimes[call.callID] = startedAt
                             // Tool events are the authoritative lifecycle edge.
                             // Emitting an additional phase event here would
                             // make the coordinator race two equivalent updates.
-                            events.emit(
+                            await events.emit(
                                 .toolStarted(
                                     Self.toolCall(
                                         from: call,
@@ -627,13 +653,13 @@ final class CodexBackendSession: BackendSession {
                             // Presentation cleanup is separate from lifecycle;
                             // `.toolFinished` below returns the runtime to
                             // streaming before this activity is dismissed.
-                            activityEnded(id)
+                            await activityEnded(id)
                         },
                         toolFinished: { call, result in
                             let startedAt = toolStartTimes.removeValue(
                                 forKey: call.callID
                             )
-                            events.emit(
+                            await events.emit(
                                 .toolFinished(
                                     Self.toolResult(
                                         from: result,
@@ -646,7 +672,7 @@ final class CodexBackendSession: BackendSession {
                         },
                         presentationRequested: presentationRequested,
                         approvalRequested: { request in
-                            approvalRequested(request)
+                            await approvalRequested(request)
                         }
                     )
                 )
@@ -681,7 +707,7 @@ final class CodexBackendSession: BackendSession {
                 )
             }
 
-            events.emit(
+            await events.emit(
                 .completed(
                     turnID: request.id,
                     outcome: result.outcome,

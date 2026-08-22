@@ -168,11 +168,11 @@ struct DelegateTaskTool: Tool {
     typealias Output = String
 
     let invoker: any AgentTaskInvoking
-    let currentTurnID: @MainActor @Sendable () -> TurnID?
+    let currentTurnID: @MainActor @Sendable () async -> TurnID?
 
     init(
         invoker: any AgentTaskInvoking,
-        currentTurnID: @escaping @MainActor @Sendable () -> TurnID? = { nil }
+        currentTurnID: @escaping @MainActor @Sendable () async -> TurnID? = { nil }
     ) {
         self.invoker = invoker
         self.currentTurnID = currentTurnID
@@ -196,7 +196,7 @@ struct DelegateTaskTool: Tool {
         let result = await AgentTaskInvocation.invoke(
             invoker,
             envelope: envelope,
-            parentTurnID: currentTurnID()
+            parentTurnID: await currentTurnID()
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]

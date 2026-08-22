@@ -491,17 +491,17 @@ private final class AdapterCodexRuntime: CodexTurnRunning {
         request: CodexRuntimeStore.TurnRequest,
         events: CodexRuntimeStore.TurnEvents
     ) async throws -> CodexRuntimeStore.TurnResult {
-        events.liveAssistantChanged("Codex result.")
-        events.liveReasoningChanged("Codex reasoning.")
+        await events.liveAssistantChanged("Codex result.")
+        await events.liveReasoningChanged("Codex reasoning.")
         let call = CodexDynamicToolCall(
             rpcID: .integer(1),
             callID: "codex-tool",
             tool: "read_file",
             arguments: .object(["filePath": .string("App.swift")])
         )
-        events.activityStarted(call, "Reading file")
-        events.toolFinished(call, toolResult)
-        events.activityEnded(call.callID)
+        await events.activityStarted(call, "Reading file")
+        await events.toolFinished(call, toolResult)
+        await events.activityEnded(call.callID)
         return CodexRuntimeStore.TurnResult(
             assistantText: "Codex result.",
             reasoningText: "Codex reasoning."

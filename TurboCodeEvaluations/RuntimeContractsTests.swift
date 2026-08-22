@@ -94,6 +94,47 @@ struct RuntimeContractsTests {
         #expect(decoded.isQuiescing)
     }
 
+    @Test("Backend event delivery applies ordered backpressure")
+    func backendEventsWaitForEarlierDelivery() async {
+        let turnID = TurnID(rawValue: "ordered-event-turn")
+        let request = TurnRequest(
+            id: turnID,
+            prompt: "Preserve event order",
+            backend: .foundationApple,
+            modelName: "test-model",
+            workspaceRoot: "/workspace"
+        )
+        let recorder = RuntimeEventOrderRecorder()
+        let gate = RuntimeEventDeliveryGate()
+        let (firstDelivery, signal) = AsyncStream.makeStream(of: Void.self)
+        let events = BackendSessionEvents { event in
+            let count = await recorder.append(event.turnID)
+            if count == 1 {
+                signal.yield()
+                await gate.waitUntilOpen()
+            }
+        }
+        let producer = Task {
+            await events.emit(.started(request))
+            await events.emit(
+                .completed(
+                    turnID: turnID,
+                    outcome: .succeeded,
+                    at: Date()
+                )
+            )
+        }
+        var iterator = firstDelivery.makeAsyncIterator()
+
+        _ = await iterator.next()
+        #expect(await recorder.count == 1)
+
+        await gate.open()
+        await producer.value
+        #expect(await recorder.count == 2)
+        signal.finish()
+    }
+
     @Test("The lifecycle reducer rejects stale and invalid callbacks")
     func reducesLifecycleWithoutProviderState() {
         let id = TurnID(rawValue: "reducer-turn")
@@ -268,5 +309,36 @@ struct RuntimeContractsTests {
                 isCancelled: true
             )
         )
+    }
+}
+
+private actor RuntimeEventOrderRecorder {
+    private var turnIDs: [TurnID] = []
+
+    var count: Int { turnIDs.count }
+
+    func append(_ turnID: TurnID) -> Int {
+        turnIDs.append(turnID)
+        return turnIDs.count
+    }
+}
+
+/// A latched gate avoids a timing-dependent test: opening before the waiter is
+/// installed remains observable and still releases the first event delivery.
+private actor RuntimeEventDeliveryGate {
+    private var isOpen = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    func waitUntilOpen() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            waiter = continuation
+        }
+    }
+
+    func open() {
+        isOpen = true
+        waiter?.resume()
+        waiter = nil
     }
 }
