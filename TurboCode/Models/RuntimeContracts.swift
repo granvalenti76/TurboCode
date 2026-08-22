@@ -101,6 +101,35 @@ nonisolated struct TurnRequest: Codable, Hashable, Sendable {
     }
 }
 
+/// Provider-neutral backend selection carried by a runtime command.
+///
+/// The display name is intentionally optional and non-authoritative: runtime
+/// ownership needs the selected backend and, when applicable, the configured
+/// model identifier, but no provider session or UI profile object crosses this
+/// boundary.
+nonisolated struct RuntimeBackendSelection: Codable, Hashable, Sendable {
+    let backend: ModelBackend
+    let modelName: String?
+
+    init(backend: ModelBackend, modelName: String? = nil) {
+        self.backend = backend
+        self.modelName = modelName
+    }
+}
+
+/// Commands translated from UI intent into provider-neutral runtime work.
+///
+/// These values describe ownership and lifecycle intent only. They do not
+/// execute work, retain closures, or expose Foundation Models/Codex request
+/// types, so the compatibility facade can later forward them to an actor.
+nonisolated enum RuntimeCommand: Codable, Hashable, Sendable {
+    case submit(TurnRequest)
+    case cancel(turnID: TurnID)
+    case switchThread(threadID: String)
+    case switchBackend(RuntimeBackendSelection)
+    case restore(threadID: String)
+}
+
 /// Structured failure information that can cross actor and provider
 /// boundaries without retaining an Error value or a provider transport type.
 nonisolated struct TurnFailure: Codable, Hashable, Sendable {
@@ -179,6 +208,34 @@ nonisolated struct TurnState: Codable, Hashable, Sendable {
             updatedAt: date,
             outcome: outcome
         )
+    }
+}
+
+/// Immutable runtime projection consumed by a presentation facade.
+///
+/// This is deliberately smaller than a transcript or a SwiftUI store. The
+/// active thread and backend identify the runtime context, while `turn` and
+/// `isQuiescing` describe lifecycle ownership needed to reject stale work and
+/// coordinate transitions. Timeline blocks remain a separate projection.
+nonisolated struct RuntimeSnapshot: Codable, Hashable, Sendable {
+    let activeThreadID: String?
+    let backend: ModelBackend
+    let turn: TurnState?
+    let isQuiescing: Bool
+    let updatedAt: Date
+
+    init(
+        activeThreadID: String? = nil,
+        backend: ModelBackend,
+        turn: TurnState? = nil,
+        isQuiescing: Bool = false,
+        updatedAt: Date = Date()
+    ) {
+        self.activeThreadID = activeThreadID
+        self.backend = backend
+        self.turn = turn
+        self.isQuiescing = isQuiescing
+        self.updatedAt = updatedAt
     }
 }
 

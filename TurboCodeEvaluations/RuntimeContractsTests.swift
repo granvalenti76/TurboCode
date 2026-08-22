@@ -35,6 +35,62 @@ struct RuntimeContractsTests {
         #expect(failed?.finishing(with: .succeeded, at: Date()) == nil)
     }
 
+    @Test("Runtime commands round-trip without provider request types")
+    func runtimeCommandsRoundTrip() throws {
+        let turnID = TurnID(rawValue: "command-turn")
+        let request = TurnRequest(
+            id: turnID,
+            prompt: "Inspect the workspace",
+            backend: .llamaServer,
+            modelName: "configured-model",
+            workspaceRoot: "/workspace",
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let commands: [RuntimeCommand] = [
+            .submit(request),
+            .cancel(turnID: turnID),
+            .switchThread(threadID: "thread-2"),
+            .switchBackend(
+                RuntimeBackendSelection(
+                    backend: .foundationServe,
+                    modelName: "configured-pcc"
+                )
+            ),
+            .restore(threadID: "thread-3")
+        ]
+
+        let data = try JSONEncoder().encode(commands)
+        let decoded = try JSONDecoder().decode([RuntimeCommand].self, from: data)
+
+        #expect(decoded == commands)
+    }
+
+    @Test("Runtime snapshots retain lifecycle ownership without UI state")
+    func runtimeSnapshotRoundTrips() throws {
+        let start = Date(timeIntervalSince1970: 200)
+        let turnID = TurnID(rawValue: "snapshot-turn")
+        let turn = TurnState(
+            id: turnID,
+            phase: .toolExecuting,
+            startedAt: start,
+            updatedAt: Date(timeIntervalSince1970: 201)
+        )
+        let snapshot = RuntimeSnapshot(
+            activeThreadID: "thread-1",
+            backend: .codex,
+            turn: turn,
+            isQuiescing: true,
+            updatedAt: Date(timeIntervalSince1970: 202)
+        )
+
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(RuntimeSnapshot.self, from: data)
+
+        #expect(decoded == snapshot)
+        #expect(decoded.turn?.id == turnID)
+        #expect(decoded.isQuiescing)
+    }
+
     @Test("Runtime measurements clamp invalid values")
     func clampsMeasurements() {
         let usage = Usage(
