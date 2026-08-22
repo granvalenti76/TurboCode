@@ -101,6 +101,10 @@ struct TurboCodeApp: App {
                     Task { await chatStore.printToolFailureSummary() }
                 }
 
+                Button("Print Runtime Baseline") {
+                    Task { await chatStore.printRuntimeBaselineSummary() }
+                }
+
                 Button("On-Device Statistics") {
                     // A dedicated window keeps live developer diagnostics out
                     // of the product navigation and conversation state.

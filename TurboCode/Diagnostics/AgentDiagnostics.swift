@@ -114,6 +114,126 @@ nonisolated struct RuntimeBoundaryMetric: Codable, Sendable {
     }
 }
 
+/// Aggregates the persisted 0.3.4 samples without exposing diagnostics in the
+/// normal product UI. Missing values remain absent so an empty or partial
+/// baseline cannot be mistaken for a measured zero.
+nonisolated struct RuntimeBaselineSummary: Sendable, Equatable {
+    let runCount: Int
+    let firstTokenSampleCount: Int
+    let averageFirstTokenMilliseconds: Int?
+    let providerSampleCount: Int
+    let averageProviderMilliseconds: Int?
+    let contextSampleCount: Int
+    let averageContextOccupancyPercent: Int?
+    let toolSampleCount: Int
+    let averageToolMilliseconds: Int?
+    let settlementSampleCount: Int
+    let averageSettlementMilliseconds: Int?
+    let persistenceSampleCount: Int
+    let averagePersistenceMilliseconds: Int?
+    let restoreSampleCount: Int
+    let averageRestoreMilliseconds: Int?
+    let publicationSampleCount: Int
+    let averagePublicationCount: Int?
+
+    init(
+        runs: [AgentRunMetric],
+        boundaries: [RuntimeBoundaryMetric]
+    ) {
+        let firstTokens = runs.compactMap(\.firstTokenMilliseconds)
+        let providerDurations = runs.compactMap(\.totalMilliseconds)
+        let contextOccupancies = runs.compactMap { run -> Int? in
+            guard let used = run.contextTokenCount,
+                  let size = run.contextSize,
+                  size > 0 else {
+                return nil
+            }
+            let ratio = Double(used) / Double(size)
+            return Int((min(1, max(0, ratio)) * 100).rounded())
+        }
+        let toolDurations = runs
+            .flatMap(\.tools)
+            .compactMap(\.durationMilliseconds)
+
+        let settlements = Self.boundaryValues(
+            boundaries,
+            for: .settlement,
+            keyPath: \.durationMilliseconds
+        )
+        let persistences = Self.boundaryValues(
+            boundaries,
+            for: .persistence,
+            keyPath: \.durationMilliseconds
+        )
+        let restores = Self.boundaryValues(
+            boundaries,
+            for: .restore,
+            keyPath: \.durationMilliseconds
+        )
+        let publications = Self.boundaryValues(
+            boundaries,
+            for: .mainActorPublication,
+            keyPath: \.eventCount
+        )
+
+        runCount = runs.count
+        firstTokenSampleCount = firstTokens.count
+        averageFirstTokenMilliseconds = Self.average(firstTokens)
+        providerSampleCount = providerDurations.count
+        averageProviderMilliseconds = Self.average(providerDurations)
+        contextSampleCount = contextOccupancies.count
+        averageContextOccupancyPercent = Self.average(contextOccupancies)
+        toolSampleCount = toolDurations.count
+        averageToolMilliseconds = Self.average(toolDurations)
+        settlementSampleCount = settlements.count
+        averageSettlementMilliseconds = Self.average(settlements)
+        persistenceSampleCount = persistences.count
+        averagePersistenceMilliseconds = Self.average(persistences)
+        restoreSampleCount = restores.count
+        averageRestoreMilliseconds = Self.average(restores)
+        publicationSampleCount = publications.count
+        averagePublicationCount = Self.average(publications)
+    }
+
+    var summary: String {
+        [
+            "Runs: \(runCount)",
+            "First token: \(formatted(averageFirstTokenMilliseconds)) ms (n=\(firstTokenSampleCount))",
+            "Provider/turn: \(formatted(averageProviderMilliseconds)) ms (n=\(providerSampleCount))",
+            "Context occupancy: \(formattedPercent(averageContextOccupancyPercent)) (n=\(contextSampleCount))",
+            "Tool duration: \(formatted(averageToolMilliseconds)) ms (n=\(toolSampleCount))",
+            "Settlement: \(formatted(averageSettlementMilliseconds)) ms (n=\(settlementSampleCount))",
+            "Persistence: \(formatted(averagePersistenceMilliseconds)) ms (n=\(persistenceSampleCount))",
+            "Restore: \(formatted(averageRestoreMilliseconds)) ms (n=\(restoreSampleCount))",
+            "MainActor publications: \(formatted(averagePublicationCount)) (n=\(publicationSampleCount))"
+        ].joined(separator: "\n")
+    }
+
+    private static func average(_ values: [Int]) -> Int? {
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / values.count
+    }
+
+    private static func boundaryValues(
+        _ boundaries: [RuntimeBoundaryMetric],
+        for boundary: RuntimeBoundary,
+        keyPath: KeyPath<RuntimeBoundaryMetric, Int?>
+    ) -> [Int] {
+        boundaries.compactMap { metric in
+            guard metric.boundary == boundary else { return nil }
+            return metric[keyPath: keyPath]
+        }
+    }
+
+    private func formatted(_ value: Int?) -> String {
+        value.map(String.init) ?? "—"
+    }
+
+    private func formattedPercent(_ value: Int?) -> String {
+        value.map { "\($0)%" } ?? "—"
+    }
+}
+
 /// A persisted on-device context boundary, shown separately from inference
 /// runs so diagnostics can distinguish summarization from model failures.
 nonisolated struct OnDeviceCompactionMetric: Codable, Sendable, Identifiable {
@@ -529,6 +649,16 @@ actor AgentDiagnosticsRecorder {
         Self.appendJSONLine(metric, filename: "boundaries.jsonl")
     }
 
+    /// Reads the persisted run and boundary streams as one release baseline.
+    /// This is intentionally a report-only operation and never mutates the
+    /// diagnostic files or the active runtime.
+    func runtimeBaselineSummary() -> RuntimeBaselineSummary {
+        RuntimeBaselineSummary(
+            runs: Self.persistedRuns(),
+            boundaries: Self.persistedBoundaries()
+        )
+    }
+
     func localCompactions() -> [LocalCompactionMetric] {
         Self.persistedLocalCompactions().sorted { $0.createdAt > $1.createdAt }
     }
@@ -747,6 +877,16 @@ actor AgentDiagnosticsRecorder {
         decoder.dateDecodingStrategy = .iso8601
         return contents.split(whereSeparator: \.isNewline).compactMap { line in
             try? decoder.decode(LocalCompactionMetric.self, from: Data(line.utf8))
+        }
+    }
+
+    nonisolated private static func persistedBoundaries() -> [RuntimeBoundaryMetric] {
+        let url = diagnosticsDirectoryURL.appendingPathComponent("boundaries.jsonl")
+        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return contents.split(whereSeparator: \.isNewline).compactMap { line in
+            try? decoder.decode(RuntimeBoundaryMetric.self, from: Data(line.utf8))
         }
     }
 

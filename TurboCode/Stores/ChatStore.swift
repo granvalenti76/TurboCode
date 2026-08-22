@@ -1477,6 +1477,11 @@ public final class ChatStore {
         let summary = await AgentDiagnosticsRecorder.shared.failureSummary()
         print("[Diagnostics] \(summary)")
     }
+
+    public func printRuntimeBaselineSummary() async {
+        let summary = await AgentDiagnosticsRecorder.shared.runtimeBaselineSummary()
+        print("[Diagnostics] Runtime baseline 0.3.4\n\(summary.summary)")
+    }
 #endif
 
     private var diagnosticsWorkspaceKind: String {

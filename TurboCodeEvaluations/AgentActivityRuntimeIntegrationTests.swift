@@ -132,6 +132,54 @@ struct AgentActivityRuntimeIntegrationTests {
         #expect(received.allSatisfy { $0.turnID == turnID })
     }
 
+    @Test("Native adapter preserves the lifecycle across the provider matrix")
+    func nativeBackendAdapterCoversProviderMatrix() async {
+        // These doubles exercise the harness boundary without requiring a live
+        // Llama/PCC endpoint or DeepSeek credentials. Transport-specific
+        // behavior remains covered by the provider runner tests.
+        let backends: [ModelBackend] = [
+            .foundationApple,
+            .llamaServer,
+            .foundationServe,
+            .premium
+        ]
+
+        for backend in backends {
+            let turnID = TurnID(rawValue: "native-matrix-\(backend.rawValue)")
+            let adapter = NativeBackendSession(
+                backend: backend,
+                runner: AdapterNativeRunner(
+                    outcome: .completed(
+                        content: "Result for \(backend.rawValue).",
+                        reasoning: "Reasoning for \(backend.rawValue)."
+                    )
+                ),
+                session: LanguageModelSession(model: SystemLanguageModel.default),
+                mode: .standalone,
+                workspaceKind: backend.rawValue
+            )
+            var received: [AgentRuntimeEvent] = []
+            let result = await adapter.run(
+                request: TurnRequest(
+                    id: turnID,
+                    prompt: "Run provider matrix test.",
+                    backend: backend,
+                    modelName: "Test \(backend.rawValue)",
+                    workspaceRoot: "/tmp"
+                ),
+                events: BackendSessionEvents { event in
+                    received.append(event)
+                }
+            )
+
+            #expect(result.assistantText == "Result for \(backend.rawValue).")
+            #expect(result.reasoningText == "Reasoning for \(backend.rawValue).")
+            #expect(result.outcome == .succeeded)
+            #expect(received.count == 3)
+            #expect(received.allSatisfy { $0.turnID == turnID })
+        }
+    }
+
     @Test("Codex backend adapter normalizes streamed output and tool results")
     func codexBackendAdapterNormalizesLifecycle() async {
         let turnID = TurnID(rawValue: "codex-adapter-turn")
