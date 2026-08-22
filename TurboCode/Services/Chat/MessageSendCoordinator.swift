@@ -7,6 +7,7 @@ import Foundation
 @MainActor
 final class MessageSendCoordinator {
     private let runtime: AgentRuntime
+    private let llmRuntime: LLMRuntime
     private let runtimeProjection: AgentRuntimeProjectionStore
     private let responseCoordinator: ChatResponseCoordinator
     private let modelRuntime: ModelRuntimeStore
@@ -21,6 +22,7 @@ final class MessageSendCoordinator {
 
     init(
         runtime: AgentRuntime,
+        llmRuntime: LLMRuntime,
         runtimeProjection: AgentRuntimeProjectionStore,
         responseCoordinator: ChatResponseCoordinator,
         modelRuntime: ModelRuntimeStore,
@@ -34,6 +36,7 @@ final class MessageSendCoordinator {
         lifecycle: ConversationLifecycleCoordinator
     ) {
         self.runtime = runtime
+        self.llmRuntime = llmRuntime
         self.runtimeProjection = runtimeProjection
         self.responseCoordinator = responseCoordinator
         self.modelRuntime = modelRuntime
@@ -134,7 +137,10 @@ final class MessageSendCoordinator {
 
     private func compactOnDeviceContextIfNeeded() async {
         guard modelRuntime.activeBackend == .foundationApple else { return }
-        let turnCount = SessionRebuildHistory.userTurnCount(in: modelRuntime.transcript)
+        guard let transcript = llmRuntime.foundationModelsTranscript else {
+            return
+        }
+        let turnCount = SessionRebuildHistory.userTurnCount(in: transcript)
         guard turnCount >= SessionRebuildHistory.onDeviceCompactionThreshold,
               let compaction = SessionRebuildHistory.onDeviceCompaction(
                   from: timeline.blocks

@@ -20,9 +20,6 @@ struct ModelSessionConfiguration {
     let delegateToolIDs: Set<ToolCapabilityID>?
     let dropsCompletedToolCalls: Bool
     let workspaceInstructions: WorkspaceInstructions?
-    /// Relay owned by the active model session; nil disables live transport
-    /// reasoning outside the local Llama path.
-    let reasoningStreamRelay: ReasoningStreamRelay?
 }
 
 struct ModelSessionEvents {
@@ -142,9 +139,13 @@ enum ModelSessionFactory {
     static func makeSession(
         configuration: ModelSessionConfiguration,
         history: [Transcript.Entry],
-        events: ModelSessionEvents
+        events: ModelSessionEvents,
+        reasoningStreamRelay: ReasoningStreamRelay? = nil
     ) -> LanguageModelSession {
-        let activeModel = activeModel(for: configuration)
+        let activeModel = activeModel(
+            for: configuration,
+            reasoningStreamRelay: reasoningStreamRelay
+        )
         let activeRemoteConfiguration = configuration.backend == .foundationApple
             ? nil
             : (configuration.activeRemoteModel ?? RemoteModelConfig.fallbackLlama)
@@ -636,7 +637,8 @@ enum ModelSessionFactory {
     }
 
     private static func activeModel(
-        for configuration: ModelSessionConfiguration
+        for configuration: ModelSessionConfiguration,
+        reasoningStreamRelay: ReasoningStreamRelay?
     ) -> any LanguageModel {
         switch configuration.backend {
         case .foundationApple:
@@ -644,7 +646,7 @@ enum ModelSessionFactory {
         case .foundationServe, .llamaServer, .premium:
             providerModel(
                 for: configuration.activeRemoteModel ?? RemoteModelConfig.fallbackLlama,
-                reasoningStreamRelay: configuration.reasoningStreamRelay
+                reasoningStreamRelay: reasoningStreamRelay
             )
         case .codex:
             // ChatStore dispatches Codex turns before this placeholder session

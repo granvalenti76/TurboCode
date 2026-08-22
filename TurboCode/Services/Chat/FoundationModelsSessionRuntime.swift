@@ -1,6 +1,17 @@
 import FoundationModels
 import FoundationModelsUtilities
 
+/// Immutable provider selection used to bootstrap the first Foundation Models
+/// session before workspace instructions and tools are loaded.
+///
+/// This value carries configuration only. The runtime creates and retains the
+/// concrete model, session, and reasoning relay as one private ownership unit.
+struct FoundationModelsBootstrapConfiguration {
+    let backend: ModelBackend
+    let usesSystemModel: Bool
+    let remoteModel: RemoteModelConfig
+}
+
 /// Owns the concrete Foundation Models session and its transport reasoning relay.
 ///
 /// This type is deliberately not observable. UI-facing stores may project model
@@ -11,6 +22,25 @@ final class FoundationModelsSessionRuntime {
     private(set) var session: LanguageModelSession
     private var reasoningStreamRelay: ReasoningStreamRelay
 
+    init(
+        configuration: FoundationModelsBootstrapConfiguration
+    ) {
+        let relay = ReasoningStreamRelay()
+        reasoningStreamRelay = relay
+        let model: any LanguageModel = configuration.usesSystemModel
+            ? SystemLanguageModel.default
+            : ProviderLanguageModel(
+                configuration: configuration.remoteModel,
+                credential: configuration.remoteModel.credential,
+                reasoningStreamRelay: configuration.backend == .llamaServer
+                    ? relay
+                    : nil
+            )
+        session = LanguageModelSession(model: model)
+    }
+
+    /// Injection seam retained for focused ownership tests. Production hosts
+    /// use the configuration initializer so provider construction stays here.
     init(
         backend: ModelBackend,
         modelBuilder: (ReasoningStreamRelay?) -> any LanguageModel
@@ -42,18 +72,18 @@ final class FoundationModelsSessionRuntime {
     /// unwinds. Assigning only after construction prevents configuration changes
     /// from pairing a new session with the previous session's reasoning relay.
     func rebuild(
-        backend: ModelBackend,
+        configuration: ModelSessionConfiguration,
         history: [Transcript.Entry],
-        events: ModelSessionEvents,
-        configurationBuilder: (ReasoningStreamRelay?) -> ModelSessionConfiguration
+        events: ModelSessionEvents
     ) {
         let nextRelay = ReasoningStreamRelay()
         let nextSession = ModelSessionFactory.makeSession(
-            configuration: configurationBuilder(
-                backend == .llamaServer ? nextRelay : nil
-            ),
+            configuration: configuration,
             history: history,
-            events: events
+            events: events,
+            reasoningStreamRelay: configuration.backend == .llamaServer
+                ? nextRelay
+                : nil
         )
         reasoningStreamRelay = nextRelay
         session = nextSession

@@ -127,10 +127,13 @@ public final class ChatStore {
         timeline.applyRuntimeSnapshot(runtimeProjection.snapshot)
         let llmSessionFactory = LiveLLMBackendSessionFactory(
             nativeRunner: nativeRunner,
-            foundationModelsRuntime: modelRuntime.foundationModelsRuntime,
             codexRuntime: codexRuntime
         )
-        let llmRuntime = LLMRuntime(sessionFactory: llmSessionFactory)
+        let llmRuntime = LLMRuntime(
+            sessionFactory: llmSessionFactory,
+            foundationModelsBootstrap:
+                modelRuntime.foundationModelsBootstrapConfiguration
+        )
         let workspace = WorkspaceStore(
             gitService: gitService,
             reviewDraftStore: reviewDraft,
@@ -146,6 +149,7 @@ public final class ChatStore {
             conversations: conversations,
             timeline: timeline,
             modelRuntime: modelRuntime,
+            llmRuntime: llmRuntime,
             persistence: conversationPersistence
         )
         self.sessionCoordinator = sessionCoordinator
@@ -183,6 +187,7 @@ public final class ChatStore {
             workspace: workspace,
             presentation: presentation,
             agentRuntime: agentRuntime,
+            llmRuntime: llmRuntime,
             runtimeProjection: runtimeProjection,
             responseCoordinator: responseCoordinator
         )
@@ -234,6 +239,7 @@ public final class ChatStore {
         )
         self.messageSendCoordinator = MessageSendCoordinator(
             runtime: agentRuntime,
+            llmRuntime: llmRuntime,
             runtimeProjection: runtimeProjection,
             responseCoordinator: responseCoordinator,
             modelRuntime: modelRuntime,
@@ -601,9 +607,11 @@ public final class ChatStore {
             return
         }
 
-        let turnCount = SessionRebuildHistory.userTurnCount(
-            in: modelRuntimeStore.transcript
-        )
+        guard let transcript = sessionCoordinator.foundationModelsTranscript else {
+            error = "The active model session has no transcript checkpoint."
+            return
+        }
+        let turnCount = SessionRebuildHistory.userTurnCount(in: transcript)
         let maximumCharacters = SessionRebuildHistory.localCompactionCharacterLimit(
             contextWindowTokens: activeRemoteModel?.contextWindowTokens
         )

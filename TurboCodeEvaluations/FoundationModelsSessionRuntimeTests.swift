@@ -36,23 +36,17 @@ struct FoundationModelsSessionRuntimeTests {
         let firstRelay = try #require(
             runtime.activeReasoningStreamRelay(for: .llamaServer)
         )
-        var configurationRelay: ReasoningStreamRelay?
-
         runtime.rebuild(
-            backend: .llamaServer,
+            configuration: Self.onDeviceConfiguration(),
             history: [],
             events: Self.noopEvents
-        ) { relay in
-            configurationRelay = relay
-            return Self.onDeviceConfiguration(reasoningStreamRelay: relay)
-        }
+        )
 
         let secondRelay = try #require(
             runtime.activeReasoningStreamRelay(for: .llamaServer)
         )
         #expect(runtime.session !== firstSession)
         #expect(secondRelay !== firstRelay)
-        #expect(configurationRelay === secondRelay)
     }
 
     private static var noopEvents: ModelSessionEvents {
@@ -63,9 +57,7 @@ struct FoundationModelsSessionRuntimeTests {
         )
     }
 
-    private static func onDeviceConfiguration(
-        reasoningStreamRelay: ReasoningStreamRelay?
-    ) -> ModelSessionConfiguration {
+    private static func onDeviceConfiguration() -> ModelSessionConfiguration {
         ModelSessionConfiguration(
             backend: .foundationApple,
             activeRemoteModel: nil,
@@ -81,8 +73,7 @@ struct FoundationModelsSessionRuntimeTests {
             delegateTemperature: nil,
             delegateToolIDs: nil,
             dropsCompletedToolCalls: true,
-            workspaceInstructions: nil,
-            reasoningStreamRelay: reasoningStreamRelay
+            workspaceInstructions: nil
         )
     }
 }

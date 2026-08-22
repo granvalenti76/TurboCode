@@ -3,11 +3,11 @@ import FoundationModels
 import FoundationModelsUtilities
 import Observation
 
-/// Owns observable Foundation Models configuration and profile selection.
+/// Owns observable model configuration and profile selection.
 ///
-/// This store resolves models, skills, sampling options, and rebuild policy.
-/// Concrete session and reasoning-relay lifetime belongs to the non-observable
-/// ``FoundationModelsSessionRuntime`` so UI state cannot own provider objects.
+/// This store resolves models, skills, sampling options, and rebuild policy into
+/// immutable values. Concrete models, sessions, reasoning relays, and transcript
+/// checkpoints belong to the application execution runtime.
 @MainActor
 @Observable
 final class ModelRuntimeStore {
@@ -26,19 +26,7 @@ final class ModelRuntimeStore {
     var composerModel: String
     var activeBackend: ModelBackend
     var orchestratorMode: OrchestratorMode
-    let foundationModelsRuntime: FoundationModelsSessionRuntime
     private var skillsWorkspaceRoot: String?
-
-    var activeReasoningStreamRelay: ReasoningStreamRelay? {
-        foundationModelsRuntime.activeReasoningStreamRelay(for: activeBackend)
-    }
-
-    /// Read-only transcript projection for persistence and context helpers.
-    /// Session construction and replacement remain behind the runtime boundary;
-    /// UI facades should not retain or pass the concrete session object around.
-    var transcript: Transcript {
-        foundationModelsRuntime.transcript
-    }
 
     var activeDynamicProfile: UserDynamicProfile? {
         activeDynamicProfileID.flatMap { id in
@@ -54,6 +42,18 @@ final class ModelRuntimeStore {
 
     var activeRemoteModel: RemoteModelConfig? {
         remoteModels.first(where: { $0.id == activeRemoteModelID })
+    }
+
+    /// Captures only the selection needed to build the initial provider
+    /// session. `LLMRuntime` consumes this once and creates all concrete
+    /// Foundation Models objects behind its execution boundary.
+    var foundationModelsBootstrapConfiguration:
+        FoundationModelsBootstrapConfiguration {
+        FoundationModelsBootstrapConfiguration(
+            backend: activeBackend,
+            usesSystemModel: activeBackend == .foundationApple,
+            remoteModel: activeRemoteModel ?? RemoteModelConfig.fallbackLlama
+        )
     }
 
     var enabledRemoteModels: [RemoteModelConfig] {
@@ -140,20 +140,6 @@ final class ModelRuntimeStore {
         composerModel = mode == .orchestrator
             ? "Apple · Orchestrator"
             : (restoredProfile?.name ?? initialRemote.name)
-
-        foundationModelsRuntime = FoundationModelsSessionRuntime(
-            backend: initialBackend
-        ) { reasoningStreamRelay in
-            if mode == .orchestrator
-                || restoredProfile?.baseModelID == .onDevice {
-                return SystemLanguageModel.default
-            }
-            return ProviderLanguageModel(
-                configuration: initialRemote,
-                credential: initialRemote.credential,
-                reasoningStreamRelay: reasoningStreamRelay
-            )
-        }
 
         if savedProfile != nil, restoredProfile == nil {
             UserDefaults.standard.removeObject(
@@ -379,10 +365,7 @@ final class ModelRuntimeStore {
         ProviderLanguageModel(
             configuration: model,
             credential: model.credential,
-            reasoningStreamRelay: model.id == activeRemoteModelID
-                && activeBackend == .llamaServer
-                ? activeReasoningStreamRelay
-            : nil
+            reasoningStreamRelay: nil
         )
     }
 
@@ -449,18 +432,12 @@ final class ModelRuntimeStore {
     }
 #endif
 
-    func rebuildSession(
-        workspaceRoot: String,
-        keepingHistory: Bool = true,
-        discardingCapabilityContext: Bool = false,
-        restoringHistory: [Transcript.Entry]? = nil,
-        events: ModelSessionEvents
-    ) {
-        let history = restoringHistory ?? SessionRebuildHistory.prepare(
-            foundationModelsRuntime.transcript,
-            keepingHistory: keepingHistory,
-            discardingCapabilityContext: discardingCapabilityContext
-        )
+    /// Produces one immutable configuration snapshot for the execution owner.
+    /// Loading workspace instructions here also advances the revision observed
+    /// by the configuration facade, but no provider object is built or retained.
+    func makeSessionConfiguration(
+        workspaceRoot: String
+    ) -> ModelSessionConfiguration {
         let workspaceInstructions = WorkspaceInstructionsLoader.load(
             from: workspaceRoot
         )
@@ -471,30 +448,23 @@ final class ModelRuntimeStore {
             profile: activeDynamicProfile,
             safariMCPEnabled: agentTuning.experimental.safariMCPEnabled
         )
-        foundationModelsRuntime.rebuild(
+        return ModelSessionConfiguration(
             backend: activeBackend,
-            history: history,
-            events: events
-        ) { reasoningStreamRelay in
-            ModelSessionConfiguration(
-                backend: activeBackend,
-                activeRemoteModel: activeRemoteModel,
-                delegateRemoteModel: delegateModel,
-                orchestratorMode: orchestratorMode,
-                workspaceRoot: workspaceRoot,
-                agentTuning: agentTuning,
-                availableSkills: sessionSkills,
-                activeDynamicProfile: activeDynamicProfile,
-                reasoningLevel: reasoningLevel,
-                delegateReasoningLevel: reasoningLevel(for: delegateModel),
-                activeTemperature: temperature(for: activeRemoteModel),
-                delegateTemperature: temperature(for: delegateModel),
-                delegateToolIDs: activeDynamicProfile?.resolvedWorkerToolIDs,
-                dropsCompletedToolCalls: shouldDropCompletedToolCalls,
-                workspaceInstructions: workspaceInstructions,
-                reasoningStreamRelay: reasoningStreamRelay
-            )
-        }
+            activeRemoteModel: activeRemoteModel,
+            delegateRemoteModel: delegateModel,
+            orchestratorMode: orchestratorMode,
+            workspaceRoot: workspaceRoot,
+            agentTuning: agentTuning,
+            availableSkills: sessionSkills,
+            activeDynamicProfile: activeDynamicProfile,
+            reasoningLevel: reasoningLevel,
+            delegateReasoningLevel: reasoningLevel(for: delegateModel),
+            activeTemperature: temperature(for: activeRemoteModel),
+            delegateTemperature: temperature(for: delegateModel),
+            delegateToolIDs: activeDynamicProfile?.resolvedWorkerToolIDs,
+            dropsCompletedToolCalls: shouldDropCompletedToolCalls,
+            workspaceInstructions: workspaceInstructions
+        )
     }
 
     /// Detects instruction edits without rebuilding stable sessions on every turn.
@@ -610,7 +580,7 @@ final class ModelRuntimeStore {
             return nil
         }
         return ModelSessionFactory.makeDelegateInvoker(
-            configuration: sessionConfiguration(workspaceRoot: workspaceRoot),
+            configuration: makeSessionConfiguration(workspaceRoot: workspaceRoot),
             events: events
         )
     }
@@ -624,38 +594,8 @@ final class ModelRuntimeStore {
         events: ModelSessionEvents
     ) -> ConfiguredAgentTaskInvoker {
         ModelSessionFactory.makeDelegateInvoker(
-            configuration: sessionConfiguration(workspaceRoot: workspaceRoot),
+            configuration: makeSessionConfiguration(workspaceRoot: workspaceRoot),
             events: events
-        )
-    }
-
-    private func sessionConfiguration(
-        workspaceRoot: String
-    ) -> ModelSessionConfiguration {
-        let delegateModel = delegateRemoteModel
-        return ModelSessionConfiguration(
-            backend: activeBackend,
-            activeRemoteModel: activeRemoteModel,
-            delegateRemoteModel: delegateModel,
-            orchestratorMode: orchestratorMode,
-            workspaceRoot: workspaceRoot,
-            agentTuning: agentTuning,
-            availableSkills: DynamicProfileRuntimeSelection.skills(
-                from: availableSkills,
-                profile: activeDynamicProfile,
-                safariMCPEnabled: agentTuning.experimental.safariMCPEnabled
-            ),
-            activeDynamicProfile: activeDynamicProfile,
-            reasoningLevel: reasoningLevel,
-            delegateReasoningLevel: reasoningLevel(for: delegateModel),
-            activeTemperature: temperature(for: activeRemoteModel),
-            delegateTemperature: temperature(for: delegateModel),
-            delegateToolIDs: activeDynamicProfile?.resolvedWorkerToolIDs,
-            dropsCompletedToolCalls: shouldDropCompletedToolCalls,
-            workspaceInstructions: WorkspaceInstructionsLoader.load(
-                from: workspaceRoot
-            ),
-            reasoningStreamRelay: activeReasoningStreamRelay
         )
     }
 }

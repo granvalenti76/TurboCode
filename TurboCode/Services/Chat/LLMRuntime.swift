@@ -49,7 +49,9 @@ struct CodexLLMExecutionConfiguration {
 protocol LLMBackendSessionBuilding: AnyObject {
     func makeNativeSession(
         request: TurnRequest,
-        configuration: NativeLLMExecutionConfiguration
+        configuration: NativeLLMExecutionConfiguration,
+        session: LanguageModelSession,
+        reasoningStreamRelay: ReasoningStreamRelay?
     ) -> any BackendSession
 
     func makeCodexSession(
@@ -60,39 +62,39 @@ protocol LLMBackendSessionBuilding: AnyObject {
     func recordCodexFailure(_ failure: TurnFailure)
 }
 
-/// Live factory retaining the provider infrastructure shared across turns.
-/// Active sessions themselves remain owned by ``LLMRuntime`` and are created
-/// per admitted request, so rebuilding model configuration cannot replace a
-/// session that is still unwinding.
+/// Live factory retaining application provider runners shared across turns.
+///
+/// The factory does not retain Foundation Models session infrastructure.
+/// ``LLMRuntime`` lends the current session generation only while this factory
+/// constructs the per-turn adapter, so rebuilding cannot create a second
+/// long-lived owner or replace a session that is still unwinding.
 @MainActor
 final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
     private let nativeRunner: any NativeResponseRunning
-    private let foundationModelsRuntime: FoundationModelsSessionRuntime
     private let codexRuntime: CodexRuntimeStore
 
     init(
         nativeRunner: any NativeResponseRunning,
-        foundationModelsRuntime: FoundationModelsSessionRuntime,
         codexRuntime: CodexRuntimeStore
     ) {
         self.nativeRunner = nativeRunner
-        self.foundationModelsRuntime = foundationModelsRuntime
         self.codexRuntime = codexRuntime
     }
 
     func makeNativeSession(
         request: TurnRequest,
-        configuration: NativeLLMExecutionConfiguration
+        configuration: NativeLLMExecutionConfiguration,
+        session: LanguageModelSession,
+        reasoningStreamRelay: ReasoningStreamRelay?
     ) -> any BackendSession {
         NativeBackendSession(
             backend: request.backend,
             runner: nativeRunner,
-            session: foundationModelsRuntime.session,
+            session: session,
             mode: configuration.mode,
             workspaceKind: configuration.workspaceKind,
             serverURL: configuration.serverURL,
-            reasoningStreamRelay: foundationModelsRuntime
-                .activeReasoningStreamRelay(for: request.backend),
+            reasoningStreamRelay: reasoningStreamRelay,
             diagnosticsChanged: configuration.diagnosticsChanged,
             contextChanged: configuration.contextChanged,
             approvalRequested: configuration.approvalRequested
@@ -147,11 +149,21 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
 @MainActor
 final class LLMRuntime {
     private let sessionFactory: (any LLMBackendSessionBuilding)?
+    /// The execution runtime is the sole long-lived owner of the active
+    /// Foundation Models session and relay. Factories receive borrowed values
+    /// only while constructing the per-turn adapter.
+    private let foundationModelsRuntime: FoundationModelsSessionRuntime?
     private var activeTurnID: TurnID?
     private var activeSession: (any BackendSession)?
 
-    init(sessionFactory: (any LLMBackendSessionBuilding)? = nil) {
+    init(
+        sessionFactory: (any LLMBackendSessionBuilding)? = nil,
+        foundationModelsBootstrap: FoundationModelsBootstrapConfiguration? = nil
+    ) {
         self.sessionFactory = sessionFactory
+        foundationModelsRuntime = foundationModelsBootstrap.map(
+            FoundationModelsSessionRuntime.init(configuration:)
+        )
     }
 
     var hasActiveSession: Bool {
@@ -202,7 +214,7 @@ final class LLMRuntime {
         configuration: NativeLLMExecutionConfiguration,
         events: BackendSessionEvents
     ) async -> BackendSessionResult {
-        guard let sessionFactory else {
+        guard let sessionFactory, let foundationModelsRuntime else {
             return rejectedResult(
                 code: "llm_runtime.unconfigured",
                 message: "No LLM backend session factory is configured."
@@ -212,10 +224,52 @@ final class LLMRuntime {
             request: request,
             using: sessionFactory.makeNativeSession(
                 request: request,
-                configuration: configuration
+                configuration: configuration,
+                session: foundationModelsRuntime.session,
+                reasoningStreamRelay: foundationModelsRuntime
+                    .activeReasoningStreamRelay(for: request.backend)
             ),
             events: events
         )
+    }
+
+    /// Returns a value checkpoint for persistence without exposing the concrete
+    /// session that produced it. Codex owns its rollout separately and callers
+    /// intentionally omit this checkpoint for Codex conversations.
+    var foundationModelsTranscript: Transcript? {
+        foundationModelsRuntime?.transcript
+    }
+
+    /// Replaces Foundation Models session infrastructure only at an
+    /// application-controlled transition boundary. History preparation and
+    /// relay injection stay beside the concrete session owner rather than in an
+    /// observable configuration store.
+    @discardableResult
+    func rebuildFoundationModelsSession(
+        configuration: ModelSessionConfiguration,
+        keepingHistory: Bool = true,
+        discardingCapabilityContext: Bool = false,
+        restoringHistory: [Transcript.Entry]? = nil,
+        events: ModelSessionEvents
+    ) -> Bool {
+        // A configuration transition may replace the stored generation only
+        // after the per-turn adapter has unwound. The adapter retains its own
+        // session reference, but rejecting overlap also keeps transcript and
+        // relay selection deterministic for the next admitted turn.
+        guard activeSession == nil, let foundationModelsRuntime else {
+            return false
+        }
+        let history = restoringHistory ?? SessionRebuildHistory.prepare(
+            foundationModelsRuntime.transcript,
+            keepingHistory: keepingHistory,
+            discardingCapabilityContext: discardingCapabilityContext
+        )
+        foundationModelsRuntime.rebuild(
+            configuration: configuration,
+            history: history,
+            events: events
+        )
+        return true
     }
 
     /// Resolves and executes a Codex adapter behind the same ownership gate as

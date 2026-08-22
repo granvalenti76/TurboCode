@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 
 /// Bridges MainActor conversation projections to UI-neutral persistence use
 /// cases. The lifecycle coordinator consumes its immutable load/delete results;
@@ -8,18 +9,27 @@ final class ConversationSessionCoordinator {
     private let conversations: ConversationStore
     private let timeline: ChatTimelineStore
     private let modelRuntime: ModelRuntimeStore
+    private let llmRuntime: LLMRuntime
     private let persistence: ConversationPersistenceService
 
     init(
         conversations: ConversationStore,
         timeline: ChatTimelineStore,
         modelRuntime: ModelRuntimeStore,
+        llmRuntime: LLMRuntime,
         persistence: ConversationPersistenceService
     ) {
         self.conversations = conversations
         self.timeline = timeline
         self.modelRuntime = modelRuntime
+        self.llmRuntime = llmRuntime
         self.persistence = persistence
+    }
+
+    /// Value checkpoint used by context policies that must inspect the active
+    /// Foundation Models history without retaining its owning session runtime.
+    var foundationModelsTranscript: Transcript? {
+        llmRuntime.foundationModelsTranscript
     }
 
     /// Captures all mutable MainActor values before awaiting disk I/O. The
@@ -39,7 +49,9 @@ final class ConversationSessionCoordinator {
             blocks: timeline.blocks,
             // Codex persists its own rollout. Saving an unrelated Foundation
             // Models transcript would contaminate a later Codex restoration.
-            transcript: backend == .codex ? nil : modelRuntime.transcript
+            transcript: backend == .codex
+                ? nil
+                : llmRuntime.foundationModelsTranscript
         )
 
         do {

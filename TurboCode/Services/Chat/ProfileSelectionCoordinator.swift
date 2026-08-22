@@ -12,6 +12,7 @@ final class ProfileSelectionCoordinator {
     private let workspace: WorkspaceStore
     private let presentation: ChatPresentationViewModel
     private let agentRuntime: AgentRuntime
+    private let llmRuntime: LLMRuntime
     private let runtimeProjection: AgentRuntimeProjectionStore
     private let responseCoordinator: ChatResponseCoordinator
 
@@ -29,6 +30,7 @@ final class ProfileSelectionCoordinator {
         workspace: WorkspaceStore,
         presentation: ChatPresentationViewModel,
         agentRuntime: AgentRuntime,
+        llmRuntime: LLMRuntime,
         runtimeProjection: AgentRuntimeProjectionStore,
         responseCoordinator: ChatResponseCoordinator
     ) {
@@ -39,6 +41,7 @@ final class ProfileSelectionCoordinator {
         self.workspace = workspace
         self.presentation = presentation
         self.agentRuntime = agentRuntime
+        self.llmRuntime = llmRuntime
         self.runtimeProjection = runtimeProjection
         self.responseCoordinator = responseCoordinator
     }
@@ -332,8 +335,11 @@ final class ProfileSelectionCoordinator {
                 )
             )
         )
-        modelRuntime.rebuildSession(
-            workspaceRoot: workspace.root,
+        let configuration = modelRuntime.makeSessionConfiguration(
+            workspaceRoot: workspace.root
+        )
+        llmRuntime.rebuildFoundationModelsSession(
+            configuration: configuration,
             keepingHistory: keepingHistory,
             discardingCapabilityContext: discardingCapabilityContext,
             restoringHistory: restoringHistory,

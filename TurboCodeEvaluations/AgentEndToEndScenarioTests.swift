@@ -298,10 +298,6 @@ struct AgentEndToEndScenarioTests {
         let codexRuntime = CodexRuntimeStore()
         let factory = LiveLLMBackendSessionFactory(
             nativeRunner: ScenarioNativeResponseRunner(operation: operation),
-            foundationModelsRuntime: FoundationModelsSessionRuntime(
-                backend: .foundationApple,
-                modelBuilder: { _ in SystemLanguageModel.default }
-            ),
             codexRuntime: codexRuntime
         )
         let runtime = AgentRuntime { snapshot in
@@ -312,7 +308,15 @@ struct AgentEndToEndScenarioTests {
             toolInteractions: ToolInteractionStore(),
             agentActivity: activity,
             agentRuntime: runtime,
-            llmRuntime: LLMRuntime(sessionFactory: factory)
+            llmRuntime: LLMRuntime(
+                sessionFactory: factory,
+                foundationModelsBootstrap:
+                    FoundationModelsBootstrapConfiguration(
+                        backend: .foundationApple,
+                        usesSystemModel: true,
+                        remoteModel: .fallbackLlama
+                    )
+            )
         )
     }
 

@@ -1,4 +1,6 @@
 import Foundation
+import FoundationModels
+import FoundationModelsUtilities
 import Testing
 @testable import TurboCode
 
@@ -113,7 +115,14 @@ struct LLMRuntimeTests {
                 outcome: .failed(codexFailure)
             )
         )
-        let runtime = LLMRuntime(sessionFactory: factory)
+        let runtime = LLMRuntime(
+            sessionFactory: factory,
+            foundationModelsBootstrap: FoundationModelsBootstrapConfiguration(
+                backend: .llamaServer,
+                usesSystemModel: true,
+                remoteModel: .fallbackLlama
+            )
+        )
 
         let native = await runtime.executeNative(
             request: request(
@@ -156,6 +165,127 @@ struct LLMRuntimeTests {
         #expect(factory.nativeBuildCount == 1)
         #expect(factory.codexBuildCount == 1)
         #expect(factory.recordedCodexFailure == codexFailure)
+    }
+
+    @Test("Runtime owns Foundation Models rebuild and lends one session generation")
+    func ownsFoundationModelsSessionGeneration() async throws {
+        let factory = RecordingBackendSessionFactory(
+            nativeSession: CompletingBackendSession(backend: .llamaServer),
+            codexSession: CompletingBackendSession(backend: .codex)
+        )
+        let runtime = LLMRuntime(
+            sessionFactory: factory,
+            foundationModelsBootstrap: FoundationModelsBootstrapConfiguration(
+                backend: .llamaServer,
+                usesSystemModel: true,
+                remoteModel: .fallbackLlama
+            )
+        )
+
+        _ = await runtime.executeNative(
+            request: request(
+                id: TurnID(rawValue: "foundation-generation-first"),
+                backend: .llamaServer
+            ),
+            configuration: nativeConfiguration,
+            events: .none
+        )
+        let firstSession = try #require(factory.nativeProviderSessions.last)
+        let firstRelay = try #require(factory.nativeReasoningRelays.last ?? nil)
+
+        #expect(runtime.rebuildFoundationModelsSession(
+            configuration: Self.llamaSessionConfiguration,
+            keepingHistory: false,
+            events: Self.noopModelSessionEvents
+        ))
+        _ = await runtime.executeNative(
+            request: request(
+                id: TurnID(rawValue: "foundation-generation-second"),
+                backend: .llamaServer
+            ),
+            configuration: nativeConfiguration,
+            events: .none
+        )
+        let secondSession = try #require(factory.nativeProviderSessions.last)
+        let secondRelay = try #require(factory.nativeReasoningRelays.last ?? nil)
+
+        #expect(firstSession !== secondSession)
+        #expect(firstRelay !== secondRelay)
+        #expect(runtime.foundationModelsTranscript != nil)
+    }
+
+    @Test("Runtime rejects Foundation Models rebuild while an adapter is active")
+    func rejectsFoundationModelsRebuildDuringExecution() async {
+        let suspended = SuspendedBackendSession(backend: .llamaServer)
+        let factory = RecordingBackendSessionFactory(
+            nativeSession: suspended,
+            codexSession: CompletingBackendSession(backend: .codex)
+        )
+        let runtime = LLMRuntime(
+            sessionFactory: factory,
+            foundationModelsBootstrap: FoundationModelsBootstrapConfiguration(
+                backend: .llamaServer,
+                usesSystemModel: true,
+                remoteModel: .fallbackLlama
+            )
+        )
+        let turnID = TurnID(rawValue: "foundation-rebuild-active")
+        let task = Task { @MainActor in
+            await runtime.executeNative(
+                request: request(id: turnID, backend: .llamaServer),
+                configuration: nativeConfiguration,
+                events: .none
+            )
+        }
+        await Task.yield()
+
+        #expect(!runtime.rebuildFoundationModelsSession(
+            configuration: Self.llamaSessionConfiguration,
+            keepingHistory: false,
+            events: Self.noopModelSessionEvents
+        ))
+
+        suspended.complete(with: .succeeded)
+        _ = await task.value
+    }
+
+    private var nativeConfiguration: NativeLLMExecutionConfiguration {
+        NativeLLMExecutionConfiguration(
+            mode: .standalone,
+            workspaceKind: "test",
+            serverURL: nil,
+            diagnosticsChanged: { _ in },
+            contextChanged: { _ in },
+            approvalRequested: { _ in }
+        )
+    }
+
+    private static var noopModelSessionEvents: ModelSessionEvents {
+        ModelSessionEvents(
+            toolStarted: { _, _, _ in },
+            toolFinished: { _, _, _, _ in },
+            delegationChanged: { _ in }
+        )
+    }
+
+    private static var llamaSessionConfiguration: ModelSessionConfiguration {
+        ModelSessionConfiguration(
+            backend: .llamaServer,
+            activeRemoteModel: nil,
+            delegateRemoteModel: .fallbackLlama,
+            orchestratorMode: .standalone,
+            workspaceRoot: FileManager.default.temporaryDirectory.path,
+            agentTuning: .default,
+            availableSkills: [],
+            activeDynamicProfile: nil,
+            reasoningLevel: nil,
+            delegateReasoningLevel: nil,
+            activeTemperature: nil,
+            delegateTemperature: nil,
+            delegateToolIDs: nil,
+            dropsCompletedToolCalls: true,
+            workspaceInstructions: nil
+        )
     }
 
     private func request(id: TurnID, backend: ModelBackend) -> TurnRequest {
@@ -234,6 +364,8 @@ private final class RecordingBackendSessionFactory: LLMBackendSessionBuilding {
     private(set) var nativeBuildCount = 0
     private(set) var codexBuildCount = 0
     private(set) var recordedCodexFailure: TurnFailure?
+    private(set) var nativeProviderSessions: [LanguageModelSession] = []
+    private(set) var nativeReasoningRelays: [ReasoningStreamRelay?] = []
 
     init(
         nativeSession: any BackendSession,
@@ -245,9 +377,13 @@ private final class RecordingBackendSessionFactory: LLMBackendSessionBuilding {
 
     func makeNativeSession(
         request: TurnRequest,
-        configuration: NativeLLMExecutionConfiguration
+        configuration: NativeLLMExecutionConfiguration,
+        session: LanguageModelSession,
+        reasoningStreamRelay: ReasoningStreamRelay?
     ) -> any BackendSession {
         nativeBuildCount += 1
+        nativeProviderSessions.append(session)
+        nativeReasoningRelays.append(reasoningStreamRelay)
         return nativeSession
     }
 
