@@ -333,3 +333,153 @@ protocol NativeResponseRunning {
         events: NativeResponseRunner.Events
     ) async -> NativeResponseRunner.Outcome
 }
+
+/// First concrete adapter for the provider-neutral backend boundary.
+///
+/// The adapter owns only lifecycle translation. Foundation Models session
+/// construction, streaming guards, diagnostics, and provider-specific
+/// reasoning behavior remain in ``NativeResponseRunner`` and its caller.
+@MainActor
+final class NativeBackendSession: BackendSession {
+    let backend: ModelBackend
+
+    private let runner: any NativeResponseRunning
+    private let session: LanguageModelSession
+    private let mode: OrchestratorMode
+    private let workspaceKind: String
+    private let serverURL: String?
+    private let reasoningStreamRelay: ReasoningStreamRelay?
+    private var activeRun: Task<BackendSessionResult, Never>?
+
+    init(
+        backend: ModelBackend,
+        runner: any NativeResponseRunning,
+        session: LanguageModelSession,
+        mode: OrchestratorMode,
+        workspaceKind: String,
+        serverURL: String? = nil,
+        reasoningStreamRelay: ReasoningStreamRelay? = nil
+    ) {
+        self.backend = backend
+        self.runner = runner
+        self.session = session
+        self.mode = mode
+        self.workspaceKind = workspaceKind
+        self.serverURL = serverURL
+        self.reasoningStreamRelay = reasoningStreamRelay
+    }
+
+    func run(
+        request: TurnRequest,
+        events: BackendSessionEvents
+    ) async -> BackendSessionResult {
+        activeRun?.cancel()
+        let runner = self.runner
+        let session = self.session
+        let mode = self.mode
+        let workspaceKind = self.workspaceKind
+        let serverURL = self.serverURL
+        let reasoningStreamRelay = self.reasoningStreamRelay
+
+        let task = Task { @MainActor in
+            events.emit(.started(request))
+            events.emit(
+                .phaseChanged(
+                    turnID: request.id,
+                    phase: .streaming,
+                    at: Date()
+                )
+            )
+
+            let outcome = await runner.run(
+                session: session,
+                request: NativeResponseRunner.Request(
+                    prompt: request.prompt,
+                    backend: request.backend,
+                    mode: mode,
+                    workspaceKind: workspaceKind,
+                    serverURL: serverURL,
+                    reasoningStreamRelay: reasoningStreamRelay
+                ),
+                events: NativeResponseRunner.Events(
+                    diagnosticsChanged: { _ in },
+                    contextChanged: { _ in },
+                    liveContentChanged: { content in
+                        events.emit(
+                            .assistantTextChanged(
+                                turnID: request.id,
+                                text: content
+                            )
+                        )
+                    },
+                    liveReasoningChanged: { reasoning in
+                        events.emit(
+                            .reasoningTextChanged(
+                                turnID: request.id,
+                                text: reasoning
+                            )
+                        )
+                    },
+                    approvalRequested: { _ in }
+                )
+            )
+            let result = Self.result(from: outcome)
+            events.emit(
+                .completed(
+                    turnID: request.id,
+                    outcome: result.outcome,
+                    at: Date()
+                )
+            )
+            return result
+        }
+        activeRun = task
+        let result = await task.value
+        if activeRun != nil {
+            activeRun = nil
+        }
+        return result
+    }
+
+    func interrupt() async {
+        activeRun?.cancel()
+    }
+
+    private static func result(
+        from outcome: NativeResponseRunner.Outcome
+    ) -> BackendSessionResult {
+        switch outcome {
+        case .completed(let content, let reasoning):
+            return BackendSessionResult(
+                assistantText: content,
+                reasoningText: reasoning,
+                outcome: .succeeded
+            )
+        case .repetitiveOutput(let content, let reasoning):
+            return BackendSessionResult(
+                assistantText: content,
+                reasoningText: reasoning,
+                outcome: .failed(
+                    TurnFailure(
+                        code: "native.repetitiveOutput",
+                        message: "The model produced repetitive output."
+                    )
+                )
+            )
+        case .cancelled(let content, let reasoning):
+            return BackendSessionResult(
+                assistantText: content,
+                reasoningText: reasoning,
+                outcome: .cancelled(reason: "The turn was interrupted.")
+            )
+        case .failed(let message, let content, let reasoning):
+            return BackendSessionResult(
+                assistantText: content,
+                reasoningText: reasoning,
+                outcome: .failed(
+                    TurnFailure(code: "native.provider", message: message)
+                )
+            )
+        }
+    }
+}

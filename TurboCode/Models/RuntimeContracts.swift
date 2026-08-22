@@ -314,6 +314,8 @@ nonisolated enum AgentRuntimeEvent: Sendable {
     case phaseChanged(turnID: TurnID, phase: TurnPhase, at: Date)
     case toolStarted(ToolCall)
     case toolFinished(ToolResult)
+    case assistantTextChanged(turnID: TurnID, text: String)
+    case reasoningTextChanged(turnID: TurnID, text: String)
     case approvalRequested(Approval)
     case usageUpdated(
         turnID: TurnID,
@@ -328,6 +330,8 @@ nonisolated enum AgentRuntimeEvent: Sendable {
         case .started(let request):
             request.id
         case .phaseChanged(let turnID, _, _),
+             .assistantTextChanged(let turnID, _),
+             .reasoningTextChanged(let turnID, _),
              .usageUpdated(let turnID, _, _, _),
              .completed(let turnID, _, _):
             turnID
@@ -339,6 +343,56 @@ nonisolated enum AgentRuntimeEvent: Sendable {
             approval.turnID
         }
     }
+}
+
+/// Provider-neutral terminal payload returned by one backend session.
+/// Provider adapters may keep richer diagnostics internally, but the harness
+/// only needs the visible text and the typed lifecycle outcome at this seam.
+nonisolated struct BackendSessionResult: Codable, Hashable, Sendable {
+    let assistantText: String
+    let reasoningText: String
+    let outcome: TurnOutcome
+
+    init(
+        assistantText: String = "",
+        reasoningText: String = "",
+        outcome: TurnOutcome
+    ) {
+        self.assistantText = assistantText
+        self.reasoningText = reasoningText
+        self.outcome = outcome
+    }
+}
+
+/// Normalized event sink shared by in-process backend adapters.
+nonisolated struct BackendSessionEvents: Sendable {
+    static let none = BackendSessionEvents()
+
+    let emit: @MainActor @Sendable (AgentRuntimeEvent) -> Void
+
+    init(
+        emit: @escaping @MainActor @Sendable (AgentRuntimeEvent) -> Void = { _ in }
+    ) {
+        self.emit = emit
+    }
+}
+
+/// In-process boundary for one configured provider session.
+///
+/// This is intentionally an adapter contract, not a second transport stack:
+/// existing Foundation Models and Codex runners remain responsible for their
+/// native streaming and tool protocols until their individual adapters are
+/// introduced and verified.
+@MainActor
+protocol BackendSession: AnyObject {
+    var backend: ModelBackend { get }
+
+    func run(
+        request: TurnRequest,
+        events: BackendSessionEvents
+    ) async -> BackendSessionResult
+
+    func interrupt() async
 }
 
 /// Prevents an independent worker result from being published after its turn

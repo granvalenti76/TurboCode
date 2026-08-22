@@ -96,6 +96,42 @@ struct AgentActivityRuntimeIntegrationTests {
         #expect(await recorder.value == parent)
     }
 
+    @Test("Native backend adapter normalizes lifecycle and terminal output")
+    func nativeBackendAdapterNormalizesLifecycle() async {
+        let turnID = TurnID(rawValue: "native-adapter-turn")
+        let adapter = NativeBackendSession(
+            backend: .foundationApple,
+            runner: AdapterNativeRunner(
+                outcome: .completed(
+                    content: "Native result.",
+                    reasoning: "Native reasoning."
+                )
+            ),
+            session: LanguageModelSession(model: SystemLanguageModel.default),
+            mode: .standalone,
+            workspaceKind: "test"
+        )
+        var received: [AgentRuntimeEvent] = []
+        let result = await adapter.run(
+            request: TurnRequest(
+                id: turnID,
+                prompt: "Run adapter test.",
+                backend: .foundationApple,
+                modelName: "Test model",
+                workspaceRoot: "/tmp"
+            ),
+            events: BackendSessionEvents { event in
+                received.append(event)
+            }
+        )
+
+        #expect(result.assistantText == "Native result.")
+        #expect(result.reasoningText == "Native reasoning.")
+        #expect(result.outcome == .succeeded)
+        #expect(received.count == 3)
+        #expect(received.allSatisfy { $0.turnID == turnID })
+    }
+
     @Test("Foundation Models and Codex tool calls share the Activity shape")
     func providerToolCallsShareMapping() {
         let foundationCall = Transcript.ToolCall(
@@ -234,6 +270,23 @@ private nonisolated struct ParentTurnRecordingRunner: AgentTaskRunning {
             outcome: .completed,
             technicalSummary: "Parent turn recorded."
         )
+    }
+}
+
+@MainActor
+private final class AdapterNativeRunner: NativeResponseRunning {
+    let outcome: NativeResponseRunner.Outcome
+
+    init(outcome: NativeResponseRunner.Outcome) {
+        self.outcome = outcome
+    }
+
+    func run(
+        session: LanguageModelSession,
+        request: NativeResponseRunner.Request,
+        events: NativeResponseRunner.Events
+    ) async -> NativeResponseRunner.Outcome {
+        outcome
     }
 }
 

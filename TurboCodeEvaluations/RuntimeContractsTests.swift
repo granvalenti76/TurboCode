@@ -101,6 +101,23 @@ struct RuntimeContractsTests {
         #expect(decoded.mode == .coding)
     }
 
+    @Test("Backend session results stay independent from provider transport")
+    func keepsBackendSessionResultProviderNeutral() throws {
+        let result = BackendSessionResult(
+            assistantText: "Done.",
+            reasoningText: "Inspected the workspace.",
+            outcome: .succeeded
+        )
+
+        let encoded = try JSONEncoder().encode(result)
+        let decoded = try JSONDecoder().decode(
+            BackendSessionResult.self,
+            from: encoded
+        )
+
+        #expect(decoded == result)
+    }
+
     @Test("Independent task completions reject stale and cancelled results")
     func guardsIndependentTaskCompletion() {
         let active = TurnID(rawValue: "active")
