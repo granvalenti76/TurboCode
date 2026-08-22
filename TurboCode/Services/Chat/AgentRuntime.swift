@@ -12,6 +12,11 @@ import Foundation
 final class AgentRuntime {
     private var turnReducer = TurnStateReducer()
     private var quiescenceDepth = 0
+    /// The concrete operation handle is runtime lifecycle state, not provider
+    /// state. Keeping it here lets navigation cancel and await one operation
+    /// without making the UI facade the owner of the response task.
+    private var operationTask: Task<Void, Never>?
+    private(set) var operationTurnID: TurnID?
     private(set) var snapshot: RuntimeSnapshot
 
     init(
@@ -26,6 +31,37 @@ final class AgentRuntime {
 
     var currentTurnState: TurnState? {
         snapshot.turn
+    }
+
+    var hasActiveOperation: Bool {
+        operationTask != nil
+    }
+
+    func registerOperation(
+        _ task: Task<Void, Never>,
+        turnID: TurnID
+    ) {
+        operationTask = task
+        operationTurnID = turnID
+    }
+
+    func ownsOperation(_ turnID: TurnID) -> Bool {
+        operationTurnID == turnID
+    }
+
+    /// Requests cancellation but keeps ownership until the caller has awaited
+    /// the task. This prevents a replacement operation from being admitted
+    /// while the previous provider or worker is still unwinding.
+    func cancelOperation() -> Task<Void, Never>? {
+        operationTask?.cancel()
+        return operationTask
+    }
+
+    /// Releases the operation handle only when its owning turn has settled.
+    func finishOperation(for turnID: TurnID) {
+        guard operationTurnID == turnID else { return }
+        operationTask = nil
+        operationTurnID = nil
     }
 
     /// Applies provider-neutral lifecycle and context commands. Provider work

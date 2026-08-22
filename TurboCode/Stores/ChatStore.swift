@@ -34,7 +34,12 @@ public final class ChatStore {
     // Runtime
     public var runtimeStatus: RuntimeStatus = .ready
     public var runtimeConnection: RuntimeConnectionState = .ready
-    public var busy: Bool = false
+    /// UI projection of runtime-owned work. Response and `/task` operations
+    /// are tracked by `AgentRuntime`; Codex handoff remains a separate
+    /// transition until that profile boundary is extracted in a later slice.
+    public var busy: Bool {
+        agentRuntime.hasActiveOperation || codexHandoffTask != nil
+    }
     public var error: String?
     public private(set) var localCompactionNotice: LocalCompactionNotice?
     /// Updated once after a completed local Llama turn, never per stream
@@ -68,10 +73,6 @@ public final class ChatStore {
     let responseCoordinator: ChatResponseCoordinator
     private let reviewCoordinator: ReviewCoordinator
 
-    // The currently running response task. Keeping the handle makes the Stop
-    // button cancel the actual model stream rather than only changing the UI.
-    private var responseTask: Task<Void, Never>?
-    private var activeIndependentTurnID: TurnID?
     private var localCompactionNoticeTask: Task<Void, Never>?
     // Codex selection and handoff are also transition operations. Keeping
     // their handles here prevents navigation from observing half-switched
@@ -389,12 +390,11 @@ public final class ChatStore {
     private func beginCodexHandoff(to selection: TurboCodeProfileSelection) {
         guard !busy, activeBackend == .codex else { return }
         cancelCodexSelection()
-        busy = true
         codexHandoffTask?.cancel()
         codexHandoffTask = Task { [weak self] in
             guard let self else { return }
             await completeCodexHandoff(to: selection)
-            self.busy = false
+            self.codexHandoffTask = nil
         }
     }
 
@@ -1083,9 +1083,7 @@ public final class ChatStore {
         )
         error = nil
         let turnID = TurnID()
-        activeIndependentTurnID = turnID
         responseCoordinator.delegationChanged(true)
-        busy = true
         let task = Task<Void, Never> { [weak self] in
             guard let self else { return }
             let result = await AgentTaskInvocation.invoke(
@@ -1100,13 +1098,9 @@ public final class ChatStore {
                 turnID: turnID
             )
         }
-        responseTask = task
+        agentRuntime.registerOperation(task, turnID: turnID)
         await task.value
-        if activeIndependentTurnID == turnID {
-            activeIndependentTurnID = nil
-        }
-        responseTask = nil
-        busy = false
+        agentRuntime.finishOperation(for: turnID)
         responseCoordinator.delegationChanged(false)
     }
 
@@ -1119,7 +1113,7 @@ public final class ChatStore {
     ) async {
         guard TurnCompletionPolicy.accepts(
             turnID: turnID,
-            activeTurnID: activeIndependentTurnID,
+            activeTurnID: agentRuntime.operationTurnID,
             isCancelled: Task.isCancelled
         ) else { return }
         let response = Self.renderIndependentTaskResult(result)
@@ -1220,7 +1214,6 @@ public final class ChatStore {
         compactOnDeviceContextIfNeeded()
         let effectivePrompt = promptText ?? text
         ensureActiveThread()
-        busy = true
         // One identity follows the accepted prompt through either provider so
         // late callbacks cannot be mistaken for the next user turn.
         let turnID = TurnID()
@@ -1242,10 +1235,9 @@ public final class ChatStore {
                 )
             }
         }
-        responseTask = task
+        agentRuntime.registerOperation(task, turnID: turnID)
         await task.value
-        responseTask = nil
-        busy = false
+        agentRuntime.finishOperation(for: turnID)
     }
 
     /// Compacts only at a turn boundary, when the previous on-device context
@@ -1384,8 +1376,7 @@ public final class ChatStore {
     }
 
     public func interrupt() {
-        responseTask?.cancel()
-        activeIndependentTurnID = nil
+        _ = agentRuntime.cancelOperation()
         let shouldInterruptCodex = activeBackend == .codex
         let approvals = toolInteractionStore.takeAllApprovals()
         toolInteractionStore.clearActivities()
@@ -1735,19 +1726,18 @@ public final class ChatStore {
             await selectionTask.value
             codexSelectionTask = nil
         }
-        if let responseTask {
-            responseTask.cancel()
-            await responseTask.value
-            if self.responseTask != nil {
-                self.responseTask = nil
-                busy = false
+        if let operationTask = agentRuntime.cancelOperation() {
+            await operationTask.value
+            if agentRuntime.hasActiveOperation {
+                if let turnID = agentRuntime.operationTurnID {
+                    agentRuntime.finishOperation(for: turnID)
+                }
             }
         }
         if let handoffTask = codexHandoffTask {
             handoffTask.cancel()
             await handoffTask.value
             codexHandoffTask = nil
-            busy = false
         }
     }
 

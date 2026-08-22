@@ -163,4 +163,26 @@ struct AgentRuntimeTests {
         runtime.endQuiescence()
         #expect(!runtime.snapshot.isQuiescing)
     }
+
+    @Test("AgentRuntime owns and releases the active operation handle")
+    func ownsOperationHandleUntilAwaited() async {
+        let turnID = TurnID(rawValue: "agent-runtime-operation")
+        let runtime = AgentRuntime()
+        let task = Task<Void, Never> {
+            try? await Task.sleep(for: .seconds(60))
+        }
+
+        runtime.registerOperation(task, turnID: turnID)
+        #expect(runtime.hasActiveOperation)
+        #expect(runtime.ownsOperation(turnID))
+
+        let cancelled = runtime.cancelOperation()
+        #expect(cancelled != nil)
+        await cancelled?.value
+        #expect(runtime.hasActiveOperation)
+
+        runtime.finishOperation(for: turnID)
+        #expect(!runtime.hasActiveOperation)
+        #expect(!runtime.ownsOperation(turnID))
+    }
 }
