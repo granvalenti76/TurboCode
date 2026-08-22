@@ -180,6 +180,20 @@ actor AgentDiagnosticsRecorder {
         runs[runID] = run
     }
 
+    /// Records a provider-neutral first-token timestamp captured at the
+    /// runtime boundary. The explicit timestamp avoids measuring the whole
+    /// turn when an adapter forwards synchronous stream callbacks later.
+    func markFirstToken(runID: String, at timestamp: Date) {
+        guard var run = runs[runID], run.firstTokenMilliseconds == nil else {
+            return
+        }
+        run.firstTokenMilliseconds = max(
+            0,
+            Int(timestamp.timeIntervalSince(run.startedAt) * 1_000)
+        )
+        runs[runID] = run
+    }
+
     func toolStarted(runID: String, call: Transcript.ToolCall, backend: ModelBackend) {
         guard var run = runs[runID], !run.tools.contains(where: { $0.id == call.id }) else { return }
         let content = try? call.arguments.value(String.self, forProperty: "content")
@@ -192,6 +206,33 @@ actor AgentDiagnosticsRecorder {
                 inputContentCharacters: content?.count,
                 inputLineCount: content.map(Self.lineCount),
                 inputParagraphCount: content.map(Self.paragraphCount),
+                durationMilliseconds: nil,
+                outputCharacters: nil,
+                outcome: nil,
+                failureCategory: nil,
+                failureFingerprint: nil
+            )
+        )
+        runs[runID] = run
+    }
+
+    /// Records a normalized tool call without requiring a Foundation Models
+    /// ``Transcript.ToolCall``. Codex and future adapters retain their
+    /// serialized arguments at the runtime boundary, while diagnostics keep
+    /// the same persisted metric shape.
+    func toolStarted(runID: String, call: ToolCall, backend: ModelBackend) {
+        guard var run = runs[runID], !run.tools.contains(where: { $0.id == call.id }) else {
+            return
+        }
+        run.tools.append(
+            ToolRunMetric(
+                id: call.id,
+                toolName: call.name,
+                backend: backend.rawValue,
+                startedAt: call.startedAt,
+                inputContentCharacters: nil,
+                inputLineCount: nil,
+                inputParagraphCount: nil,
                 durationMilliseconds: nil,
                 outputCharacters: nil,
                 outcome: nil,
@@ -239,11 +280,67 @@ actor AgentDiagnosticsRecorder {
         runs[runID] = run
     }
 
+    /// Completes a normalized runtime tool metric using the provider-neutral
+    /// status and duration carried by ``ToolResult``.
+    func toolFinished(
+        runID: String,
+        call: ToolCall,
+        output: ToolResult,
+        backend: ModelBackend
+    ) {
+        guard var run = runs[runID] else { return }
+        let text = output.output
+        let classified = Self.classifyToolOutput(text, toolName: call.name)
+        let outcome: ToolRunOutcome
+        let category: AgentFailureCategory?
+        switch output.status {
+        case .succeeded:
+            outcome = classified.outcome
+            category = classified.category
+        case .failed:
+            outcome = .failed
+            category = classified.category ?? .toolExecution
+        case .cancelled:
+            outcome = .cancelled
+            category = .interrupted
+        }
+        let fingerprint = category == nil ? nil : Self.fingerprint(text)
+        let duration = output.durationMilliseconds
+            ?? max(0, Int(Date().timeIntervalSince(call.startedAt) * 1_000))
+
+        if let index = run.tools.firstIndex(where: { $0.id == call.id }) {
+            run.tools[index].durationMilliseconds = duration
+            run.tools[index].outputCharacters = text.count
+            run.tools[index].outcome = outcome
+            run.tools[index].failureCategory = category
+            run.tools[index].failureFingerprint = fingerprint
+        } else {
+            run.tools.append(
+                ToolRunMetric(
+                    id: call.id,
+                    toolName: call.name,
+                    backend: backend.rawValue,
+                    startedAt: call.startedAt,
+                    inputContentCharacters: nil,
+                    inputLineCount: nil,
+                    inputParagraphCount: nil,
+                    durationMilliseconds: duration,
+                    outputCharacters: text.count,
+                    outcome: outcome,
+                    failureCategory: category,
+                    failureFingerprint: fingerprint
+                )
+            )
+        }
+        runs[runID] = run
+    }
+
     func finishRun(
         runID: String,
         outcome: AgentRunOutcome,
         generatedCharacters: Int,
-        error: Error? = nil
+        error: Error? = nil,
+        failure: TurnFailure? = nil
     ) {
         guard var run = runs.removeValue(forKey: runID) else { return }
         let finishedAt = Date()
@@ -258,6 +355,10 @@ actor AgentDiagnosticsRecorder {
             run.failureCategory = Self.classifyFailure(detail)
             run.failureFingerprint = Self.fingerprint(detail)
             run.suspectedTool = Self.suspectedTool(in: detail)
+        } else if let failure {
+            run.failureCategory = Self.classifyFailure(failure.message)
+            run.failureFingerprint = Self.fingerprint(failure.message)
+            run.suspectedTool = Self.suspectedTool(in: failure.message)
         }
         append(run)
     }

@@ -483,7 +483,7 @@ final class CodexRuntimeStore {
 /// Keeping this protocol above the adapter lets evaluations exercise lifecycle
 /// normalization without starting the external App Server process.
 @MainActor
-protocol CodexTurnRunning {
+protocol CodexTurnRunning: AnyObject, Sendable {
     func runTurn(
         request: CodexRuntimeStore.TurnRequest,
         events: CodexRuntimeStore.TurnEvents
@@ -511,6 +511,10 @@ final class CodexBackendSession: BackendSession {
     private let modelID: String?
     private let reasoningEffort: CodexReasoningEffort?
     private let delegationInvoker: (any AgentTaskInvoking)?
+    private let activityStarted: @MainActor @Sendable (CodexDynamicToolCall, String) -> Void
+    private let activityEnded: @MainActor @Sendable (String) -> Void
+    private let presentationRequested: @MainActor @Sendable (CodexToolPresentation) -> Void
+    private let approvalRequested: @MainActor @Sendable (ApprovalRequest) -> Void
     private var activeRun: Task<BackendSessionResult, Never>?
 
     init(
@@ -521,7 +525,11 @@ final class CodexBackendSession: BackendSession {
         availableSkills: [TurboCodeSkillDefinition] = [],
         modelID: String? = nil,
         reasoningEffort: CodexReasoningEffort? = nil,
-        delegationInvoker: (any AgentTaskInvoking)? = nil
+        delegationInvoker: (any AgentTaskInvoking)? = nil,
+        activityStarted: @escaping @MainActor @Sendable (CodexDynamicToolCall, String) -> Void = { _, _ in },
+        activityEnded: @escaping @MainActor @Sendable (String) -> Void = { _ in },
+        presentationRequested: @escaping @MainActor @Sendable (CodexToolPresentation) -> Void = { _ in },
+        approvalRequested: @escaping @MainActor @Sendable (ApprovalRequest) -> Void = { _ in }
     ) {
         self.runtime = runtime
         self.turboThreadID = turboThreadID
@@ -531,6 +539,10 @@ final class CodexBackendSession: BackendSession {
         self.modelID = modelID
         self.reasoningEffort = reasoningEffort
         self.delegationInvoker = delegationInvoker
+        self.activityStarted = activityStarted
+        self.activityEnded = activityEnded
+        self.presentationRequested = presentationRequested
+        self.approvalRequested = approvalRequested
     }
 
     func run(
@@ -546,6 +558,11 @@ final class CodexBackendSession: BackendSession {
         let modelID = self.modelID
         let reasoningEffort = self.reasoningEffort
         let delegationInvoker = self.delegationInvoker
+        let activityStarted = self.activityStarted
+        let activityEnded = self.activityEnded
+        let presentationRequested = self.presentationRequested
+        let approvalRequested = self.approvalRequested
+        var toolStartTimes: [String: Date] = [:]
 
         let task = Task { @MainActor in
             events.emit(.started(request))
@@ -589,7 +606,10 @@ final class CodexBackendSession: BackendSession {
                                 )
                             )
                         },
-                        activityStarted: { call, _ in
+                        activityStarted: { call, summary in
+                            activityStarted(call, summary)
+                            let startedAt = Date()
+                            toolStartTimes[call.callID] = startedAt
                             events.emit(
                                 .phaseChanged(
                                     turnID: request.id,
@@ -599,11 +619,16 @@ final class CodexBackendSession: BackendSession {
                             )
                             events.emit(
                                 .toolStarted(
-                                    Self.toolCall(from: call, turnID: request.id)
+                                    Self.toolCall(
+                                        from: call,
+                                        turnID: request.id,
+                                        startedAt: startedAt
+                                    )
                                 )
                             )
                         },
-                        activityEnded: { _ in
+                        activityEnded: { id in
+                            activityEnded(id)
                             events.emit(
                                 .phaseChanged(
                                     turnID: request.id,
@@ -613,25 +638,23 @@ final class CodexBackendSession: BackendSession {
                             )
                         },
                         toolFinished: { call, result in
+                            let startedAt = toolStartTimes.removeValue(
+                                forKey: call.callID
+                            )
                             events.emit(
                                 .toolFinished(
                                     Self.toolResult(
                                         from: result,
                                         call: call,
-                                        turnID: request.id
+                                        turnID: request.id,
+                                        startedAt: startedAt
                                     )
                                 )
                             )
                         },
-                        presentationRequested: { _ in },
-                        approvalRequested: { _ in
-                            events.emit(
-                                .phaseChanged(
-                                    turnID: request.id,
-                                    phase: .awaitingApproval,
-                                    at: Date()
-                                )
-                            )
+                        presentationRequested: presentationRequested,
+                        approvalRequested: { request in
+                            approvalRequested(request)
                         }
                     )
                 )
@@ -643,6 +666,17 @@ final class CodexBackendSession: BackendSession {
             } catch where error is CancellationError || Task.isCancelled {
                 result = BackendSessionResult(
                     outcome: .cancelled(reason: "The turn was interrupted.")
+                )
+            } catch let codexError as CodexAppServerError
+                where codexError.requiresChatGPTLogin {
+                result = BackendSessionResult(
+                    outcome: .failed(
+                        TurnFailure(
+                            code: "codex.authentication",
+                            message: "Codex authentication is required.",
+                            isRecoverable: true
+                        )
+                    )
                 )
             } catch {
                 result = BackendSessionResult(
@@ -669,6 +703,9 @@ final class CodexBackendSession: BackendSession {
             await task.value
         } onCancel: {
             task.cancel()
+            Task { @MainActor in
+                await runtime.interrupt()
+            }
         }
         if activeRun != nil {
             activeRun = nil
@@ -683,26 +720,32 @@ final class CodexBackendSession: BackendSession {
 
     private static func toolCall(
         from call: CodexDynamicToolCall,
-        turnID: TurnID
+        turnID: TurnID,
+        startedAt: Date = Date()
     ) -> ToolCall {
         ToolCall(
             id: call.callID,
             turnID: turnID,
             name: call.tool,
-            argumentsJSON: jsonString(call.arguments)
+            argumentsJSON: jsonString(call.arguments),
+            startedAt: startedAt
         )
     }
 
     private static func toolResult(
         from result: CodexDynamicToolResult,
         call: CodexDynamicToolCall,
-        turnID: TurnID
+        turnID: TurnID,
+        startedAt: Date?
     ) -> ToolResult {
         ToolResult(
             id: call.callID,
             turnID: turnID,
             status: result.succeeded ? .succeeded : .failed,
-            output: result.text
+            output: result.text,
+            durationMilliseconds: startedAt.map {
+                max(0, Int(Date().timeIntervalSince($0) * 1_000))
+            }
         )
     }
 

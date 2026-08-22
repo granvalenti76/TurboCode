@@ -1309,6 +1309,8 @@ public final class ChatStore {
             turboThreadID: turboThreadID,
             workspaceRoot: workspaceRoot,
             workspaceName: workspaceRoot.isEmpty ? nil : workspaceLabel,
+            mode: orchestratorMode,
+            workspaceKind: diagnosticsWorkspaceKind,
             agentTuning: agentTuning,
             availableSkills: DynamicProfileRuntimeSelection.skills(
                 from: modelRuntimeStore.availableSkills,

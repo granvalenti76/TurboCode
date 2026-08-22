@@ -98,6 +98,8 @@ final class ChatResponseCoordinator {
         turboThreadID: String,
         workspaceRoot: String,
         workspaceName: String?,
+        mode: OrchestratorMode,
+        workspaceKind: String,
         agentTuning: AgentTuningConfig,
         availableSkills: [TurboCodeSkillDefinition],
         codexModelID: String?,
@@ -121,83 +123,108 @@ final class ChatResponseCoordinator {
             placeholderID: placeholderID,
             model: modelName
         )
-        var assistantText = ""
-        var reasoningText = ""
+        let diagnostics = CodexDiagnosticsCapture()
+        let diagnosticsRunID = await AgentDiagnosticsRecorder.shared.startRun(
+            backend: .codex,
+            mode: mode,
+            profileVersion: AgentProfileVersion.value(
+                for: .codex,
+                mode: mode
+            ),
+            workspaceKind: workspaceKind,
+            promptCharacters: promptText.count
+        )
+        activeDiagnosticsRunID = diagnosticsRunID
         var result = Result(errorMessage: nil, touchedConversation: false)
 
-        do {
-            let response = try await codexRuntime.runTurn(
-                request: CodexRuntimeStore.TurnRequest(
-                    turnID: turnID,
-                    turboThreadID: turboThreadID,
-                    prompt: promptText,
-                    workspaceRoot: workspaceRoot,
-                    workspaceName: workspaceName,
-                    agentTuning: agentTuning,
-                    availableSkills: availableSkills,
-                    modelID: codexModelID,
-                    reasoningEffort: codexReasoningEffort,
-                    delegationInvoker: delegationInvoker
-                ),
-                events: CodexRuntimeStore.TurnEvents(
-                    liveAssistantChanged: { [weak self] text in
-                        guard let self, self.ownsTurn(turnID) else { return }
-                        assistantText = text
-                        self.timeline.liveAssistant = text
-                    },
-                    liveReasoningChanged: { [weak self] text in
-                        guard let self, self.ownsTurn(turnID) else { return }
-                        reasoningText = text
-                        self.timeline.liveReasoning = text
-                    },
-                    activityStarted: { [weak self] call, summary in
-                        guard let self, self.ownsTurn(turnID) else { return }
-                        _ = self.advanceTurn(
-                            to: .toolExecuting,
-                            turnID: turnID
-                        )
-                        self.toolInteractions.beginActivity(
-                            id: call.callID,
-                            toolName: call.tool,
-                            summary: self.routedToolSummary(
-                                summary,
-                                toolName: call.tool,
-                                owner: .coordinator
-                            )
-                        )
-                        self.coordinatorToolStarted(
-                            AgentActivityRuntimeMapping.tool(
-                                from: call,
-                                owner: .coordinator
-                            )
-                        )
-                    },
-                    activityEnded: { [weak self] id in
-                        guard let self, self.ownsTurn(turnID) else { return }
-                        self.toolInteractions.endActivity(id: id)
-                        self.coordinatorToolFinished(callID: id)
-                        _ = self.advanceTurn(to: .streaming, turnID: turnID)
-                    },
-                    toolFinished: { _, _ in },
-                    presentationRequested: { [weak self] presentation in
-                        guard let self, self.ownsTurn(turnID) else { return }
-                        self.present(presentation)
-                    },
-                    approvalRequested: { [weak self] request in
-                        guard let self, self.ownsTurn(turnID) else { return }
-                        _ = self.advanceTurn(
-                            to: .awaitingApproval,
-                            turnID: turnID
-                        )
-                        self.toolInteractions.enqueueApproval(request)
-                    }
+        let backendSession = CodexBackendSession(
+            runtime: codexRuntime,
+            turboThreadID: turboThreadID,
+            workspaceName: workspaceName,
+            agentTuning: agentTuning,
+            availableSkills: availableSkills,
+            modelID: codexModelID,
+            reasoningEffort: codexReasoningEffort,
+            delegationInvoker: delegationInvoker,
+            activityStarted: { [weak self] call, summary in
+                guard let self, self.ownsTurn(turnID) else { return }
+                _ = self.advanceTurn(to: .toolExecuting, turnID: turnID)
+                self.toolInteractions.beginActivity(
+                    id: call.callID,
+                    toolName: call.tool,
+                    summary: self.routedToolSummary(
+                        summary,
+                        toolName: call.tool,
+                        owner: .coordinator
+                    )
                 )
-            )
-            guard ownsTurn(turnID) else {
-                return Result(errorMessage: nil, touchedConversation: false)
+                self.coordinatorToolStarted(
+                    AgentActivityRuntimeMapping.tool(
+                        from: call,
+                        owner: .coordinator
+                    )
+                )
+            },
+            activityEnded: { [weak self] id in
+                guard let self, self.ownsTurn(turnID) else { return }
+                self.toolInteractions.endActivity(id: id)
+                self.coordinatorToolFinished(callID: id)
+                _ = self.advanceTurn(to: .streaming, turnID: turnID)
+            },
+            presentationRequested: { [weak self] presentation in
+                guard let self, self.ownsTurn(turnID) else { return }
+                self.present(presentation)
+            },
+            approvalRequested: { [weak self] request in
+                guard let self, self.ownsTurn(turnID) else { return }
+                _ = self.advanceTurn(to: .awaitingApproval, turnID: turnID)
+                self.toolInteractions.enqueueApproval(request)
             }
-            assistantText = response.assistantText
-            reasoningText = response.reasoningText
+        )
+        let backendResult = await backendSession.run(
+            request: TurnRequest(
+                id: turnID,
+                prompt: promptText,
+                backend: .codex,
+                modelName: modelName,
+                workspaceRoot: workspaceRoot
+            ),
+            events: BackendSessionEvents { [weak self] event in
+                guard let self, event.turnID == turnID, self.ownsTurn(turnID) else {
+                    return
+                }
+                switch event {
+                case .assistantTextChanged(_, let text):
+                    diagnostics.textChanged(text)
+                    self.timeline.liveAssistant = text
+                case .reasoningTextChanged(_, let text):
+                    diagnostics.textChanged(text)
+                    self.timeline.liveReasoning = text
+                case .toolStarted(let call):
+                    diagnostics.toolStarted(call)
+                case .toolFinished(let toolResult):
+                    diagnostics.toolFinished(toolResult)
+                case .phaseChanged(_, let phase, _):
+                    _ = self.advanceTurn(to: phase, turnID: turnID)
+                default:
+                    break
+                }
+            }
+        )
+
+        await finishCodexDiagnostics(
+            runID: diagnosticsRunID,
+            capture: diagnostics,
+            outcome: backendResult.outcome
+        )
+
+        guard ownsTurn(turnID) else {
+            return Result(errorMessage: nil, touchedConversation: false)
+        }
+        switch backendResult.outcome {
+        case .succeeded:
+            let assistantText = backendResult.assistantText
+            let reasoningText = backendResult.reasoningText
             let assistantBlock = assistantText.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ).isEmpty ? nil : ChatBlock(
@@ -222,28 +249,23 @@ final class ChatResponseCoordinator {
             _ = advanceTurn(to: .settling, turnID: turnID)
             finishTurn(.succeeded, turnID: turnID)
             result = Result(errorMessage: nil, touchedConversation: true)
-        } catch where error is CancellationError || Task.isCancelled {
-            guard ownsTurn(turnID) else {
-                return Result(errorMessage: nil, touchedConversation: false)
-            }
-            await codexRuntime.interrupt()
+        case .cancelled:
+            let partialText = backendResult.assistantText.isEmpty
+                ? backendResult.reasoningText
+                : backendResult.assistantText
             timeline.replaceBlock(
                 id: placeholderID,
                 with: ChatBlock(
                     id: placeholderID,
                     kind: .assistant,
-                    text: assistantText.isEmpty
+                    text: partialText.isEmpty
                         ? "Response interrupted."
-                        : assistantText,
+                        : partialText,
                     model: modelName
                 )
             )
             finishTurn(.cancelled(reason: "The turn was interrupted."), turnID: turnID)
-        } catch let codexError as CodexAppServerError
-            where codexError.requiresChatGPTLogin {
-            guard ownsTurn(turnID) else {
-                return Result(errorMessage: nil, touchedConversation: false)
-            }
+        case .failed(let failure) where failure.code == "codex.authentication":
             codexRuntime.markSignedOut()
             timeline.replaceBlock(
                 id: placeholderID,
@@ -264,29 +286,26 @@ final class ChatResponseCoordinator {
                 ),
                 turnID: turnID
             )
-        } catch {
-            guard ownsTurn(turnID) else {
-                return Result(errorMessage: nil, touchedConversation: false)
-            }
-            codexRuntime.markFailed(error.localizedDescription)
+        case .failed(let failure):
+            codexRuntime.markFailed(failure.message)
             timeline.replaceBlock(
                 id: placeholderID,
                 with: ChatBlock(
                     id: placeholderID,
                     kind: .assistant,
-                    text: "Error: \(error.localizedDescription)",
+                    text: "Error: \(failure.message)",
                     model: modelName
                 )
             )
             result = Result(
-                errorMessage: error.localizedDescription,
+                errorMessage: failure.message,
                 touchedConversation: false
             )
             finishTurn(
                 .failed(
                     TurnFailure(
                         code: "codex.request",
-                        message: error.localizedDescription
+                        message: failure.message
                     )
                 ),
                 turnID: turnID
@@ -506,6 +525,61 @@ final class ChatResponseCoordinator {
         timeline.finishResponse(placeholderID: placeholderID)
         timeline.clearEditGroup(editGroupID)
         return result
+    }
+
+    /// Flushes the Codex projection after the provider task settles. The
+    /// capture keeps synchronous adapter callbacks precise while the actor
+    /// recorder remains the only owner of persisted diagnostics.
+    private func finishCodexDiagnostics(
+        runID: String?,
+        capture: CodexDiagnosticsCapture,
+        outcome: TurnOutcome
+    ) async {
+        guard let runID else { return }
+        if let firstTokenAt = capture.firstTokenAt {
+            await AgentDiagnosticsRecorder.shared.markFirstToken(
+                runID: runID,
+                at: firstTokenAt
+            )
+        }
+        for call in capture.startedTools {
+            await AgentDiagnosticsRecorder.shared.toolStarted(
+                runID: runID,
+                call: call,
+                backend: .codex
+            )
+        }
+        for completion in capture.completedTools {
+            await AgentDiagnosticsRecorder.shared.toolFinished(
+                runID: runID,
+                call: completion.call,
+                output: completion.result,
+                backend: .codex
+            )
+        }
+
+        let diagnosticOutcome: AgentRunOutcome
+        let failure: TurnFailure?
+        switch outcome {
+        case .succeeded:
+            diagnosticOutcome = .success
+            failure = nil
+        case .cancelled:
+            diagnosticOutcome = .cancelled
+            failure = nil
+        case .failed(let turnFailure):
+            diagnosticOutcome = .failed
+            failure = turnFailure
+        }
+        await AgentDiagnosticsRecorder.shared.finishRun(
+            runID: runID,
+            outcome: diagnosticOutcome,
+            generatedCharacters: capture.generatedCharacters,
+            failure: failure
+        )
+        if activeDiagnosticsRunID == runID {
+            activeDiagnosticsRunID = nil
+        }
     }
 
     func toolStarted(
@@ -803,5 +877,38 @@ final class ChatResponseCoordinator {
         }
         return visibleLines.joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Captures Codex lifecycle values on the coordinator actor before they are
+/// flushed to the recorder. This avoids spawning one persistence hop per
+/// synchronous provider callback and keeps tool timestamps meaningful.
+@MainActor
+private final class CodexDiagnosticsCapture {
+    struct CompletedTool {
+        let call: ToolCall
+        let result: ToolResult
+    }
+
+    private(set) var firstTokenAt: Date?
+    private(set) var generatedCharacters = 0
+    private(set) var startedTools: [ToolCall] = []
+    private(set) var completedTools: [CompletedTool] = []
+
+    func textChanged(_ text: String) {
+        guard !text.isEmpty else { return }
+        firstTokenAt = firstTokenAt ?? Date()
+        generatedCharacters = max(generatedCharacters, text.count)
+    }
+
+    func toolStarted(_ call: ToolCall) {
+        startedTools.append(call)
+    }
+
+    func toolFinished(_ result: ToolResult) {
+        guard let call = startedTools.last(where: { $0.id == result.id }) else {
+            return
+        }
+        completedTools.append(CompletedTool(call: call, result: result))
     }
 }

@@ -159,6 +159,77 @@ struct AgentActivityRuntimeIntegrationTests {
         #expect(result.outcome == .succeeded)
         #expect(received.count == 9)
         #expect(received.allSatisfy { $0.turnID == turnID })
+        let toolResults = received.compactMap { event -> ToolResult? in
+            guard case .toolFinished(let toolResult) = event else {
+                return nil
+            }
+            return toolResult
+        }
+        #expect(toolResults.count == 1)
+        if let toolResult = toolResults.first {
+            #expect(toolResult.status == .succeeded)
+            #expect(toolResult.durationMilliseconds != nil)
+        }
+    }
+
+    @Test("Codex backend adapter maps authentication failures to recoverable outcomes")
+    func codexBackendAdapterMapsAuthenticationFailure() async {
+        let adapter = CodexBackendSession(
+            runtime: FailingAdapterCodexRuntime(
+                error: CodexAppServerError.chatGPTLoginRequired
+            ),
+            turboThreadID: "thread-auth",
+            agentTuning: AgentTuningConfig()
+        )
+
+        let result = await adapter.run(
+            request: TurnRequest(
+                prompt: "Authenticate Codex.",
+                backend: .codex,
+                modelName: "Codex test model",
+                workspaceRoot: "/tmp"
+            ),
+            events: .none
+        )
+
+        #expect(
+            result.outcome
+                == .failed(
+                    TurnFailure(
+                        code: "codex.authentication",
+                        message: "Codex authentication is required.",
+                        isRecoverable: true
+                    )
+                )
+        )
+    }
+
+    @Test("Cancelling a Codex backend session interrupts the provider runtime")
+    func cancellingCodexBackendSessionInterruptsRuntime() async {
+        let runtime = BlockingAdapterCodexRuntime()
+        let adapter = CodexBackendSession(
+            runtime: runtime,
+            turboThreadID: "thread-cancel",
+            agentTuning: AgentTuningConfig()
+        )
+        let task = Task { @MainActor in
+            await adapter.run(
+                request: TurnRequest(
+                    prompt: "Cancel Codex.",
+                    backend: .codex,
+                    modelName: "Codex test model",
+                    workspaceRoot: "/tmp"
+                ),
+                events: .none
+            )
+        }
+
+        await Task.yield()
+        task.cancel()
+        let result = await task.value
+
+        #expect(result.outcome == .cancelled(reason: "The turn was interrupted."))
+        #expect(runtime.interrupted)
     }
 
     @Test("Foundation Models and Codex tool calls share the Activity shape")
@@ -343,6 +414,51 @@ private final class AdapterCodexRuntime: CodexTurnRunning {
     }
 
     func interrupt() async {}
+}
+
+/// Provider doubles for terminal error and cancellation paths. The blocking
+/// runtime deliberately ignores task cancellation until the adapter forwards
+/// its explicit provider interrupt, which keeps that boundary observable.
+@MainActor
+private final class FailingAdapterCodexRuntime: CodexTurnRunning {
+    let error: any Error
+
+    init(error: any Error) {
+        self.error = error
+    }
+
+    func runTurn(
+        request: CodexRuntimeStore.TurnRequest,
+        events: CodexRuntimeStore.TurnEvents
+    ) async throws -> CodexRuntimeStore.TurnResult {
+        throw error
+    }
+
+    func interrupt() async {}
+}
+
+@MainActor
+private final class BlockingAdapterCodexRuntime: CodexTurnRunning {
+    private var continuation: CheckedContinuation<
+        CodexRuntimeStore.TurnResult,
+        Error
+    >?
+    private(set) var interrupted = false
+
+    func runTurn(
+        request: CodexRuntimeStore.TurnRequest,
+        events: CodexRuntimeStore.TurnEvents
+    ) async throws -> CodexRuntimeStore.TurnResult {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func interrupt() async {
+        interrupted = true
+        continuation?.resume(throwing: CancellationError())
+        continuation = nil
+    }
 }
 
 private nonisolated struct SuspendedActivityRunner: AgentTaskRunning {
