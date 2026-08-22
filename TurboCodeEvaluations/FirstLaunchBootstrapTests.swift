@@ -85,6 +85,38 @@ struct FirstLaunchBootstrapTests {
         #expect(try DynamicProfileStore(fileURL: config.dynamicProfilesURL).load() == [profile])
     }
 
+    @Test("Onboarding preserves user model endpoints and identifiers")
+    func preservesConfiguredModelGroundTruth() throws {
+        let home = try makeEmptyHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let root = home.appendingPathComponent(".turbocode", isDirectory: true)
+        let config = TurboCodeConfig(rootURL: root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let configuredLlama = RemoteModelConfig(
+            id: "llama",
+            name: "Office Llama",
+            url: "http://192.168.1.120:8080/v1",
+            modelName: "office-model",
+            temperature: 0.2
+        )
+        try JSONEncoder().encode([configuredLlama]).write(
+            to: config.modelsConfigurationURL,
+            options: .atomic
+        )
+
+        try config.performOnboarding()
+
+        let llama = try #require(
+            config.loadRemoteModels().first(where: { $0.id == "llama" })
+        )
+        let modelIDs = Set(try config.loadRemoteModels().map(\.id))
+        #expect(llama.name == configuredLlama.name)
+        #expect(llama.url == configuredLlama.url)
+        #expect(llama.modelName == configuredLlama.modelName)
+        #expect(modelIDs.isSuperset(of: ["llama", "apple-pcc", "deepseek"]))
+    }
+
     @Test("Onboarding migrates 0.1 configuration and profiles without changing their intent")
     func migratesLegacyConfigurationAndProfiles() throws {
         let home = try makeEmptyHome()
