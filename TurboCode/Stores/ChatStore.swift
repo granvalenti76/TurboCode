@@ -192,6 +192,7 @@ public final class ChatStore {
             workspace: workspace,
             composer: composer,
             reviewDrafts: reviewDraft,
+            presentation: presentation,
             runtime: agentRuntime,
             profiles: profileSelectionCoordinator,
             sessions: sessionCoordinator
@@ -459,46 +460,7 @@ public final class ChatStore {
     }
 
     public func deleteThread(id: String) async {
-        let deletesActiveThread = activeThreadId == id
-        if deletesActiveThread {
-            // Deletion is a runtime transition too: wait for response,
-            // selection, and handoff tasks through the shared quiescence
-            // barrier before removing the conversation they may still touch.
-            await finishActiveResponseBeforeTransition()
-        }
-
-        let nextThreadID: String?
-        do {
-            nextThreadID = try await sessionCoordinator.delete(id: id)
-        } catch {
-            // Keep the visible row when durable deletion fails; pretending the
-            // operation succeeded would make it reappear on the next launch.
-            self.error = "Could not delete the conversation: \(error.localizedDescription)"
-            return
-        }
-        self.error = nil
-
-        // Preserve the selection captured before awaiting an in-flight response:
-        // the original transition always cleared that conversation's timeline.
-        guard deletesActiveThread else { return }
-
-        conversationStore.activeThreadID = nil
-        await projectRuntimeCommand(.switchThread(threadID: nil))
-        timelineStore.reset()
-        resetAgentActivityForConversation()
-        reviewDraftStore.discardAll()
-
-        if let nextThreadID {
-            await restoreSession(id: nextThreadID)
-            if activeThreadId == nil {
-                // A never-persisted draft has no snapshot to restore but remains
-                // a valid next selection with a fresh model session.
-                conversationStore.activeThreadID = nextThreadID
-                await rebuildSession(keepingHistory: false)
-            }
-        } else {
-            await rebuildSession(keepingHistory: false)
-        }
+        await conversationLifecycleCoordinator.deleteThread(id: id)
     }
 
     /// Removes a workspace from TurboCode and deletes only its persisted chats.

@@ -76,6 +76,28 @@ struct ConversationDeletionTests {
         #expect(store.threads.map(\.id) == [retained.id])
     }
 
+    @Test("Deleting an active persisted chat selects a valid unsaved draft")
+    func activeDeletionSelectsUnsavedDraft() async {
+        let deleted = Conversation(id: "deleted", title: "Deleted")
+        let draft = Conversation(id: "draft", title: "Unsaved draft")
+        let repository = DeletionConversationRepository(
+            snapshots: [makeSnapshot(deleted)]
+        )
+        let store = ChatStore(conversationRepository: repository)
+        store.conversationStore.threads = [deleted, draft]
+        store.conversationStore.activeThreadID = deleted.id
+        store.timelineStore.restore([
+            ChatBlock(kind: .assistant, text: "Deleted timeline")
+        ])
+
+        await store.deleteThread(id: deleted.id)
+
+        #expect(store.threads.map(\.id) == [draft.id])
+        #expect(store.activeThreadId == draft.id)
+        #expect(store.agentRuntimeProjectionStore.snapshot.activeThreadID == draft.id)
+        #expect(store.blocks.isEmpty)
+    }
+
     @Test("Opening persisted threads restores the matching timeline")
     func openingPersistedThreadsRestoresMatchingTimeline() async {
         let first = Conversation(id: "first", title: "First")

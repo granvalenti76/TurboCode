@@ -12,6 +12,7 @@ final class ConversationLifecycleCoordinator {
     private let workspace: WorkspaceStore
     private let composer: ComposerViewModel
     private let reviewDrafts: ReviewDraftStore
+    private let presentation: ChatPresentationViewModel
     private let runtime: AgentRuntime
     private let profiles: ProfileSelectionCoordinator
     private let sessions: ConversationSessionCoordinator
@@ -24,6 +25,7 @@ final class ConversationLifecycleCoordinator {
         workspace: WorkspaceStore,
         composer: ComposerViewModel,
         reviewDrafts: ReviewDraftStore,
+        presentation: ChatPresentationViewModel,
         runtime: AgentRuntime,
         profiles: ProfileSelectionCoordinator,
         sessions: ConversationSessionCoordinator
@@ -35,6 +37,7 @@ final class ConversationLifecycleCoordinator {
         self.workspace = workspace
         self.composer = composer
         self.reviewDrafts = reviewDrafts
+        self.presentation = presentation
         self.runtime = runtime
         self.profiles = profiles
         self.sessions = sessions
@@ -124,6 +127,50 @@ final class ConversationLifecycleCoordinator {
                 )
             )
         )
+    }
+
+    /// Deletes durable state before changing the observable catalog. Removing
+    /// the active conversation also clears its runtime identity and either
+    /// restores the next snapshot or installs a valid unsaved draft.
+    func deleteThread(id: String) async {
+        let deletesActiveThread = conversations.activeThreadID == id
+        if deletesActiveThread {
+            // The old operation may still perform its final persistence pass;
+            // release it before deleting the file that pass belongs to.
+            await finishActiveResponseBeforeTransition()
+        }
+
+        let nextThreadID: String?
+        do {
+            nextThreadID = try await sessions.delete(id: id)
+        } catch {
+            // Durable deletion is authoritative. Keeping the row visible avoids
+            // a false success that would reverse itself on the next launch.
+            presentation.errorMessage = "Could not delete the conversation: "
+                + error.localizedDescription
+            return
+        }
+        presentation.errorMessage = nil
+        guard deletesActiveThread else { return }
+
+        conversations.activeThreadID = nil
+        _ = await runtime.apply(.switchThread(threadID: nil))
+        timeline.reset()
+        resetActivityPresentation()
+        reviewDrafts.discardAll()
+
+        if let nextThreadID {
+            await restoreSession(id: nextThreadID)
+            if conversations.activeThreadID == nil {
+                // A new draft may not have reached disk yet. It remains a valid
+                // catalog selection but starts with a fresh provider context.
+                conversations.activeThreadID = nextThreadID
+                _ = await runtime.apply(.switchThread(threadID: nextThreadID))
+                await profiles.rebuildSession(keepingHistory: false)
+            }
+        } else {
+            await profiles.rebuildSession(keepingHistory: false)
+        }
     }
 
     /// Makes message and application-command entry points safe without losing
