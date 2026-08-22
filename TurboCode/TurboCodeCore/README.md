@@ -82,6 +82,25 @@ This example documents direction, not an API available in 0.3.7. Exact public
 initializers, error types, package platforms, semantic-versioning policy, and
 provider adapter SPI must be frozen before third-party distribution.
 
+## Future extension compatibility
+
+TurboCodeCore is not a plugin SDK or RPC server in 0.3.7. Keeping its commands,
+events, receipts, and snapshots provider- and presentation-neutral nevertheless
+preserves a future option: an application-owned adapter could expose selected
+capabilities to an out-of-process TypeScript host without giving plugins access
+to SwiftUI, observable stores, credentials, or concrete provider sessions.
+
+That later proposal must define a versioned canonical contract, capability and
+permission negotiation, structured errors, bounded concurrency, cancellation,
+timeouts, backpressure, and failure isolation before choosing a wire transport.
+Tool-call extensions must cross the same approval and workspace policy boundary
+as built-in tools. UX contributions must be declarative, schema-validated data
+rendered in fixed host-owned surfaces; they are not arbitrary remote views.
+
+These constraints are compatibility guidance, not current API commitments. No
+plugin registry, TypeScript SDK, transport framing, RPC lifecycle, hot reload,
+or extension UI is part of the 0.3.7 extraction or automatically part of 0.4.0.
+
 ## Extraction rules
 
 - Core source files may import Foundation and explicitly approved model SDKs,
