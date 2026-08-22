@@ -1767,6 +1767,9 @@ public final class ChatStore {
     /// persistence pass target the old conversation before the new timeline or
     /// workspace is installed.
     private func finishActiveResponseBeforeTransition() async {
+        agentRuntime.beginQuiescence()
+        defer { agentRuntime.endQuiescence() }
+
         if let selectionTask = codexSelectionTask {
             selectionTask.cancel()
             await selectionTask.value

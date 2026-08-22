@@ -74,4 +74,23 @@ struct AgentRuntimeTests {
         #expect(runtime.snapshot.turn?.phase == .cancelled)
         #expect(!runtime.owns(turnID))
     }
+
+    @Test("AgentRuntime keeps nested transition barriers closed")
+    func nestsQuiescenceBarriers() {
+        let runtime = AgentRuntime()
+
+        runtime.beginQuiescence()
+        runtime.beginQuiescence()
+        #expect(runtime.snapshot.isQuiescing)
+
+        runtime.endQuiescence()
+        #expect(runtime.snapshot.isQuiescing)
+
+        runtime.endQuiescence()
+        #expect(!runtime.snapshot.isQuiescing)
+
+        // An unmatched end must not underflow or reopen a future barrier.
+        runtime.endQuiescence()
+        #expect(!runtime.snapshot.isQuiescing)
+    }
 }

@@ -11,6 +11,7 @@ import Foundation
 @MainActor
 final class AgentRuntime {
     private var turnReducer = TurnStateReducer()
+    private var quiescenceDepth = 0
     private(set) var snapshot: RuntimeSnapshot
 
     init(
@@ -65,15 +66,30 @@ final class AgentRuntime {
         turnReducer.owns(turnID)
     }
 
+    /// Begins a transition barrier. Nested navigation operations keep the
+    /// runtime quiescing until the outermost operation has settled.
+    func beginQuiescence() {
+        quiescenceDepth += 1
+        publish(isQuiescing: true)
+    }
+
+    /// Ends one transition barrier without reopening the runtime prematurely.
+    func endQuiescence() {
+        guard quiescenceDepth > 0 else { return }
+        quiescenceDepth -= 1
+        publish(isQuiescing: quiescenceDepth > 0)
+    }
+
     private func publish(
         backend: ModelBackend? = nil,
+        isQuiescing: Bool? = nil,
         at date: Date = Date()
     ) {
         snapshot = RuntimeSnapshot(
             activeThreadID: snapshot.activeThreadID,
             backend: backend ?? snapshot.backend,
             turn: turnReducer.state,
-            isQuiescing: snapshot.isQuiescing,
+            isQuiescing: isQuiescing ?? snapshot.isQuiescing,
             updatedAt: date
         )
     }
