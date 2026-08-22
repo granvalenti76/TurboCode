@@ -22,6 +22,10 @@ public final class TurboCodeConfig {
     private var modelsURL: URL { rootURL.appendingPathComponent("models.json") }
     public var modelsConfigurationURL: URL { modelsURL }
     public var dynamicProfilesURL: URL { rootURL.appendingPathComponent("profiles.json") }
+    /// The single canonical installation root for TypeScript plugins.
+    public var pluginsDirectoryURL: URL {
+        rootURL.appendingPathComponent("plugins", isDirectory: true)
+    }
     public var agentTuningConfigurationURL: URL { agentTuningURL }
     private var agentTuningURL: URL { rootURL.appendingPathComponent("config.json") }
     private var sessionsDir: URL { rootURL.appendingPathComponent("sessions") }
@@ -65,6 +69,10 @@ public final class TurboCodeConfig {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: skillsDirectoryURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: pluginsDirectoryURL,
+            withIntermediateDirectories: true
+        )
         try FileManager.default.createDirectory(
             at: diagnosticsDirectoryURL,
             withIntermediateDirectories: true

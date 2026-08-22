@@ -1,5 +1,5 @@
 {
-  "version": "1.5.0",
+  "version": "1.6.0",
   "documents": [
     {
       "id": "capabilities",
@@ -42,6 +42,13 @@
       "summary": "Workspace boundaries, approvals, deterministic edits, review, and undo.",
       "file": "turbocode-safety.md",
       "keywords": ["safety", "approval", "workspace", "review", "undo", "privacy", "Git"]
+    },
+    {
+      "id": "typescript-plugins",
+      "title": "TypeScript Plugins",
+      "summary": "How to install Node 24.x plugins, expose tools, and read a session transcript snapshot.",
+      "file": "turbocode-typescript-plugins.md",
+      "keywords": ["TypeScript", "plugin", "plugins", "Node", "npm", "SDK", "transcript", "session", "JSON-RPC"]
     }
   ]
 }
