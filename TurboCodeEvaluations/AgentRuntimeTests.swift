@@ -5,6 +5,24 @@ import Testing
 @Suite("Agent runtime")
 @MainActor
 struct AgentRuntimeTests {
+    @Test("Runtime submit preserves every configured backend identity")
+    func submitPreservesBackendIdentity() {
+        for backend in ModelBackend.allCases {
+            let runtime = AgentRuntime(backend: backend)
+            let request = TurnRequest(
+                id: TurnID(rawValue: "backend-\(backend.rawValue)"),
+                prompt: "Run the provider-neutral boundary test.",
+                backend: backend,
+                modelName: "configured-test-model",
+                workspaceRoot: "/workspace"
+            )
+
+            #expect(runtime.apply(.submit(request)))
+            #expect(runtime.snapshot.backend == backend)
+            #expect(runtime.snapshot.turn?.id == request.id)
+        }
+    }
+
     @Test("AgentRuntime accepts a native submit command")
     func acceptsSubmitCommand() {
         let turnID = TurnID(rawValue: "agent-runtime-submit")

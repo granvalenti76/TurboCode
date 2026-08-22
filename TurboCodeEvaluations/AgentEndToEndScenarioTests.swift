@@ -144,6 +144,8 @@ struct AgentEndToEndScenarioTests {
         #expect(activity.current?.phase == .failed)
         #expect(activity.current?.activeTool == nil)
         #expect(response.currentTurnState?.id == turnID)
+        #expect(timeline.runtimeSnapshot?.turn?.id == turnID)
+        #expect(timeline.runtimeSnapshot?.turn?.phase == .completed)
         // The provider turn completed successfully; the embedded delegated
         // task result is the failure surfaced by the scenario above.
         #expect(response.currentTurnState?.phase == .completed)
@@ -217,6 +219,8 @@ struct AgentEndToEndScenarioTests {
         #expect(activity.current?.finalResult?.outcome == .cancelled)
         #expect(response.currentTurnState?.id == turnID)
         #expect(response.currentTurnState?.phase == .cancelled)
+        #expect(timeline.runtimeSnapshot?.turn?.id == turnID)
+        #expect(timeline.runtimeSnapshot?.turn?.phase == .cancelled)
         #expect(activity.current?.activeTool == nil)
         #expect(timeline.activeAssistantPlaceholderID == nil)
         #expect(timeline.liveAssistant.isEmpty)
