@@ -10,7 +10,7 @@ struct ConversationStoreTests {
     func catalogFiltersAndSortsThreads() {
         let older = Date(timeIntervalSince1970: 10)
         let newer = Date(timeIntervalSince1970: 20)
-        let store = ConversationStore(repository: ConversationStoreRepository())
+        let store = ConversationStore()
         store.threads = [
             Conversation(
                 id: "archived",
@@ -55,7 +55,7 @@ struct ConversationStoreTests {
 
     @Test("Metadata mutations preserve identity and update the catalog")
     func metadataMutationsUpdateCatalog() {
-        let store = ConversationStore(repository: ConversationStoreRepository())
+        let store = ConversationStore()
         store.threads = [Conversation(id: "thread", title: "Original")]
 
         store.renameThread(id: "thread", title: "Renamed")
@@ -88,7 +88,7 @@ struct ConversationStoreTests {
                 )
             ]
         )
-        let store = ConversationStore(repository: repository)
+        let store = ConversationStore()
         store.threads = [
             Conversation(
                 id: "thread",
@@ -100,7 +100,12 @@ struct ConversationStoreTests {
             )
         ]
 
-        try await store.persistMetadata(id: "thread")
+        let conversation = try #require(store.conversation(id: "thread"))
+        let persistence = ConversationPersistenceService(repository: repository)
+        try await persistence.saveMetadata(
+            conversation,
+            defaultModelBackend: ModelBackend.foundationApple.rawValue
+        )
         let saved = try #require(repository.snapshots["thread"])
 
         #expect(saved.conversation.title == "Renamed")
@@ -216,10 +221,53 @@ struct ConversationStoreTests {
         #expect(try await repository.list().count == 1)
     }
 
+    @Test("Workspace cleanup keeps rows whose durable deletion fails")
+    func partialWorkspaceCleanupKeepsFailedRowsVisible() async {
+        let workspace = "/Work/TurboCode"
+        let deleted = Conversation(id: "deleted", title: "Deleted", workspace: workspace)
+        let retained = Conversation(id: "retained", title: "Retained", workspace: workspace)
+        let repository = RecordingConversationStoreRepository(
+            snapshots: [
+                makeSnapshot(deleted),
+                makeSnapshot(retained)
+            ],
+            failingDeletionIDs: [retained.id]
+        )
+        let persistence = ConversationPersistenceService(repository: repository)
+        let store = ConversationStore()
+        store.threads = [deleted, retained]
+        store.activeThreadID = retained.id
+
+        let removal = await persistence.removeWorkspace(
+            workspace,
+            visibleConversations: store.threads
+        )
+        let removedActiveThread = store.removeThreads(
+            ids: removal.deletedConversationIDs
+        )
+
+        #expect(removal.deletedConversationIDs == [deleted.id])
+        #expect(removal.deletionErrors.count == 1)
+        #expect(!removedActiveThread)
+        #expect(store.threads.map(\.id) == [retained.id])
+        #expect(store.activeThreadID == retained.id)
+        #expect(repository.snapshots[deleted.id] == nil)
+        #expect(repository.snapshots[retained.id] != nil)
+    }
+
     private func temporarySessionDirectory() -> URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(
             "turbocode-session-repository-\(UUID().uuidString)",
             isDirectory: true
+        )
+    }
+
+    private func makeSnapshot(_ conversation: Conversation) -> ConversationSnapshot {
+        ConversationSnapshot(
+            conversation: conversation,
+            modelBackend: ModelBackend.foundationApple.rawValue,
+            blocks: [],
+            transcript: nil
         )
     }
 }
@@ -237,9 +285,14 @@ private struct ConversationStoreRepository: ConversationRepository {
 /// touching the user's on-disk session directory.
 private final class RecordingConversationStoreRepository: ConversationRepository, @unchecked Sendable {
     var snapshots: [String: ConversationSnapshot]
+    private let failingDeletionIDs: Set<String>
 
-    init(snapshots: [ConversationSnapshot]) {
+    init(
+        snapshots: [ConversationSnapshot],
+        failingDeletionIDs: Set<String> = []
+    ) {
         self.snapshots = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.conversation.id, $0) })
+        self.failingDeletionIDs = failingDeletionIDs
     }
 
     func save(_ snapshot: ConversationSnapshot) throws {
@@ -255,6 +308,13 @@ private final class RecordingConversationStoreRepository: ConversationRepository
     }
 
     func delete(id: String) throws {
+        if failingDeletionIDs.contains(id) {
+            throw RecordingConversationStoreRepositoryError.deletionDenied
+        }
         snapshots.removeValue(forKey: id)
     }
+}
+
+private enum RecordingConversationStoreRepositoryError: Error {
+    case deletionDenied
 }

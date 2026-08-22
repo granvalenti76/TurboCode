@@ -100,8 +100,9 @@ provider adapter SPI must be frozen before third-party distribution.
 ## Current source layout
 
 - `Domain/` contains provider- and UI-neutral values shared across the boundary.
-- `Persistence/` contains schema-1 session records and the ordered disk
-  repository.
+- `Persistence/` contains schema-1 session records, the ordered disk repository,
+  and UI-neutral async persistence use cases. Observable hosts apply returned
+  values only after durable operations succeed.
 - Runtime contracts and provider ports will join this tree only after their
   dependency audit proves they do not reach back into application state.
 
