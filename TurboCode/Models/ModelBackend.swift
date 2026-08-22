@@ -1,7 +1,9 @@
 import Foundation
 
 /// The active inference backend shown by TurboCode's profile picker.
-public enum ModelBackend: String, CaseIterable, Sendable {
+/// Codable and Hashable also let provider-neutral runtime requests retain the
+/// selected backend without depending on a provider-specific session object.
+public enum ModelBackend: String, CaseIterable, Codable, Hashable, Sendable {
     case llamaServer = "Llama-server"
     case foundationApple = "Foundation Apple"
     case foundationServe = "Apple PCC"
