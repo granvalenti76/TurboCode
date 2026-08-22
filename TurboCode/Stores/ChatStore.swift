@@ -1084,7 +1084,7 @@ public final class ChatStore {
         error = nil
         let turnID = TurnID()
         responseCoordinator.delegationChanged(true)
-        let task = Task<Void, Never> { [weak self] in
+        await agentRuntime.runOperation(turnID: turnID) { [weak self] in
             guard let self else { return }
             let result = await AgentTaskInvocation.invoke(
                 invoker,
@@ -1098,9 +1098,6 @@ public final class ChatStore {
                 turnID: turnID
             )
         }
-        agentRuntime.registerOperation(task, turnID: turnID)
-        await task.value
-        agentRuntime.finishOperation(for: turnID)
         responseCoordinator.delegationChanged(false)
     }
 
@@ -1113,7 +1110,7 @@ public final class ChatStore {
     ) async {
         guard TurnCompletionPolicy.accepts(
             turnID: turnID,
-            activeTurnID: agentRuntime.operationTurnID,
+            activeTurnID: agentRuntime.ownsOperation(turnID) ? turnID : nil,
             isCancelled: Task.isCancelled
         ) else { return }
         let response = Self.renderIndependentTaskResult(result)
@@ -1217,7 +1214,7 @@ public final class ChatStore {
         // One identity follows the accepted prompt through either provider so
         // late callbacks cannot be mistaken for the next user turn.
         let turnID = TurnID()
-        let task = Task<Void, Never> { [weak self] in
+        await agentRuntime.runOperation(turnID: turnID) { [weak self] in
             guard let self else { return }
             if self.activeBackend == .codex {
                 await self.performCodexSendMessage(
@@ -1235,9 +1232,6 @@ public final class ChatStore {
                 )
             }
         }
-        agentRuntime.registerOperation(task, turnID: turnID)
-        await task.value
-        agentRuntime.finishOperation(for: turnID)
     }
 
     /// Compacts only at a turn boundary, when the previous on-device context
@@ -1376,7 +1370,7 @@ public final class ChatStore {
     }
 
     public func interrupt() {
-        _ = agentRuntime.cancelOperation()
+        agentRuntime.requestOperationCancellation()
         let shouldInterruptCodex = activeBackend == .codex
         let approvals = toolInteractionStore.takeAllApprovals()
         toolInteractionStore.clearActivities()
@@ -1510,14 +1504,7 @@ public final class ChatStore {
         conversationID: String?,
         text: String
     ) async {
-        while busy {
-            guard !Task.isCancelled else { return }
-            do {
-                try await Task.sleep(nanoseconds: 100_000_000)
-            } catch {
-                return
-            }
-        }
+        await agentRuntime.waitUntilIdle()
         guard !Task.isCancelled,
               activeThreadId == conversationID else { return }
         await sendMessage(text, visibleInTimeline: false)
@@ -1726,14 +1713,7 @@ public final class ChatStore {
             await selectionTask.value
             codexSelectionTask = nil
         }
-        if let operationTask = agentRuntime.cancelOperation() {
-            await operationTask.value
-            if agentRuntime.hasActiveOperation {
-                if let turnID = agentRuntime.operationTurnID {
-                    agentRuntime.finishOperation(for: turnID)
-                }
-            }
-        }
+        await agentRuntime.cancelAndWaitForOperation()
         if let handoffTask = codexHandoffTask {
             handoffTask.cancel()
             await handoffTask.value

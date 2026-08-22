@@ -16,7 +16,8 @@ final class AgentRuntime {
     /// state. Keeping it here lets navigation cancel and await one operation
     /// without making the UI facade the owner of the response task.
     private var operationTask: Task<Void, Never>?
-    private(set) var operationTurnID: TurnID?
+    private var operationTurnID: TurnID?
+    private var idleWaiters: [CheckedContinuation<Void, Never>] = []
     private(set) var snapshot: RuntimeSnapshot
 
     init(
@@ -37,31 +38,70 @@ final class AgentRuntime {
         operationTask != nil
     }
 
-    func registerOperation(
-        _ task: Task<Void, Never>,
-        turnID: TurnID
-    ) {
-        operationTask = task
-        operationTurnID = turnID
-    }
-
     func ownsOperation(_ turnID: TurnID) -> Bool {
         operationTurnID == turnID
     }
 
-    /// Requests cancellation but keeps ownership until the caller has awaited
-    /// the task. This prevents a replacement operation from being admitted
-    /// while the previous provider or worker is still unwinding.
-    func cancelOperation() -> Task<Void, Never>? {
-        operationTask?.cancel()
-        return operationTask
+    /// Creates and owns one response or independent worker operation through
+    /// settlement. Callers provide provider work but never retain its concrete
+    /// task, so the UI facade cannot release ownership before cancellation has
+    /// finished unwinding.
+    @discardableResult
+    func runOperation(
+        turnID: TurnID,
+        operation: @escaping @MainActor @Sendable () async -> Void
+    ) async -> Bool {
+        guard operationTask == nil, !snapshot.isQuiescing else { return false }
+
+        let task = Task { await operation() }
+        operationTask = task
+        operationTurnID = turnID
+        await task.value
+        finishOperation(for: turnID)
+        return true
     }
 
-    /// Releases the operation handle only when its owning turn has settled.
-    func finishOperation(for turnID: TurnID) {
+    /// Cancels and awaits the owned task before reporting idle. Keeping both
+    /// actions inside the runtime prevents navigation from installing a new
+    /// context while provider cleanup still targets the previous thread.
+    func cancelAndWaitForOperation() async {
+        guard let task = operationTask else { return }
+        let turnID = operationTurnID
+        task.cancel()
+        await task.value
+        if let turnID {
+            finishOperation(for: turnID)
+        }
+    }
+
+    /// Suspends without polling until the current operation releases runtime
+    /// ownership. Waiters are resumed together because idle is a state edge,
+    /// not a consumable event owned by one caller.
+    func waitUntilIdle() async {
+        guard operationTask != nil else { return }
+        await withCheckedContinuation { continuation in
+            idleWaiters.append(continuation)
+        }
+    }
+
+    /// Requests cancellation for user-initiated stop without awaiting on the
+    /// MainActor. Transition boundaries use `cancelAndWaitForOperation()` when
+    /// they must prove quiescence before replacing the active context.
+    func requestOperationCancellation() {
+        operationTask?.cancel()
+    }
+
+    /// Releases the operation only when its owning turn settles. Resuming idle
+    /// waiters here gives every caller the same post-settlement observation.
+    private func finishOperation(for turnID: TurnID) {
         guard operationTurnID == turnID else { return }
         operationTask = nil
         operationTurnID = nil
+        let waiters = idleWaiters
+        idleWaiters.removeAll(keepingCapacity: true)
+        for waiter in waiters {
+            waiter.resume()
+        }
     }
 
     /// Applies provider-neutral lifecycle and context commands. Provider work

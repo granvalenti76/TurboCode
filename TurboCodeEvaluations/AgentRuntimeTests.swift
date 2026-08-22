@@ -164,25 +164,46 @@ struct AgentRuntimeTests {
         #expect(!runtime.snapshot.isQuiescing)
     }
 
-    @Test("AgentRuntime owns and releases the active operation handle")
-    func ownsOperationHandleUntilAwaited() async {
+    @Test("AgentRuntime creates, cancels, awaits, and releases its operation")
+    func ownsOperationHandleThroughCancellation() async {
         let turnID = TurnID(rawValue: "agent-runtime-operation")
         let runtime = AgentRuntime()
-        let task = Task<Void, Never> {
-            try? await Task.sleep(for: .seconds(60))
+        let execution = Task {
+            await runtime.runOperation(turnID: turnID) {
+                try? await Task.sleep(for: .seconds(60))
+            }
         }
+        await Task.yield()
 
-        runtime.registerOperation(task, turnID: turnID)
         #expect(runtime.hasActiveOperation)
         #expect(runtime.ownsOperation(turnID))
 
-        let cancelled = runtime.cancelOperation()
-        #expect(cancelled != nil)
-        await cancelled?.value
-        #expect(runtime.hasActiveOperation)
+        await runtime.cancelAndWaitForOperation()
+        _ = await execution.value
 
-        runtime.finishOperation(for: turnID)
         #expect(!runtime.hasActiveOperation)
         #expect(!runtime.ownsOperation(turnID))
+    }
+
+    @Test("Idle waiters resume when the owned operation settles")
+    func resumesIdleWaitersWithoutPolling() async {
+        let turnID = TurnID(rawValue: "agent-runtime-idle-waiter")
+        let runtime = AgentRuntime()
+        let execution = Task {
+            await runtime.runOperation(turnID: turnID) {
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+        await Task.yield()
+
+        let waiter = Task {
+            await runtime.waitUntilIdle()
+            return runtime.hasActiveOperation
+        }
+        await Task.yield()
+        await runtime.cancelAndWaitForOperation()
+
+        #expect(await waiter.value == false)
+        _ = await execution.value
     }
 }
