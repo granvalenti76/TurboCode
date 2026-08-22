@@ -1,5 +1,8 @@
 import Foundation
 
+/// Immutable receipt produced by a workspace-listing tool. It belongs to the
+/// Core domain rather than SwiftUI so any host can persist or render it without
+/// parsing model-facing text.
 nonisolated public struct WorkspaceListingBlock: Codable, Hashable, Sendable {
     public let toolCallID: String
     public let path: String

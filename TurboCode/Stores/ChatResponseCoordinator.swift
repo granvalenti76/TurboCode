@@ -15,6 +15,14 @@ final class ChatResponseCoordinator {
         let touchedConversation: Bool
     }
 
+    /// Captures ownership when the provider starts a native tool. Looking up
+    /// the current turn again at completion could mislabel a delayed callback
+    /// after cancellation, restore, or a subsequent submission.
+    private struct NativeToolInvocation {
+        let turnID: TurnID
+        let startedAt: Date
+    }
+
     private let timeline: ChatTimelineStore
     private let toolInteractions: ToolInteractionStore
     private let agentActivity: AgentActivityStore
@@ -32,7 +40,7 @@ final class ChatResponseCoordinator {
     private var productGuidePresentation: ProductGuideBlock?
     private var completedRootWrite: String?
     private var pendingCoordinatorTool: AgentActivityTool?
-    private var runtimeToolStartedAt: [String: Date] = [:]
+    private var nativeToolInvocations: [String: NativeToolInvocation] = [:]
     init(
         timeline: ChatTimelineStore,
         toolInteractions: ToolInteractionStore,
@@ -106,7 +114,7 @@ final class ChatResponseCoordinator {
 
     private func beginTurn(_ request: TurnRequest) async {
         guard await acceptRuntimeEvent(.started(request)) else { return }
-        runtimeToolStartedAt.removeAll(keepingCapacity: true)
+        nativeToolInvocations.removeAll(keepingCapacity: true)
         _ = await advanceTurn(to: .preparing, turnID: request.id)
     }
 
@@ -124,7 +132,7 @@ final class ChatResponseCoordinator {
         _ = await acceptRuntimeEvent(
             .completed(turnID: turnID, outcome: outcome, at: Date())
         )
-        runtimeToolStartedAt.removeAll(keepingCapacity: true)
+        nativeToolInvocations.removeAll(keepingCapacity: true)
     }
 
     /// Accepts lifecycle and ownership changes before any event reaches a UI
@@ -141,12 +149,19 @@ final class ChatResponseCoordinator {
     /// so stale content, tool, and approval callbacks are rejected uniformly.
     /// A redundant phase is not a reason to drop a current tool payload: native
     /// widgets remain presentation projections, independent of reducer idempotency.
-    private func acceptBackendEvent(_ event: AgentRuntimeEvent) async -> Bool {
+    func acceptBackendEvent(_ event: AgentRuntimeEvent) async -> Bool {
         guard await ownsTurn(event.turnID) else { return false }
         if case .completed = event {
             return true
         }
         _ = await acceptRuntimeEvent(event)
+        // Rich output is projected only after the owning TurnID passes the
+        // runtime gate. Native and Codex adapters therefore share one receipt
+        // path and stale callbacks cannot insert widgets into a newer thread.
+        if case .toolFinished(let result) = event,
+           let receipt = result.receipt {
+            present(receipt)
+        }
         return true
     }
 
@@ -237,10 +252,6 @@ final class ChatResponseCoordinator {
                     guard let self, await self.ownsTurn(turnID) else { return }
                     self.toolInteractions.endActivity(id: id)
                     self.coordinatorToolFinished(callID: id)
-                },
-                presentationRequested: { [weak self] presentation in
-                    guard let self, await self.ownsTurn(turnID) else { return }
-                    self.present(presentation)
                 },
                 approvalRequested: { [weak self] request in
                     guard let self, await self.ownsTurn(turnID) else { return }
@@ -710,7 +721,10 @@ final class ChatResponseCoordinator {
                 )
             )
         )
-        runtimeToolStartedAt[call.id] = startedAt
+        nativeToolInvocations[call.id] = NativeToolInvocation(
+            turnID: turnID,
+            startedAt: startedAt
+        )
         if let activeDiagnosticsRunID {
             await AgentDiagnosticsRecorder.shared.toolStarted(
                 runID: activeDiagnosticsRunID,
@@ -744,7 +758,14 @@ final class ChatResponseCoordinator {
         owner: AgentActivityToolOwner,
         workspaceName: String?
     ) async {
-        guard let turnID = await currentTurnState()?.id else { return }
+        guard let invocation = nativeToolInvocations.removeValue(
+            forKey: call.id
+        ) else {
+            // A completion without its captured start belongs to an operation
+            // that was reset or never admitted; it cannot be re-parented to
+            // whichever turn happens to be current now.
+            return
+        }
         let outputText = output.segments.compactMap { segment -> String? in
             switch segment {
             case .text(let value):
@@ -755,21 +776,22 @@ final class ChatResponseCoordinator {
                 return nil
             }
         }.joined()
-        let startedAt = runtimeToolStartedAt.removeValue(forKey: call.id)
-        guard await ownsTurn(turnID) else { return }
-        _ = await acceptRuntimeEvent(
-            .toolFinished(
-                ToolResult(
-                    id: call.id,
-                    turnID: turnID,
-                    status: .succeeded,
-                    output: outputText,
-                    durationMilliseconds: startedAt.map {
-                        max(0, Int(Date().timeIntervalSince($0) * 1_000))
-                    }
-                )
+        let result = ToolResult(
+            id: call.id,
+            turnID: invocation.turnID,
+            status: .succeeded,
+            output: outputText,
+            durationMilliseconds: max(
+                0,
+                Int(Date().timeIntervalSince(invocation.startedAt) * 1_000)
+            ),
+            receipt: ToolReceiptRouter.receipt(
+                for: call,
+                output: output,
+                workspaceName: workspaceName
             )
         )
+        guard await acceptBackendEvent(.toolFinished(result)) else { return }
         if let activeDiagnosticsRunID {
             await AgentDiagnosticsRecorder.shared.toolFinished(
                 runID: activeDiagnosticsRunID,
@@ -786,13 +808,6 @@ final class ChatResponseCoordinator {
             completedRootWrite = String(
                 text.dropFirst("WRITE_COMPLETE: ".count)
             )
-        }
-        if let presentation = ToolPresentationRouter.presentation(
-            for: call,
-            output: output,
-            workspaceName: workspaceName
-        ) {
-            present(presentation)
         }
         if owner == .coordinator {
             coordinatorToolFinished(callID: call.id)
@@ -876,15 +891,8 @@ final class ChatResponseCoordinator {
         return "\(label) · \(summary)"
     }
 
-    private func present(_ presentation: ToolPresentation) {
-        switch presentation {
-        case .workspaceListing(let listing):
-            timeline.presentWorkspaceListing(listing)
-        }
-    }
-
-    private func present(_ presentation: CodexToolPresentation) {
-        switch presentation {
+    private func present(_ receipt: ToolReceipt) {
+        switch receipt {
         case .workspaceListing(let listing):
             timeline.presentWorkspaceListing(listing)
         }

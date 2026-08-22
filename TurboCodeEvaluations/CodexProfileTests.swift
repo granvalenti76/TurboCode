@@ -433,7 +433,7 @@ struct CodexProfileTests {
         )
 
         #expect(execution.result.succeeded)
-        guard case .workspaceListing(let listing) = execution.presentation else {
+        guard case .workspaceListing(let listing) = execution.receipt else {
             Issue.record("Expected a workspace listing presentation")
             return
         }

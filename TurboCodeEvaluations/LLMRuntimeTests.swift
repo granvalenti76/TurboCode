@@ -154,7 +154,6 @@ struct LLMRuntimeTests {
                 delegationInvoker: nil,
                 activityStarted: { _, _ in },
                 activityEnded: { _ in },
-                presentationRequested: { _ in },
                 approvalRequested: { _ in }
             ),
             events: .none

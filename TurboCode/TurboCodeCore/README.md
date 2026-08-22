@@ -36,6 +36,14 @@ Hosts must not retain a concrete provider session or infer operation lifetime
 from UI state. A host may render `ChatBlock` and its typed tool receipts however
 it chooses; the core never constructs a SwiftUI view.
 
+In the current contract, `ToolReceipt` travels inside the owning `ToolResult`.
+Native Foundation Models structure and Codex dynamic-tool output are converted
+once, at their adapter edges, into the same provider-neutral receipt. The host
+projects that receipt only after `AgentRuntime` accepts its `TurnID`; there is
+no parallel widget callback that can race a cancelled, restored, or newer turn.
+`workspaceListing` is the first receipt case, and its immutable
+`WorkspaceListingBlock` preserves the existing widget and session payload.
+
 `ReasoningEffort` is a provider-neutral domain value. Hosts may persist or
 present that intent, while a provider adapter alone translates it into a wire-
 or SDK-specific option. The observable `ModelRuntimeStore` follows the same
@@ -125,12 +133,14 @@ or extension UI is part of the 0.3.7 extraction or automatically part of 0.4.0.
 ## Current source layout
 
 - `Domain/` contains provider- and UI-neutral values shared across the boundary,
-  including backend identity and reasoning intent.
+  including backend identity, reasoning intent, and immutable structured tool
+  payloads such as `WorkspaceListingBlock`.
 - `Persistence/` contains schema-1 session records, the ordered disk repository,
   and UI-neutral async persistence use cases. Observable hosts apply returned
   values only after durable operations succeed.
-- `Runtime/` contains the provider-neutral command/event vocabulary, transient
-  turn reducer, immutable snapshots, and actor-isolated operation owner.
+- `Runtime/` contains the provider-neutral command/event vocabulary, typed
+  `ToolReceipt` envelope, transient turn reducer, immutable snapshots, and
+  actor-isolated operation owner.
 - The current MainActor `BackendSession` adapter port remains under
   `Services/Chat/`; moving a presentation-isolated bridge into this directory
   would disguise rather than remove the dependency.

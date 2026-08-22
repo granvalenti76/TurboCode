@@ -34,9 +34,6 @@ struct CodexLLMExecutionConfiguration {
         String
     ) async -> Void
     let activityEnded: @MainActor @Sendable (String) async -> Void
-    let presentationRequested: @MainActor @Sendable (
-        CodexToolPresentation
-    ) async -> Void
     let approvalRequested: @MainActor @Sendable (
         ApprovalRequest
     ) async -> Void
@@ -116,7 +113,6 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
             delegationInvoker: configuration.delegationInvoker,
             activityStarted: configuration.activityStarted,
             activityEnded: configuration.activityEnded,
-            presentationRequested: configuration.presentationRequested,
             approvalRequested: configuration.approvalRequested
         )
     }

@@ -68,6 +68,56 @@ struct RuntimeContractsTests {
         #expect(decoded == commands)
     }
 
+    @Test("Structured tool receipt round-trips with its runtime completion")
+    func toolReceiptRoundTrips() throws {
+        let listing = WorkspaceListingBlock(
+            toolCallID: "tool-1",
+            path: ".",
+            entries: [
+                WorkspaceListingEntry(
+                    name: "Package.swift",
+                    relativePath: "Package.swift",
+                    kind: .file,
+                    sizeBytes: 811,
+                    modifiedAt: "2026-07-19T10:00:00Z",
+                    fileExtension: "swift"
+                )
+            ],
+            totalCount: 1,
+            isTruncated: false,
+            errorMessage: nil,
+            capturedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            workspaceName: "TurboCode"
+        )
+        let result = ToolResult(
+            id: listing.toolCallID,
+            turnID: TurnID(rawValue: "receipt-turn"),
+            status: .succeeded,
+            output: "model-facing text",
+            durationMilliseconds: 12,
+            receipt: .workspaceListing(listing)
+        )
+
+        let data = try JSONEncoder().encode(result)
+        let decoded = try JSONDecoder().decode(ToolResult.self, from: data)
+
+        #expect(decoded == result)
+    }
+
+    @Test("Tool result without a receipt keeps its legacy Codable shape")
+    func toolResultWithoutReceiptRemainsCompatible() throws {
+        let result = ToolResult(
+            id: "plain-tool",
+            turnID: TurnID(rawValue: "legacy-turn"),
+            status: .succeeded,
+            output: "plain text"
+        )
+
+        let data = try JSONEncoder().encode(result)
+        #expect(!String(decoding: data, as: UTF8.self).contains("receipt"))
+        #expect(try JSONDecoder().decode(ToolResult.self, from: data) == result)
+    }
+
     @Test("Runtime snapshots retain lifecycle ownership without UI state")
     func runtimeSnapshotRoundTrips() throws {
         let start = Date(timeIntervalSince1970: 200)

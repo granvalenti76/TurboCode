@@ -75,6 +75,31 @@ struct TurboCodeCoreArchitectureTests {
         }
     }
 
+    /// Structured widget data must be part of the accepted tool completion.
+    /// A second presentation callback would escape the runtime TurnID gate and
+    /// could project stale output after cancellation or a thread switch.
+    @Test("LLM adapters expose no parallel widget presentation channel")
+    func llmAdaptersHaveNoWidgetSideChannel() throws {
+        let relativePaths = [
+            "TurboCode/Services/Chat/LLMRuntime.swift",
+            "TurboCode/Stores/CodexRuntimeStore.swift",
+            "TurboCode/Stores/ChatResponseCoordinator.swift"
+        ]
+        let forbiddenTokens = [
+            "presentationRequested",
+            "CodexToolPresentation",
+            "ToolPresentationRouter"
+        ]
+
+        for relativePath in relativePaths {
+            let sourceURL = Self.repositoryRoot.appendingPathComponent(relativePath)
+            let source = try String(contentsOf: sourceURL, encoding: .utf8)
+            for token in forbiddenTokens {
+                #expect(!source.contains(token))
+            }
+        }
+    }
+
     private func coreSwiftSourceURLs() throws -> [URL] {
         let coreURL = Self.coreURL
         guard let enumerator = FileManager.default.enumerator(

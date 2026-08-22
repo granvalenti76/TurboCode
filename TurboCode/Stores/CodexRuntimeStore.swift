@@ -47,10 +47,8 @@ final class CodexRuntimeStore {
         let activityEnded: @MainActor @Sendable (String) async -> Void
         let toolFinished: @MainActor @Sendable (
             CodexDynamicToolCall,
-            CodexDynamicToolResult
-        ) async -> Void
-        let presentationRequested: @MainActor @Sendable (
-            CodexToolPresentation
+            CodexDynamicToolResult,
+            ToolReceipt?
         ) async -> Void
         let approvalRequested: @MainActor @Sendable (
             ApprovalRequest
@@ -343,6 +341,7 @@ final class CodexRuntimeStore {
                     CodexTurboCodeToolBridge.activitySummary(for: call)
                 )
                 let result: CodexDynamicToolResult
+                let receipt: ToolReceipt?
                 do {
                     let execution = try await CodexTurboCodeToolBridge.execute(
                         call,
@@ -353,14 +352,13 @@ final class CodexRuntimeStore {
                         delegationInvoker: request.delegationInvoker,
                         parentTurnID: request.turnID
                     )
-                    if let presentation = execution.presentation {
-                        await events.presentationRequested(presentation)
-                    }
                     result = execution.result
+                    receipt = execution.receipt
                 } catch {
                     result = .failure(error.localizedDescription)
+                    receipt = nil
                 }
-                await events.toolFinished(call, result)
+                await events.toolFinished(call, result, receipt)
                 await events.activityEnded(call.callID)
                 try await client.resolveToolCall(call, result: result)
             case .approvalRequested(let approval):
@@ -526,9 +524,6 @@ final class CodexBackendSession: BackendSession {
         String
     ) async -> Void
     private let activityEnded: @MainActor @Sendable (String) async -> Void
-    private let presentationRequested: @MainActor @Sendable (
-        CodexToolPresentation
-    ) async -> Void
     private let approvalRequested: @MainActor @Sendable (
         ApprovalRequest
     ) async -> Void
@@ -550,9 +545,6 @@ final class CodexBackendSession: BackendSession {
         activityEnded: @escaping @MainActor @Sendable (
             String
         ) async -> Void = { _ in },
-        presentationRequested: @escaping @MainActor @Sendable (
-            CodexToolPresentation
-        ) async -> Void = { _ in },
         approvalRequested: @escaping @MainActor @Sendable (
             ApprovalRequest
         ) async -> Void = { _ in }
@@ -567,7 +559,6 @@ final class CodexBackendSession: BackendSession {
         self.delegationInvoker = delegationInvoker
         self.activityStarted = activityStarted
         self.activityEnded = activityEnded
-        self.presentationRequested = presentationRequested
         self.approvalRequested = approvalRequested
     }
 
@@ -586,7 +577,6 @@ final class CodexBackendSession: BackendSession {
         let delegationInvoker = self.delegationInvoker
         let activityStarted = self.activityStarted
         let activityEnded = self.activityEnded
-        let presentationRequested = self.presentationRequested
         let approvalRequested = self.approvalRequested
         var toolStartTimes: [String: Date] = [:]
 
@@ -655,7 +645,7 @@ final class CodexBackendSession: BackendSession {
                             // streaming before this activity is dismissed.
                             await activityEnded(id)
                         },
-                        toolFinished: { call, result in
+                        toolFinished: { call, result, receipt in
                             let startedAt = toolStartTimes.removeValue(
                                 forKey: call.callID
                             )
@@ -665,12 +655,12 @@ final class CodexBackendSession: BackendSession {
                                         from: result,
                                         call: call,
                                         turnID: request.id,
-                                        startedAt: startedAt
+                                        startedAt: startedAt,
+                                        receipt: receipt
                                     )
                                 )
                             )
                         },
-                        presentationRequested: presentationRequested,
                         approvalRequested: { request in
                             await approvalRequested(request)
                         }
@@ -754,7 +744,8 @@ final class CodexBackendSession: BackendSession {
         from result: CodexDynamicToolResult,
         call: CodexDynamicToolCall,
         turnID: TurnID,
-        startedAt: Date?
+        startedAt: Date?,
+        receipt: ToolReceipt?
     ) -> ToolResult {
         ToolResult(
             id: call.callID,
@@ -763,7 +754,8 @@ final class CodexBackendSession: BackendSession {
             output: result.text,
             durationMilliseconds: startedAt.map {
                 max(0, Int(Date().timeIntervalSince($0) * 1_000))
-            }
+            },
+            receipt: receipt
         )
     }
 

@@ -1,19 +1,16 @@
 import Foundation
 import FoundationModels
 
-nonisolated enum ToolPresentation: Sendable {
-    case workspaceListing(WorkspaceListingBlock)
-}
-
-/// Decodes structured tool outputs into persisted timeline payloads. ChatStore
-/// coordinates placement only; it does not know individual output schemas.
-nonisolated enum ToolPresentationRouter {
-    static func presentation(
+/// Converts provider structure segments directly into typed Core receipts.
+/// Model-facing text is deliberately ignored so widget data cannot be flattened
+/// and parsed back into an application payload.
+nonisolated enum ToolReceiptRouter {
+    static func receipt(
         for call: Transcript.ToolCall,
         output: Transcript.ToolOutput,
         workspaceName: String?,
         capturedAt: Date = .now
-    ) -> ToolPresentation? {
+    ) -> ToolReceipt? {
         guard call.toolName == "list_workspace" else { return nil }
         for segment in output.segments {
             guard case .structure(let structured) = segment,

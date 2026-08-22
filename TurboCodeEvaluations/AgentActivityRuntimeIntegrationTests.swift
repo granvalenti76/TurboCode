@@ -183,8 +183,18 @@ struct AgentActivityRuntimeIntegrationTests {
     @Test("Codex backend adapter normalizes streamed output and tool results")
     func codexBackendAdapterNormalizesLifecycle() async {
         let turnID = TurnID(rawValue: "codex-adapter-turn")
+        let listing = WorkspaceListingBlock(
+            toolCallID: "codex-tool",
+            path: ".",
+            entries: [],
+            totalCount: 0,
+            isTruncated: false,
+            errorMessage: nil
+        )
         let adapter = CodexBackendSession(
-            runtime: AdapterCodexRuntime(),
+            runtime: AdapterCodexRuntime(
+                receipt: .workspaceListing(listing)
+            ),
             turboThreadID: "thread-test",
             agentTuning: AgentTuningConfig()
         )
@@ -227,6 +237,7 @@ struct AgentActivityRuntimeIntegrationTests {
         if let toolResult = toolResults.first {
             #expect(toolResult.status == .succeeded)
             #expect(toolResult.durationMilliseconds != nil)
+            #expect(toolResult.receipt == .workspaceListing(listing))
         }
     }
 
@@ -482,9 +493,14 @@ private final class AdapterNativeRunner: NativeResponseRunning {
 @MainActor
 private final class AdapterCodexRuntime: CodexTurnRunning {
     private let toolResult: CodexDynamicToolResult
+    private let receipt: ToolReceipt?
 
-    init(toolResult: CodexDynamicToolResult = .success("file contents")) {
+    init(
+        toolResult: CodexDynamicToolResult = .success("file contents"),
+        receipt: ToolReceipt? = nil
+    ) {
         self.toolResult = toolResult
+        self.receipt = receipt
     }
 
     func runTurn(
@@ -500,7 +516,10 @@ private final class AdapterCodexRuntime: CodexTurnRunning {
             arguments: .object(["filePath": .string("App.swift")])
         )
         await events.activityStarted(call, "Reading file")
-        await events.toolFinished(call, toolResult)
+        // The adapter test double carries the same typed receipt as a real
+        // Codex tool bridge so the runtime boundary, not UI reconstruction,
+        // remains responsible for preserving structured tool output.
+        await events.toolFinished(call, toolResult, receipt)
         await events.activityEnded(call.callID)
         return CodexRuntimeStore.TurnResult(
             assistantText: "Codex result.",

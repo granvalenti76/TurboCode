@@ -328,6 +328,14 @@ nonisolated struct ToolCall: Codable, Hashable, Sendable {
     }
 }
 
+/// Typed, provider-neutral output that a host may project into a native widget.
+///
+/// Receipts travel with the owning ``ToolResult``. They are never inferred from
+/// display text and cannot bypass the runtime's TurnID acceptance gate.
+nonisolated enum ToolReceipt: Codable, Hashable, Sendable {
+    case workspaceListing(WorkspaceListingBlock)
+}
+
 /// Normalized completion of a tool invocation.
 nonisolated struct ToolResult: Codable, Hashable, Sendable {
     nonisolated enum Status: String, Codable, Hashable, Sendable {
@@ -342,6 +350,7 @@ nonisolated struct ToolResult: Codable, Hashable, Sendable {
     let output: String
     let errorMessage: String?
     let durationMilliseconds: Int?
+    let receipt: ToolReceipt?
 
     init(
         id: String,
@@ -349,7 +358,8 @@ nonisolated struct ToolResult: Codable, Hashable, Sendable {
         status: Status,
         output: String = "",
         errorMessage: String? = nil,
-        durationMilliseconds: Int? = nil
+        durationMilliseconds: Int? = nil,
+        receipt: ToolReceipt? = nil
     ) {
         self.id = id
         self.turnID = turnID
@@ -357,6 +367,7 @@ nonisolated struct ToolResult: Codable, Hashable, Sendable {
         self.output = output
         self.errorMessage = errorMessage
         self.durationMilliseconds = durationMilliseconds.map { max(0, $0) }
+        self.receipt = receipt
     }
 }
 
