@@ -106,6 +106,18 @@ approval.
 Removes one workspace file through an explicit approval request. It is separate
 from general editing so destructive intent stays visible and reviewable.
 
+### `safari_mcp`
+
+Controls Safari through TurboCode's experimental Safari MCP integration. It is
+available only after enabling Safari MCP in **Agents > Experimental** and while
+the current Safari browsing context remains valid. TurboCode keeps the
+capability disabled by default, does not register it when the opt-in is off,
+and reports lost or unavailable browsing contexts as bounded tool failures.
+
+Safari MCP is a coordinator-only capability. It is never passed to delegated
+workers, whose tool surface remains restricted to the configured workspace and
+worker profile boundaries.
+
 ## Build, test, packages, and Git
 
 ### `xcode_project`
