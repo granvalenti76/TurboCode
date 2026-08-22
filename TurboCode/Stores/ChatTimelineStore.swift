@@ -13,6 +13,11 @@ final class ChatTimelineStore {
     var liveAssistant = ""
     var isFirstMessage = true
 
+    /// Latest runtime context projected for presentation decisions. This is a
+    /// read-only copy; turn ownership and lifecycle transitions remain in
+    /// AgentRuntime rather than in the timeline aggregate.
+    private(set) var runtimeSnapshot: RuntimeSnapshot?
+
     private(set) var activeAssistantPlaceholderID: String?
     private(set) var workspaceListingPresentations: [WorkspaceListingBlock] = []
 
@@ -34,6 +39,12 @@ final class ChatTimelineStore {
         reset()
         blocks = restoredBlocks
         isFirstMessage = restoredBlocks.isEmpty
+    }
+
+    /// Applies a provider-neutral runtime snapshot without importing or
+    /// retaining a provider session, task, or lifecycle reducer.
+    func applyRuntimeSnapshot(_ snapshot: RuntimeSnapshot) {
+        runtimeSnapshot = snapshot
     }
 
     /// Starts one visible response and records the exact placeholder used to

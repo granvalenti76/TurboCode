@@ -1768,7 +1768,11 @@ public final class ChatStore {
     /// workspace is installed.
     private func finishActiveResponseBeforeTransition() async {
         agentRuntime.beginQuiescence()
-        defer { agentRuntime.endQuiescence() }
+        timelineStore.applyRuntimeSnapshot(agentRuntime.snapshot)
+        defer {
+            agentRuntime.endQuiescence()
+            timelineStore.applyRuntimeSnapshot(agentRuntime.snapshot)
+        }
 
         if let selectionTask = codexSelectionTask {
             selectionTask.cancel()

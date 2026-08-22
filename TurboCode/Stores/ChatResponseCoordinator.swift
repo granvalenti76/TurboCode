@@ -58,6 +58,7 @@ final class ChatResponseCoordinator {
 
     private func beginTurn(_ request: TurnRequest) {
         agentRuntime.begin(request)
+        projectRuntimeSnapshot()
         _ = advanceTurn(to: .preparing, turnID: request.id)
     }
 
@@ -65,12 +66,15 @@ final class ChatResponseCoordinator {
     /// Codex compatibility path remains available for parity comparison.
     private func beginNativeTurn(_ request: TurnRequest) {
         guard agentRuntime.apply(.submit(request)) else { return }
+        projectRuntimeSnapshot()
         _ = advanceTurn(to: .preparing, turnID: request.id)
     }
 
     @discardableResult
     private func advanceTurn(to phase: TurnPhase, turnID: TurnID) -> Bool {
-        agentRuntime.advance(to: phase, turnID: turnID, at: Date())
+        let advanced = agentRuntime.advance(to: phase, turnID: turnID, at: Date())
+        projectRuntimeSnapshot()
+        return advanced
     }
 
     private func finishTurn(
@@ -78,6 +82,11 @@ final class ChatResponseCoordinator {
         turnID: TurnID
     ) {
         _ = agentRuntime.finish(with: outcome, turnID: turnID, at: Date())
+        projectRuntimeSnapshot()
+    }
+
+    private func projectRuntimeSnapshot() {
+        timeline.applyRuntimeSnapshot(agentRuntime.snapshot)
     }
 
     /// Carries profile-owned Codex choices across the timeline boundary while

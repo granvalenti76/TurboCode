@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 import Testing
 @testable import TurboCode
@@ -5,6 +6,29 @@ import Testing
 @MainActor
 @Suite("Chat timeline store")
 struct ChatTimelineStoreTests {
+    @Test("Runtime snapshots are projected without moving lifecycle ownership")
+    func projectsRuntimeSnapshot() {
+        let store = ChatTimelineStore()
+        let turnID = TurnID(rawValue: "timeline-runtime")
+        let snapshot = RuntimeSnapshot(
+            activeThreadID: "thread-1",
+            backend: .foundationApple,
+            turn: TurnState(
+                id: turnID,
+                phase: .streaming,
+                startedAt: Date(timeIntervalSince1970: 100)
+            ),
+            isQuiescing: true
+        )
+
+        store.applyRuntimeSnapshot(snapshot)
+
+        #expect(store.runtimeSnapshot == snapshot)
+        #expect(store.runtimeSnapshot?.turn?.id == turnID)
+        #expect(store.runtimeSnapshot?.isQuiescing == true)
+        #expect(store.blocks.isEmpty)
+    }
+
     @Test("Response receipts remain ahead of reasoning and assistant output")
     func responseOrderingPreservesToolReceipts() {
         let store = ChatTimelineStore()
