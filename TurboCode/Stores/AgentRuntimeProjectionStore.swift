@@ -3,8 +3,8 @@ import Observation
 /// MainActor projection of immutable runtime state consumed by presentation.
 ///
 /// This store is intentionally passive: it owns no reducer, task, provider, or
-/// cancellation handle. Keeping Observation here lets `AgentRuntime` shed every
-/// UI dependency when it becomes an actor in the next architectural checkpoint.
+/// cancellation handle. Keeping Observation here lets the actor remain free of
+/// UI dependencies and suitable for the future TurboCodeCore module boundary.
 @MainActor
 @Observable
 final class AgentRuntimeProjectionStore {

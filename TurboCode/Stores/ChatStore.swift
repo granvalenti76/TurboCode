@@ -25,15 +25,6 @@ public final class ChatStore {
     public static var shared: ChatStore!
 
     // MARK: - Properties
-    // Composer
-    public var composerProviderId: String = ""
-    public var composerMode: ConversationMode = .agent
-    public var composerInput: String = ""
-    public var composerAttachments: Int = 0
-
-    // Runtime
-    public var runtimeStatus: RuntimeStatus = .ready
-    public var runtimeConnection: RuntimeConnectionState = .ready
     /// UI projection of runtime-owned work. Response and `/task` operations
     /// arrive as immutable snapshots; the UI never observes the runtime task.
     /// Codex handoff remains a separate transition until that profile boundary
@@ -42,15 +33,18 @@ public final class ChatStore {
         agentRuntimeProjectionStore.hasActiveOperation
             || codexHandoffTask != nil
     }
-    public var error: String?
-    public private(set) var localCompactionNotice: LocalCompactionNotice?
-    /// Updated once after a completed local Llama turn, never per stream
-    /// snapshot, so the composer remains cheap while inference is active.
-    public private(set) var llamaContextUsage: LlamaContextUsage?
 #if DEBUG
     public var benchmarkRunning: Bool = false
     public var benchmarkStatus: String?
 #endif
+
+    /// Compatibility-internal error channel while send and transition use
+    /// cases still migrate out of this facade. Views observe the narrower
+    /// presentation model directly.
+    private var error: String? {
+        get { presentationViewModel.errorMessage }
+        set { presentationViewModel.errorMessage = newValue }
+    }
 
     // Orchestrator mode
     public var orchestratorMode: OrchestratorMode {
@@ -71,6 +65,8 @@ public final class ChatStore {
     let toolInteractionStore: ToolInteractionStore
     let agentActivityStore: AgentActivityStore
     let agentRuntimeProjectionStore: AgentRuntimeProjectionStore
+    let composerViewModel: ComposerViewModel
+    let presentationViewModel: ChatPresentationViewModel
     let timelineStore: ChatTimelineStore
     let workbenchStore: WorkbenchStore
     let reviewDraftStore: ReviewDraftStore
@@ -80,7 +76,6 @@ public final class ChatStore {
     let responseCoordinator: ChatResponseCoordinator
     private let reviewCoordinator: ReviewCoordinator
 
-    private var localCompactionNoticeTask: Task<Void, Never>?
     // Codex selection and handoff are also transition operations. Keeping
     // their handles here prevents navigation from observing half-switched
     // backend state while one of them is suspended at an await.
@@ -123,6 +118,8 @@ public final class ChatStore {
         let reviewDraft = ReviewDraftStore()
         let modelRuntime = ModelRuntimeStore()
         let runtimeProjection = AgentRuntimeProjectionStore()
+        let composer = ComposerViewModel()
+        let presentation = ChatPresentationViewModel()
         let agentRuntime = AgentRuntime { snapshot in
             await runtimeProjection.apply(snapshot)
             await timeline.applyRuntimeSnapshot(snapshot)
@@ -144,6 +141,8 @@ public final class ChatStore {
         self.toolInteractionStore = toolInteractions
         self.agentActivityStore = agentActivity
         self.agentRuntimeProjectionStore = runtimeProjection
+        self.composerViewModel = composer
+        self.presentationViewModel = presentation
         self.timelineStore = timeline
         self.workbenchStore = workbench
         self.reviewDraftStore = reviewDraft
@@ -509,7 +508,7 @@ public final class ChatStore {
         discardingCapabilityContext: Bool = false,
         restoringHistory: [ModelRuntimeStore.RestoredTranscriptEntry]? = nil
     ) async {
-        llamaContextUsage = nil
+        presentationViewModel.setLlamaContextUsage(nil)
         await projectRuntimeCommand(
             .switchBackend(
                 RuntimeBackendSelection(
@@ -590,7 +589,7 @@ public final class ChatStore {
         let hasOrphanedBlocks = !blocks.isEmpty
         let created = conversationStore.ensureActiveThread(
             workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
-            mode: composerMode
+            mode: composerViewModel.mode
         )
         guard created else { return }
 
@@ -937,7 +936,7 @@ public final class ChatStore {
             error = "Use /task followed by the task instructions."
             return
         }
-        clearLocalCompactionNotice()
+        presentationViewModel.clearCompactionNotice()
         await refreshSkillsIfNeeded()
         if activeBackend != .codex,
            modelRuntimeStore.workspaceInstructionsChanged(in: workspaceRoot) {
@@ -1034,11 +1033,12 @@ public final class ChatStore {
         error = nil
         await ensureActiveThread()
         timelineStore.presentCompaction(compaction.summary)
-        localCompactionNotice = LocalCompactionNotice(
-            sourceCharacters: compaction.sourceCharacters,
-            retainedCharacters: compaction.retainedCharacters
+        presentationViewModel.presentCompactionNotice(
+            LocalCompactionNotice(
+                sourceCharacters: compaction.sourceCharacters,
+                retainedCharacters: compaction.retainedCharacters
+            )
         )
-        scheduleLocalCompactionNoticeDismissal()
         await rebuildSession(restoringHistory: compaction.history)
 
         await AgentDiagnosticsRecorder.shared.recordLocalCompaction(
@@ -1052,23 +1052,6 @@ public final class ChatStore {
             conversationStore.touchThread(id: threadID)
             await persistSession(for: threadID)
         }
-    }
-
-    private func scheduleLocalCompactionNoticeDismissal() {
-        localCompactionNoticeTask?.cancel()
-        localCompactionNoticeTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(9))
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                self?.localCompactionNotice = nil
-            }
-        }
-    }
-
-    public func clearLocalCompactionNotice() {
-        localCompactionNoticeTask?.cancel()
-        localCompactionNoticeTask = nil
-        localCompactionNotice = nil
     }
 
     func isIncompleteSkillCommand(_ text: String) -> Bool {
@@ -1416,7 +1399,7 @@ public final class ChatStore {
         turnID: TurnID
     ) async {
         let conversationID = activeThreadId
-        runtimeStatus = .ready
+        presentationViewModel.runtimeStatus = .ready
         error = nil
         let result = await responseCoordinator.performNative(
             displayText: displayText,
@@ -1434,7 +1417,7 @@ public final class ChatStore {
                 : nil,
             contextChanged: { [weak self] usage in
                 guard let self, self.activeBackend == .llamaServer else { return }
-                self.llamaContextUsage = usage
+                self.presentationViewModel.setLlamaContextUsage(usage)
             }
         )
         error = result.errorMessage

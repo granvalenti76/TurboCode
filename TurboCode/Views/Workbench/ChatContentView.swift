@@ -4,13 +4,14 @@ import SwiftUI
 
 struct ChatContentView: View {
     @Environment(ChatStore.self) private var chatStore
+    @Environment(ChatPresentationViewModel.self) private var presentation
     @Environment(SettingsStore.self) private var settings
 
     var body: some View {
         VStack(spacing: 0) {
             RuntimeBannerView()
 
-            if let error = chatStore.error {
+            if let error = presentation.errorMessage {
                 errorBanner(error)
             }
 
@@ -35,7 +36,7 @@ struct ChatContentView: View {
                 .textSelection(.enabled)
             Spacer(minLength: 0)
             Button {
-                chatStore.error = nil
+                presentation.errorMessage = nil
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .semibold))
@@ -79,9 +80,9 @@ struct ChatContentView: View {
             MessageTimelineView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay(alignment: .topTrailing) {
-                    if let notice = chatStore.localCompactionNotice {
+                    if let notice = presentation.localCompactionNotice {
                         LocalCompactionNoticeView(notice: notice) {
-                            chatStore.clearLocalCompactionNotice()
+                            presentation.clearCompactionNotice()
                         }
                         .padding(.top, 10)
                         .padding(.trailing, 14)

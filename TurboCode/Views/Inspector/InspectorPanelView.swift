@@ -453,6 +453,7 @@ private struct AgentActivityInspectorView: View {
     let activity: AgentActivity
 
     @Environment(ChatStore.self) private var chatStore
+    @Environment(ComposerViewModel.self) private var composer
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fullTaskPresented = false
     @State private var technicalResultPresented = false
@@ -890,7 +891,7 @@ private struct AgentActivityInspectorView: View {
             .controlSize(.regular)
             .disabled(
                 recovery.action.requiresComposer
-                    && !chatStore.composerInput
+                    && !composer.messageText
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .isEmpty
             )
@@ -903,7 +904,7 @@ private struct AgentActivityInspectorView: View {
         case .reviewChanges(let receiptID):
             chatStore.openActivityReceipt(receiptID)
         case .prepareRetry, .prepareReread, .runCoordinator:
-            guard chatStore.composerInput
+            guard composer.messageText
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .isEmpty else {
                 return
@@ -917,14 +918,14 @@ private struct AgentActivityInspectorView: View {
             }
             // Closing the inspector reveals the focused composer containing
             // the draft; sending remains an explicit user action.
-            chatStore.composerInput = draft
+            composer.messageText = draft
             chatStore.closeRightPanel()
         }
     }
 
     private func recoveryHelp(_ recovery: AgentRecoveryPresentation) -> String {
         if recovery.action.requiresComposer,
-           !chatStore.composerInput
+           !composer.messageText
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .isEmpty {
             return "Send or clear the current draft before preparing recovery"

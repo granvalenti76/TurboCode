@@ -12,6 +12,8 @@ enum ReasoningEffort: String, CaseIterable {
 
 struct InputFieldView: View {
     @Environment(ChatStore.self) private var chatStore
+    @Environment(ComposerViewModel.self) private var composer
+    @Environment(ChatPresentationViewModel.self) private var presentation
     @Environment(\.chatFontSize) private var chatFontSize
     @FocusState private var isFocused: Bool
     @State private var selectedSlashCommandIndex = 0
@@ -78,8 +80,8 @@ struct InputFieldView: View {
             TextField(
                 "What would you like to do in this project?",
                 text: Binding(
-                    get: { chatStore.composerInput },
-                    set: { chatStore.composerInput = $0 }
+                    get: { composer.messageText },
+                    set: { composer.messageText = $0 }
                 ),
                 axis: .vertical
             )
@@ -96,7 +98,7 @@ struct InputFieldView: View {
                         isFocused = true
                     }
                 )
-                .onChange(of: chatStore.composerInput) { oldValue, newValue in
+                .onChange(of: composer.messageText) { oldValue, newValue in
                     // A changed query describes a new result set; keeping the
                     // previous row selected could execute the wrong command.
                     selectedSlashCommandIndex = 0
@@ -133,7 +135,7 @@ struct InputFieldView: View {
                 }
 
                 Button {
-                    chatStore.composerInput = suggestion.insertion
+                    composer.messageText = suggestion.insertion
                     isFocused = true
                 } label: {
                     HStack(spacing: 10) {
@@ -207,19 +209,19 @@ struct InputFieldView: View {
             min(max(selectedSlashCommandIndex, 0), slashSuggestions.count - 1)
         ]
         guard suggestion.command != "/skill", suggestion.command != "/task" else {
-            chatStore.composerInput = suggestion.insertion
+            composer.messageText = suggestion.insertion
             isFocused = true
             return
         }
 
         let command = suggestion.command
-        chatStore.composerInput = ""
+        composer.reset()
         isFocused = false
         Task { await chatStore.sendMessage(command) }
     }
 
     private var slashSuggestions: [SlashCommandSuggestion] {
-        let input = chatStore.composerInput
+        let input = composer.messageText
         guard input.hasPrefix("/"), !input.contains("\n") else { return [] }
 
         if input.hasPrefix("/skill ") {
@@ -479,14 +481,14 @@ struct InputFieldView: View {
         .disabled(
             !chatStore.busy
                 && (
-                    chatStore.composerInput
+                    composer.messageText
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .isEmpty
-                    || chatStore.isIncompleteSkillCommand(chatStore.composerInput)
-                    || chatStore.isIncompleteTaskCommand(chatStore.composerInput)
+                    || chatStore.isIncompleteSkillCommand(composer.messageText)
+                    || chatStore.isIncompleteTaskCommand(composer.messageText)
                     || (
                         !chatStore.activeProfileCanSend
-                            && !chatStore.isLocalCommand(chatStore.composerInput)
+                            && !chatStore.isLocalCommand(composer.messageText)
                     )
                 )
         )
@@ -499,28 +501,28 @@ struct InputFieldView: View {
             Task { await chatStore.interrupt() }
             return
         }
-        let text = chatStore.composerInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = composer.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if chatStore.isIncompleteSkillCommand(text) {
-            chatStore.composerInput = "/skill "
+            composer.messageText = "/skill "
             isFocused = true
             return
         }
         if chatStore.isIncompleteTaskCommand(text) {
-            chatStore.composerInput = "/task "
+            composer.messageText = "/task "
             isFocused = true
             return
         }
         // Clear the shared draft before starting inference so recovery drafts
         // and ordinary composer input follow the same lifecycle.
-        chatStore.composerInput = ""
+        composer.reset()
         Task { await chatStore.sendMessage(text) }
     }
 
     private var sendButtonHelp: String {
         if chatStore.busy { return "Stop response" }
         if !chatStore.activeProfileCanSend
-            && !chatStore.isLocalCommand(chatStore.composerInput) {
+            && !chatStore.isLocalCommand(composer.messageText) {
             return "Wait for Codex to connect or sign in first"
         }
         return "Send message"
@@ -536,7 +538,7 @@ struct InputFieldView: View {
             Spacer()
 
             if chatStore.activeBackend == .llamaServer,
-               let contextUsage = chatStore.llamaContextUsage {
+               let contextUsage = presentation.llamaContextUsage {
                 llamaContextIndicator(contextUsage)
             }
         }

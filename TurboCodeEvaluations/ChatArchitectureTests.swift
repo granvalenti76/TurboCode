@@ -7,6 +7,39 @@ import Testing
 @MainActor
 @Suite("Chat architecture boundaries")
 struct ChatArchitectureTests {
+    @Test("Composer view model owns and resets transient input")
+    func composerProjectionOwnsDraftState() {
+        let composer = ComposerViewModel()
+        composer.messageText = "Inspect the runtime boundary"
+        composer.mode = .plan
+
+        #expect(composer.canSend)
+        composer.reset()
+        #expect(composer.messageText.isEmpty)
+        #expect(!composer.canSend)
+        #expect(composer.mode == .plan)
+    }
+
+    @Test("Presentation view model replaces and clears compaction notices")
+    func presentationProjectionOwnsTransientNotice() {
+        let presentation = ChatPresentationViewModel()
+        let first = LocalCompactionNotice(
+            sourceCharacters: 12_000,
+            retainedCharacters: 3_000
+        )
+        let replacement = LocalCompactionNotice(
+            sourceCharacters: 20_000,
+            retainedCharacters: 4_000
+        )
+
+        presentation.presentCompactionNotice(first)
+        presentation.presentCompactionNotice(replacement)
+        #expect(presentation.localCompactionNotice == replacement)
+
+        presentation.clearCompactionNotice()
+        #expect(presentation.localCompactionNotice == nil)
+    }
+
     @Test("Workbench profile presentation preserves the underlying route")
     func workbenchProfilePresentationIsModal() {
         let workbench = WorkbenchStore()

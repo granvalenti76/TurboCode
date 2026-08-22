@@ -4,11 +4,12 @@ import SwiftUI
 
 struct RuntimeBannerView: View {
     @Environment(ChatStore.self) private var chatStore
+    @Environment(ChatPresentationViewModel.self) private var presentation
 
     var body: some View {
         if chatStore.activeBackend == .codex {
             codexBanner
-        } else if chatStore.runtimeStatus != .ready {
+        } else if presentation.runtimeStatus != .ready {
             HStack(spacing: 8) {
                 Circle()
                     .fill(statusColor)
@@ -17,9 +18,9 @@ struct RuntimeBannerView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                if chatStore.runtimeStatus == .disconnected {
+                if presentation.runtimeStatus == .disconnected {
                     Button("Connect") {
-                        chatStore.runtimeStatus = .connecting
+                        presentation.runtimeStatus = .connecting
                     }
                     .font(.caption)
                     .buttonStyle(.borderedProminent)
@@ -108,7 +109,7 @@ struct RuntimeBannerView: View {
     }
 
     private var statusColor: Color {
-        switch chatStore.runtimeStatus {
+        switch presentation.runtimeStatus {
         case .disconnected: return .red
         case .connecting: return .orange
         case .ready: return .green
@@ -117,7 +118,7 @@ struct RuntimeBannerView: View {
     }
 
     private var statusText: String {
-        switch chatStore.runtimeStatus {
+        switch presentation.runtimeStatus {
         case .disconnected: return "Runtime disconnected"
         case .connecting: return "Connecting to runtime..."
         case .ready: return ""

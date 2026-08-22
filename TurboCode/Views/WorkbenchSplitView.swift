@@ -128,6 +128,11 @@ struct WorkbenchSplitView: View {
                 )
             }
         }
+        // The workbench is the reusable UI composition boundary used by the
+        // app, previews, and hosted layout tests. Child views observe narrow
+        // projections even when no TurboCodeApp scene constructed the shell.
+        .environment(chatStore.composerViewModel)
+        .environment(chatStore.presentationViewModel)
     }
 
     /// Keeps the terminal at the workbench-layout level rather than embedding

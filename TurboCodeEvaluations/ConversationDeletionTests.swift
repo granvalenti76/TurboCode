@@ -41,7 +41,10 @@ struct ConversationDeletionTests {
         await store.deleteThread(id: conversation.id)
 
         #expect(store.threads.map(\.id) == [conversation.id])
-        #expect(store.error?.contains("Could not delete the conversation") == true)
+        #expect(
+            store.presentationViewModel.errorMessage?
+                .contains("Could not delete the conversation") == true
+        )
     }
 
     @Test("Deleting the active conversation restores the next timeline")
