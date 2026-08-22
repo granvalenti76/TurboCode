@@ -1,7 +1,7 @@
 import Foundation
 
 /// Immutable presentation data for one destructive operation awaiting review.
-public struct ApprovalRequest: Sendable {
+nonisolated public struct ApprovalRequest: Sendable {
     public let id: String
     public let operation: String
     public let path: String

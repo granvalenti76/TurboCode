@@ -507,9 +507,8 @@ extension CodexRuntimeStore: CodexTurnRunning {}
 /// Codex still owns thread setup, streaming, dynamic tool execution and RPC
 /// resolution. This type only translates those callbacks into the harness
 /// lifecycle contract and maps terminal errors to ``TurnOutcome``.
-@MainActor
-final class CodexBackendSession: BackendSession {
-    let backend: ModelBackend = .codex
+actor CodexBackendSession: BackendSession {
+    nonisolated let backend: ModelBackend = .codex
 
     private let runtime: any CodexTurnRunning
     private let turboThreadID: String
@@ -726,7 +725,7 @@ final class CodexBackendSession: BackendSession {
         await runtime.interrupt()
     }
 
-    private static func toolCall(
+    nonisolated private static func toolCall(
         from call: CodexDynamicToolCall,
         turnID: TurnID,
         startedAt: Date = Date()
@@ -740,7 +739,7 @@ final class CodexBackendSession: BackendSession {
         )
     }
 
-    private static func toolResult(
+    nonisolated private static func toolResult(
         from result: CodexDynamicToolResult,
         call: CodexDynamicToolCall,
         turnID: TurnID,
@@ -759,7 +758,7 @@ final class CodexBackendSession: BackendSession {
         )
     }
 
-    private static func jsonString(_ value: CodexJSONValue) -> String {
+    nonisolated private static func jsonString(_ value: CodexJSONValue) -> String {
         guard let data = try? JSONEncoder().encode(value),
               let string = String(data: data, encoding: .utf8) else {
             return "{}"

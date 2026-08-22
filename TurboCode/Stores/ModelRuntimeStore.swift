@@ -371,6 +371,7 @@ final class ModelRuntimeStore {
             workspaceRoot: workspaceRoot,
             agentTuning: agentTuning,
             availableSkills: sessionSkills,
+            documentationStore: .live,
             activeDynamicProfile: activeDynamicProfile,
             reasoningEffort: reasoningEffort,
             delegateReasoningEffort: reasoningEffort(for: delegateModel),

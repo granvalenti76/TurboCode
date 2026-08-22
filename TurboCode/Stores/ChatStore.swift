@@ -617,7 +617,7 @@ public final class ChatStore {
             return
         }
 
-        guard let transcript = sessionCoordinator.foundationModelsTranscript else {
+        guard let transcript = await sessionCoordinator.foundationModelsTranscript() else {
             error = "The active model session has no transcript checkpoint."
             return
         }

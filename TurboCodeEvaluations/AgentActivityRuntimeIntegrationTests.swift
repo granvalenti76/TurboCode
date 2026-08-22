@@ -130,6 +130,17 @@ struct AgentActivityRuntimeIntegrationTests {
         #expect(result.outcome == .succeeded)
         #expect(received.count == 3)
         #expect(received.allSatisfy { $0.turnID == turnID })
+        let lifecycle = received.map { event -> String in
+            switch event {
+            case .started: "started"
+            case .phaseChanged(_, .streaming, _): "streaming"
+            case .completed: "completed"
+            default: "unexpected"
+            }
+        }
+        // Awaited emission provides backpressure across actors: terminal state
+        // cannot overtake admission or the first streaming transition.
+        #expect(lifecycle == ["started", "streaming", "completed"])
     }
 
     @Test("Native adapter preserves the lifecycle across the provider matrix")

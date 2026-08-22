@@ -143,7 +143,7 @@ final class MessageSendCoordinator {
 
     private func compactOnDeviceContextIfNeeded() async {
         guard modelRuntime.activeBackend == .foundationApple else { return }
-        guard let transcript = llmRuntime.foundationModelsTranscript else {
+        guard let transcript = await llmRuntime.foundationModelsTranscript() else {
             return
         }
         let turnCount = SessionRebuildHistory.userTurnCount(in: transcript)

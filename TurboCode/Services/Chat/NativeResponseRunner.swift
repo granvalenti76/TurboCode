@@ -7,8 +7,7 @@ import FoundationModelsUtilities
 /// The runner owns provider streaming and diagnostics only. It deliberately
 /// does not know about conversations, timeline blocks, workspace mutations, or
 /// navigation; ChatStore decides how the returned outcome is presented.
-@MainActor
-final class NativeResponseRunner: NativeResponseRunning {
+nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
     /// Normalizes reasoning updates that may arrive either as a cumulative
     /// snapshot or as an incremental fragment, depending on the provider
     /// bridge and Foundation Models runtime.
@@ -101,25 +100,13 @@ final class NativeResponseRunner: NativeResponseRunning {
         if request.backend == .llamaServer,
            let reasoningStreamRelay = request.reasoningStreamRelay {
             reasoningRelayID = await reasoningStreamRelay.install { event in
-                guard relayProjection.isActive else { return }
+                guard await relayProjection.isActive else { return }
                 await events.liveReasoningChanged(
-                    relayProjection.append(event.delta)
+                    await relayProjection.append(event.delta)
                 )
             }
         } else {
             reasoningRelayID = nil
-        }
-
-        defer {
-            relayProjection.deactivate()
-            if let reasoningRelayID {
-                Task {
-                    guard let reasoningStreamRelay = request.reasoningStreamRelay else {
-                        return
-                    }
-                    await reasoningStreamRelay.remove(reasoningRelayID)
-                }
-            }
         }
 
         do {
@@ -221,7 +208,7 @@ final class NativeResponseRunner: NativeResponseRunning {
         // transcript snapshot. Preserve the request-scoped transport projection
         // so the visible partial response remains complete.
         if reasoning.isEmpty {
-            reasoning = relayProjection.text
+            reasoning = await relayProjection.text
         }
 
         if request.backend == .llamaServer,
@@ -273,6 +260,12 @@ final class NativeResponseRunner: NativeResponseRunning {
                 error: recordedError
             )
         }
+        // Stop transport projection before returning so no delayed reasoning
+        // delta can cross the terminal event owned by the backend session.
+        await relayProjection.deactivate()
+        if let reasoningRelayID, let relay = request.reasoningStreamRelay {
+            await relay.remove(reasoningRelayID)
+        }
         await events.diagnosticsChanged(nil)
         return result
     }
@@ -281,8 +274,7 @@ final class NativeResponseRunner: NativeResponseRunning {
 /// Reconstructs the cumulative live reasoning value from request-scoped
 /// transport deltas. The projection is deliberately separate from the relay;
 /// the vendor emits ordered events while the app owns presentation text.
-@MainActor
-private final class ReasoningStreamProjection {
+private actor ReasoningStreamProjection {
     private(set) var text = ""
     private(set) var isActive = true
 
@@ -329,8 +321,7 @@ private enum LlamaServerRuntimeProbe {
 /// Production uses ``NativeResponseRunner``. Keeping the coordinator dependent
 /// on this narrow protocol lets release scenarios exercise the complete chat,
 /// delegation, and cancellation path without starting a variable model stream.
-@MainActor
-protocol NativeResponseRunning {
+nonisolated protocol NativeResponseRunning: Sendable {
     func run(
         session: LanguageModelSession,
         request: NativeResponseRunner.Request,
@@ -343,9 +334,8 @@ protocol NativeResponseRunning {
 /// The adapter owns only lifecycle translation. Foundation Models session
 /// construction, streaming guards, diagnostics, and provider-specific
 /// reasoning behavior remain in ``NativeResponseRunner`` and its caller.
-@MainActor
-final class NativeBackendSession: BackendSession {
-    let backend: ModelBackend
+actor NativeBackendSession: BackendSession {
+    nonisolated let backend: ModelBackend
 
     private let runner: any NativeResponseRunning
     private let session: LanguageModelSession
@@ -407,7 +397,9 @@ final class NativeBackendSession: BackendSession {
         let contextChanged = self.contextChanged
         let approvalRequested = self.approvalRequested
 
-        let task = Task { @MainActor in
+        // The child inherits this actor only long enough to capture immutable
+        // request state; provider streaming is not pinned to MainActor.
+        let task = Task {
             await events.emit(.started(request))
             await events.emit(
                 .phaseChanged(
@@ -475,7 +467,7 @@ final class NativeBackendSession: BackendSession {
         activeRun?.cancel()
     }
 
-    private static func result(
+    nonisolated private static func result(
         from outcome: NativeResponseRunner.Outcome
     ) -> BackendSessionResult {
         switch outcome {

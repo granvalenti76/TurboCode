@@ -30,8 +30,7 @@ enum FoundationModelsCapabilities {
 /// This type is deliberately not observable. UI-facing stores may project model
 /// configuration and transcript snapshots, but provider objects live here so a
 /// view update cannot replace or retain an in-flight session accidentally.
-@MainActor
-final class FoundationModelsSessionRuntime {
+actor FoundationModelsSessionRuntime {
     private(set) var session: LanguageModelSession
     private var reasoningStreamRelay: ReasoningStreamRelay
 
@@ -56,7 +55,7 @@ final class FoundationModelsSessionRuntime {
     /// use the configuration initializer so provider construction stays here.
     init(
         backend: ModelBackend,
-        modelBuilder: (ReasoningStreamRelay?) -> any LanguageModel
+        modelBuilder: @Sendable (ReasoningStreamRelay?) -> any LanguageModel
     ) {
         let relay = ReasoningStreamRelay()
         reasoningStreamRelay = relay
@@ -71,12 +70,16 @@ final class FoundationModelsSessionRuntime {
         session.transcript
     }
 
-    /// Exposes the active session-scoped relay only to the provider adapter.
-    /// Other backends must not install a sink on Llama's transport channel.
-    func activeReasoningStreamRelay(
+    /// Borrows one coherent session generation. Returning the session and its
+    /// relay together prevents an adapter from observing a rebuild between two
+    /// independent actor reads.
+    func resources(
         for backend: ModelBackend
-    ) -> ReasoningStreamRelay? {
-        backend == .llamaServer ? reasoningStreamRelay : nil
+    ) -> (session: LanguageModelSession, reasoningRelay: ReasoningStreamRelay?) {
+        (
+            session,
+            backend == .llamaServer ? reasoningStreamRelay : nil
+        )
     }
 
     /// Builds the next session and relay as one replacement unit.

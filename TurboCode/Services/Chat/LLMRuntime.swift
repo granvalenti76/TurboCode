@@ -43,18 +43,18 @@ struct CodexLLMExecutionConfiguration {
 /// The protocol keeps construction injectable for characterization tests while
 /// preventing `ChatResponseCoordinator` from importing adapter initializers.
 @MainActor
-protocol LLMBackendSessionBuilding: AnyObject {
+protocol LLMBackendSessionBuilding: AnyObject, Sendable {
     func makeNativeSession(
         request: TurnRequest,
         configuration: NativeLLMExecutionConfiguration,
         session: LanguageModelSession,
         reasoningStreamRelay: ReasoningStreamRelay?
-    ) -> any BackendSession
+    ) async -> any BackendSession
 
     func makeCodexSession(
         request: TurnRequest,
         configuration: CodexLLMExecutionConfiguration
-    ) -> any BackendSession
+    ) async -> any BackendSession
 
     func recordCodexFailure(_ failure: TurnFailure)
 }
@@ -83,7 +83,7 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
         configuration: NativeLLMExecutionConfiguration,
         session: LanguageModelSession,
         reasoningStreamRelay: ReasoningStreamRelay?
-    ) -> any BackendSession {
+    ) async -> any BackendSession {
         NativeBackendSession(
             backend: request.backend,
             runner: nativeRunner,
@@ -101,7 +101,7 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
     func makeCodexSession(
         request: TurnRequest,
         configuration: CodexLLMExecutionConfiguration
-    ) -> any BackendSession {
+    ) async -> any BackendSession {
         CodexBackendSession(
             runtime: codexRuntime,
             turboThreadID: configuration.turboThreadID,
@@ -138,12 +138,10 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
 /// Keeping those roles distinct prevents presentation code from becoming a
 /// second cancellation or release authority.
 ///
-/// The service is temporarily MainActor-isolated because the existing backend
-/// adapters are MainActor types. A later 0.3.7 slice will move their concrete
-/// session work off the UI actor while preserving this API and its single-owner
-/// invariant.
-@MainActor
-final class LLMRuntime {
+/// Actor isolation is the execution lock: admission, cancellation, rebuild,
+/// and transcript access are serialized by one owner without introducing a
+/// second mutex or permitting presentation code to mutate lifecycle state.
+actor LLMRuntime {
     private let sessionFactory: (any LLMBackendSessionBuilding)?
     /// The execution runtime is the sole long-lived owner of the active
     /// Foundation Models session and relay. Factories receive borrowed values
@@ -187,7 +185,7 @@ final class LLMRuntime {
         using session: any BackendSession,
         events: BackendSessionEvents
     ) async -> BackendSessionResult {
-        guard activeSession == nil, !isDiagnosticExecutionActive else {
+        guard activeTurnID == nil, !isDiagnosticExecutionActive else {
             return rejectedResult(
                 code: "llm_runtime.busy",
                 message: "Another LLM backend session is still active."
@@ -200,6 +198,9 @@ final class LLMRuntime {
             )
         }
 
+        // Reserve the turn before the adapter begins. Provider factories may
+        // require an actor hop, and this reservation prevents actor reentrancy
+        // from admitting a rebuild or competing request during construction.
         activeTurnID = request.id
         activeSession = session
         defer { releaseSession(for: request.id) }
@@ -221,24 +222,38 @@ final class LLMRuntime {
                 message: "No LLM backend session factory is configured."
             )
         }
-        return await execute(
-            request: request,
-            using: sessionFactory.makeNativeSession(
-                request: request,
-                configuration: configuration,
-                session: foundationModelsRuntime.session,
-                reasoningStreamRelay: foundationModelsRuntime
-                    .activeReasoningStreamRelay(for: request.backend)
-            ),
-            events: events
+        guard reserveTurn(request.id) else {
+            return rejectedResult(
+                code: "llm_runtime.busy",
+                message: "Another LLM backend session is still active."
+            )
+        }
+        defer { releaseSession(for: request.id) }
+        let resources = await foundationModelsRuntime.resources(
+            for: request.backend
         )
+        let session = await sessionFactory.makeNativeSession(
+            request: request,
+            configuration: configuration,
+            session: resources.session,
+            reasoningStreamRelay: resources.reasoningRelay
+        )
+        guard session.backend == request.backend else {
+            return rejectedResult(
+                code: "llm_runtime.backend_mismatch",
+                message: "The selected backend session does not match the admitted turn."
+            )
+        }
+        activeSession = session
+        return await session.run(request: request, events: events)
     }
 
     /// Returns a value checkpoint for persistence without exposing the concrete
     /// session that produced it. Codex owns its rollout separately and callers
     /// intentionally omit this checkpoint for Codex conversations.
-    var foundationModelsTranscript: Transcript? {
-        foundationModelsRuntime?.transcript
+    func foundationModelsTranscript() async -> Transcript? {
+        guard let foundationModelsRuntime else { return nil }
+        return await foundationModelsRuntime.transcript
     }
 
     /// Replaces Foundation Models session infrastructure only at an
@@ -252,22 +267,23 @@ final class LLMRuntime {
         discardingCapabilityContext: Bool = false,
         restoringHistory: [Transcript.Entry]? = nil,
         events: ModelSessionEvents
-    ) -> Bool {
+    ) async -> Bool {
         // A configuration transition may replace the stored generation only
         // after the per-turn adapter has unwound. The adapter retains its own
         // session reference, but rejecting overlap also keeps transcript and
         // relay selection deterministic for the next admitted turn.
-        guard activeSession == nil,
+        guard activeTurnID == nil,
               !isDiagnosticExecutionActive,
               let foundationModelsRuntime else {
             return false
         }
+        let transcript = await foundationModelsRuntime.transcript
         let history = restoringHistory ?? SessionRebuildHistory.prepare(
-            foundationModelsRuntime.transcript,
+            transcript,
             keepingHistory: keepingHistory,
             discardingCapabilityContext: discardingCapabilityContext
         )
-        foundationModelsRuntime.rebuild(
+        await foundationModelsRuntime.rebuild(
             configuration: configuration,
             history: history,
             events: events
@@ -283,7 +299,7 @@ final class LLMRuntime {
         configuration: FoundationModelsBootstrapConfiguration,
         reasoningEffort: ReasoningEffort?
     ) async -> String {
-        guard activeSession == nil, !diagnosticExecutionActive else {
+        guard activeTurnID == nil, !diagnosticExecutionActive else {
             return "Benchmark unavailable while another LLM operation is active."
         }
         guard configuration.backend != .codex else {
@@ -324,16 +340,27 @@ final class LLMRuntime {
                 message: "No LLM backend session factory is configured."
             )
         }
-        let result = await execute(
+        guard reserveTurn(request.id) else {
+            return rejectedResult(
+                code: "llm_runtime.busy",
+                message: "Another LLM backend session is still active."
+            )
+        }
+        defer { releaseSession(for: request.id) }
+        let session = await sessionFactory.makeCodexSession(
             request: request,
-            using: sessionFactory.makeCodexSession(
-                request: request,
-                configuration: configuration
-            ),
-            events: events
+            configuration: configuration
         )
+        guard session.backend == request.backend else {
+            return rejectedResult(
+                code: "llm_runtime.backend_mismatch",
+                message: "The selected backend session does not match the admitted turn."
+            )
+        }
+        activeSession = session
+        let result = await session.run(request: request, events: events)
         if case .failed(let failure) = result.outcome {
-            sessionFactory.recordCodexFailure(failure)
+            await sessionFactory.recordCodexFailure(failure)
         }
         return result
     }
@@ -350,6 +377,14 @@ final class LLMRuntime {
         guard activeTurnID == turnID else { return }
         activeSession = nil
         activeTurnID = nil
+    }
+
+    private func reserveTurn(_ turnID: TurnID) -> Bool {
+        guard activeTurnID == nil, !isDiagnosticExecutionActive else {
+            return false
+        }
+        activeTurnID = turnID
+        return true
     }
 
     /// Release builds have no diagnostic execution path, so the shared gate is

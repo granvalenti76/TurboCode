@@ -11,7 +11,7 @@ import FoundationModelsUtilities
 /// registers `onToolCall` / `onToolOutput` callbacks that fire on the
 /// orchestrator's `call_powerful_model` invocations — no manual transcript
 /// scanning required.
-struct TurboCodeDynamicProfile: LanguageModelSession.DynamicProfile {
+nonisolated struct TurboCodeDynamicProfile: LanguageModelSession.DynamicProfile {
     let instructions: String
     let tools: [any Tool]
     let model: any LanguageModel

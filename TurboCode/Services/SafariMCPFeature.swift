@@ -3,10 +3,10 @@ import FoundationModelsUtilities
 /// Product-level metadata for the experimental Safari integration.
 /// Prompt-based activation is intentional: it appends the browser guidance as
 /// tool output instead of mutating the session's leading instructions entry.
-enum SafariMCPFeature {
+nonisolated enum SafariMCPFeature {
     static let skillName = DynamicProfileRuntimeSelection.safariMCPSkillName
 
-    nonisolated static let prompt = """
+    static let prompt = """
     Safari MCP is enabled for this session. Use safari_mcp with operation
     list_tools before the first browser action, then operation call with the
     exact discovered tool name and a JSON object in argumentsJSON. At the
@@ -18,9 +18,13 @@ enum SafariMCPFeature {
     reports that approval is required.
     """
 
-    static let skill = Skill(
-        name: skillName,
-        description: "Use Safari through the explicitly enabled safaridriver MCP bridge.",
-        prompt: prompt
-    )
+    /// `Skill` is not Sendable, so construct a profile-owned value instead of
+    /// sharing one mutable-capable instance across concurrent session actors.
+    static var skill: Skill {
+        Skill(
+            name: skillName,
+            description: "Use Safari through the explicitly enabled safaridriver MCP bridge.",
+            prompt: prompt
+        )
+    }
 }

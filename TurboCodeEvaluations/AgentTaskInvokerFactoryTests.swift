@@ -43,6 +43,7 @@ struct AgentTaskInvokerFactoryTests {
             workspaceRoot: "/tmp/workspace",
             agentTuning: .default,
             availableSkills: [],
+            documentationStore: .live,
             activeDynamicProfile: nil,
             reasoningEffort: nil,
             delegateReasoningEffort: nil,

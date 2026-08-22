@@ -158,7 +158,7 @@ final class IndependentTaskCoordinator {
             ChatBlock(kind: .user, text: command),
             ChatBlock(kind: .assistant, text: response)
         ])
-        guard let transcript = sessions.foundationModelsTranscript else {
+        guard let transcript = await sessions.foundationModelsTranscript() else {
             return
         }
         let existing = SessionRebuildHistory.prepare(

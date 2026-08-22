@@ -28,8 +28,8 @@ final class ConversationSessionCoordinator {
 
     /// Value checkpoint used by context policies that must inspect the active
     /// Foundation Models history without retaining its owning session runtime.
-    var foundationModelsTranscript: Transcript? {
-        llmRuntime.foundationModelsTranscript
+    func foundationModelsTranscript() async -> Transcript? {
+        await llmRuntime.foundationModelsTranscript()
     }
 
     /// Captures all mutable MainActor values before awaiting disk I/O. The
@@ -43,15 +43,16 @@ final class ConversationSessionCoordinator {
             return
         }
         let backend = modelRuntime.activeBackend
+        let transcript = backend == .codex
+            ? nil
+            : await llmRuntime.foundationModelsTranscript()
         let snapshot = ConversationSnapshot(
             conversation: conversation,
             modelBackend: modelRuntime.persistedModelIdentifier,
             blocks: timeline.blocks,
             // Codex persists its own rollout. Saving an unrelated Foundation
             // Models transcript would contaminate a later Codex restoration.
-            transcript: backend == .codex
-                ? nil
-                : llmRuntime.foundationModelsTranscript
+            transcript: transcript
         )
 
         do {

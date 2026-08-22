@@ -3,8 +3,7 @@ import FoundationModels
 /// Converts the provider-neutral product setting at the Foundation Models
 /// adapter boundary. Core and observable configuration must not depend on
 /// transport-specific reasoning option types.
-@MainActor
-enum FoundationModelsReasoningLevel {
+nonisolated enum FoundationModelsReasoningLevel {
     static func resolve(
         _ effort: ReasoningEffort?
     ) -> ContextOptions.ReasoningLevel? {

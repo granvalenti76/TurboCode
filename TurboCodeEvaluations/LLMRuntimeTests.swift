@@ -20,16 +20,16 @@ struct LLMRuntimeTests {
             )
         }
 
-        await Task.yield()
-        #expect(runtime.hasActiveSession)
-        #expect(runtime.ownsSession(for: turnID))
+        await session.waitUntilStarted()
+        #expect(await runtime.hasActiveSession)
+        #expect(await runtime.ownsSession(for: turnID))
 
-        session.complete(with: .succeeded)
+        await session.complete(with: .succeeded)
         let result = await task.value
 
         #expect(result.outcome == .succeeded)
-        #expect(!runtime.hasActiveSession)
-        #expect(!runtime.ownsSession(for: turnID))
+        #expect(await !runtime.hasActiveSession)
+        #expect(await !runtime.ownsSession(for: turnID))
     }
 
     @Test("Runtime interruption targets the owning turn and waits for unwind")
@@ -45,18 +45,18 @@ struct LLMRuntimeTests {
             )
         }
 
-        await Task.yield()
+        await session.waitUntilStarted()
         await runtime.interrupt(turnID: TurnID(rawValue: "stale-turn"))
-        #expect(!session.wasInterrupted)
-        #expect(runtime.hasActiveSession)
+        #expect(await !session.wasInterrupted)
+        #expect(await runtime.hasActiveSession)
 
         await runtime.interrupt(turnID: turnID)
-        #expect(session.wasInterrupted)
+        #expect(await session.wasInterrupted)
         // `interrupt` resolves the adapter's run, after which `execute` owns
         // the final release. The UI cannot clear this state independently.
         let result = await task.value
         #expect(result.outcome == .cancelled(reason: "Interrupted by test."))
-        #expect(!runtime.hasActiveSession)
+        #expect(await !runtime.hasActiveSession)
     }
 
     @Test("Runtime rejects competing and mismatched backend sessions")
@@ -71,7 +71,7 @@ struct LLMRuntimeTests {
                 events: .none
             )
         }
-        await Task.yield()
+        await activeSession.waitUntilStarted()
 
         let competing = await runtime.execute(
             request: request(
@@ -83,7 +83,7 @@ struct LLMRuntimeTests {
         )
         #expect(failureCode(in: competing) == "llm_runtime.busy")
 
-        activeSession.complete(with: .succeeded)
+        await activeSession.complete(with: .succeeded)
         _ = await activeTask.value
 
         let mismatch = await runtime.execute(
@@ -95,7 +95,7 @@ struct LLMRuntimeTests {
             events: .none
         )
         #expect(failureCode(in: mismatch) == "llm_runtime.backend_mismatch")
-        #expect(!runtime.hasActiveSession)
+        #expect(await !runtime.hasActiveSession)
     }
 
     @Test("Runtime factory builds providers and records Codex failure state")
@@ -192,7 +192,7 @@ struct LLMRuntimeTests {
         let firstSession = try #require(factory.nativeProviderSessions.last)
         let firstRelay = try #require(factory.nativeReasoningRelays.last ?? nil)
 
-        #expect(runtime.rebuildFoundationModelsSession(
+        #expect(await runtime.rebuildFoundationModelsSession(
             configuration: Self.llamaSessionConfiguration,
             keepingHistory: false,
             events: Self.noopModelSessionEvents
@@ -210,7 +210,7 @@ struct LLMRuntimeTests {
 
         #expect(firstSession !== secondSession)
         #expect(firstRelay !== secondRelay)
-        #expect(runtime.foundationModelsTranscript != nil)
+        #expect(await runtime.foundationModelsTranscript() != nil)
     }
 
     @Test("Runtime rejects Foundation Models rebuild while an adapter is active")
@@ -236,16 +236,53 @@ struct LLMRuntimeTests {
                 events: .none
             )
         }
-        await Task.yield()
+        await suspended.waitUntilStarted()
 
-        #expect(!runtime.rebuildFoundationModelsSession(
+        #expect(await !runtime.rebuildFoundationModelsSession(
             configuration: Self.llamaSessionConfiguration,
             keepingHistory: false,
             events: Self.noopModelSessionEvents
         ))
 
-        suspended.complete(with: .succeeded)
+        await suspended.complete(with: .succeeded)
         _ = await task.value
+    }
+
+    @Test("Runtime reserves admission while a provider adapter is being built")
+    func reservesAdmissionAcrossFactoryHop() async {
+        let factory = RecordingBackendSessionFactory(
+            nativeSession: CompletingBackendSession(backend: .llamaServer),
+            codexSession: CompletingBackendSession(backend: .codex),
+            suspendsNativeBuild: true
+        )
+        let runtime = LLMRuntime(
+            sessionFactory: factory,
+            foundationModelsBootstrap: FoundationModelsBootstrapConfiguration(
+                backend: .llamaServer,
+                usesSystemModel: true,
+                remoteModel: .fallbackLlama
+            )
+        )
+        let task = Task { @MainActor in
+            await runtime.executeNative(
+                request: request(
+                    id: TurnID(rawValue: "foundation-build-reservation"),
+                    backend: .llamaServer
+                ),
+                configuration: nativeConfiguration,
+                events: .none
+            )
+        }
+        await factory.waitForNativeBuildStart()
+
+        #expect(await !runtime.rebuildFoundationModelsSession(
+            configuration: Self.llamaSessionConfiguration,
+            keepingHistory: false,
+            events: Self.noopModelSessionEvents
+        ))
+
+        factory.resumeNativeBuild()
+        #expect(await task.value.outcome == .succeeded)
     }
 
     private var nativeConfiguration: NativeLLMExecutionConfiguration {
@@ -276,6 +313,7 @@ struct LLMRuntimeTests {
             workspaceRoot: FileManager.default.temporaryDirectory.path,
             agentTuning: .default,
             availableSkills: [],
+            documentationStore: .live,
             activeDynamicProfile: nil,
             reasoningEffort: nil,
             delegateReasoningEffort: nil,
@@ -303,10 +341,11 @@ struct LLMRuntimeTests {
     }
 }
 
-@MainActor
-private final class SuspendedBackendSession: BackendSession {
-    let backend: ModelBackend
+private actor SuspendedBackendSession: BackendSession {
+    nonisolated let backend: ModelBackend
     private var continuation: CheckedContinuation<BackendSessionResult, Never>?
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var hasStarted = false
     private(set) var wasInterrupted = false
 
     init(backend: ModelBackend) {
@@ -317,8 +356,21 @@ private final class SuspendedBackendSession: BackendSession {
         request: TurnRequest,
         events: BackendSessionEvents
     ) async -> BackendSessionResult {
-        await withCheckedContinuation { continuation in
+        hasStarted = true
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        return await withCheckedContinuation { continuation in
             self.continuation = continuation
+        }
+    }
+
+    /// Synchronizes ownership assertions with actual adapter admission instead
+    /// of relying on scheduler timing after the runtime moved to its own actor.
+    func waitUntilStarted() async {
+        guard !hasStarted else { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
         }
     }
 
@@ -336,8 +388,7 @@ private final class SuspendedBackendSession: BackendSession {
     }
 }
 
-@MainActor
-private final class CompletingBackendSession: BackendSession {
+nonisolated private final class CompletingBackendSession: BackendSession, Sendable {
     let backend: ModelBackend
     let outcome: TurnOutcome
 
@@ -365,13 +416,18 @@ private final class RecordingBackendSessionFactory: LLMBackendSessionBuilding {
     private(set) var recordedCodexFailure: TurnFailure?
     private(set) var nativeProviderSessions: [LanguageModelSession] = []
     private(set) var nativeReasoningRelays: [ReasoningStreamRelay?] = []
+    private let suspendsNativeBuild: Bool
+    private var nativeBuildStarted = false
+    private var nativeBuildContinuation: CheckedContinuation<Void, Never>?
 
     init(
         nativeSession: any BackendSession,
-        codexSession: any BackendSession
+        codexSession: any BackendSession,
+        suspendsNativeBuild: Bool = false
     ) {
         self.nativeSession = nativeSession
         self.codexSession = codexSession
+        self.suspendsNativeBuild = suspendsNativeBuild
     }
 
     func makeNativeSession(
@@ -379,7 +435,13 @@ private final class RecordingBackendSessionFactory: LLMBackendSessionBuilding {
         configuration: NativeLLMExecutionConfiguration,
         session: LanguageModelSession,
         reasoningStreamRelay: ReasoningStreamRelay?
-    ) -> any BackendSession {
+    ) async -> any BackendSession {
+        nativeBuildStarted = true
+        if suspendsNativeBuild {
+            await withCheckedContinuation { continuation in
+                nativeBuildContinuation = continuation
+            }
+        }
         nativeBuildCount += 1
         nativeProviderSessions.append(session)
         nativeReasoningRelays.append(reasoningStreamRelay)
@@ -389,12 +451,24 @@ private final class RecordingBackendSessionFactory: LLMBackendSessionBuilding {
     func makeCodexSession(
         request: TurnRequest,
         configuration: CodexLLMExecutionConfiguration
-    ) -> any BackendSession {
+    ) async -> any BackendSession {
         codexBuildCount += 1
         return codexSession
     }
 
     func recordCodexFailure(_ failure: TurnFailure) {
         recordedCodexFailure = failure
+    }
+
+    func waitForNativeBuildStart() async {
+        while !nativeBuildStarted {
+            await Task.yield()
+        }
+    }
+
+    func resumeNativeBuild() {
+        let continuation = nativeBuildContinuation
+        nativeBuildContinuation = nil
+        continuation?.resume()
     }
 }

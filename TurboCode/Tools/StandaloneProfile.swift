@@ -6,7 +6,7 @@ import FoundationModelsUtilities
 
 /// DynamicProfile for standalone mode with direct tools, disk-backed skills,
 /// model selection, and reasoning level control.
-struct StandaloneProfile: LanguageModelSession.DynamicProfile {
+nonisolated struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let instructions: String
     let diskSkills: [TurboCodeSkillDefinition]
     let workspaceRoot: String

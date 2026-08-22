@@ -1,11 +1,11 @@
 import Foundation
 
-/// MainActor event sink used by the application's in-process provider adapters.
+/// Ordered event sink used by the application's in-process provider adapters.
 ///
 /// The normalized event values belong to TurboCodeCore, but current Foundation
-/// Models and Codex adapters still publish through application-owned MainActor
-/// coordinators. Keeping this bridge outside the core makes that temporary
-/// isolation dependency visible until the execution runtime removes it.
+/// Presentation projection remains an explicit output port. Its closure is
+/// MainActor-isolated because the current consumer reduces events into UI state,
+/// while the session invoking it is free to execute on its own actor.
 nonisolated struct BackendSessionEvents: Sendable {
     static let none = BackendSessionEvents()
 
@@ -28,8 +28,7 @@ nonisolated struct BackendSessionEvents: Sendable {
 /// existing Foundation Models and Codex runners retain their native streaming
 /// and tool protocols. The port stays outside TurboCodeCore while its isolation
 /// still depends on the application's MainActor presentation bridge.
-@MainActor
-protocol BackendSession: AnyObject {
+nonisolated protocol BackendSession: AnyObject, Sendable {
     var backend: ModelBackend { get }
 
     func run(

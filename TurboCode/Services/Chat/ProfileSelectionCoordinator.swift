@@ -338,7 +338,7 @@ final class ProfileSelectionCoordinator {
         let configuration = modelRuntime.makeSessionConfiguration(
             workspaceRoot: workspace.root
         )
-        llmRuntime.rebuildFoundationModelsSession(
+        await llmRuntime.rebuildFoundationModelsSession(
             configuration: configuration,
             keepingHistory: keepingHistory,
             discardingCapabilityContext: discardingCapabilityContext,

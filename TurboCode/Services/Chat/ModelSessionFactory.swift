@@ -2,7 +2,7 @@ import Foundation
 import FoundationModels
 import FoundationModelsUtilities
 
-struct ModelSessionConfiguration {
+nonisolated struct ModelSessionConfiguration: Sendable {
     let backend: ModelBackend
     let activeRemoteModel: RemoteModelConfig?
     let delegateRemoteModel: RemoteModelConfig
@@ -10,6 +10,9 @@ struct ModelSessionConfiguration {
     let workspaceRoot: String
     let agentTuning: AgentTuningConfig
     let availableSkills: [TurboCodeSkillDefinition]
+    /// Pre-resolved on the application actor so concurrent session assembly
+    /// never reaches through `TurboCodeConfig.shared` for a global dependency.
+    let documentationStore: ProductDocumentationStore
     let activeDynamicProfile: UserDynamicProfile?
     let reasoningEffort: ReasoningEffort?
     let delegateReasoningEffort: ReasoningEffort?
@@ -22,7 +25,7 @@ struct ModelSessionConfiguration {
     let workspaceInstructions: WorkspaceInstructions?
 }
 
-struct ModelSessionEvents {
+nonisolated struct ModelSessionEvents: Sendable {
     /// Reads the currently admitted application turn at tool invocation time.
     /// Sessions can outlive individual turns, so this must be a provider and
     /// not a value captured while the session is being built.
@@ -69,7 +72,7 @@ struct ModelSessionEvents {
     }
 }
 
-struct ResolvedModelCapabilities {
+nonisolated struct ResolvedModelCapabilities: Sendable {
     let reasoningLevel: ContextOptions.ReasoningLevel?
     let toolAccess: ModelToolTier
 }
@@ -94,7 +97,7 @@ nonisolated enum ModelHistoryPolicy {
     }
 }
 
-private struct ToollessProfile: LanguageModelSession.DynamicProfile {
+nonisolated private struct ToollessProfile: LanguageModelSession.DynamicProfile {
     let instructions: String
     let model: any LanguageModel
     let temperature: Double?
@@ -116,7 +119,7 @@ private struct ToollessProfile: LanguageModelSession.DynamicProfile {
 /// This is the extension point for future model classes and richer tool tiers:
 /// profiles consume this resolved policy instead of assuming every backend can
 /// use every option or tool.
-enum ModelCapabilityPolicy {
+nonisolated enum ModelCapabilityPolicy {
     static func resolve(
         for model: any LanguageModel,
         requestedReasoningLevel: ContextOptions.ReasoningLevel?,
@@ -135,7 +138,7 @@ enum ModelCapabilityPolicy {
 /// Owns the construction of Foundation Models sessions, profiles, tools and
 /// system instructions. Non-observable runtime services supply immutable
 /// configuration and event ports; UI stores never construct provider objects.
-enum ModelSessionFactory {
+nonisolated enum ModelSessionFactory {
     static func makeSession(
         configuration: ModelSessionConfiguration,
         history: [Transcript.Entry],
@@ -436,7 +439,7 @@ enum ModelSessionFactory {
                   allowedIDs?.contains(assignment.id) ?? true else { return nil }
             switch assignment.id {
             case .turboCodeGuide:
-                return TurboCodeGuideTool(store: .live)
+                return TurboCodeGuideTool(store: configuration.documentationStore)
             case .listWorkspace:
                 return ListWorkspaceTool(workspaceRoot: configuration.workspaceRoot)
             case .swiftWorkspaceMap:

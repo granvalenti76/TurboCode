@@ -100,6 +100,35 @@ struct TurboCodeCoreArchitectureTests {
         }
     }
 
+    /// The Xcode target defaults unannotated declarations to MainActor. These
+    /// source guards therefore protect the explicit opt-out that keeps native
+    /// provider streaming and lifecycle ownership away from the UI executor.
+    @Test("Native execution ownership remains outside MainActor")
+    func nativeExecutionOwnershipRemainsOffMainActor() throws {
+        let runtimeSource = try source(
+            at: "TurboCode/Services/Chat/LLMRuntime.swift"
+        )
+        let nativeSource = try source(
+            at: "TurboCode/Services/Chat/NativeResponseRunner.swift"
+        )
+        let sessionSource = try source(
+            at: "TurboCode/Services/Chat/FoundationModelsSessionRuntime.swift"
+        )
+
+        #expect(runtimeSource.contains("actor LLMRuntime"))
+        #expect(sessionSource.contains("actor FoundationModelsSessionRuntime"))
+        #expect(nativeSource.contains("nonisolated final class NativeResponseRunner"))
+        #expect(nativeSource.contains("actor NativeBackendSession"))
+        #expect(!nativeSource.contains("Task { @MainActor in"))
+    }
+
+    private func source(at relativePath: String) throws -> String {
+        try String(
+            contentsOf: Self.repositoryRoot.appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
+    }
+
     private func coreSwiftSourceURLs() throws -> [URL] {
         let coreURL = Self.coreURL
         guard let enumerator = FileManager.default.enumerator(
