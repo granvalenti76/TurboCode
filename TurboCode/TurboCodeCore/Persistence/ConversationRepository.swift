@@ -12,7 +12,7 @@ nonisolated struct ConversationSnapshot: Sendable {
 }
 
 /// Persistence contract for conversations. Keeping this boundary protocol-based
-/// lets ChatStore coordinate UI state without knowing where sessions are stored.
+/// lets a host coordinate presentation without knowing where sessions are stored.
 nonisolated protocol ConversationRepository: Sendable {
     func save(_ snapshot: ConversationSnapshot) async throws
     func load(id: String) async throws -> ConversationSnapshot?

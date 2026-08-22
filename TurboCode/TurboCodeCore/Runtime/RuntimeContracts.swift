@@ -485,41 +485,6 @@ nonisolated struct BackendSessionResult: Codable, Hashable, Sendable {
     }
 }
 
-/// Normalized event sink shared by in-process backend adapters.
-nonisolated struct BackendSessionEvents: Sendable {
-    static let none = BackendSessionEvents()
-
-    /// Backpressure is intentional: a provider must not overtake lifecycle
-    /// reduction or publish completion before earlier stream/tool events settle.
-    let emit: @MainActor @Sendable (AgentRuntimeEvent) async -> Void
-
-    init(
-        emit: @escaping @MainActor @Sendable (
-            AgentRuntimeEvent
-        ) async -> Void = { _ in }
-    ) {
-        self.emit = emit
-    }
-}
-
-/// In-process boundary for one configured provider session.
-///
-/// This is intentionally an adapter contract, not a second transport stack:
-/// existing Foundation Models and Codex runners remain responsible for their
-/// native streaming and tool protocols until their individual adapters are
-/// introduced and verified.
-@MainActor
-protocol BackendSession: AnyObject {
-    var backend: ModelBackend { get }
-
-    func run(
-        request: TurnRequest,
-        events: BackendSessionEvents
-    ) async -> BackendSessionResult
-
-    func interrupt() async
-}
-
 /// Prevents an independent worker result from being published after its turn
 /// was cancelled or replaced by a newer application command.
 nonisolated enum TurnCompletionPolicy {

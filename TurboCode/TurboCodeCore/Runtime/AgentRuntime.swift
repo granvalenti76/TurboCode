@@ -4,8 +4,9 @@ import Foundation
 ///
 /// The runtime contains no UI framework, observable state, provider adapter, or
 /// persistence dependency. Consumers submit commands/events and receive complete
-/// immutable snapshots through an async `Sendable` output port, which keeps this
-/// boundary suitable for a future `TurboCodeCore` package.
+/// immutable snapshots through an async `Sendable` output port. Keeping the
+/// lifecycle owner inside TurboCodeCore prevents application stores from
+/// becoming a second authority for cancellation, settlement, or turn identity.
 actor AgentRuntime {
     private var turnReducer = TurnStateReducer()
     private var quiescenceDepth = 0

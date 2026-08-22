@@ -122,8 +122,16 @@ or extension UI is part of the 0.3.7 extraction or automatically part of 0.4.0.
 - `Persistence/` contains schema-1 session records, the ordered disk repository,
   and UI-neutral async persistence use cases. Observable hosts apply returned
   values only after durable operations succeed.
-- Runtime contracts and provider ports will join this tree only after their
-  dependency audit proves they do not reach back into application state.
+- `Runtime/` contains the provider-neutral command/event vocabulary, transient
+  turn reducer, immutable snapshots, and actor-isolated operation owner.
+- The current MainActor `BackendSession` adapter port remains under
+  `Services/Chat/`; moving a presentation-isolated bridge into this directory
+  would disguise rather than remove the dependency.
+
+`TurboCodeCoreArchitectureTests` scans every Swift source in this tree for
+forbidden UI, observable-store, MainActor, and concrete-provider dependencies.
+That guard is temporary structural enforcement until a separate target makes
+the same dependency direction compiler-enforced.
 
 See the repository `TODO.md` section “0.3.7 — Complete LLM runtime/UI
 decoupling” for the release gates. Until a package product is published, third
