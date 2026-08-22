@@ -75,6 +75,7 @@ public final class ChatStore {
     let responseCoordinator: ChatResponseCoordinator
     private let sessionCoordinator: ConversationSessionCoordinator
     private let profileSelectionCoordinator: ProfileSelectionCoordinator
+    private let independentTaskCoordinator: IndependentTaskCoordinator
     private let reviewCoordinator: ReviewCoordinator
     // MARK: - Onboarding
 
@@ -136,12 +137,13 @@ public final class ChatStore {
             repository: conversationRepository
         )
         self.conversationStore = conversations
-        self.sessionCoordinator = ConversationSessionCoordinator(
+        let sessionCoordinator = ConversationSessionCoordinator(
             conversations: conversations,
             timeline: timeline,
             modelRuntime: modelRuntime,
             persistence: conversationPersistence
         )
+        self.sessionCoordinator = sessionCoordinator
         self.workspaceStore = workspace
         self.toolInteractionStore = toolInteractions
         self.agentActivityStore = agentActivity
@@ -168,7 +170,7 @@ public final class ChatStore {
             }
         )
         self.responseCoordinator = responseCoordinator
-        self.profileSelectionCoordinator = ProfileSelectionCoordinator(
+        let profileSelectionCoordinator = ProfileSelectionCoordinator(
             modelRuntime: modelRuntime,
             codexRuntime: codexRuntime,
             conversations: conversations,
@@ -178,6 +180,20 @@ public final class ChatStore {
             agentRuntime: agentRuntime,
             runtimeProjection: runtimeProjection,
             responseCoordinator: responseCoordinator
+        )
+        self.profileSelectionCoordinator = profileSelectionCoordinator
+        self.independentTaskCoordinator = IndependentTaskCoordinator(
+            runtime: agentRuntime,
+            runtimeProjection: runtimeProjection,
+            responseCoordinator: responseCoordinator,
+            modelRuntime: modelRuntime,
+            conversations: conversations,
+            timeline: timeline,
+            codexRuntime: codexRuntime,
+            workspace: workspace,
+            presentation: presentation,
+            sessions: sessionCoordinator,
+            profiles: profileSelectionCoordinator
         )
         self.reviewCoordinator = ReviewCoordinator(
             timeline: timeline,
@@ -771,169 +787,8 @@ public final class ChatStore {
     /// The active profile does not need to advertise `delegate_task`, because
     /// this is an explicit application command rather than model tool use.
     private func runIndependentTask(_ goal: String) async {
-        guard !busy else { return }
-        let command = "/task \(goal)"
-        let envelope: AgentTaskEnvelope
-        do {
-            envelope = try DelegateTaskArguments(
-                mode: DelegatedWorkerMode.coding.rawValue,
-                goal: goal
-            ).envelope()
-        } catch {
-            self.error = error.localizedDescription
-            return
-        }
-
         await ensureActiveThread()
-        let invoker = modelRuntimeStore.makeIndependentTaskInvoker(
-            workspaceRoot: workspaceRoot,
-            events: responseCoordinator.modelSessionEvents
-        )
-        error = nil
-        let turnID = TurnID()
-        let request = TurnRequest(
-            id: turnID,
-            prompt: command,
-            backend: activeBackend,
-            modelName: composerModel,
-            workspaceRoot: workspaceRoot
-        )
-        guard await projectRuntimeEvent(.started(request)) else { return }
-        _ = await projectRuntimeEvent(
-            .phaseChanged(turnID: turnID, phase: .preparing, at: Date())
-        )
-        responseCoordinator.delegationChanged(true)
-        await agentRuntime.runOperation(turnID: turnID) { [weak self] in
-            guard let self else { return }
-            _ = await self.projectRuntimeEvent(
-                .phaseChanged(turnID: turnID, phase: .streaming, at: Date())
-            )
-            let result = await AgentTaskInvocation.invoke(
-                invoker,
-                envelope: envelope,
-                parentTurnID: turnID
-            )
-            guard !Task.isCancelled else {
-                _ = await self.projectRuntimeEvent(
-                    .completed(
-                        turnID: turnID,
-                        outcome: .cancelled(reason: "Independent task cancelled."),
-                        at: Date()
-                    )
-                )
-                return
-            }
-            _ = await self.projectRuntimeEvent(
-                .phaseChanged(turnID: turnID, phase: .settling, at: Date())
-            )
-            await self.finishIndependentTask(
-                command: command,
-                result: result,
-                turnID: turnID
-            )
-            _ = await self.projectRuntimeEvent(
-                .completed(
-                    turnID: turnID,
-                    outcome: Self.runtimeOutcome(for: result),
-                    at: Date()
-                )
-            )
-        }
-        responseCoordinator.delegationChanged(false)
-    }
-
-    /// Publishes the worker's typed terminal result as a visible assistant
-    /// turn and refreshes the current model transcript with that outcome.
-    private func finishIndependentTask(
-        command: String,
-        result: AgentTaskResult,
-        turnID: TurnID
-    ) async {
-        guard TurnCompletionPolicy.accepts(
-            turnID: turnID,
-            activeTurnID: await agentRuntime.ownsOperation(turnID) ? turnID : nil,
-            isCancelled: Task.isCancelled
-        ) else { return }
-        let response = Self.renderIndependentTaskResult(result)
-        timelineStore.presentTaskTurn(command: command, response: response)
-        await appendIndependentTaskToTranscript(command: command, response: response)
-        if let threadID = activeThreadId {
-            conversationStore.touchThread(id: threadID)
-            if activeBackend == .codex {
-                codexRuntimeStore.captureImportedContext(
-                    turboThreadID: threadID,
-                    blocks: blocks
-                )
-            }
-            await persistSession(for: threadID)
-        }
-    }
-
-    /// Keeps the worker answer available to the next Foundation Models turn
-    /// without copying its internal tool-call transcript into the coordinator.
-    private func appendIndependentTaskToTranscript(
-        command: String,
-        response: String
-    ) async {
-        guard activeBackend != .codex else { return }
-        let additions = RuntimeContextHandoff.transcript(from: [
-            ChatBlock(kind: .user, text: command),
-            ChatBlock(kind: .assistant, text: response)
-        ])
-        let existing = SessionRebuildHistory.prepare(
-            modelRuntimeStore.transcript,
-            keepingHistory: true,
-            discardingCapabilityContext: false
-        )
-        await rebuildSession(restoringHistory: existing + additions)
-    }
-
-    private static func renderIndependentTaskResult(
-        _ result: AgentTaskResult
-    ) -> String {
-        var sections = [
-            "### Independent task",
-            result.technicalSummary
-        ]
-        if let failureDetail = result.failureDetail,
-           !failureDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            sections.append("**Details:** \(failureDetail)")
-        }
-        if !result.unresolvedWork.isEmpty {
-            sections.append(
-                "**Remaining:**\n" + result.unresolvedWork
-                    .map { "- \($0)" }
-                    .joined(separator: "\n")
-            )
-        }
-        if result.outcome == .failed || result.outcome == .cancelled {
-            sections.insert(
-                "Status: `\(result.outcome.rawValue)`",
-                at: 1
-            )
-        }
-        return sections.joined(separator: "\n\n")
-    }
-
-    /// Maps the worker contract into the shared terminal vocabulary without
-    /// exposing worker-specific verification or receipt state to AgentRuntime.
-    /// Those details remain in the visible task receipt and transcript.
-    private static func runtimeOutcome(
-        for result: AgentTaskResult
-    ) -> TurnOutcome {
-        switch result.outcome {
-        case .completed, .verified:
-            return .succeeded
-        case .cancelled:
-            return .cancelled(reason: result.failureDetail)
-        case .failed:
-            return .failed(
-                TurnFailure(
-                    code: result.failureReason?.rawValue ?? "task.failed",
-                    message: result.failureDetail ?? result.technicalSummary
-                )
-            )
-        }
+        await independentTaskCoordinator.run(goal: goal)
     }
 
     private static func taskCommandGoal(from text: String) -> String? {

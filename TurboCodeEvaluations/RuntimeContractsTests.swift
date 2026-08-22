@@ -310,6 +310,32 @@ struct RuntimeContractsTests {
             )
         )
     }
+
+    @Test("Independent task terminal mapping preserves failure detail")
+    func mapsIndependentTaskFailureForRuntimeAndTimeline() throws {
+        let result = try AgentTaskResult(
+            taskID: "task-failed",
+            attemptID: "attempt-1",
+            outcome: .failed,
+            technicalSummary: "The requested edit could not be completed.",
+            failureReason: .invalidResult,
+            failureDetail: "The worker returned an invalid payload.",
+            unresolvedWork: ["Retry with a valid worker response."]
+        )
+
+        let rendered = IndependentTaskCoordinator.render(result)
+        #expect(rendered.contains("Status: `failed`"))
+        #expect(rendered.contains("The worker returned an invalid payload."))
+        #expect(rendered.contains("Retry with a valid worker response."))
+
+        guard case .failed(let failure) =
+                IndependentTaskCoordinator.runtimeOutcome(for: result) else {
+            Issue.record("Expected a failed runtime outcome")
+            return
+        }
+        #expect(failure.code == AgentTaskFailureReason.invalidResult.rawValue)
+        #expect(failure.message == result.failureDetail)
+    }
 }
 
 private actor RuntimeEventOrderRecorder {
