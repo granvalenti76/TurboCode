@@ -33,6 +33,13 @@ final class ModelRuntimeStore {
         activeBackend == .llamaServer ? reasoningStreamRelay : nil
     }
 
+    /// Read-only transcript projection for persistence and context helpers.
+    /// Session construction and replacement remain owned by this store; UI
+    /// facades should not retain or pass the concrete session object around.
+    var transcript: Transcript {
+        session.transcript
+    }
+
     var activeDynamicProfile: UserDynamicProfile? {
         activeDynamicProfileID.flatMap { id in
             dynamicProfiles.first(where: { $0.id == id })

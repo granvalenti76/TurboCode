@@ -70,10 +70,6 @@ public final class ChatStore {
     let responseCoordinator: ChatResponseCoordinator
     private let reviewCoordinator: ReviewCoordinator
 
-    // Session — recreated when backend or workspace changes
-    private var session: LanguageModelSession {
-        modelRuntimeStore.session
-    }
     // The currently running response task. Keeping the handle makes the Stop
     // button cancel the actual model stream rather than only changing the UI.
     private var responseTask: Task<Void, Never>?
@@ -637,7 +633,9 @@ public final class ChatStore {
             blocks: blocks,
             // Codex persists its own rollout. Saving an unrelated Foundation
             // Models transcript here would contaminate later restoration.
-            transcript: activeBackend == .codex ? nil : session.transcript
+            transcript: activeBackend == .codex
+                ? nil
+                : modelRuntimeStore.transcript
         )
         do {
             try conversationStore.persist(snapshot)
@@ -999,7 +997,9 @@ public final class ChatStore {
             return
         }
 
-        let turnCount = SessionRebuildHistory.userTurnCount(in: session.transcript)
+        let turnCount = SessionRebuildHistory.userTurnCount(
+            in: modelRuntimeStore.transcript
+        )
         let maximumCharacters = SessionRebuildHistory.localCompactionCharacterLimit(
             contextWindowTokens: activeRemoteModel?.contextWindowTokens
         )
@@ -1157,7 +1157,7 @@ public final class ChatStore {
             ChatBlock(kind: .assistant, text: response)
         ])
         let existing = SessionRebuildHistory.prepare(
-            session.transcript,
+            modelRuntimeStore.transcript,
             keepingHistory: true,
             discardingCapabilityContext: false
         )
@@ -1261,7 +1261,9 @@ public final class ChatStore {
     /// from a concise handoff so the ninth question starts with usable context.
     private func compactOnDeviceContextIfNeeded() {
         guard activeBackend == .foundationApple else { return }
-        let turnCount = SessionRebuildHistory.userTurnCount(in: session.transcript)
+        let turnCount = SessionRebuildHistory.userTurnCount(
+            in: modelRuntimeStore.transcript
+        )
         guard turnCount >= SessionRebuildHistory.onDeviceCompactionThreshold,
               let compaction = SessionRebuildHistory.onDeviceCompaction(from: blocks)
         else { return }

@@ -138,6 +138,35 @@ Follow this sequence for any refactor, new feature, or non-trivial change:
 4. **Implement in small, reviewable increments**; after each, summarize what changed.
 5. **Ask before any Git mutation** or any command with side effects (builds that fail, deletions, etc.).
 
+## Resuming Work in a New Session
+
+When continuing an in-progress release or refactor, begin with a targeted
+handoff check before editing:
+
+1. Read `git status --short`, the current branch, the latest commits, and the
+   unstaged diff. Treat existing changes as intentional until their ownership
+   is clear; do not discard or reset them.
+2. Read the relevant milestone sections in `TODO.md` and `FUTURE.md`, then
+   inspect only the declarations and tests touched by the next slice. Keep
+   `TODO.md` updates limited to the active release scope.
+3. For the current 0.3.5 runtime/UI separation, preserve the compatibility
+   path through `ChatStore` and `ChatResponseCoordinator` until the provider
+   matrix and rollback criteria are proven. The next slice must be selected
+   from the open exit criteria, not inferred from unrelated backlog items.
+4. Keep provider configuration external. `~/.turbocode/models.json` is the
+   ground truth for endpoint and model selection; never modify it as part of
+   tests, never hardcode a model name into production or evaluation code, and
+   do not use the aesthetic model name as a session-behavior assertion. Record
+   only the provider/backend needed to explain a diagnostic result.
+5. If a real interactive validation is required, ask the user to run the app
+   or Xcode session and capture the resulting diagnostics; do not substitute a
+   synthetic model configuration for that validation.
+
+Every coherent slice should leave a recoverable checkpoint: focused tests,
+`git diff --check`, and a commit message that states the problem, the design
+decision, and the verification performed. This makes the repository itself the
+handoff record when conversational context is unavailable.
+
 ## Coding Style & Naming Conventions
 
 Follow Swift API design: four-space indentation, `UpperCamelCase` for types, and `lowerCamelCase` for methods, properties, and enum cases. Match filenames to their primary type, such as `SessionSearchViewModel.swift`. Prefer focused SwiftUI views and keep workspace, Git, Xcode, and provider behavior behind existing service/tool boundaries. Use `@MainActor` for UI-owned mutable state and preserve explicit concurrency annotations. No separate formatter or linter is configured; use Xcode formatting and keep warnings clean.
