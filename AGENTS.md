@@ -144,7 +144,7 @@ Follow Swift API design: four-space indentation, `UpperCamelCase` for types, and
 
 ## Code Comments & Documentation
 
-Every code change must add or update comments that make the modified behavior easy to review and maintain. Document the intent behind non-obvious logic, invariants, provider-specific workarounds, concurrency or safety constraints, and important tradeoffs. Keep public types and APIs documented with concise Swift documentation comments where their purpose is not already self-evident. When behavior changes, update nearby comments so they remain accurate. Prefer comments that explain why the code exists and what must remain true; avoid comments that merely repeat the syntax or narrate an obvious statement.
+Comments are part of the implementation deliverable, not optional polish. Every code change must add or update the nearby comment when the modified behavior has non-obvious intent, an invariant, a provider-specific workaround, a concurrency or safety constraint, or an important tradeoff. Before finishing, inspect the diff and explicitly check that the changed behavior is explainable to the next maintainer without reconstructing the entire investigation. Keep public types and APIs documented with concise Swift documentation comments where their purpose is not already self-evident. When behavior changes, update nearby comments so they remain accurate. Prefer comments that explain why the code exists and what must remain true; avoid comments that merely repeat the syntax or narrate an obvious statement.
 
 ## Testing Guidelines
 
@@ -152,7 +152,20 @@ Tests use Apple's Swift Testing framework (`import Testing`), with descriptive `
 
 ## Commit & Pull Request Guidelines
 
-History uses short, imperative subjects such as `Add native session search` and `Fix DeepSeek edit argument parsing`. Keep commits scoped to one coherent change. Pull requests should explain the user-visible outcome, note build/test results, link relevant issues, and include screenshots for SwiftUI changes. Call out changes to entitlements, signing, model configuration, or persisted data.
+Use a short, imperative subject, but do not confuse a concise subject with an incomplete commit. Every feature, fix, refactor, or architectural slice must have a meaningful commit body that records the problem or observed symptom, the relevant context or investigation, the chosen solution and its boundary, and the verification performed. A useful shape is:
+
+```text
+Fix runtime contract documentation tests
+
+The custom-profile test expected an implicitly added capability even though
+explicit selections are authoritative. The tools guide also omitted the
+experimental Safari capability from the searchable reference.
+
+Keep explicit custom-profile boundaries and document the opt-in capability.
+Focused evaluation tests pass; the provider runtime is unchanged.
+```
+
+Keep each commit scoped to one coherent, reviewable change; "substantial" means complete context and rationale, not unrelated files or artificial size. Subject-only commits are reserved for genuinely trivial mechanical changes. Before committing, review the staged diff, run `git diff --check`, and include relevant test/build results in the body. Pull requests should explain the user-visible outcome, note build/test results, link relevant issues, and include screenshots for SwiftUI changes. Call out changes to entitlements, signing, model configuration, or persisted data.
 
 ## Security & Configuration
 
