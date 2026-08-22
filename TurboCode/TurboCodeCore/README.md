@@ -36,6 +36,12 @@ Hosts must not retain a concrete provider session or infer operation lifetime
 from UI state. A host may render `ChatBlock` and its typed tool receipts however
 it chooses; the core never constructs a SwiftUI view.
 
+`ReasoningEffort` is a provider-neutral domain value. Hosts may persist or
+present that intent, while a provider adapter alone translates it into a wire-
+or SDK-specific option. The observable `ModelRuntimeStore` follows the same
+rule: it emits immutable configuration and does not construct models, sessions,
+title inference, benchmarks, or task workers.
+
 ## Session persistence in 0.3.7
 
 `DiskConversationRepository` stores one `StoredSession` JSON document per
@@ -118,7 +124,8 @@ or extension UI is part of the 0.3.7 extraction or automatically part of 0.4.0.
 
 ## Current source layout
 
-- `Domain/` contains provider- and UI-neutral values shared across the boundary.
+- `Domain/` contains provider- and UI-neutral values shared across the boundary,
+  including backend identity and reasoning intent.
 - `Persistence/` contains schema-1 session records, the ordered disk repository,
   and UI-neutral async persistence use cases. Observable hosts apply returned
   values only after durable operations succeed.

@@ -72,6 +72,8 @@ public final class ChatStore {
     let codexRuntimeStore: CodexRuntimeStore
     let modelRuntimeStore: ModelRuntimeStore
     let agentRuntime: AgentRuntime
+    private let llmRuntime: LLMRuntime
+    let onDeviceToolCallingSupported: Bool
     let responseCoordinator: ChatResponseCoordinator
     private let sessionCoordinator: ConversationSessionCoordinator
     private let profileSelectionCoordinator: ProfileSelectionCoordinator
@@ -134,6 +136,8 @@ public final class ChatStore {
             foundationModelsBootstrap:
                 modelRuntime.foundationModelsBootstrapConfiguration
         )
+        let titleGenerator = FoundationModelsConversationTitleGenerator()
+        let invokerFactory = AgentTaskInvokerFactory()
         let workspace = WorkspaceStore(
             gitService: gitService,
             reviewDraftStore: reviewDraft,
@@ -165,6 +169,9 @@ public final class ChatStore {
         self.codexRuntimeStore = codexRuntime
         self.modelRuntimeStore = modelRuntime
         self.agentRuntime = agentRuntime
+        self.llmRuntime = llmRuntime
+        self.onDeviceToolCallingSupported =
+            FoundationModelsCapabilities.onDeviceSupportsToolCalling
         let responseCoordinator = ChatResponseCoordinator(
             timeline: timeline,
             toolInteractions: toolInteractions,
@@ -227,6 +234,7 @@ public final class ChatStore {
             runtime: agentRuntime,
             runtimeProjection: runtimeProjection,
             responseCoordinator: responseCoordinator,
+            invokerFactory: invokerFactory,
             modelRuntime: modelRuntime,
             conversations: conversations,
             timeline: timeline,
@@ -240,6 +248,8 @@ public final class ChatStore {
         self.messageSendCoordinator = MessageSendCoordinator(
             runtime: agentRuntime,
             llmRuntime: llmRuntime,
+            titleGenerator: titleGenerator,
+            invokerFactory: invokerFactory,
             runtimeProjection: runtimeProjection,
             responseCoordinator: responseCoordinator,
             modelRuntime: modelRuntime,
@@ -376,7 +386,7 @@ public final class ChatStore {
     private func rebuildSession(
         keepingHistory: Bool = true,
         discardingCapabilityContext: Bool = false,
-        restoringHistory: [ModelRuntimeStore.RestoredTranscriptEntry]? = nil
+        restoringHistory: [FoundationModelsTranscriptEntry]? = nil
     ) async {
         await profileSelectionCoordinator.rebuildSession(
             keepingHistory: keepingHistory,
@@ -738,7 +748,10 @@ public final class ChatStore {
         benchmarkStatus = "Running \(activeBackend.rawValue) editing benchmark..."
         defer { benchmarkRunning = false }
 
-        let summary = await modelRuntimeStore.runEditingBenchmark()
+        let summary = await llmRuntime.runEditingBenchmark(
+            configuration: modelRuntimeStore.foundationModelsBootstrapConfiguration,
+            reasoningEffort: modelRuntimeStore.reasoningEffort
+        )
         benchmarkStatus = summary
         print("[Benchmark] \(summary)")
     }

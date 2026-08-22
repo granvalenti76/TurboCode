@@ -226,7 +226,7 @@ extension ChatStore {
     }
 
     var onDeviceSupportsToolCalling: Bool {
-        modelRuntimeStore.onDeviceSupportsToolCalling
+        onDeviceToolCallingSupported
     }
 
     public var isDelegating: Bool {

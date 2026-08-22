@@ -1,13 +1,5 @@
 import SwiftUI
 
-// MARK: - Composer Enums
-
-enum ReasoningEffort: String, CaseIterable {
-    case low = "Low"
-    case medium = "Medium"
-    case high = "High"
-}
-
 // MARK: - InputFieldView — Composer input card
 
 struct InputFieldView: View {

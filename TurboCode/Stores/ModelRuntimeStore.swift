@@ -1,6 +1,4 @@
 import Foundation
-import FoundationModels
-import FoundationModelsUtilities
 import Observation
 
 /// Owns observable model configuration and profile selection.
@@ -11,10 +9,6 @@ import Observation
 @MainActor
 @Observable
 final class ModelRuntimeStore {
-    /// Compatibility name used by the facade while transcript ownership stays
-    /// behind this Foundation Models boundary.
-    typealias RestoredTranscriptEntry = Transcript.Entry
-
     private(set) var agentTuning: AgentTuningConfig = .default
     private(set) var remoteModels: [RemoteModelConfig]
     private(set) var activeRemoteModelID: String
@@ -68,16 +62,10 @@ final class ModelRuntimeStore {
             )
     }
 
-    /// Projects the built-in model capability without exposing Foundation
-    /// Models types to view models or the compatibility facade.
-    var onDeviceSupportsToolCalling: Bool {
-        SystemLanguageModel.default.capabilities.contains(.toolCalling)
-    }
-
-    var reasoningLevel: ContextOptions.ReasoningLevel? {
+    var reasoningEffort: ReasoningEffort? {
         guard activeBackend != .foundationApple,
               activeBackend != .codex else { return nil }
-        return reasoningLevel(for: activeRemoteModel)
+        return reasoningEffort(for: activeRemoteModel)
     }
 
     var persistedModelIdentifier: String {
@@ -359,79 +347,6 @@ final class ModelRuntimeStore {
         return CredentialStore.contains(account: credential)
     }
 
-    func languageModel(
-        for model: RemoteModelConfig
-    ) -> ProviderLanguageModel {
-        ProviderLanguageModel(
-            configuration: model,
-            credential: model.credential,
-            reasoningStreamRelay: nil
-        )
-    }
-
-    /// Generates a short title without exposing a Foundation Models stream to
-    /// the UI facade. Title inference intentionally stays on Apple's on-device
-    /// model and does not affect the active conversation session.
-    func generateConversationTitle(from prompt: String) async -> String? {
-        let titlePrompt = """
-        Generate a very short title (max 6 words) for a conversation that starts with this message.
-        Respond with ONLY the title, no quotes, no punctuation.
-
-        Message: \(prompt)
-        """
-
-        do {
-            let titleSession = LanguageModelSession(model: SystemLanguageModel.default)
-            var generated = ""
-            for try await snapshot in titleSession.streamResponse(to: titlePrompt) {
-                if !snapshot.content.isEmpty {
-                    generated = snapshot.content
-                }
-            }
-            return Self.normalizedConversationTitle(generated)
-        } catch {
-            // Title generation is optional; the conversation keeps "New Chat".
-            return nil
-        }
-    }
-
-    /// Keeps title cleanup deterministic and independently testable from model
-    /// availability. The limit matches the existing persisted-title contract.
-    nonisolated static func normalizedConversationTitle(
-        _ generated: String
-    ) -> String? {
-        let clean = generated
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\"", with: "")
-        guard !clean.isEmpty else { return nil }
-        return String(clean.prefix(60))
-    }
-
-#if DEBUG
-    /// Keeps diagnostic model construction beside the provider configuration;
-    /// the UI facade only owns benchmark progress and presentation.
-    func runEditingBenchmark() async -> String {
-        let model: any LanguageModel
-        switch activeBackend {
-        case .foundationApple:
-            model = SystemLanguageModel.default
-        case .foundationServe, .llamaServer, .premium:
-            model = languageModel(
-                for: activeRemoteModel ?? RemoteModelConfig.fallbackLlama
-            )
-        case .codex:
-            return "Codex uses its own App Server evaluation path."
-        }
-
-        let result = await AgentBenchmarkRunner.runSuite(
-            backend: activeBackend,
-            model: model,
-            reasoningLevel: reasoningLevel
-        )
-        return result.summary
-    }
-#endif
-
     /// Produces one immutable configuration snapshot for the execution owner.
     /// Loading workspace instructions here also advances the revision observed
     /// by the configuration facade, but no provider object is built or retained.
@@ -457,8 +372,8 @@ final class ModelRuntimeStore {
             agentTuning: agentTuning,
             availableSkills: sessionSkills,
             activeDynamicProfile: activeDynamicProfile,
-            reasoningLevel: reasoningLevel,
-            delegateReasoningLevel: reasoningLevel(for: delegateModel),
+            reasoningEffort: reasoningEffort,
+            delegateReasoningEffort: reasoningEffort(for: delegateModel),
             activeTemperature: temperature(for: activeRemoteModel),
             delegateTemperature: temperature(for: delegateModel),
             delegateToolIDs: activeDynamicProfile?.resolvedWorkerToolIDs,
@@ -524,17 +439,13 @@ final class ModelRuntimeStore {
         UserDefaults.standard.removeObject(forKey: "activeDynamicProfileID")
     }
 
-    private func reasoningLevel(
+    private func reasoningEffort(
         for model: RemoteModelConfig?
-    ) -> ContextOptions.ReasoningLevel? {
+    ) -> ReasoningEffort? {
         guard let model, model.supportsReasoning else { return nil }
         let raw = UserDefaults.standard.string(forKey: "reasoningEffort")
             ?? ReasoningEffort.medium.rawValue
-        switch ReasoningEffort(rawValue: raw) ?? .medium {
-        case .low: return .light
-        case .medium: return .moderate
-        case .high: return .deep
-        }
+        return ReasoningEffort(rawValue: raw) ?? .medium
     }
 
     private var delegateRemoteModel: RemoteModelConfig {
@@ -556,7 +467,7 @@ final class ModelRuntimeStore {
     private func temperature(for model: RemoteModelConfig?) -> Double? {
         guard let model else { return nil }
         if model.reasoningTransport == .deepseekThinking,
-           reasoningLevel(for: model) != nil {
+           reasoningEffort(for: model) != nil {
             return nil
         }
         return model.temperature
@@ -569,33 +480,4 @@ final class ModelRuntimeStore {
         )
     }
 
-    /// Creates the same bounded worker adapter used by native coordinators.
-    /// Codex depends on this boundary so provider choice, tool policy, verifier,
-    /// and Activity events cannot drift between coordinator implementations.
-    func makeDelegateInvoker(
-        workspaceRoot: String,
-        events: ModelSessionEvents
-    ) -> ConfiguredAgentTaskInvoker? {
-        guard activeDynamicProfile?.usesDelegation == true else {
-            return nil
-        }
-        return ModelSessionFactory.makeDelegateInvoker(
-            configuration: makeSessionConfiguration(workspaceRoot: workspaceRoot),
-            events: events
-        )
-    }
-
-    /// Builds the configured worker for an application-owned task command.
-    /// Unlike the model-facing delegate tool, this path is intentionally not
-    /// gated by the active profile's capability list: `/task` is an explicit
-    /// user action and must remain available when `delegate_task` is hidden.
-    func makeIndependentTaskInvoker(
-        workspaceRoot: String,
-        events: ModelSessionEvents
-    ) -> ConfiguredAgentTaskInvoker {
-        ModelSessionFactory.makeDelegateInvoker(
-            configuration: makeSessionConfiguration(workspaceRoot: workspaceRoot),
-            events: events
-        )
-    }
 }

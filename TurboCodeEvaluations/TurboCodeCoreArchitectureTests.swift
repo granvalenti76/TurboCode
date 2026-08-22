@@ -43,25 +43,31 @@ struct TurboCodeCoreArchitectureTests {
         let relativePaths = try coreSwiftSourceURLs().map(coreRelativePath)
 
         #expect(relativePaths.contains("Domain/ModelBackend.swift"))
+        #expect(relativePaths.contains("Domain/ReasoningEffort.swift"))
         #expect(relativePaths.contains("Runtime/RuntimeContracts.swift"))
         #expect(relativePaths.contains("Runtime/AgentRuntime.swift"))
     }
 
-    /// Phase A permits the store's separate post-turn title helper to create a
-    /// short-lived session until that utility moves in the next slice. These
-    /// tokens specifically guard active conversation-session ownership: the
-    /// observable store must never regain the runtime, relay, transcript port,
-    /// or rebuild authority removed by the 0.3.7 boundary.
-    @Test("Observable model configuration owns no active provider session")
-    func modelRuntimeStoreOwnsNoActiveProviderSession() throws {
+    /// The configuration facade may emit immutable selections, but concrete
+    /// providers, sessions, transcript types, and worker factories must remain
+    /// behind non-observable application services.
+    @Test("Observable model store owns configuration only")
+    func modelRuntimeStoreOwnsConfigurationOnly() throws {
         let storeURL = Self.repositoryRoot
             .appendingPathComponent("TurboCode/Stores/ModelRuntimeStore.swift")
         let source = try String(contentsOf: storeURL, encoding: .utf8)
         let forbiddenTokens = [
+            "import FoundationModels",
             "let foundationModelsRuntime",
             "var activeReasoningStreamRelay",
             "var transcript: Transcript",
-            "func rebuildSession("
+            "func rebuildSession(",
+            "LanguageModelSession(",
+            "SystemLanguageModel.",
+            "ProviderLanguageModel(",
+            "ModelSessionFactory.",
+            "ConfiguredAgentTaskInvoker",
+            "ContextOptions."
         ]
 
         for token in forbiddenTokens {

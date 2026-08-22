@@ -12,6 +12,19 @@ struct FoundationModelsBootstrapConfiguration {
     let remoteModel: RemoteModelConfig
 }
 
+/// Value-only history type exposed at persistence and navigation boundaries.
+/// Naming it here keeps observable stores from importing Foundation Models just
+/// to describe restoration input.
+typealias FoundationModelsTranscriptEntry = Transcript.Entry
+
+/// Capability queries live beside the concrete system model adapter. UI code
+/// receives only the resulting Boolean and never touches the provider object.
+enum FoundationModelsCapabilities {
+    static var onDeviceSupportsToolCalling: Bool {
+        SystemLanguageModel.default.capabilities.contains(.toolCalling)
+    }
+}
+
 /// Owns the concrete Foundation Models session and its transport reasoning relay.
 ///
 /// This type is deliberately not observable. UI-facing stores may project model

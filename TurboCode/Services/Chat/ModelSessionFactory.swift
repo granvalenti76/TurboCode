@@ -11,8 +11,8 @@ struct ModelSessionConfiguration {
     let agentTuning: AgentTuningConfig
     let availableSkills: [TurboCodeSkillDefinition]
     let activeDynamicProfile: UserDynamicProfile?
-    let reasoningLevel: ContextOptions.ReasoningLevel?
-    let delegateReasoningLevel: ContextOptions.ReasoningLevel?
+    let reasoningEffort: ReasoningEffort?
+    let delegateReasoningEffort: ReasoningEffort?
     let activeTemperature: Double?
     let delegateTemperature: Double?
     /// `nil` keeps the default complete worker catalog; a value is an
@@ -133,8 +133,8 @@ enum ModelCapabilityPolicy {
 }
 
 /// Owns the construction of Foundation Models sessions, profiles, tools and
-/// system instructions. ChatStore only supplies current application state and
-/// receives lifecycle events used to update its observable UI state.
+/// system instructions. Non-observable runtime services supply immutable
+/// configuration and event ports; UI stores never construct provider objects.
 enum ModelSessionFactory {
     static func makeSession(
         configuration: ModelSessionConfiguration,
@@ -151,7 +151,9 @@ enum ModelSessionFactory {
             : (configuration.activeRemoteModel ?? RemoteModelConfig.fallbackLlama)
         let activeCapabilities = ModelCapabilityPolicy.resolve(
             for: activeModel,
-            requestedReasoningLevel: configuration.reasoningLevel,
+            requestedReasoningLevel: FoundationModelsReasoningLevel.resolve(
+                configuration.reasoningEffort
+            ),
             preferredToolAccess: preferredToolTier(
                 backend: configuration.backend,
                 remoteModel: activeRemoteConfiguration
@@ -298,7 +300,9 @@ enum ModelSessionFactory {
         let delegateModel = providerModel(for: configuration.delegateRemoteModel)
         let delegateCapabilities = ModelCapabilityPolicy.resolve(
             for: delegateModel,
-            requestedReasoningLevel: configuration.delegateReasoningLevel,
+            requestedReasoningLevel: FoundationModelsReasoningLevel.resolve(
+                configuration.delegateReasoningEffort
+            ),
             preferredToolAccess: preferredToolTier(
                 backend: backend(for: configuration.delegateRemoteModel.role),
                 remoteModel: configuration.delegateRemoteModel
@@ -514,7 +518,9 @@ enum ModelSessionFactory {
         let delegateBackend = backend(for: configuration.delegateRemoteModel.role)
         let capabilities = ModelCapabilityPolicy.resolve(
             for: delegateModel,
-            requestedReasoningLevel: configuration.delegateReasoningLevel,
+            requestedReasoningLevel: FoundationModelsReasoningLevel.resolve(
+                configuration.delegateReasoningEffort
+            ),
             preferredToolAccess: preferredToolTier(
                 backend: delegateBackend,
                 remoteModel: configuration.delegateRemoteModel

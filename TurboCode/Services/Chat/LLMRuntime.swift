@@ -155,6 +155,11 @@ final class LLMRuntime {
     private let foundationModelsRuntime: FoundationModelsSessionRuntime?
     private var activeTurnID: TurnID?
     private var activeSession: (any BackendSession)?
+#if DEBUG
+    /// Developer diagnostics use a separate ephemeral model, but still share
+    /// the runtime's single-execution gate with production adapters.
+    private var diagnosticExecutionActive = false
+#endif
 
     init(
         sessionFactory: (any LLMBackendSessionBuilding)? = nil,
@@ -186,7 +191,7 @@ final class LLMRuntime {
         using session: any BackendSession,
         events: BackendSessionEvents
     ) async -> BackendSessionResult {
-        guard activeSession == nil else {
+        guard activeSession == nil, !isDiagnosticExecutionActive else {
             return rejectedResult(
                 code: "llm_runtime.busy",
                 message: "Another LLM backend session is still active."
@@ -256,7 +261,9 @@ final class LLMRuntime {
         // after the per-turn adapter has unwound. The adapter retains its own
         // session reference, but rejecting overlap also keeps transcript and
         // relay selection deterministic for the next admitted turn.
-        guard activeSession == nil, let foundationModelsRuntime else {
+        guard activeSession == nil,
+              !isDiagnosticExecutionActive,
+              let foundationModelsRuntime else {
             return false
         }
         let history = restoringHistory ?? SessionRebuildHistory.prepare(
@@ -271,6 +278,41 @@ final class LLMRuntime {
         )
         return true
     }
+
+#if DEBUG
+    /// Runs the developer editing benchmark behind the same exclusion boundary
+    /// as conversational adapters. The diagnostic model is ephemeral and never
+    /// becomes the active conversation session or transcript owner.
+    func runEditingBenchmark(
+        configuration: FoundationModelsBootstrapConfiguration,
+        reasoningEffort: ReasoningEffort?
+    ) async -> String {
+        guard activeSession == nil, !diagnosticExecutionActive else {
+            return "Benchmark unavailable while another LLM operation is active."
+        }
+        guard configuration.backend != .codex else {
+            return "Codex uses its own App Server evaluation path."
+        }
+
+        diagnosticExecutionActive = true
+        defer { diagnosticExecutionActive = false }
+        let model: any LanguageModel = configuration.usesSystemModel
+            ? SystemLanguageModel.default
+            : ProviderLanguageModel(
+                configuration: configuration.remoteModel,
+                credential: configuration.remoteModel.credential,
+                reasoningStreamRelay: nil
+            )
+        let result = await AgentBenchmarkRunner.runSuite(
+            backend: configuration.backend,
+            model: model,
+            reasoningLevel: FoundationModelsReasoningLevel.resolve(
+                reasoningEffort
+            )
+        )
+        return result.summary
+    }
+#endif
 
     /// Resolves and executes a Codex adapter behind the same ownership gate as
     /// native providers. Provider-specific construction no longer lives in the
@@ -312,6 +354,16 @@ final class LLMRuntime {
         guard activeTurnID == turnID else { return }
         activeSession = nil
         activeTurnID = nil
+    }
+
+    /// Release builds have no diagnostic execution path, so the shared gate is
+    /// a compile-time constant outside developer tooling.
+    private var isDiagnosticExecutionActive: Bool {
+#if DEBUG
+        diagnosticExecutionActive
+#else
+        false
+#endif
     }
 
     private func rejectedResult(

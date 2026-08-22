@@ -8,6 +8,8 @@ import Foundation
 final class MessageSendCoordinator {
     private let runtime: AgentRuntime
     private let llmRuntime: LLMRuntime
+    private let titleGenerator: any ConversationTitleGenerating
+    private let invokerFactory: AgentTaskInvokerFactory
     private let runtimeProjection: AgentRuntimeProjectionStore
     private let responseCoordinator: ChatResponseCoordinator
     private let modelRuntime: ModelRuntimeStore
@@ -23,6 +25,8 @@ final class MessageSendCoordinator {
     init(
         runtime: AgentRuntime,
         llmRuntime: LLMRuntime,
+        titleGenerator: any ConversationTitleGenerating,
+        invokerFactory: AgentTaskInvokerFactory,
         runtimeProjection: AgentRuntimeProjectionStore,
         responseCoordinator: ChatResponseCoordinator,
         modelRuntime: ModelRuntimeStore,
@@ -37,6 +41,8 @@ final class MessageSendCoordinator {
     ) {
         self.runtime = runtime
         self.llmRuntime = llmRuntime
+        self.titleGenerator = titleGenerator
+        self.invokerFactory = invokerFactory
         self.runtimeProjection = runtimeProjection
         self.responseCoordinator = responseCoordinator
         self.modelRuntime = modelRuntime
@@ -117,7 +123,7 @@ final class MessageSendCoordinator {
               conversations.threads.contains(where: {
                   $0.id == threadID && $0.title == "New Chat"
               }) else { return }
-        if let title = await modelRuntime.generateConversationTitle(from: prompt) {
+        if let title = await titleGenerator.generateTitle(from: prompt) {
             conversations.applyGeneratedTitle(title, to: threadID)
         }
     }
@@ -169,6 +175,11 @@ final class MessageSendCoordinator {
         }
         let profile = modelRuntime.activeDynamicProfile
         let tuning = modelRuntime.agentTuning
+        // Worker construction belongs to the application factory. The
+        // observable store contributes only one immutable configuration value.
+        let delegationConfiguration = profile?.usesDelegation == true
+            ? modelRuntime.makeSessionConfiguration(workspaceRoot: workspace.root)
+            : nil
         let result = await responseCoordinator.performCodex(
             displayText: displayText,
             promptText: promptText,
@@ -187,8 +198,8 @@ final class MessageSendCoordinator {
             ),
             codexModelID: profile?.codexModelID,
             codexReasoningEffort: profile?.codexReasoningEffort,
-            delegationInvoker: modelRuntime.makeDelegateInvoker(
-                workspaceRoot: workspace.root,
+            delegationInvoker: invokerFactory.makeDelegateInvoker(
+                configuration: delegationConfiguration,
                 events: responseCoordinator.modelSessionEvents
             ),
             modelName: modelRuntime.composerModel

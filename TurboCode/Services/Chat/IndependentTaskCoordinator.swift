@@ -9,6 +9,7 @@ final class IndependentTaskCoordinator {
     private let runtime: AgentRuntime
     private let runtimeProjection: AgentRuntimeProjectionStore
     private let responseCoordinator: ChatResponseCoordinator
+    private let invokerFactory: AgentTaskInvokerFactory
     private let modelRuntime: ModelRuntimeStore
     private let conversations: ConversationStore
     private let timeline: ChatTimelineStore
@@ -23,6 +24,7 @@ final class IndependentTaskCoordinator {
         runtime: AgentRuntime,
         runtimeProjection: AgentRuntimeProjectionStore,
         responseCoordinator: ChatResponseCoordinator,
+        invokerFactory: AgentTaskInvokerFactory,
         modelRuntime: ModelRuntimeStore,
         conversations: ConversationStore,
         timeline: ChatTimelineStore,
@@ -36,6 +38,7 @@ final class IndependentTaskCoordinator {
         self.runtime = runtime
         self.runtimeProjection = runtimeProjection
         self.responseCoordinator = responseCoordinator
+        self.invokerFactory = invokerFactory
         self.modelRuntime = modelRuntime
         self.conversations = conversations
         self.timeline = timeline
@@ -66,8 +69,11 @@ final class IndependentTaskCoordinator {
             return
         }
 
-        let invoker = modelRuntime.makeIndependentTaskInvoker(
-            workspaceRoot: workspace.root,
+        let configuration = modelRuntime.makeSessionConfiguration(
+            workspaceRoot: workspace.root
+        )
+        let invoker = invokerFactory.makeIndependentTaskInvoker(
+            configuration: configuration,
             events: responseCoordinator.modelSessionEvents
         )
         presentation.errorMessage = nil
