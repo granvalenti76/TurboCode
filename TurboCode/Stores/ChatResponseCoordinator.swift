@@ -110,22 +110,16 @@ final class ChatResponseCoordinator {
     }
 
     private func beginTurn(_ request: TurnRequest) {
-        agentRuntime.begin(request)
-        projectRuntimeSnapshot()
-        _ = advanceTurn(to: .preparing, turnID: request.id)
-    }
-
-    /// Routes only the native provider through the command boundary while the
-    /// Codex compatibility path remains available for parity comparison.
-    private func beginNativeTurn(_ request: TurnRequest) {
-        guard agentRuntime.apply(.submit(request)) else { return }
+        guard agentRuntime.apply(.started(request)) else { return }
         projectRuntimeSnapshot()
         _ = advanceTurn(to: .preparing, turnID: request.id)
     }
 
     @discardableResult
     private func advanceTurn(to phase: TurnPhase, turnID: TurnID) -> Bool {
-        let advanced = agentRuntime.advance(to: phase, turnID: turnID, at: Date())
+        let advanced = agentRuntime.apply(
+            .phaseChanged(turnID: turnID, phase: phase, at: Date())
+        )
         projectRuntimeSnapshot()
         return advanced
     }
@@ -134,7 +128,9 @@ final class ChatResponseCoordinator {
         _ outcome: TurnOutcome,
         turnID: TurnID
     ) {
-        _ = agentRuntime.finish(with: outcome, turnID: turnID, at: Date())
+        _ = agentRuntime.apply(
+            .completed(turnID: turnID, outcome: outcome, at: Date())
+        )
         projectRuntimeSnapshot()
     }
 
@@ -408,7 +404,7 @@ final class ChatResponseCoordinator {
         let editGroupID = UUID().uuidString
         activeEditGroupID = editGroupID
         let placeholderID = UUID().uuidString
-        beginNativeTurn(
+        beginTurn(
             TurnRequest(
                 id: turnID,
                 prompt: promptText,

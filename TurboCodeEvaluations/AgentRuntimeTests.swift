@@ -43,6 +43,93 @@ struct AgentRuntimeTests {
         #expect(!runtime.owns(turnID))
     }
 
+    @Test("Runtime start is idempotent and rejects a competing live turn")
+    func guardsTurnAdmission() {
+        let runtime = AgentRuntime()
+        let request = TurnRequest(
+            id: TurnID(rawValue: "admitted-turn"),
+            prompt: "Keep this turn",
+            backend: .foundationApple,
+            modelName: "test-model",
+            workspaceRoot: "/workspace"
+        )
+        let competing = TurnRequest(
+            id: TurnID(rawValue: "competing-turn"),
+            prompt: "Replace the live turn",
+            backend: .codex,
+            modelName: "test-codex",
+            workspaceRoot: "/workspace"
+        )
+
+        #expect(runtime.apply(.started(request)))
+        #expect(
+            runtime.apply(
+                .phaseChanged(
+                    turnID: request.id,
+                    phase: .preparing,
+                    at: Date()
+                )
+            )
+        )
+        #expect(runtime.apply(.started(request)))
+        #expect(!runtime.apply(.started(competing)))
+        #expect(runtime.currentTurnState?.id == request.id)
+        #expect(runtime.currentTurnState?.phase == .preparing)
+    }
+
+    @Test("Runtime events own tool, approval, and terminal lifecycle")
+    func reducesNormalizedLifecycleEvents() {
+        let runtime = AgentRuntime()
+        let turnID = TurnID(rawValue: "normalized-events")
+        let request = TurnRequest(
+            id: turnID,
+            prompt: "Exercise the lifecycle",
+            backend: .llamaServer,
+            modelName: "test-model",
+            workspaceRoot: "/workspace"
+        )
+
+        #expect(runtime.apply(.started(request)))
+        #expect(runtime.apply(.phaseChanged(
+            turnID: turnID,
+            phase: .preparing,
+            at: Date()
+        )))
+        #expect(runtime.apply(.phaseChanged(
+            turnID: turnID,
+            phase: .streaming,
+            at: Date()
+        )))
+        #expect(runtime.apply(.toolStarted(
+            ToolCall(id: "tool", turnID: turnID, name: "read_file")
+        )))
+        #expect(runtime.currentTurnState?.phase == .toolExecuting)
+        #expect(runtime.apply(.approvalRequested(
+            Approval(
+                id: "approval",
+                turnID: turnID,
+                toolCallID: "tool",
+                operation: "read",
+                summary: "Read one file"
+            )
+        )))
+        #expect(runtime.currentTurnState?.phase == .awaitingApproval)
+        #expect(runtime.apply(.toolFinished(
+            ToolResult(id: "tool", turnID: turnID, status: .succeeded)
+        )))
+        #expect(runtime.apply(.phaseChanged(
+            turnID: turnID,
+            phase: .settling,
+            at: Date()
+        )))
+        #expect(runtime.apply(.completed(
+            turnID: turnID,
+            outcome: .succeeded,
+            at: Date()
+        )))
+        #expect(runtime.currentTurnState?.phase == .completed)
+    }
+
     @Test("Runtime context commands replace only a settled turn")
     func contextCommandsPublishThreadAndBackend() {
         let runtime = AgentRuntime()

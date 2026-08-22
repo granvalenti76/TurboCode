@@ -1083,19 +1083,52 @@ public final class ChatStore {
         )
         error = nil
         let turnID = TurnID()
+        let request = TurnRequest(
+            id: turnID,
+            prompt: command,
+            backend: activeBackend,
+            modelName: composerModel,
+            workspaceRoot: workspaceRoot
+        )
+        guard projectRuntimeEvent(.started(request)) else { return }
+        _ = projectRuntimeEvent(
+            .phaseChanged(turnID: turnID, phase: .preparing, at: Date())
+        )
         responseCoordinator.delegationChanged(true)
         await agentRuntime.runOperation(turnID: turnID) { [weak self] in
             guard let self else { return }
+            _ = self.projectRuntimeEvent(
+                .phaseChanged(turnID: turnID, phase: .streaming, at: Date())
+            )
             let result = await AgentTaskInvocation.invoke(
                 invoker,
                 envelope: envelope,
                 parentTurnID: turnID
             )
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                _ = self.projectRuntimeEvent(
+                    .completed(
+                        turnID: turnID,
+                        outcome: .cancelled(reason: "Independent task cancelled."),
+                        at: Date()
+                    )
+                )
+                return
+            }
+            _ = self.projectRuntimeEvent(
+                .phaseChanged(turnID: turnID, phase: .settling, at: Date())
+            )
             await self.finishIndependentTask(
                 command: command,
                 result: result,
                 turnID: turnID
+            )
+            _ = self.projectRuntimeEvent(
+                .completed(
+                    turnID: turnID,
+                    outcome: Self.runtimeOutcome(for: result),
+                    at: Date()
+                )
             )
         }
         responseCoordinator.delegationChanged(false)
@@ -1172,6 +1205,27 @@ public final class ChatStore {
             )
         }
         return sections.joined(separator: "\n\n")
+    }
+
+    /// Maps the worker contract into the shared terminal vocabulary without
+    /// exposing worker-specific verification or receipt state to AgentRuntime.
+    /// Those details remain in the visible task receipt and transcript.
+    private static func runtimeOutcome(
+        for result: AgentTaskResult
+    ) -> TurnOutcome {
+        switch result.outcome {
+        case .completed, .verified:
+            return .succeeded
+        case .cancelled:
+            return .cancelled(reason: result.failureDetail)
+        case .failed:
+            return .failed(
+                TurnFailure(
+                    code: result.failureReason?.rawValue ?? "task.failed",
+                    message: result.failureDetail ?? result.technicalSummary
+                )
+            )
+        }
     }
 
     private static func taskCommandGoal(from text: String) -> String? {
@@ -1689,6 +1743,16 @@ public final class ChatStore {
     private func projectRuntimeCommand(_ command: RuntimeCommand) {
         guard agentRuntime.apply(command) else { return }
         timelineStore.applyRuntimeSnapshot(agentRuntime.snapshot)
+    }
+
+    /// Projects only events accepted by the runtime owner. `/task` is an app
+    /// command rather than a backend session, so the facade is its adapter and
+    /// must still pass through the same stale-TurnID gate as native and Codex.
+    @discardableResult
+    private func projectRuntimeEvent(_ event: AgentRuntimeEvent) -> Bool {
+        guard agentRuntime.apply(event) else { return false }
+        timelineStore.applyRuntimeSnapshot(agentRuntime.snapshot)
+        return true
     }
 
     private func cancelCodexSelection() {

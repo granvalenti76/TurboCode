@@ -111,6 +111,12 @@ final class AgentRuntime {
     func apply(_ command: RuntimeCommand) -> Bool {
         switch command {
         case .submit(let request):
+            // Backend adapters echo `.started` after the facade has admitted
+            // the request. Treat the same TurnID as idempotent, but never let
+            // a competing request replace live state.
+            if let turn = snapshot.turn, turn.outcome == nil {
+                return turn.id == request.id
+            }
             begin(request)
             return true
         case .cancel(let turnID):
@@ -133,6 +139,47 @@ final class AgentRuntime {
                 activeThreadID: threadID,
                 backend: snapshot.backend
             )
+        }
+    }
+
+    /// Reduces the provider-neutral event vocabulary into authoritative turn
+    /// state. Presentation consumers may react to the same accepted event, but
+    /// only this runtime decides whether its TurnID is current and whether the
+    /// lifecycle transition is legal.
+    @discardableResult
+    func apply(_ event: AgentRuntimeEvent) -> Bool {
+        switch event {
+        case .started(let request):
+            return apply(.submit(request))
+        case .phaseChanged(let turnID, let phase, let date):
+            return advance(to: phase, turnID: turnID, at: date)
+        case .toolStarted(let call):
+            return advance(
+                to: .toolExecuting,
+                turnID: call.turnID,
+                at: call.startedAt
+            )
+        case .toolFinished(let result):
+            return advance(
+                to: .streaming,
+                turnID: result.turnID,
+                at: Date()
+            )
+        case .approvalRequested(let approval):
+            return advance(
+                to: .awaitingApproval,
+                turnID: approval.turnID,
+                at: approval.requestedAt
+            )
+        case .assistantTextChanged(let turnID, _),
+             .reasoningTextChanged(let turnID, _),
+             .usageUpdated(let turnID, _, _, _):
+            // Content and usage remain projection data in 0.3.6. Ownership is
+            // still checked here so a stale provider event is rejected before
+            // any presentation store sees it.
+            return owns(turnID)
+        case .completed(let turnID, let outcome, let date):
+            return finish(with: outcome, turnID: turnID, at: date)
         }
     }
 
