@@ -10,6 +10,9 @@ struct RuntimeContractsTests {
         #expect(accepted.canTransition(to: .preparing))
         #expect(accepted.canTransition(to: .cancelled))
         #expect(!accepted.canTransition(to: .streaming))
+        // Some providers request approval after returning a structured tool
+        // output, so the runtime may observe streaming before the approval UI.
+        #expect(TurnPhase.streaming.canTransition(to: .awaitingApproval))
         #expect(!TurnPhase.completed.canTransition(to: .preparing))
     }
 

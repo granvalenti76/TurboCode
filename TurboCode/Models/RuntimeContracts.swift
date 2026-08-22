@@ -47,6 +47,7 @@ nonisolated enum TurnPhase: String, Codable, Hashable, Sendable {
         case (.accepted, .preparing),
              (.preparing, .streaming),
              (.streaming, .toolExecuting),
+             (.streaming, .awaitingApproval),
              (.streaming, .settling),
              (.toolExecuting, .streaming),
              (.toolExecuting, .awaitingApproval),

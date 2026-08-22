@@ -205,8 +205,18 @@ struct AgentActivityRuntimeIntegrationTests {
         #expect(result.assistantText == "Codex result.")
         #expect(result.reasoningText == "Codex reasoning.")
         #expect(result.outcome == .succeeded)
-        #expect(received.count == 9)
+        // Tool events are themselves lifecycle transitions. The adapter must
+        // not also emit toolExecuting/streaming phase duplicates, because the
+        // runtime owns that reduction and presentation consumes the payload.
+        #expect(received.count == 7)
         #expect(received.allSatisfy { $0.turnID == turnID })
+        let phases = received.compactMap { event -> TurnPhase? in
+            guard case .phaseChanged(_, let phase, _) = event else {
+                return nil
+            }
+            return phase
+        }
+        #expect(phases == [.streaming])
         let toolResults = received.compactMap { event -> ToolResult? in
             guard case .toolFinished(let toolResult) = event else {
                 return nil

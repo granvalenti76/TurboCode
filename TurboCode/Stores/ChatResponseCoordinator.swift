@@ -32,6 +32,7 @@ final class ChatResponseCoordinator {
     private var productGuidePresentation: ProductGuideBlock?
     private var completedRootWrite: String?
     private var pendingCoordinatorTool: AgentActivityTool?
+    private var runtimeToolStartedAt: [String: Date] = [:]
     var currentTurnState: TurnState? {
         agentRuntime.currentTurnState
     }
@@ -110,28 +111,53 @@ final class ChatResponseCoordinator {
     }
 
     private func beginTurn(_ request: TurnRequest) {
-        guard agentRuntime.apply(.started(request)) else { return }
-        projectRuntimeSnapshot()
+        guard acceptRuntimeEvent(.started(request)) else { return }
+        runtimeToolStartedAt.removeAll(keepingCapacity: true)
         _ = advanceTurn(to: .preparing, turnID: request.id)
     }
 
     @discardableResult
     private func advanceTurn(to phase: TurnPhase, turnID: TurnID) -> Bool {
-        let advanced = agentRuntime.apply(
+        acceptRuntimeEvent(
             .phaseChanged(turnID: turnID, phase: phase, at: Date())
         )
-        projectRuntimeSnapshot()
-        return advanced
     }
 
     private func finishTurn(
         _ outcome: TurnOutcome,
         turnID: TurnID
     ) {
-        _ = agentRuntime.apply(
+        _ = acceptRuntimeEvent(
             .completed(turnID: turnID, outcome: outcome, at: Date())
         )
-        projectRuntimeSnapshot()
+        runtimeToolStartedAt.removeAll(keepingCapacity: true)
+    }
+
+    /// Accepts lifecycle and ownership changes before any event reaches a UI
+    /// projection. Snapshot equality suppresses idempotent backend `.started`
+    /// echoes and content-only events, preserving the publication baseline.
+    @discardableResult
+    private func acceptRuntimeEvent(_ event: AgentRuntimeEvent) -> Bool {
+        let previous = agentRuntime.snapshot
+        guard agentRuntime.apply(event) else { return false }
+        if agentRuntime.snapshot != previous {
+            projectRuntimeSnapshot()
+        }
+        return true
+    }
+
+    /// Backend completion is settled after the coordinator has finalized its
+    /// timeline and diagnostics. Every nonterminal event is reduced immediately
+    /// so stale content, tool, and approval callbacks are rejected uniformly.
+    /// A redundant phase is not a reason to drop a current tool payload: native
+    /// widgets remain presentation projections, independent of reducer idempotency.
+    private func acceptBackendEvent(_ event: AgentRuntimeEvent) -> Bool {
+        guard ownsTurn(event.turnID) else { return false }
+        if case .completed = event {
+            return true
+        }
+        _ = acceptRuntimeEvent(event)
+        return true
     }
 
     private func projectRuntimeSnapshot() {
@@ -198,7 +224,6 @@ final class ChatResponseCoordinator {
             delegationInvoker: delegationInvoker,
             activityStarted: { [weak self] call, summary in
                 guard let self, self.ownsTurn(turnID) else { return }
-                _ = self.advanceTurn(to: .toolExecuting, turnID: turnID)
                 self.toolInteractions.beginActivity(
                     id: call.callID,
                     toolName: call.tool,
@@ -219,7 +244,6 @@ final class ChatResponseCoordinator {
                 guard let self, self.ownsTurn(turnID) else { return }
                 self.toolInteractions.endActivity(id: id)
                 self.coordinatorToolFinished(callID: id)
-                _ = self.advanceTurn(to: .streaming, turnID: turnID)
             },
             presentationRequested: { [weak self] presentation in
                 guard let self, self.ownsTurn(turnID) else { return }
@@ -227,7 +251,11 @@ final class ChatResponseCoordinator {
             },
             approvalRequested: { [weak self] request in
                 guard let self, self.ownsTurn(turnID) else { return }
-                _ = self.advanceTurn(to: .awaitingApproval, turnID: turnID)
+                _ = self.acceptRuntimeEvent(
+                    .approvalRequested(
+                        Self.runtimeApproval(from: request, turnID: turnID)
+                    )
+                )
                 self.toolInteractions.enqueueApproval(request)
             }
         )
@@ -240,7 +268,9 @@ final class ChatResponseCoordinator {
                 workspaceRoot: workspaceRoot
             ),
             events: BackendSessionEvents { [weak self] event in
-                guard let self, event.turnID == turnID, self.ownsTurn(turnID) else {
+                guard let self,
+                      event.turnID == turnID,
+                      self.acceptBackendEvent(event) else {
                     return
                 }
                 switch event {
@@ -254,8 +284,6 @@ final class ChatResponseCoordinator {
                     diagnostics.toolStarted(call)
                 case .toolFinished(let toolResult):
                     diagnostics.toolFinished(toolResult)
-                case .phaseChanged(_, let phase, _):
-                    _ = self.advanceTurn(to: phase, turnID: turnID)
                 default:
                     break
                 }
@@ -440,9 +468,10 @@ final class ChatResponseCoordinator {
             },
             approvalRequested: { [weak self] request in
                 guard let self, self.ownsTurn(turnID) else { return }
-                _ = self.advanceTurn(
-                    to: .awaitingApproval,
-                    turnID: turnID
+                _ = self.acceptRuntimeEvent(
+                    .approvalRequested(
+                        Self.runtimeApproval(from: request, turnID: turnID)
+                    )
                 )
                 self.toolInteractions.enqueueApproval(request)
             }
@@ -456,7 +485,9 @@ final class ChatResponseCoordinator {
                 workspaceRoot: workspaceRoot
             ),
             events: BackendSessionEvents { [weak self] event in
-                guard let self, event.turnID == turnID, self.ownsTurn(turnID) else {
+                guard let self,
+                      event.turnID == turnID,
+                      self.acceptBackendEvent(event) else {
                     return
                 }
                 switch event {
@@ -467,8 +498,6 @@ final class ChatResponseCoordinator {
                 case .reasoningTextChanged(_, let reasoning):
                     publications.record()
                     self.timeline.liveReasoning = reasoning
-                case .phaseChanged(_, let phase, _):
-                    _ = self.advanceTurn(to: phase, turnID: turnID)
                 default:
                     break
                 }
@@ -689,9 +718,20 @@ final class ChatResponseCoordinator {
         backend: ModelBackend,
         owner: AgentActivityToolOwner
     ) async {
-        if let turnID = currentTurnState?.id {
-            _ = advanceTurn(to: .toolExecuting, turnID: turnID)
-        }
+        guard let turnID = currentTurnState?.id else { return }
+        let startedAt = Date()
+        guard ownsTurn(turnID) else { return }
+        _ = acceptRuntimeEvent(
+            .toolStarted(
+                ToolCall(
+                    id: call.id,
+                    turnID: turnID,
+                    name: call.toolName,
+                    startedAt: startedAt
+                )
+            )
+        )
+        runtimeToolStartedAt[call.id] = startedAt
         if let activeDiagnosticsRunID {
             await AgentDiagnosticsRecorder.shared.toolStarted(
                 runID: activeDiagnosticsRunID,
@@ -725,6 +765,32 @@ final class ChatResponseCoordinator {
         owner: AgentActivityToolOwner,
         workspaceName: String?
     ) async {
+        guard let turnID = currentTurnState?.id else { return }
+        let outputText = output.segments.compactMap { segment -> String? in
+            switch segment {
+            case .text(let value):
+                return value.content
+            case .structure(let value):
+                return value.content.jsonString
+            default:
+                return nil
+            }
+        }.joined()
+        let startedAt = runtimeToolStartedAt.removeValue(forKey: call.id)
+        guard ownsTurn(turnID) else { return }
+        _ = acceptRuntimeEvent(
+            .toolFinished(
+                ToolResult(
+                    id: call.id,
+                    turnID: turnID,
+                    status: .succeeded,
+                    output: outputText,
+                    durationMilliseconds: startedAt.map {
+                        max(0, Int(Date().timeIntervalSince($0) * 1_000))
+                    }
+                )
+            )
+        )
         if let activeDiagnosticsRunID {
             await AgentDiagnosticsRecorder.shared.toolFinished(
                 runID: activeDiagnosticsRunID,
@@ -733,10 +799,7 @@ final class ChatResponseCoordinator {
                 backend: backend
             )
         }
-        let text = output.segments.compactMap { segment -> String? in
-            guard case .text(let value) = segment else { return nil }
-            return value.content
-        }.joined()
+        let text = outputText
         if call.toolName == "turbocode_guide" {
             productGuidePresentation = ProductGuideBlock(toolOutput: text)
         } else if call.toolName == "write_ondevice",
@@ -756,9 +819,6 @@ final class ChatResponseCoordinator {
             coordinatorToolFinished(callID: call.id)
         }
         toolInteractions.endActivity(id: call.id)
-        if let turnID = currentTurnState?.id {
-            _ = advanceTurn(to: .streaming, turnID: turnID)
-        }
     }
 
     /// Applies the provider-neutral delegation event stream and attaches a
@@ -952,6 +1012,25 @@ final class ChatResponseCoordinator {
         default:
             return "Using \(call.toolName.replacingOccurrences(of: "_", with: " "))"
         }
+    }
+
+    /// Normalizes the app-owned approval request without leaking either
+    /// Foundation Models or Codex request types into the runtime. The existing
+    /// presentation ID is also the best stable tool correlation available at
+    /// this compatibility boundary.
+    private static func runtimeApproval(
+        from request: ApprovalRequest,
+        turnID: TurnID
+    ) -> Approval {
+        Approval(
+            id: request.id,
+            turnID: turnID,
+            toolCallID: request.id,
+            operation: request.operation,
+            path: request.path,
+            destination: request.destination,
+            summary: request.summary
+        )
     }
 
     private static func userVisibleAssistantText(_ text: String) -> String {

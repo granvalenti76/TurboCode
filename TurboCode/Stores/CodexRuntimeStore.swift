@@ -610,13 +610,9 @@ final class CodexBackendSession: BackendSession {
                             activityStarted(call, summary)
                             let startedAt = Date()
                             toolStartTimes[call.callID] = startedAt
-                            events.emit(
-                                .phaseChanged(
-                                    turnID: request.id,
-                                    phase: .toolExecuting,
-                                    at: Date()
-                                )
-                            )
+                            // Tool events are the authoritative lifecycle edge.
+                            // Emitting an additional phase event here would
+                            // make the coordinator race two equivalent updates.
                             events.emit(
                                 .toolStarted(
                                     Self.toolCall(
@@ -628,14 +624,10 @@ final class CodexBackendSession: BackendSession {
                             )
                         },
                         activityEnded: { id in
+                            // Presentation cleanup is separate from lifecycle;
+                            // `.toolFinished` below returns the runtime to
+                            // streaming before this activity is dismissed.
                             activityEnded(id)
-                            events.emit(
-                                .phaseChanged(
-                                    turnID: request.id,
-                                    phase: .streaming,
-                                    at: Date()
-                                )
-                            )
                         },
                         toolFinished: { call, result in
                             let startedAt = toolStartTimes.removeValue(
