@@ -300,12 +300,20 @@ struct AgentEndToEndScenarioTests {
         operation: @escaping @MainActor @Sendable () async
             -> NativeResponseRunner.Outcome
     ) -> ChatResponseCoordinator {
-        ChatResponseCoordinator(
+        let codexRuntime = CodexRuntimeStore()
+        let factory = LiveLLMBackendSessionFactory(
+            nativeRunner: ScenarioNativeResponseRunner(operation: operation),
+            nativeSessionProvider: {
+                LanguageModelSession(model: SystemLanguageModel.default)
+            },
+            reasoningStreamRelayProvider: { nil },
+            codexRuntime: codexRuntime
+        )
+        return ChatResponseCoordinator(
             timeline: timeline,
             toolInteractions: ToolInteractionStore(),
             agentActivity: activity,
-            codexRuntime: CodexRuntimeStore(),
-            nativeRunner: ScenarioNativeResponseRunner(operation: operation)
+            llmRuntime: LLMRuntime(sessionFactory: factory)
         )
     }
 

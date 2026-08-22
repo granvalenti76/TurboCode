@@ -115,6 +115,16 @@ public final class ChatStore {
         let nativeRunner = NativeResponseRunner()
         let reviewDraft = ReviewDraftStore()
         let modelRuntime = ModelRuntimeStore()
+        let agentRuntime = AgentRuntime()
+        let llmSessionFactory = LiveLLMBackendSessionFactory(
+            nativeRunner: nativeRunner,
+            nativeSessionProvider: { modelRuntime.session },
+            reasoningStreamRelayProvider: {
+                modelRuntime.activeReasoningStreamRelay
+            },
+            codexRuntime: codexRuntime
+        )
+        let llmRuntime = LLMRuntime(sessionFactory: llmSessionFactory)
         let workspace = WorkspaceStore(
             gitService: gitService,
             reviewDraftStore: reviewDraft
@@ -129,17 +139,13 @@ public final class ChatStore {
         self.reviewDraftStore = reviewDraft
         self.codexRuntimeStore = codexRuntime
         self.modelRuntimeStore = modelRuntime
-        self.agentRuntime = AgentRuntime()
+        self.agentRuntime = agentRuntime
         self.responseCoordinator = ChatResponseCoordinator(
             timeline: timeline,
             toolInteractions: toolInteractions,
             agentActivity: agentActivity,
-            codexRuntime: codexRuntime,
-            nativeRunner: nativeRunner,
             agentRuntime: agentRuntime,
-            nativeSessionProvider: {
-                modelRuntime.session
-            },
+            llmRuntime: llmRuntime,
             workspaceNameProvider: {
                 workspace.label.isEmpty ? nil : workspace.label
             },
@@ -1412,7 +1418,6 @@ public final class ChatStore {
             serverURL: activeBackend == .llamaServer
                 ? activeRemoteModel?.url
                 : nil,
-            reasoningStreamRelay: modelRuntimeStore.activeReasoningStreamRelay,
             contextChanged: { [weak self] usage in
                 guard let self, self.activeBackend == .llamaServer else { return }
                 self.llamaContextUsage = usage

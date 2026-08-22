@@ -1,6 +1,5 @@
 import Foundation
 import FoundationModels
-import FoundationModelsUtilities
 import Observation
 
 /// Coordinates one response lifecycle across a runtime and the chat timeline.
@@ -19,14 +18,11 @@ final class ChatResponseCoordinator {
     private let timeline: ChatTimelineStore
     private let toolInteractions: ToolInteractionStore
     private let agentActivity: AgentActivityStore
-    private let codexRuntime: CodexRuntimeStore
-    private let nativeRunner: any NativeResponseRunning
     private let agentRuntime: AgentRuntime
-    /// Concrete backend adapters execute behind this non-observable boundary.
-    /// The coordinator maps accepted events to presentation, but it is no
-    /// longer the lifetime owner of the provider session it configures.
+    /// Concrete backend adapters are constructed and executed behind this
+    /// non-observable boundary. The coordinator supplies presentation output
+    /// ports but never receives or retains the provider session itself.
     private let llmRuntime: LLMRuntime
-    private let nativeSessionProvider: @MainActor @Sendable () -> LanguageModelSession
     private let workspaceNameProvider: @MainActor @Sendable () -> String?
     private let activityPresentationRequested: @MainActor @Sendable () -> Void
 
@@ -45,24 +41,16 @@ final class ChatResponseCoordinator {
         timeline: ChatTimelineStore,
         toolInteractions: ToolInteractionStore,
         agentActivity: AgentActivityStore,
-        codexRuntime: CodexRuntimeStore,
-        nativeRunner: any NativeResponseRunning,
         agentRuntime: AgentRuntime = AgentRuntime(),
-        llmRuntime: LLMRuntime = LLMRuntime(),
-        nativeSessionProvider: @escaping @MainActor @Sendable () -> LanguageModelSession = {
-            LanguageModelSession()
-        },
+        llmRuntime: LLMRuntime,
         workspaceNameProvider: @escaping @MainActor @Sendable () -> String? = { nil },
         activityPresentationRequested: @escaping @MainActor @Sendable () -> Void = {}
     ) {
         self.timeline = timeline
         self.toolInteractions = toolInteractions
         self.agentActivity = agentActivity
-        self.codexRuntime = codexRuntime
-        self.nativeRunner = nativeRunner
         self.agentRuntime = agentRuntime
         self.llmRuntime = llmRuntime
-        self.nativeSessionProvider = nativeSessionProvider
         self.workspaceNameProvider = workspaceNameProvider
         self.activityPresentationRequested = activityPresentationRequested
     }
@@ -219,53 +207,7 @@ final class ChatResponseCoordinator {
         activeDiagnosticsRunID = diagnosticsRunID
         var result = Result(errorMessage: nil, touchedConversation: false)
 
-        let backendSession = CodexBackendSession(
-            runtime: codexRuntime,
-            turboThreadID: turboThreadID,
-            workspaceName: workspaceName,
-            agentTuning: agentTuning,
-            availableSkills: availableSkills,
-            modelID: codexModelID,
-            reasoningEffort: codexReasoningEffort,
-            delegationInvoker: delegationInvoker,
-            activityStarted: { [weak self] call, summary in
-                guard let self, self.ownsTurn(turnID) else { return }
-                self.toolInteractions.beginActivity(
-                    id: call.callID,
-                    toolName: call.tool,
-                    summary: self.routedToolSummary(
-                        summary,
-                        toolName: call.tool,
-                        owner: .coordinator
-                    )
-                )
-                self.coordinatorToolStarted(
-                    AgentActivityRuntimeMapping.tool(
-                        from: call,
-                        owner: .coordinator
-                    )
-                )
-            },
-            activityEnded: { [weak self] id in
-                guard let self, self.ownsTurn(turnID) else { return }
-                self.toolInteractions.endActivity(id: id)
-                self.coordinatorToolFinished(callID: id)
-            },
-            presentationRequested: { [weak self] presentation in
-                guard let self, self.ownsTurn(turnID) else { return }
-                self.present(presentation)
-            },
-            approvalRequested: { [weak self] request in
-                guard let self, self.ownsTurn(turnID) else { return }
-                _ = self.acceptRuntimeEvent(
-                    .approvalRequested(
-                        Self.runtimeApproval(from: request, turnID: turnID)
-                    )
-                )
-                self.toolInteractions.enqueueApproval(request)
-            }
-        )
-        let backendResult = await llmRuntime.execute(
+        let backendResult = await llmRuntime.executeCodex(
             request: TurnRequest(
                 id: turnID,
                 prompt: promptText,
@@ -273,7 +215,51 @@ final class ChatResponseCoordinator {
                 modelName: modelName,
                 workspaceRoot: workspaceRoot
             ),
-            using: backendSession,
+            configuration: CodexLLMExecutionConfiguration(
+                turboThreadID: turboThreadID,
+                workspaceName: workspaceName,
+                agentTuning: agentTuning,
+                availableSkills: availableSkills,
+                modelID: codexModelID,
+                reasoningEffort: codexReasoningEffort,
+                delegationInvoker: delegationInvoker,
+                activityStarted: { [weak self] call, summary in
+                    guard let self, self.ownsTurn(turnID) else { return }
+                    self.toolInteractions.beginActivity(
+                        id: call.callID,
+                        toolName: call.tool,
+                        summary: self.routedToolSummary(
+                            summary,
+                            toolName: call.tool,
+                            owner: .coordinator
+                        )
+                    )
+                    self.coordinatorToolStarted(
+                        AgentActivityRuntimeMapping.tool(
+                            from: call,
+                            owner: .coordinator
+                        )
+                    )
+                },
+                activityEnded: { [weak self] id in
+                    guard let self, self.ownsTurn(turnID) else { return }
+                    self.toolInteractions.endActivity(id: id)
+                    self.coordinatorToolFinished(callID: id)
+                },
+                presentationRequested: { [weak self] presentation in
+                    guard let self, self.ownsTurn(turnID) else { return }
+                    self.present(presentation)
+                },
+                approvalRequested: { [weak self] request in
+                    guard let self, self.ownsTurn(turnID) else { return }
+                    _ = self.acceptRuntimeEvent(
+                        .approvalRequested(
+                            Self.runtimeApproval(from: request, turnID: turnID)
+                        )
+                    )
+                    self.toolInteractions.enqueueApproval(request)
+                }
+            ),
             events: BackendSessionEvents { [weak self] event in
                 guard let self,
                       event.turnID == turnID,
@@ -358,7 +344,6 @@ final class ChatResponseCoordinator {
             )
             finishTurn(.cancelled(reason: "The turn was interrupted."), turnID: turnID)
         case .failed(let failure) where failure.code == "codex.authentication":
-            codexRuntime.markSignedOut()
             timeline.replaceBlock(
                 id: placeholderID,
                 with: ChatBlock(
@@ -379,7 +364,6 @@ final class ChatResponseCoordinator {
                 turnID: turnID
             )
         case .failed(let failure):
-            codexRuntime.markFailed(failure.message)
             timeline.replaceBlock(
                 id: placeholderID,
                 with: ChatBlock(
@@ -429,7 +413,6 @@ final class ChatResponseCoordinator {
         workspaceRoot: String,
         modelName: String,
         serverURL: String? = nil,
-        reasoningStreamRelay: ReasoningStreamRelay? = nil,
         contextChanged: @escaping @MainActor @Sendable (LlamaContextUsage?) -> Void = { _ in }
     ) async -> Result {
         let modelPrompt = WorkspaceListingFollowUpContext.enriching(
@@ -457,33 +440,7 @@ final class ChatResponseCoordinator {
         completedRootWrite = nil
         let publications = ResponsePublicationCapture()
 
-        let backendSession = NativeBackendSession(
-            backend: backend,
-            runner: nativeRunner,
-            session: nativeSessionProvider(),
-            mode: mode,
-            workspaceKind: workspaceKind,
-            serverURL: serverURL,
-            reasoningStreamRelay: reasoningStreamRelay,
-            diagnosticsChanged: { [weak self] runID in
-                guard let self, self.ownsTurn(turnID) else { return }
-                self.activeDiagnosticsRunID = runID
-            },
-            contextChanged: { [weak self] usage in
-                guard let self, self.ownsTurn(turnID) else { return }
-                contextChanged(usage)
-            },
-            approvalRequested: { [weak self] request in
-                guard let self, self.ownsTurn(turnID) else { return }
-                _ = self.acceptRuntimeEvent(
-                    .approvalRequested(
-                        Self.runtimeApproval(from: request, turnID: turnID)
-                    )
-                )
-                self.toolInteractions.enqueueApproval(request)
-            }
-        )
-        let backendResult = await llmRuntime.execute(
+        let backendResult = await llmRuntime.executeNative(
             request: TurnRequest(
                 id: turnID,
                 prompt: modelPrompt,
@@ -491,7 +448,28 @@ final class ChatResponseCoordinator {
                 modelName: modelName,
                 workspaceRoot: workspaceRoot
             ),
-            using: backendSession,
+            configuration: NativeLLMExecutionConfiguration(
+                mode: mode,
+                workspaceKind: workspaceKind,
+                serverURL: serverURL,
+                diagnosticsChanged: { [weak self] runID in
+                    guard let self, self.ownsTurn(turnID) else { return }
+                    self.activeDiagnosticsRunID = runID
+                },
+                contextChanged: { [weak self] usage in
+                    guard let self, self.ownsTurn(turnID) else { return }
+                    contextChanged(usage)
+                },
+                approvalRequested: { [weak self] request in
+                    guard let self, self.ownsTurn(turnID) else { return }
+                    _ = self.acceptRuntimeEvent(
+                        .approvalRequested(
+                            Self.runtimeApproval(from: request, turnID: turnID)
+                        )
+                    )
+                    self.toolInteractions.enqueueApproval(request)
+                }
+            ),
             events: BackendSessionEvents { [weak self] event in
                 guard let self,
                       event.turnID == turnID,

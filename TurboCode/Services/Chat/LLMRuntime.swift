@@ -1,4 +1,130 @@
 import Foundation
+import FoundationModels
+import FoundationModelsUtilities
+
+/// Provider configuration needed to build one native backend adapter.
+///
+/// Concrete `LanguageModelSession` and reasoning-relay values are deliberately
+/// absent. They are resolved by the runtime factory at the last responsible
+/// moment, so presentation code cannot retain session infrastructure.
+@MainActor
+struct NativeLLMExecutionConfiguration {
+    let mode: OrchestratorMode
+    let workspaceKind: String
+    let serverURL: String?
+    let diagnosticsChanged: @MainActor @Sendable (String?) -> Void
+    let contextChanged: @MainActor @Sendable (LlamaContextUsage?) -> Void
+    let approvalRequested: @MainActor @Sendable (ApprovalRequest) -> Void
+}
+
+/// Provider configuration needed to build one Codex backend adapter.
+/// Presentation callbacks remain explicit output ports; the factory owns the
+/// Codex process adapter and does not leak it back through this value.
+@MainActor
+struct CodexLLMExecutionConfiguration {
+    let turboThreadID: String
+    let workspaceName: String?
+    let agentTuning: AgentTuningConfig
+    let availableSkills: [TurboCodeSkillDefinition]
+    let modelID: String?
+    let reasoningEffort: CodexReasoningEffort?
+    let delegationInvoker: (any AgentTaskInvoking)?
+    let activityStarted: @MainActor @Sendable (CodexDynamicToolCall, String) -> Void
+    let activityEnded: @MainActor @Sendable (String) -> Void
+    let presentationRequested: @MainActor @Sendable (CodexToolPresentation) -> Void
+    let approvalRequested: @MainActor @Sendable (ApprovalRequest) -> Void
+}
+
+/// Builds concrete provider adapters exclusively inside the LLM runtime layer.
+/// The protocol keeps construction injectable for characterization tests while
+/// preventing `ChatResponseCoordinator` from importing adapter initializers.
+@MainActor
+protocol LLMBackendSessionBuilding: AnyObject {
+    func makeNativeSession(
+        request: TurnRequest,
+        configuration: NativeLLMExecutionConfiguration
+    ) -> any BackendSession
+
+    func makeCodexSession(
+        request: TurnRequest,
+        configuration: CodexLLMExecutionConfiguration
+    ) -> any BackendSession
+
+    func recordCodexFailure(_ failure: TurnFailure)
+}
+
+/// Live factory retaining the provider infrastructure shared across turns.
+/// Active sessions themselves remain owned by ``LLMRuntime`` and are created
+/// per admitted request, so rebuilding model configuration cannot replace a
+/// session that is still unwinding.
+@MainActor
+final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
+    private let nativeRunner: any NativeResponseRunning
+    private let nativeSessionProvider: @MainActor @Sendable () -> LanguageModelSession
+    private let reasoningStreamRelayProvider: @MainActor @Sendable () -> ReasoningStreamRelay?
+    private let codexRuntime: CodexRuntimeStore
+
+    init(
+        nativeRunner: any NativeResponseRunning,
+        nativeSessionProvider: @escaping @MainActor @Sendable () -> LanguageModelSession,
+        reasoningStreamRelayProvider: @escaping @MainActor @Sendable () -> ReasoningStreamRelay?,
+        codexRuntime: CodexRuntimeStore
+    ) {
+        self.nativeRunner = nativeRunner
+        self.nativeSessionProvider = nativeSessionProvider
+        self.reasoningStreamRelayProvider = reasoningStreamRelayProvider
+        self.codexRuntime = codexRuntime
+    }
+
+    func makeNativeSession(
+        request: TurnRequest,
+        configuration: NativeLLMExecutionConfiguration
+    ) -> any BackendSession {
+        NativeBackendSession(
+            backend: request.backend,
+            runner: nativeRunner,
+            session: nativeSessionProvider(),
+            mode: configuration.mode,
+            workspaceKind: configuration.workspaceKind,
+            serverURL: configuration.serverURL,
+            reasoningStreamRelay: reasoningStreamRelayProvider(),
+            diagnosticsChanged: configuration.diagnosticsChanged,
+            contextChanged: configuration.contextChanged,
+            approvalRequested: configuration.approvalRequested
+        )
+    }
+
+    func makeCodexSession(
+        request: TurnRequest,
+        configuration: CodexLLMExecutionConfiguration
+    ) -> any BackendSession {
+        CodexBackendSession(
+            runtime: codexRuntime,
+            turboThreadID: configuration.turboThreadID,
+            workspaceName: configuration.workspaceName,
+            agentTuning: configuration.agentTuning,
+            availableSkills: configuration.availableSkills,
+            modelID: configuration.modelID,
+            reasoningEffort: configuration.reasoningEffort,
+            delegationInvoker: configuration.delegationInvoker,
+            activityStarted: configuration.activityStarted,
+            activityEnded: configuration.activityEnded,
+            presentationRequested: configuration.presentationRequested,
+            approvalRequested: configuration.approvalRequested
+        )
+    }
+
+    /// Provider connection state belongs beside the Codex transport, not in
+    /// the timeline mapper. Authentication failures clear the signed-in state;
+    /// other failures retain their diagnostic message for the provider UI.
+    func recordCodexFailure(_ failure: TurnFailure) {
+        if failure.code == "codex.authentication" {
+            codexRuntime.markSignedOut()
+        } else {
+            codexRuntime.markFailed(failure.message)
+        }
+    }
+}
 
 /// Owns execution of the concrete backend session selected for one LLM turn.
 ///
@@ -15,8 +141,13 @@ import Foundation
 /// invariant.
 @MainActor
 final class LLMRuntime {
+    private let sessionFactory: (any LLMBackendSessionBuilding)?
     private var activeTurnID: TurnID?
     private var activeSession: (any BackendSession)?
+
+    init(sessionFactory: (any LLMBackendSessionBuilding)? = nil) {
+        self.sessionFactory = sessionFactory
+    }
 
     var hasActiveSession: Bool {
         activeSession != nil
@@ -56,6 +187,58 @@ final class LLMRuntime {
         defer { releaseSession(for: request.id) }
 
         return await session.run(request: request, events: events)
+    }
+
+    /// Resolves and executes a native adapter entirely inside the runtime
+    /// layer. `ChatResponseCoordinator` supplies presentation output ports but
+    /// never receives the concrete session or reasoning relay.
+    func executeNative(
+        request: TurnRequest,
+        configuration: NativeLLMExecutionConfiguration,
+        events: BackendSessionEvents
+    ) async -> BackendSessionResult {
+        guard let sessionFactory else {
+            return rejectedResult(
+                code: "llm_runtime.unconfigured",
+                message: "No LLM backend session factory is configured."
+            )
+        }
+        return await execute(
+            request: request,
+            using: sessionFactory.makeNativeSession(
+                request: request,
+                configuration: configuration
+            ),
+            events: events
+        )
+    }
+
+    /// Resolves and executes a Codex adapter behind the same ownership gate as
+    /// native providers. Provider-specific construction no longer lives in the
+    /// presentation coordinator.
+    func executeCodex(
+        request: TurnRequest,
+        configuration: CodexLLMExecutionConfiguration,
+        events: BackendSessionEvents
+    ) async -> BackendSessionResult {
+        guard let sessionFactory else {
+            return rejectedResult(
+                code: "llm_runtime.unconfigured",
+                message: "No LLM backend session factory is configured."
+            )
+        }
+        let result = await execute(
+            request: request,
+            using: sessionFactory.makeCodexSession(
+                request: request,
+                configuration: configuration
+            ),
+            events: events
+        )
+        if case .failed(let failure) = result.outcome {
+            sessionFactory.recordCodexFailure(failure)
+        }
+        return result
     }
 
     /// Interrupts only the adapter owned by the requested turn. Ownership is
