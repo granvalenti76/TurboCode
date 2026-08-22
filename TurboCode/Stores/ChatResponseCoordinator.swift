@@ -22,6 +22,7 @@ final class ChatResponseCoordinator {
     private let codexRuntime: CodexRuntimeStore
     private let nativeRunner: any NativeResponseRunning
     private let agentRuntime: AgentRuntime
+    private let nativeSessionProvider: @MainActor @Sendable () -> LanguageModelSession
     private let workspaceNameProvider: @MainActor @Sendable () -> String?
     private let activityPresentationRequested: @MainActor @Sendable () -> Void
 
@@ -42,6 +43,9 @@ final class ChatResponseCoordinator {
         codexRuntime: CodexRuntimeStore,
         nativeRunner: any NativeResponseRunning,
         agentRuntime: AgentRuntime = AgentRuntime(),
+        nativeSessionProvider: @escaping @MainActor @Sendable () -> LanguageModelSession = {
+            LanguageModelSession()
+        },
         workspaceNameProvider: @escaping @MainActor @Sendable () -> String? = { nil },
         activityPresentationRequested: @escaping @MainActor @Sendable () -> Void = {}
     ) {
@@ -51,6 +55,7 @@ final class ChatResponseCoordinator {
         self.codexRuntime = codexRuntime
         self.nativeRunner = nativeRunner
         self.agentRuntime = agentRuntime
+        self.nativeSessionProvider = nativeSessionProvider
         self.workspaceNameProvider = workspaceNameProvider
         self.activityPresentationRequested = activityPresentationRequested
     }
@@ -387,7 +392,6 @@ final class ChatResponseCoordinator {
         visibleInTimeline: Bool,
         turnID: TurnID,
         blocks: [ChatBlock],
-        session: LanguageModelSession,
         backend: ModelBackend,
         mode: OrchestratorMode,
         workspaceKind: String,
@@ -425,7 +429,7 @@ final class ChatResponseCoordinator {
         let backendSession = NativeBackendSession(
             backend: backend,
             runner: nativeRunner,
-            session: session,
+            session: nativeSessionProvider(),
             mode: mode,
             workspaceKind: workspaceKind,
             serverURL: serverURL,

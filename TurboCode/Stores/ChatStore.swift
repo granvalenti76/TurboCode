@@ -119,6 +119,7 @@ public final class ChatStore {
         let codexRuntime = CodexRuntimeStore()
         let nativeRunner = NativeResponseRunner()
         let reviewDraft = ReviewDraftStore()
+        let modelRuntime = ModelRuntimeStore()
         let workspace = WorkspaceStore(
             gitService: gitService,
             reviewDraftStore: reviewDraft
@@ -132,7 +133,7 @@ public final class ChatStore {
         self.workbenchStore = workbench
         self.reviewDraftStore = reviewDraft
         self.codexRuntimeStore = codexRuntime
-        self.modelRuntimeStore = ModelRuntimeStore()
+        self.modelRuntimeStore = modelRuntime
         self.agentRuntime = AgentRuntime()
         self.responseCoordinator = ChatResponseCoordinator(
             timeline: timeline,
@@ -141,6 +142,9 @@ public final class ChatStore {
             codexRuntime: codexRuntime,
             nativeRunner: nativeRunner,
             agentRuntime: agentRuntime,
+            nativeSessionProvider: {
+                modelRuntime.session
+            },
             workspaceNameProvider: {
                 workspace.label.isEmpty ? nil : workspace.label
             },
@@ -1354,7 +1358,6 @@ public final class ChatStore {
             visibleInTimeline: visibleInTimeline,
             turnID: turnID,
             blocks: blocks,
-            session: session,
             backend: activeBackend,
             mode: orchestratorMode,
             workspaceKind: diagnosticsWorkspaceKind,
