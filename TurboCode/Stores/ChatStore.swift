@@ -74,7 +74,7 @@ public final class ChatStore {
     let modelRuntimeStore: ModelRuntimeStore
     let agentRuntime: AgentRuntime
     let responseCoordinator: ChatResponseCoordinator
-    private let conversationPersistence: ConversationPersistenceService
+    private let sessionCoordinator: ConversationSessionCoordinator
     private let reviewCoordinator: ReviewCoordinator
 
     // Codex selection and handoff are also transition operations. Keeping
@@ -137,9 +137,16 @@ public final class ChatStore {
             reviewDraftStore: reviewDraft
         )
         let workbench = WorkbenchStore()
-        self.conversationStore = ConversationStore()
-        self.conversationPersistence = ConversationPersistenceService(
+        let conversations = ConversationStore()
+        let conversationPersistence = ConversationPersistenceService(
             repository: conversationRepository
+        )
+        self.conversationStore = conversations
+        self.sessionCoordinator = ConversationSessionCoordinator(
+            conversations: conversations,
+            timeline: timeline,
+            modelRuntime: modelRuntime,
+            persistence: conversationPersistence
         )
         self.workspaceStore = workspace
         self.toolInteractionStore = toolInteractions
@@ -630,58 +637,14 @@ public final class ChatStore {
 
     /// Saves the active thread and its blocks to `~/.turbocode/sessions/<id>.json`.
     public func persistSession(for threadId: String) async {
-        let startedAt = Date()
-        guard threadId == activeThreadId,
-              let thread = threads.first(where: { $0.id == threadId }) else {
-            assertionFailure("persistSession can only persist the active thread")
-            return
-        }
-        let snapshot = ConversationSnapshot(
-            conversation: thread,
-            modelBackend: modelRuntimeStore.persistedModelIdentifier,
-            blocks: blocks,
-            // Codex persists its own rollout. Saving an unrelated Foundation
-            // Models transcript here would contaminate later restoration.
-            transcript: activeBackend == .codex
-                ? nil
-                : modelRuntimeStore.transcript
-        )
-        do {
-            try await conversationPersistence.save(snapshot)
-        } catch {
-            print("[TurboCode] Failed to persist session: \(error.localizedDescription)")
-        }
-        await AgentDiagnosticsRecorder.shared.recordBoundary(
-            RuntimeBoundaryMetric(
-                boundary: .persistence,
-                backend: activeBackend.rawValue,
-                durationMilliseconds: max(
-                    0,
-                    Int(Date().timeIntervalSince(startedAt) * 1_000)
-                )
-            )
-        )
+        await sessionCoordinator.persistActiveSession(id: threadId)
     }
 
     /// Persists catalog-only changes without replacing a non-active thread's
     /// timeline. Active drafts use the full session snapshot; older threads
     /// retain their durable blocks and transcript while only metadata changes.
     private func persistConversationMetadata(for threadID: String) async {
-        if threadID == activeThreadId {
-            await persistSession(for: threadID)
-            return
-        }
-        guard let conversation = conversationStore.conversation(id: threadID) else {
-            return
-        }
-        do {
-            try await conversationPersistence.saveMetadata(
-                conversation,
-                defaultModelBackend: ModelBackend.foundationApple.rawValue
-            )
-        } catch {
-            print("[TurboCode] Failed to persist conversation metadata: \(error.localizedDescription)")
-        }
+        await sessionCoordinator.persistMetadata(id: threadID)
     }
 
     /// Persists a delayed generated title without resnapshotting the active
@@ -689,32 +652,19 @@ public final class ChatStore {
     /// before releasing ownership; updating only metadata prevents a title
     /// completion from capturing a newer turn while that turn is streaming.
     private func persistGeneratedTitleMetadata(for threadID: String) async {
-        guard let conversation = conversationStore.conversation(id: threadID) else {
-            return
-        }
-        do {
-            try await conversationPersistence.saveMetadata(
-                conversation,
-                defaultModelBackend: ModelBackend.foundationApple.rawValue
-            )
-        } catch {
-            print("[TurboCode] Failed to persist generated title: \(error.localizedDescription)")
-        }
+        await sessionCoordinator.persistGeneratedTitle(id: threadID)
     }
 
     /// Loads all session files and populates the thread list.
     public func restoreSessions() async {
-        guard let conversations = try? await conversationPersistence.loadCatalog() else {
-            return
-        }
-        conversationStore.restoreCatalog(conversations)
+        await sessionCoordinator.restoreCatalog()
     }
 
     /// Fully restores a past session with its blocks.
     public func restoreSession(id: String) async {
         let startedAt = Date()
         await finishActiveResponseBeforeTransition()
-        guard let snapshot = try? await conversationPersistence.load(id: id),
+        guard let snapshot = await sessionCoordinator.load(id: id),
               let _ = threads.firstIndex(where: { $0.id == id }) else { return }
         dismissWorkspaceListingInspector()
         workbenchStore.dismissDiffPatchReview()
@@ -831,8 +781,7 @@ public final class ChatStore {
 
         let nextThreadID: String?
         do {
-            try await conversationPersistence.delete(id: id)
-            nextThreadID = conversationStore.removeThread(id: id)
+            nextThreadID = try await sessionCoordinator.delete(id: id)
         } catch {
             // Keep the visible row when durable deletion fails; pretending the
             // operation succeeded would make it reappear on the next launch.
@@ -868,13 +817,11 @@ public final class ChatStore {
     /// The workspace directory and all project files are left untouched.
     public func removeWorkspace(_ path: String) async {
         await finishActiveResponseBeforeTransition()
-        let persistenceRemoval = await conversationPersistence.removeWorkspace(
-            path,
-            visibleConversations: threads
-        )
-        let removedActiveThread = conversationStore.removeThreads(
-            ids: persistenceRemoval.deletedConversationIDs
-        )
+        let activeThreadBeforeRemoval = activeThreadId
+        let persistenceRemoval = await sessionCoordinator.removeWorkspace(path)
+        let removedActiveThread = activeThreadBeforeRemoval.map(
+            persistenceRemoval.deletedConversationIDs.contains
+        ) ?? false
         let removedActiveWorkspace = workspaceStore.removeWorkspace(path)
 
         if removedActiveThread {
