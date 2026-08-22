@@ -1,7 +1,6 @@
 import Foundation
 import AppKit
 import Observation
-import FoundationModels
 import FoundationModelsUtilities
 
 /// Temporary, non-invasive status shown after a local context compaction.
@@ -493,7 +492,7 @@ public final class ChatStore {
     private func rebuildSession(
         keepingHistory: Bool = true,
         discardingCapabilityContext: Bool = false,
-        restoringHistory: [Transcript.Entry]? = nil
+        restoringHistory: [ModelRuntimeStore.RestoredTranscriptEntry]? = nil
     ) {
         llamaContextUsage = nil
         modelRuntimeStore.rebuildSession(
@@ -583,30 +582,8 @@ public final class ChatStore {
         guard let threadID = threadID ?? activeThreadId,
               threads.contains(where: { $0.id == threadID && $0.title == "New Chat" }) else { return }
 
-        let titlePrompt = """
-        Generate a very short title (max 6 words) for a conversation that starts with this message.
-        Respond with ONLY the title, no quotes, no punctuation.
-
-        Message: \(prompt)
-        """
-
-        do {
-            let model = SystemLanguageModel.default
-            let titleSession = LanguageModelSession(model: model)
-            var generated = ""
-            for try await snapshot in titleSession.streamResponse(to: titlePrompt) {
-                if !snapshot.content.isEmpty {
-                    generated = snapshot.content
-                }
-            }
-            let clean = generated
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .replacingOccurrences(of: "\"", with: "")
-            if !clean.isEmpty {
-                applyGeneratedTitle(String(clean.prefix(60)), to: threadID)
-            }
-        } catch {
-            // Silently fall back to "New Chat"
+        if let title = await modelRuntimeStore.generateConversationTitle(from: prompt) {
+            applyGeneratedTitle(title, to: threadID)
         }
     }
 
@@ -1428,25 +1405,9 @@ public final class ChatStore {
         benchmarkStatus = "Running \(activeBackend.rawValue) editing benchmark..."
         defer { benchmarkRunning = false }
 
-        let model: any LanguageModel
-        switch activeBackend {
-        case .foundationApple:
-            model = SystemLanguageModel.default
-        case .foundationServe, .llamaServer, .premium:
-            model = modelRuntimeStore.languageModel(
-                for: activeRemoteModel ?? RemoteModelConfig.fallbackLlama
-            )
-        case .codex:
-            benchmarkStatus = "Codex uses its own App Server evaluation path."
-            return
-        }
-        let result = await AgentBenchmarkRunner.runSuite(
-            backend: activeBackend,
-            model: model,
-            reasoningLevel: reasoningLevel
-        )
-        benchmarkStatus = result.summary
-        print("[Benchmark] \(result.summary)")
+        let summary = await modelRuntimeStore.runEditingBenchmark()
+        benchmarkStatus = summary
+        print("[Benchmark] \(summary)")
     }
 
     public func printToolFailureSummary() async {

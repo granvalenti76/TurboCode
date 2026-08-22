@@ -20,4 +20,19 @@ struct ModelRuntimeStoreTests {
 
         #expect(selected.url == configuredLlama.url)
     }
+
+    @Test("Conversation title normalization stays bounded and optional")
+    func conversationTitleNormalizationIsDeterministic() {
+        #expect(
+            ModelRuntimeStore.normalizedConversationTitle("  \"Fix the sidebar\"  ")
+                == "Fix the sidebar"
+        )
+        #expect(
+            ModelRuntimeStore.normalizedConversationTitle("   \n") == nil
+        )
+        #expect(
+            ModelRuntimeStore.normalizedConversationTitle(String(repeating: "x", count: 80))?.count
+                == 60
+        )
+    }
 }

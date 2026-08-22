@@ -11,6 +11,10 @@ import Observation
 @MainActor
 @Observable
 final class ModelRuntimeStore {
+    /// Compatibility name used by the facade while transcript ownership stays
+    /// behind this Foundation Models boundary.
+    typealias RestoredTranscriptEntry = Transcript.Entry
+
     private(set) var agentTuning: AgentTuningConfig = .default
     private(set) var remoteModels: [RemoteModelConfig]
     private(set) var activeRemoteModelID: String
@@ -377,9 +381,72 @@ final class ModelRuntimeStore {
             reasoningStreamRelay: model.id == activeRemoteModelID
                 && activeBackend == .llamaServer
                 ? reasoningStreamRelay
-                : nil
+            : nil
         )
     }
+
+    /// Generates a short title without exposing a Foundation Models stream to
+    /// the UI facade. Title inference intentionally stays on Apple's on-device
+    /// model and does not affect the active conversation session.
+    func generateConversationTitle(from prompt: String) async -> String? {
+        let titlePrompt = """
+        Generate a very short title (max 6 words) for a conversation that starts with this message.
+        Respond with ONLY the title, no quotes, no punctuation.
+
+        Message: \(prompt)
+        """
+
+        do {
+            let titleSession = LanguageModelSession(model: SystemLanguageModel.default)
+            var generated = ""
+            for try await snapshot in titleSession.streamResponse(to: titlePrompt) {
+                if !snapshot.content.isEmpty {
+                    generated = snapshot.content
+                }
+            }
+            return Self.normalizedConversationTitle(generated)
+        } catch {
+            // Title generation is optional; the conversation keeps "New Chat".
+            return nil
+        }
+    }
+
+    /// Keeps title cleanup deterministic and independently testable from model
+    /// availability. The limit matches the existing persisted-title contract.
+    nonisolated static func normalizedConversationTitle(
+        _ generated: String
+    ) -> String? {
+        let clean = generated
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\"", with: "")
+        guard !clean.isEmpty else { return nil }
+        return String(clean.prefix(60))
+    }
+
+#if DEBUG
+    /// Keeps diagnostic model construction beside the provider configuration;
+    /// the UI facade only owns benchmark progress and presentation.
+    func runEditingBenchmark() async -> String {
+        let model: any LanguageModel
+        switch activeBackend {
+        case .foundationApple:
+            model = SystemLanguageModel.default
+        case .foundationServe, .llamaServer, .premium:
+            model = languageModel(
+                for: activeRemoteModel ?? RemoteModelConfig.fallbackLlama
+            )
+        case .codex:
+            return "Codex uses its own App Server evaluation path."
+        }
+
+        let result = await AgentBenchmarkRunner.runSuite(
+            backend: activeBackend,
+            model: model,
+            reasoningLevel: reasoningLevel
+        )
+        return result.summary
+    }
+#endif
 
     func rebuildSession(
         workspaceRoot: String,
