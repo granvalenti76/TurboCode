@@ -17,6 +17,7 @@ final class IndependentTaskCoordinator {
     private let presentation: ChatPresentationViewModel
     private let sessions: ConversationSessionCoordinator
     private let profiles: ProfileSelectionCoordinator
+    private let lifecycle: ConversationLifecycleCoordinator
 
     init(
         runtime: AgentRuntime,
@@ -29,7 +30,8 @@ final class IndependentTaskCoordinator {
         workspace: WorkspaceStore,
         presentation: ChatPresentationViewModel,
         sessions: ConversationSessionCoordinator,
-        profiles: ProfileSelectionCoordinator
+        profiles: ProfileSelectionCoordinator,
+        lifecycle: ConversationLifecycleCoordinator
     ) {
         self.runtime = runtime
         self.runtimeProjection = runtimeProjection
@@ -42,10 +44,12 @@ final class IndependentTaskCoordinator {
         self.presentation = presentation
         self.sessions = sessions
         self.profiles = profiles
+        self.lifecycle = lifecycle
     }
 
     func run(goal: String) async {
         guard !runtimeProjection.hasActiveOperation else { return }
+        await lifecycle.ensureActiveThread()
         let command = "/task \(goal)"
         let envelope: AgentTaskEnvelope
         do {

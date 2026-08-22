@@ -75,7 +75,9 @@ public final class ChatStore {
     let responseCoordinator: ChatResponseCoordinator
     private let sessionCoordinator: ConversationSessionCoordinator
     private let profileSelectionCoordinator: ProfileSelectionCoordinator
+    private let conversationLifecycleCoordinator: ConversationLifecycleCoordinator
     private let independentTaskCoordinator: IndependentTaskCoordinator
+    private let messageSendCoordinator: MessageSendCoordinator
     private let reviewCoordinator: ReviewCoordinator
     // MARK: - Onboarding
 
@@ -182,6 +184,17 @@ public final class ChatStore {
             responseCoordinator: responseCoordinator
         )
         self.profileSelectionCoordinator = profileSelectionCoordinator
+        let conversationLifecycleCoordinator = ConversationLifecycleCoordinator(
+            conversations: conversations,
+            timeline: timeline,
+            activity: agentActivity,
+            workbench: workbench,
+            workspace: workspace,
+            composer: composer,
+            runtime: agentRuntime,
+            profiles: profileSelectionCoordinator
+        )
+        self.conversationLifecycleCoordinator = conversationLifecycleCoordinator
         self.independentTaskCoordinator = IndependentTaskCoordinator(
             runtime: agentRuntime,
             runtimeProjection: runtimeProjection,
@@ -193,7 +206,22 @@ public final class ChatStore {
             workspace: workspace,
             presentation: presentation,
             sessions: sessionCoordinator,
-            profiles: profileSelectionCoordinator
+            profiles: profileSelectionCoordinator,
+            lifecycle: conversationLifecycleCoordinator
+        )
+        self.messageSendCoordinator = MessageSendCoordinator(
+            runtime: agentRuntime,
+            runtimeProjection: runtimeProjection,
+            responseCoordinator: responseCoordinator,
+            modelRuntime: modelRuntime,
+            codexRuntime: codexRuntime,
+            conversations: conversations,
+            timeline: timeline,
+            workspace: workspace,
+            presentation: presentation,
+            sessions: sessionCoordinator,
+            profiles: profileSelectionCoordinator,
+            lifecycle: conversationLifecycleCoordinator
         )
         self.reviewCoordinator = ReviewCoordinator(
             timeline: timeline,
@@ -388,33 +416,16 @@ public final class ChatStore {
     /// without a thread, attach them to the new metadata instead of discarding
     /// the visible conversation.
     private func ensureActiveThread() async {
-        let hasOrphanedBlocks = !blocks.isEmpty
-        let created = conversationStore.ensureActiveThread(
-            workspace: workspaceRoot.isEmpty ? nil : workspaceRoot,
-            mode: composerViewModel.mode
-        )
-        guard created else { return }
-
-        if let threadID = activeThreadId {
-            await projectRuntimeCommand(.switchThread(threadID: threadID))
-        }
-        guard !hasOrphanedBlocks else { return }
-        timelineStore.reset()
-        resetAgentActivityForConversation()
-        await rebuildSession(keepingHistory: false)
+        await conversationLifecycleCoordinator.ensureActiveThread()
     }
 
     /// Generates a concise title from the first user prompt using the Apple
     /// on-device model, then applies it to the thread that initiated the request.
     public func generateTitle(from prompt: String, for threadID: String? = nil) async {
-        // Capture identity before inference: the active conversation can change
-        // while the on-device model streams a title in the background.
-        guard let threadID = threadID ?? activeThreadId,
-              threads.contains(where: { $0.id == threadID && $0.title == "New Chat" }) else { return }
-
-        if let title = await modelRuntimeStore.generateConversationTitle(from: prompt) {
-            applyGeneratedTitle(title, to: threadID)
-        }
+        await messageSendCoordinator.generateTitle(
+            from: prompt,
+            threadID: threadID
+        )
     }
 
     /// Commits an asynchronously generated title by stable identity. Re-finding
@@ -436,14 +447,6 @@ public final class ChatStore {
     /// retain their durable blocks and transcript while only metadata changes.
     private func persistConversationMetadata(for threadID: String) async {
         await sessionCoordinator.persistMetadata(id: threadID)
-    }
-
-    /// Persists a delayed generated title without resnapshotting the active
-    /// timeline. The response operation has already saved its durable blocks
-    /// before releasing ownership; updating only metadata prevents a title
-    /// completion from capturing a newer turn while that turn is streaming.
-    private func persistGeneratedTitleMetadata(for threadID: String) async {
-        await sessionCoordinator.persistGeneratedTitle(id: threadID)
     }
 
     /// Loads all session files and populates the thread list.
@@ -650,14 +653,7 @@ public final class ChatStore {
             return
         }
         presentationViewModel.clearCompactionNotice()
-        await refreshSkillsIfNeeded()
-        if activeBackend != .codex,
-           modelRuntimeStore.workspaceInstructionsChanged(in: workspaceRoot) {
-            // LanguageModelSession instructions are immutable. Preserve visible
-            // history while replacing only the stale system-instruction prefix.
-            await rebuildSession()
-        }
-        guard let promptText = modelRuntimeStore.resolvedPrompt(
+        guard let promptText = await messageSendCoordinator.preparePrompt(
             for: text
         ) else { return }
         await sendMessage(text, promptText: promptText, visibleInTimeline: true)
@@ -676,12 +672,7 @@ public final class ChatStore {
             comments: reviewDraftStore.comments
         ) else { return }
 
-        await refreshSkillsIfNeeded()
-        if activeBackend != .codex,
-           modelRuntimeStore.workspaceInstructionsChanged(in: workspaceRoot) {
-            await rebuildSession()
-        }
-        guard let promptText = modelRuntimeStore.resolvedPrompt(
+        guard let promptText = await messageSendCoordinator.preparePrompt(
             for: request.promptText
         ) else { return }
 
@@ -787,7 +778,6 @@ public final class ChatStore {
     /// The active profile does not need to advertise `delegate_task`, because
     /// this is an explicit application command rather than model tool use.
     private func runIndependentTask(_ goal: String) async {
-        await ensureActiveThread()
         await independentTaskCoordinator.run(goal: goal)
     }
 
@@ -800,20 +790,17 @@ public final class ChatStore {
     }
 
     public func reloadSkills() async {
-        await refreshSkillsIfNeeded(forceRebuild: true)
+        await messageSendCoordinator.reloadSkills()
     }
 
     func applyAgentTuning(_ value: AgentTuningConfig) async {
-        guard modelRuntimeStore.applyAgentTuning(value) else { return }
-        await rebuildSession(discardingCapabilityContext: true)
+        await messageSendCoordinator.applyAgentTuning(value)
     }
 
     private func refreshSkillsIfNeeded(forceRebuild: Bool = false) async {
-        guard modelRuntimeStore.refreshSkills(
-            force: forceRebuild,
-            workspaceRoot: workspaceRoot
-        ) else { return }
-        await rebuildSession(discardingCapabilityContext: true)
+        await messageSendCoordinator.refreshSkillsIfNeeded(
+            forceRebuild: forceRebuild
+        )
     }
 
     private func sendMessage(
@@ -821,167 +808,11 @@ public final class ChatStore {
         promptText: String? = nil,
         visibleInTimeline: Bool
     ) async {
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !busy,
-              activeProfileCanSend else { return }
-
-        await compactOnDeviceContextIfNeeded()
-        let effectivePrompt = promptText ?? text
-        await ensureActiveThread()
-        // One identity follows the accepted prompt through either provider so
-        // late callbacks cannot be mistaken for the next user turn.
-        let turnID = TurnID()
-        let titleThreadID = activeThreadId
-        // Capture routing before detached execution. The provider task receives
-        // an immutable value and never reaches back into MainActor UI state to
-        // decide which backend owns this turn.
-        let responseBackend = activeBackend
-        await agentRuntime.runOperation(
-            turnID: turnID,
-            operation: { [weak self] in
-                guard let self else { return }
-                if responseBackend == .codex {
-                    await self.performCodexSendMessage(
-                        displayText: text,
-                        promptText: effectivePrompt,
-                        visibleInTimeline: visibleInTimeline,
-                        turnID: turnID
-                    )
-                } else {
-                    await self.performSendMessage(
-                        displayText: text,
-                        promptText: effectivePrompt,
-                        visibleInTimeline: visibleInTimeline,
-                        turnID: turnID
-                    )
-                }
-            },
-            afterRelease: { [weak self] in
-                guard visibleInTimeline,
-                      let self,
-                      let titleThreadID else { return }
-                // Title inference is optional catalog polish. It deliberately
-                // starts after response ownership is released so a stalled
-                // Apple title session cannot leave the composer on Stop.
-                await self.generateTitle(from: text, for: titleThreadID)
-                await self.persistGeneratedTitleMetadata(for: titleThreadID)
-            }
+        await messageSendCoordinator.send(
+            displayText: text,
+            promptText: promptText ?? text,
+            visibleInTimeline: visibleInTimeline
         )
-    }
-
-    /// Compacts only at a turn boundary, when the previous on-device context
-    /// has reached eight question/answer turns. The active session is rebuilt
-    /// from a concise handoff so the ninth question starts with usable context.
-    private func compactOnDeviceContextIfNeeded() async {
-        guard activeBackend == .foundationApple else { return }
-        let turnCount = SessionRebuildHistory.userTurnCount(
-            in: modelRuntimeStore.transcript
-        )
-        guard turnCount >= SessionRebuildHistory.onDeviceCompactionThreshold,
-              let compaction = SessionRebuildHistory.onDeviceCompaction(from: blocks)
-        else { return }
-
-        timelineStore.presentCompaction(compaction.summary)
-        await rebuildSession(restoringHistory: compaction.history)
-        Task {
-            await AgentDiagnosticsRecorder.shared.recordCompaction(
-                turnCount: turnCount,
-                retainedCharacters: compaction.summary.count
-            )
-        }
-    }
-
-    /// Runs one turn through Codex App Server while preserving TurboCode's
-    /// timeline contract. Visual file-change mapping is intentionally a later
-    /// adapter layer; this foundation handles text, reasoning and cancellation.
-    /// Dynamic coordinator profiles also forward their isolated Codex choices
-    /// without changing the direct-Codex composer preference.
-    private func performCodexSendMessage(
-        displayText: String,
-        promptText: String,
-        visibleInTimeline: Bool,
-        turnID: TurnID
-    ) async {
-        error = nil
-        guard let turboThreadID = activeThreadId else {
-            self.error = "TurboCode could not create the conversation."
-            return
-        }
-        let result = await responseCoordinator.performCodex(
-            displayText: displayText,
-            promptText: promptText,
-            visibleInTimeline: visibleInTimeline,
-            turnID: turnID,
-            turboThreadID: turboThreadID,
-            workspaceRoot: workspaceRoot,
-            workspaceName: workspaceRoot.isEmpty ? nil : workspaceLabel,
-            mode: orchestratorMode,
-            workspaceKind: diagnosticsWorkspaceKind,
-            agentTuning: agentTuning,
-            availableSkills: DynamicProfileRuntimeSelection.skills(
-                from: modelRuntimeStore.availableSkills,
-                profile: activeDynamicProfile,
-                safariMCPEnabled: agentTuning.experimental.safariMCPEnabled
-            ),
-            codexModelID: activeDynamicProfile?.codexModelID,
-            codexReasoningEffort:
-                activeDynamicProfile?.codexReasoningEffort,
-            delegationInvoker: modelRuntimeStore.makeDelegateInvoker(
-                workspaceRoot: workspaceRoot,
-                events: responseCoordinator.modelSessionEvents
-            ),
-            modelName: composerModel
-        )
-        modelRuntimeStore.composerModel = activeDynamicProfile?.name
-            ?? "Codex · \(codexDisplayName)"
-        error = result.errorMessage
-        if result.touchedConversation {
-            conversationStore.touchThread(id: turboThreadID)
-        }
-        // A skill created by skill-creator becomes available to the next turn
-        // without requiring an app restart or a manual Skills reload.
-        await refreshSkillsIfNeeded()
-        await persistSession(for: turboThreadID)
-    }
-
-    private func performSendMessage(
-        displayText: String,
-        promptText: String,
-        visibleInTimeline: Bool,
-        turnID: TurnID
-    ) async {
-        let conversationID = activeThreadId
-        presentationViewModel.runtimeStatus = .ready
-        error = nil
-        let result = await responseCoordinator.performNative(
-            displayText: displayText,
-            promptText: promptText,
-            visibleInTimeline: visibleInTimeline,
-            turnID: turnID,
-            blocks: blocks,
-            backend: activeBackend,
-            mode: orchestratorMode,
-            workspaceKind: diagnosticsWorkspaceKind,
-            workspaceRoot: workspaceRoot,
-            modelName: composerModel,
-            serverURL: activeBackend == .llamaServer
-                ? activeRemoteModel?.url
-                : nil,
-            contextChanged: { [weak self] usage in
-                guard let self, self.activeBackend == .llamaServer else { return }
-                self.presentationViewModel.setLlamaContextUsage(usage)
-            }
-        )
-        error = result.errorMessage
-        if result.touchedConversation, let conversationID {
-            conversationStore.touchThread(id: conversationID)
-        }
-        // A skill created by skill-creator becomes available to the next turn
-        // without requiring an app restart or a manual Skills reload.
-        await refreshSkillsIfNeeded()
-        if let conversationID, activeThreadId == conversationID {
-            await persistSession(for: conversationID)
-        }
     }
 
     public func interrupt() async {
@@ -1033,12 +864,6 @@ public final class ChatStore {
         print("[Diagnostics] Runtime baseline 0.3.4\n\(summary.summary)")
     }
 #endif
-
-    private var diagnosticsWorkspaceKind: String {
-        guard !workspaceRoot.isEmpty else { return "none" }
-        let marker = URL(fileURLWithPath: workspaceRoot).appendingPathComponent(".git")
-        return FileManager.default.fileExists(atPath: marker.path) ? "git" : "nonGit"
-    }
 
     /// Approve a pending tool operation, execute the exact registered action,
     /// then inform the model that the action completed.
