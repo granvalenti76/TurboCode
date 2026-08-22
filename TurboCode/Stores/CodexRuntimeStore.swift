@@ -42,6 +42,7 @@ final class CodexRuntimeStore {
         let liveReasoningChanged: (String) -> Void
         let activityStarted: (CodexDynamicToolCall, String) -> Void
         let activityEnded: (String) -> Void
+        let toolFinished: (CodexDynamicToolCall, CodexDynamicToolResult) -> Void
         let presentationRequested: (CodexToolPresentation) -> Void
         let approvalRequested: (ApprovalRequest) -> Void
     }
@@ -349,6 +350,7 @@ final class CodexRuntimeStore {
                 } catch {
                     result = .failure(error.localizedDescription)
                 }
+                events.toolFinished(call, result)
                 events.activityEnded(call.callID)
                 try await client.resolveToolCall(call, result: result)
             case .approvalRequested(let approval):
@@ -474,5 +476,241 @@ final class CodexRuntimeStore {
             }
         }
         return summary.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Injectable Codex transport boundary used by ``CodexBackendSession``.
+/// Keeping this protocol above the adapter lets evaluations exercise lifecycle
+/// normalization without starting the external App Server process.
+@MainActor
+protocol CodexTurnRunning {
+    func runTurn(
+        request: CodexRuntimeStore.TurnRequest,
+        events: CodexRuntimeStore.TurnEvents
+    ) async throws -> CodexRuntimeStore.TurnResult
+
+    func interrupt() async
+}
+
+extension CodexRuntimeStore: CodexTurnRunning {}
+
+/// Thin provider adapter for the existing Codex App Server runtime.
+///
+/// Codex still owns thread setup, streaming, dynamic tool execution and RPC
+/// resolution. This type only translates those callbacks into the harness
+/// lifecycle contract and maps terminal errors to ``TurnOutcome``.
+@MainActor
+final class CodexBackendSession: BackendSession {
+    let backend: ModelBackend = .codex
+
+    private let runtime: any CodexTurnRunning
+    private let turboThreadID: String
+    private let workspaceName: String?
+    private let agentTuning: AgentTuningConfig
+    private let availableSkills: [TurboCodeSkillDefinition]
+    private let modelID: String?
+    private let reasoningEffort: CodexReasoningEffort?
+    private let delegationInvoker: (any AgentTaskInvoking)?
+    private var activeRun: Task<BackendSessionResult, Never>?
+
+    init(
+        runtime: any CodexTurnRunning,
+        turboThreadID: String,
+        workspaceName: String? = nil,
+        agentTuning: AgentTuningConfig,
+        availableSkills: [TurboCodeSkillDefinition] = [],
+        modelID: String? = nil,
+        reasoningEffort: CodexReasoningEffort? = nil,
+        delegationInvoker: (any AgentTaskInvoking)? = nil
+    ) {
+        self.runtime = runtime
+        self.turboThreadID = turboThreadID
+        self.workspaceName = workspaceName
+        self.agentTuning = agentTuning
+        self.availableSkills = availableSkills
+        self.modelID = modelID
+        self.reasoningEffort = reasoningEffort
+        self.delegationInvoker = delegationInvoker
+    }
+
+    func run(
+        request: TurnRequest,
+        events: BackendSessionEvents
+    ) async -> BackendSessionResult {
+        activeRun?.cancel()
+        let runtime = self.runtime
+        let turboThreadID = self.turboThreadID
+        let workspaceName = self.workspaceName
+        let agentTuning = self.agentTuning
+        let availableSkills = self.availableSkills
+        let modelID = self.modelID
+        let reasoningEffort = self.reasoningEffort
+        let delegationInvoker = self.delegationInvoker
+
+        let task = Task { @MainActor in
+            events.emit(.started(request))
+            events.emit(
+                .phaseChanged(
+                    turnID: request.id,
+                    phase: .streaming,
+                    at: Date()
+                )
+            )
+
+            let result: BackendSessionResult
+            do {
+                let response = try await runtime.runTurn(
+                    request: CodexRuntimeStore.TurnRequest(
+                        turnID: request.id,
+                        turboThreadID: turboThreadID,
+                        prompt: request.prompt,
+                        workspaceRoot: request.workspaceRoot,
+                        workspaceName: workspaceName,
+                        agentTuning: agentTuning,
+                        availableSkills: availableSkills,
+                        modelID: modelID,
+                        reasoningEffort: reasoningEffort,
+                        delegationInvoker: delegationInvoker
+                    ),
+                    events: CodexRuntimeStore.TurnEvents(
+                        liveAssistantChanged: { text in
+                            events.emit(
+                                .assistantTextChanged(
+                                    turnID: request.id,
+                                    text: text
+                                )
+                            )
+                        },
+                        liveReasoningChanged: { text in
+                            events.emit(
+                                .reasoningTextChanged(
+                                    turnID: request.id,
+                                    text: text
+                                )
+                            )
+                        },
+                        activityStarted: { call, _ in
+                            events.emit(
+                                .phaseChanged(
+                                    turnID: request.id,
+                                    phase: .toolExecuting,
+                                    at: Date()
+                                )
+                            )
+                            events.emit(
+                                .toolStarted(
+                                    Self.toolCall(from: call, turnID: request.id)
+                                )
+                            )
+                        },
+                        activityEnded: { _ in
+                            events.emit(
+                                .phaseChanged(
+                                    turnID: request.id,
+                                    phase: .streaming,
+                                    at: Date()
+                                )
+                            )
+                        },
+                        toolFinished: { call, result in
+                            events.emit(
+                                .toolFinished(
+                                    Self.toolResult(
+                                        from: result,
+                                        call: call,
+                                        turnID: request.id
+                                    )
+                                )
+                            )
+                        },
+                        presentationRequested: { _ in },
+                        approvalRequested: { _ in
+                            events.emit(
+                                .phaseChanged(
+                                    turnID: request.id,
+                                    phase: .awaitingApproval,
+                                    at: Date()
+                                )
+                            )
+                        }
+                    )
+                )
+                result = BackendSessionResult(
+                    assistantText: response.assistantText,
+                    reasoningText: response.reasoningText,
+                    outcome: .succeeded
+                )
+            } catch where error is CancellationError || Task.isCancelled {
+                result = BackendSessionResult(
+                    outcome: .cancelled(reason: "The turn was interrupted.")
+                )
+            } catch {
+                result = BackendSessionResult(
+                    outcome: .failed(
+                        TurnFailure(
+                            code: "codex.provider",
+                            message: error.localizedDescription
+                        )
+                    )
+                )
+            }
+
+            events.emit(
+                .completed(
+                    turnID: request.id,
+                    outcome: result.outcome,
+                    at: Date()
+                )
+            )
+            return result
+        }
+        activeRun = task
+        let result = await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+        if activeRun != nil {
+            activeRun = nil
+        }
+        return result
+    }
+
+    func interrupt() async {
+        activeRun?.cancel()
+        await runtime.interrupt()
+    }
+
+    private static func toolCall(
+        from call: CodexDynamicToolCall,
+        turnID: TurnID
+    ) -> ToolCall {
+        ToolCall(
+            id: call.callID,
+            turnID: turnID,
+            name: call.tool,
+            argumentsJSON: jsonString(call.arguments)
+        )
+    }
+
+    private static func toolResult(
+        from result: CodexDynamicToolResult,
+        call: CodexDynamicToolCall,
+        turnID: TurnID
+    ) -> ToolResult {
+        ToolResult(
+            id: call.callID,
+            turnID: turnID,
+            status: result.succeeded ? .succeeded : .failed,
+            output: result.text
+        )
+    }
+
+    private static func jsonString(_ value: CodexJSONValue) -> String {
+        guard let data = try? JSONEncoder().encode(value),
+              let string = String(data: data, encoding: .utf8) else {
+            return "{}"
+        }
+        return string
     }
 }

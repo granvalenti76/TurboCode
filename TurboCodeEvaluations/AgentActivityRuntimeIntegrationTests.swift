@@ -132,6 +132,35 @@ struct AgentActivityRuntimeIntegrationTests {
         #expect(received.allSatisfy { $0.turnID == turnID })
     }
 
+    @Test("Codex backend adapter normalizes streamed output and tool results")
+    func codexBackendAdapterNormalizesLifecycle() async {
+        let turnID = TurnID(rawValue: "codex-adapter-turn")
+        let adapter = CodexBackendSession(
+            runtime: AdapterCodexRuntime(),
+            turboThreadID: "thread-test",
+            agentTuning: AgentTuningConfig()
+        )
+        var received: [AgentRuntimeEvent] = []
+        let result = await adapter.run(
+            request: TurnRequest(
+                id: turnID,
+                prompt: "Run Codex adapter test.",
+                backend: .codex,
+                modelName: "Codex test model",
+                workspaceRoot: "/tmp"
+            ),
+            events: BackendSessionEvents { event in
+                received.append(event)
+            }
+        )
+
+        #expect(result.assistantText == "Codex result.")
+        #expect(result.reasoningText == "Codex reasoning.")
+        #expect(result.outcome == .succeeded)
+        #expect(received.count == 9)
+        #expect(received.allSatisfy { $0.turnID == turnID })
+    }
+
     @Test("Foundation Models and Codex tool calls share the Activity shape")
     func providerToolCallsShareMapping() {
         let foundationCall = Transcript.ToolCall(
@@ -288,6 +317,32 @@ private final class AdapterNativeRunner: NativeResponseRunning {
     ) async -> NativeResponseRunner.Outcome {
         outcome
     }
+}
+
+@MainActor
+private final class AdapterCodexRuntime: CodexTurnRunning {
+    func runTurn(
+        request: CodexRuntimeStore.TurnRequest,
+        events: CodexRuntimeStore.TurnEvents
+    ) async throws -> CodexRuntimeStore.TurnResult {
+        events.liveAssistantChanged("Codex result.")
+        events.liveReasoningChanged("Codex reasoning.")
+        let call = CodexDynamicToolCall(
+            rpcID: .integer(1),
+            callID: "codex-tool",
+            tool: "read_file",
+            arguments: .object(["filePath": .string("App.swift")])
+        )
+        events.activityStarted(call, "Reading file")
+        events.toolFinished(call, .success("file contents"))
+        events.activityEnded(call.callID)
+        return CodexRuntimeStore.TurnResult(
+            assistantText: "Codex result.",
+            reasoningText: "Codex reasoning."
+        )
+    }
+
+    func interrupt() async {}
 }
 
 private nonisolated struct SuspendedActivityRunner: AgentTaskRunning {

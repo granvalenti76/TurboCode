@@ -178,6 +178,7 @@ final class ChatResponseCoordinator {
                         self.coordinatorToolFinished(callID: id)
                         _ = self.advanceTurn(to: .streaming, turnID: turnID)
                     },
+                    toolFinished: { _, _ in },
                     presentationRequested: { [weak self] presentation in
                         guard let self, self.ownsTurn(turnID) else { return }
                         self.present(presentation)
@@ -340,43 +341,55 @@ final class ChatResponseCoordinator {
         productGuidePresentation = nil
         completedRootWrite = nil
 
-        let outcome = await nativeRunner.run(
+        let backendSession = NativeBackendSession(
+            backend: backend,
+            runner: nativeRunner,
             session: session,
-            request: NativeResponseRunner.Request(
+            mode: mode,
+            workspaceKind: workspaceKind,
+            serverURL: serverURL,
+            reasoningStreamRelay: reasoningStreamRelay,
+            diagnosticsChanged: { [weak self] runID in
+                guard let self, self.ownsTurn(turnID) else { return }
+                self.activeDiagnosticsRunID = runID
+            },
+            contextChanged: { [weak self] usage in
+                guard let self, self.ownsTurn(turnID) else { return }
+                contextChanged(usage)
+            },
+            approvalRequested: { [weak self] request in
+                guard let self, self.ownsTurn(turnID) else { return }
+                _ = self.advanceTurn(
+                    to: .awaitingApproval,
+                    turnID: turnID
+                )
+                self.toolInteractions.enqueueApproval(request)
+            }
+        )
+        let backendResult = await backendSession.run(
+            request: TurnRequest(
+                id: turnID,
                 prompt: modelPrompt,
                 backend: backend,
-                mode: mode,
-                workspaceKind: workspaceKind,
-                serverURL: serverURL,
-                reasoningStreamRelay: reasoningStreamRelay
+                modelName: modelName,
+                workspaceRoot: workspaceRoot
             ),
-            events: NativeResponseRunner.Events(
-                diagnosticsChanged: { [weak self] runID in
-                    guard let self, self.ownsTurn(turnID) else { return }
-                    self.activeDiagnosticsRunID = runID
-                },
-                contextChanged: { [weak self] usage in
-                    guard let self, self.ownsTurn(turnID) else { return }
-                    contextChanged(usage)
-                },
-                liveContentChanged: { [weak self] content in
-                    guard let self, self.ownsTurn(turnID) else { return }
+            events: BackendSessionEvents { [weak self] event in
+                guard let self, event.turnID == turnID, self.ownsTurn(turnID) else {
+                    return
+                }
+                switch event {
+                case .assistantTextChanged(_, let content):
                     self.timeline.liveAssistant =
                         Self.userVisibleAssistantText(content)
-                },
-                liveReasoningChanged: { [weak self] reasoning in
-                    guard let self, self.ownsTurn(turnID) else { return }
+                case .reasoningTextChanged(_, let reasoning):
                     self.timeline.liveReasoning = reasoning
-                },
-                approvalRequested: { [weak self] request in
-                    guard let self, self.ownsTurn(turnID) else { return }
-                    _ = self.advanceTurn(
-                        to: .awaitingApproval,
-                        turnID: turnID
-                    )
-                    self.toolInteractions.enqueueApproval(request)
+                case .phaseChanged(_, let phase, _):
+                    _ = self.advanceTurn(to: phase, turnID: turnID)
+                default:
+                    break
                 }
-            )
+            }
         )
         _ = advanceTurn(to: .streaming, turnID: turnID)
         isDelegating = false
@@ -386,8 +399,10 @@ final class ChatResponseCoordinator {
         toolInteractions.clearActivities()
         var result = Result(errorMessage: nil, touchedConversation: false)
 
-        switch outcome {
-        case .completed(let content, let reasoning):
+        switch backendResult.outcome {
+        case .succeeded:
+            let content = backendResult.assistantText
+            let reasoning = backendResult.reasoningText
             let rawFinalText = content.isEmpty
                 ? reasoning
                 : Self.userVisibleAssistantText(content)
@@ -421,7 +436,7 @@ final class ChatResponseCoordinator {
             _ = advanceTurn(to: .settling, turnID: turnID)
             finishTurn(.succeeded, turnID: turnID)
             result = Result(errorMessage: nil, touchedConversation: true)
-        case .repetitiveOutput:
+        case .failed(let failure) where failure.code == "native.repetitiveOutput":
             let stoppedText = completedRootWrite.map { "Created `\($0)`." }
                 ?? "Response stopped because the on-device model began repeating output. Please retry."
             timeline.replaceBlock(
@@ -443,7 +458,9 @@ final class ChatResponseCoordinator {
                 ),
                 turnID: turnID
             )
-        case .cancelled(let content, let reasoning):
+        case .cancelled:
+            let content = backendResult.assistantText
+            let reasoning = backendResult.reasoningText
             let partialText = content.isEmpty ? reasoning : content
             timeline.replaceBlock(
                 id: placeholderID,
@@ -460,7 +477,8 @@ final class ChatResponseCoordinator {
                 .cancelled(reason: "The turn was interrupted."),
                 turnID: turnID
             )
-        case .failed(let message, _, _):
+        case .failed(let failure):
+            let message = failure.message
             timeline.replaceBlock(
                 id: placeholderID,
                 with: ChatBlock(

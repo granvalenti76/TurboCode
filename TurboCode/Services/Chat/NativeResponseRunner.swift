@@ -349,6 +349,9 @@ final class NativeBackendSession: BackendSession {
     private let workspaceKind: String
     private let serverURL: String?
     private let reasoningStreamRelay: ReasoningStreamRelay?
+    private let diagnosticsChanged: @MainActor @Sendable (String?) -> Void
+    private let contextChanged: @MainActor @Sendable (LlamaContextUsage?) -> Void
+    private let approvalRequested: @MainActor @Sendable (ApprovalRequest) -> Void
     private var activeRun: Task<BackendSessionResult, Never>?
 
     init(
@@ -358,7 +361,10 @@ final class NativeBackendSession: BackendSession {
         mode: OrchestratorMode,
         workspaceKind: String,
         serverURL: String? = nil,
-        reasoningStreamRelay: ReasoningStreamRelay? = nil
+        reasoningStreamRelay: ReasoningStreamRelay? = nil,
+        diagnosticsChanged: @escaping @MainActor @Sendable (String?) -> Void = { _ in },
+        contextChanged: @escaping @MainActor @Sendable (LlamaContextUsage?) -> Void = { _ in },
+        approvalRequested: @escaping @MainActor @Sendable (ApprovalRequest) -> Void = { _ in }
     ) {
         self.backend = backend
         self.runner = runner
@@ -367,6 +373,9 @@ final class NativeBackendSession: BackendSession {
         self.workspaceKind = workspaceKind
         self.serverURL = serverURL
         self.reasoningStreamRelay = reasoningStreamRelay
+        self.diagnosticsChanged = diagnosticsChanged
+        self.contextChanged = contextChanged
+        self.approvalRequested = approvalRequested
     }
 
     func run(
@@ -380,6 +389,9 @@ final class NativeBackendSession: BackendSession {
         let workspaceKind = self.workspaceKind
         let serverURL = self.serverURL
         let reasoningStreamRelay = self.reasoningStreamRelay
+        let diagnosticsChanged = self.diagnosticsChanged
+        let contextChanged = self.contextChanged
+        let approvalRequested = self.approvalRequested
 
         let task = Task { @MainActor in
             events.emit(.started(request))
@@ -402,8 +414,8 @@ final class NativeBackendSession: BackendSession {
                     reasoningStreamRelay: reasoningStreamRelay
                 ),
                 events: NativeResponseRunner.Events(
-                    diagnosticsChanged: { _ in },
-                    contextChanged: { _ in },
+                    diagnosticsChanged: diagnosticsChanged,
+                    contextChanged: contextChanged,
                     liveContentChanged: { content in
                         events.emit(
                             .assistantTextChanged(
@@ -420,7 +432,7 @@ final class NativeBackendSession: BackendSession {
                             )
                         )
                     },
-                    approvalRequested: { _ in }
+                    approvalRequested: approvalRequested
                 )
             )
             let result = Self.result(from: outcome)
@@ -434,7 +446,11 @@ final class NativeBackendSession: BackendSession {
             return result
         }
         activeRun = task
-        let result = await task.value
+        let result = await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
         if activeRun != nil {
             activeRun = nil
         }
