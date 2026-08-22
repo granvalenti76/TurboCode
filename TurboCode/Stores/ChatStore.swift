@@ -761,12 +761,11 @@ public final class ChatStore {
 
     public func deleteThread(id: String) async {
         let deletesActiveThread = activeThreadId == id
-        if deletesActiveThread, let responseTask {
-            // A cancelled response still performs its final persistence pass.
-            // Wait for that pass before deleting, otherwise it can recreate the
-            // session file immediately after the user removes the conversation.
-            responseTask.cancel()
-            await responseTask.value
+        if deletesActiveThread {
+            // Deletion is a runtime transition too: wait for response,
+            // selection, and handoff tasks through the shared quiescence
+            // barrier before removing the conversation they may still touch.
+            await finishActiveResponseBeforeTransition()
         }
 
         let nextThreadID: String?
