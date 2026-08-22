@@ -73,6 +73,38 @@ struct ConversationDeletionTests {
         #expect(store.threads.map(\.id) == [retained.id])
     }
 
+    @Test("Opening persisted threads restores the matching timeline")
+    func openingPersistedThreadsRestoresMatchingTimeline() async {
+        let first = Conversation(id: "first", title: "First")
+        let second = Conversation(id: "second", title: "Second")
+        let repository = DeletionConversationRepository(
+            snapshots: [
+                ConversationSnapshot(
+                    conversation: first,
+                    modelBackend: ModelBackend.foundationApple.rawValue,
+                    blocks: [ChatBlock(kind: .assistant, text: "First saved")],
+                    transcript: nil
+                ),
+                ConversationSnapshot(
+                    conversation: second,
+                    modelBackend: ModelBackend.foundationApple.rawValue,
+                    blocks: [ChatBlock(kind: .assistant, text: "Second saved")],
+                    transcript: nil
+                )
+            ]
+        )
+        let store = ChatStore(conversationRepository: repository)
+        await store.restoreSessions()
+
+        await store.openThread(first.id)
+        #expect(store.activeThreadId == first.id)
+        #expect(store.blocks.map(\.text) == ["First saved"])
+
+        await store.openThread(second.id)
+        #expect(store.activeThreadId == second.id)
+        #expect(store.blocks.map(\.text) == ["Second saved"])
+    }
+
     private func makeSnapshot(_ conversation: Conversation) -> ConversationSnapshot {
         ConversationSnapshot(
             conversation: conversation,

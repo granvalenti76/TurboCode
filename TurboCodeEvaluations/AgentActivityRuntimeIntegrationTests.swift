@@ -172,6 +172,37 @@ struct AgentActivityRuntimeIntegrationTests {
         }
     }
 
+    @Test("Codex backend adapter preserves failed tool results")
+    func codexBackendAdapterPreservesFailedToolResults() async {
+        let adapter = CodexBackendSession(
+            runtime: AdapterCodexRuntime(
+                toolResult: .failure("Error: file was not readable.")
+            ),
+            turboThreadID: "thread-tool-failure",
+            agentTuning: AgentTuningConfig()
+        )
+        var received: [AgentRuntimeEvent] = []
+
+        _ = await adapter.run(
+            request: TurnRequest(
+                prompt: "Run a failing Codex tool.",
+                backend: .codex,
+                modelName: "Codex test model",
+                workspaceRoot: "/tmp"
+            ),
+            events: BackendSessionEvents { event in
+                received.append(event)
+            }
+        )
+
+        let toolResult = received.compactMap { event -> ToolResult? in
+            guard case .toolFinished(let result) = event else { return nil }
+            return result
+        }.first
+        #expect(toolResult?.status == .failed)
+        #expect(toolResult?.output == "Error: file was not readable.")
+    }
+
     @Test("Codex backend adapter maps authentication failures to recoverable outcomes")
     func codexBackendAdapterMapsAuthenticationFailure() async {
         let adapter = CodexBackendSession(
@@ -392,6 +423,12 @@ private final class AdapterNativeRunner: NativeResponseRunning {
 
 @MainActor
 private final class AdapterCodexRuntime: CodexTurnRunning {
+    private let toolResult: CodexDynamicToolResult
+
+    init(toolResult: CodexDynamicToolResult = .success("file contents")) {
+        self.toolResult = toolResult
+    }
+
     func runTurn(
         request: CodexRuntimeStore.TurnRequest,
         events: CodexRuntimeStore.TurnEvents
@@ -405,7 +442,7 @@ private final class AdapterCodexRuntime: CodexTurnRunning {
             arguments: .object(["filePath": .string("App.swift")])
         )
         events.activityStarted(call, "Reading file")
-        events.toolFinished(call, .success("file contents"))
+        events.toolFinished(call, toolResult)
         events.activityEnded(call.callID)
         return CodexRuntimeStore.TurnResult(
             assistantText: "Codex result.",
