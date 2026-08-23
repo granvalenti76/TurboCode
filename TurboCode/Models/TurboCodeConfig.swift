@@ -26,6 +26,12 @@ public final class TurboCodeConfig {
     public var pluginsDirectoryURL: URL {
         rootURL.appendingPathComponent("plugins", isDirectory: true)
     }
+    /// Local SDK packages are kept outside installed plugins so ordinary
+    /// TypeScript projects can import the stable package name without a
+    /// relative path into TurboCode's source tree.
+    public var sdkDirectoryURL: URL {
+        rootURL.appendingPathComponent("sdk", isDirectory: true)
+    }
     public var agentTuningConfigurationURL: URL { agentTuningURL }
     private var agentTuningURL: URL { rootURL.appendingPathComponent("config.json") }
     private var sessionsDir: URL { rootURL.appendingPathComponent("sessions") }
@@ -59,6 +65,7 @@ public final class TurboCodeConfig {
             && FileManager.default.fileExists(atPath: modelsURL.path)
             && FileManager.default.fileExists(atPath: agentTuningURL.path)
             && FileManager.default.fileExists(atPath: dynamicProfilesURL.path)
+            && FileManager.default.fileExists(atPath: sdkDirectoryURL.path)
             && FileManager.default.fileExists(atPath: diagnosticsDirectoryURL.path)
             && FileManager.default.fileExists(atPath: repositoryMapCacheDirectoryURL.path)
             && FileManager.default.fileExists(atPath: officialDocumentationDirectoryURL.path)
@@ -71,6 +78,10 @@ public final class TurboCodeConfig {
         try FileManager.default.createDirectory(at: skillsDirectoryURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(
             at: pluginsDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: sdkDirectoryURL,
             withIntermediateDirectories: true
         )
         try FileManager.default.createDirectory(

@@ -74,3 +74,28 @@ The SDK directory contains complete tool implementations:
 
 See `TypeScriptSDK/README.md` for build/install notes and the complete SDK
 surface.
+
+## Project validation and import
+
+TurboCode treats the user project as the source of truth and builds a temporary
+copy. The source directory is not rewritten while the build is running. The
+project service performs these checks in order:
+
+1. read `package.json` and `plugin.json`;
+2. run `npm exec -- tsc --noEmit`;
+3. run `npm run build`;
+4. run `npm run --if-present lint`;
+5. validate the compiled entrypoint and stage `dist/`, package metadata, and
+   `node_modules` under the plugin root.
+
+The temporary generation replaces `~/.turbocode/plugins/<plugin-id>/` only
+after every step succeeds. A failed validation or build therefore leaves the
+previous installed generation untouched. The SDK installer copies only
+`package.json` and `dist/` to
+`~/.turbocode/sdk/@granvalenti/turbocode-sdk/`, then exposes the same package
+inside the build's `node_modules` tree.
+
+This slice provides the import/build service and its focused coverage. Provider
+profile selection and native Enable/Cancel confirmation remain the next
+integration boundary; `/reload` will consume the installed registry once that
+boundary is wired.

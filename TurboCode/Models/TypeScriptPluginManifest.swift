@@ -108,7 +108,9 @@ nonisolated struct TypeScriptPluginManifest: Codable, Sendable, Equatable {
     }
 
     /// Validates host-owned fields before a child process is allowed to run.
-    func validate(at pluginRoot: URL) throws {
+    /// Build pipelines may defer the entrypoint existence check until their
+    /// compiler has produced the declared output.
+    func validate(at pluginRoot: URL, requireEntrypoint: Bool = true) throws {
         guard manifestVersion == Self.currentManifestVersion else {
             throw TypeScriptPluginManifestError.unsupportedManifestVersion(manifestVersion)
         }
@@ -132,8 +134,11 @@ nonisolated struct TypeScriptPluginManifest: Codable, Sendable, Equatable {
         let root = pluginRoot.standardizedFileURL.resolvingSymlinksInPath()
         let entryURL = pluginRoot.appendingPathComponent(entrypoint).standardizedFileURL
         let resolvedEntry = entryURL.resolvingSymlinksInPath()
-        guard resolvedEntry.path.hasPrefix(root.path + "/"),
-              FileManager.default.isReadableFile(atPath: resolvedEntry.path) else {
+        guard resolvedEntry.path.hasPrefix(root.path + "/") else {
+            throw TypeScriptPluginManifestError.invalidEntrypoint(entrypoint)
+        }
+        if requireEntrypoint,
+           !FileManager.default.isReadableFile(atPath: resolvedEntry.path) {
             throw TypeScriptPluginManifestError.invalidEntrypoint(entrypoint)
         }
     }
