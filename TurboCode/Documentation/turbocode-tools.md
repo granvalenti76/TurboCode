@@ -153,10 +153,20 @@ and file tools whenever they apply.
 
 ## Skills and orchestration
 
+TurboCode's product-level skills are provider-neutral `SKILL.md` instruction
+files. Their name and description form the session catalog; their body is loaded
+only when relevant. Foundation Models may use an internal dynamic-instructions
+adapter, but that implementation detail does not define another installation
+format. A user-created skill belongs at `.agents/skills/<name>/SKILL.md` in the
+active workspace. Keep its instructions self-contained and use clear
+workspace-relative paths for any supporting project files.
+
 ### `load_skill`
 
 Loads the instructions of one installed skill on demand. The tool is registered
-only when the active profile has access to at least one skill.
+only when the active profile has access to at least one skill. `/skill <name>` and
+`/<name>` are explicit host-side selections and do not depend on the model first
+choosing the tool itself.
 
 ### `create_skill`
 

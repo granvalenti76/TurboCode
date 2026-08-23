@@ -232,7 +232,7 @@ public final class TurboCodeConfig {
     }
 
     private static let turboCodeSkillDescription =
-        "description: Explain TurboCode, model and provider setup, credentials, workspace tools, approvals, skills, and interface behavior"
+        "description: Explain TurboCode, providers, workspace tools, approvals, skills, TypeScript plugins, and interface behavior"
 
     private static let providerCredentialsSkillMarker =
         "<!-- turbocode-managed:provider-credentials-v1 -->"
@@ -398,9 +398,13 @@ public final class TurboCodeConfig {
     - `ripgrep` discovers workspace files or searches their text with optional filters.
     - `file_system` lists and manages files inside the workspace.
     - `git` initializes repositories and provides complete structured local and
-      remote Git workflows. Git writes are independent from the read-only bash
-      sandbox. Destructive operations are presented for approval before execution.
-    - `bash` runs bounded commands with read-only workspace access in a macOS process sandbox.
+      remote Git workflows. Destructive operations are presented for approval
+      before execution.
+    - `bash` runs bounded commands from the active workspace and may write inside
+      it. Access outside the workspace is denied first and can continue only after
+      TurboCode presents the exact command for host-owned user approval. Every call
+      starts again from the reported working directory; `cd` never changes the
+      workspace used by later calls.
     - `swift_package_manager` provides structured SwiftPM initialization, dependency
       editing, resolution, builds, tests, runs, cleanup, and package inspection.
       Prefer it over `bash` whenever it supports the requested SwiftPM action.
@@ -427,6 +431,15 @@ public final class TurboCodeConfig {
     Their names and descriptions stay in the session instructions; their full body
     is loaded on demand when relevant. Users can type `/skills`, `/skill <name>`, or
     `/<skill-name>` in the composer.
+
+    ## TypeScript plugins
+
+    TypeScript plugins are executable extensions, separate from instructional
+    skills. TurboCode discovers them under `~/.turbocode/plugins/<plugin-id>`,
+    exposes the installed SDK and plugin roots to Bash through environment
+    variables, and reloads changed manifests and processes with `/reload`. In
+    **Settings > Agents**, third-party plugins must be enabled before their tools
+    and optional widgets are exposed to the selected profile.
     """
 
     private static let skillCreatorSkill = """
@@ -439,8 +452,8 @@ public final class TurboCodeConfig {
     Help the user design and install a reusable TurboCode skill. When a workspace
     is selected, create the skill at
     `.agents/skills/<skill-name>/SKILL.md` using `create_skill` when available;
-    otherwise use the available workspace write tool (`edit_file`, `apply_edits`,
-    or `file_system`). The write must go through TurboCode's normal Review/Undo
+    otherwise use `edit_file` to create the same workspace-relative path. The
+    write must go through TurboCode's normal Review/Undo
     transaction; never claim the skill was saved until the tool succeeds. Without
     a workspace, return the complete file and explain that the user must choose a
     workspace before installation.
@@ -462,9 +475,11 @@ public final class TurboCodeConfig {
     procedural and focused; avoid repeating general TurboCode behavior. When asked
     to create a skill, validate the name and description, create the directory and
     file when workspace tools are available, then report the exact path. TurboCode
-    discovers valid files automatically before the next submitted prompt. Keep the
-    full file in the response only when the user asks for a draft or when the write
-    cannot be performed.
+    discovers valid files automatically before the next submitted prompt. The
+    skill body should be self-contained; references to supporting workspace files
+    must use paths that are clear from the active project. Keep the full file in
+    the response only when the user asks for a draft or when the write cannot be
+    performed.
     """
 
     // MARK: - Agent Tuning
