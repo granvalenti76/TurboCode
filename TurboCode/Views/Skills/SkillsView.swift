@@ -305,6 +305,10 @@ struct SkillsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                if !viewModel.discoveredTypeScriptPlugins.isEmpty {
+                    typeScriptPluginSection()
+                }
             }
             .padding(28)
             .frame(maxWidth: 1120, alignment: .leading)
@@ -498,6 +502,10 @@ struct SkillsView: View {
                     }
                 }
 
+                if !viewModel.discoveredTypeScriptPlugins.isEmpty {
+                    typeScriptPluginSection(draft: draft)
+                }
+
                 sectionCard(
                     title: "Included Capabilities",
                     subtitle: "The saved list is explicit: everything outside Included is excluded."
@@ -516,6 +524,99 @@ struct SkillsView: View {
             .frame(maxWidth: 1120, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .top)
         }
+    }
+
+    private func typeScriptPluginSection(draft: UserDynamicProfile? = nil) -> some View {
+        sectionCard(
+            title: "TypeScript plugins",
+            subtitle: "Installed extensions are discovered automatically and shown separately from TurboCode tools."
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                if !settings.agentTuning.experimental.thirdPartyPluginsEnabled {
+                    Label(
+                        "Enable third-party plugins in Settings > Agents to load these tools.",
+                        systemImage: "info.circle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                ForEach(viewModel.discoveredTypeScriptPlugins, id: \.manifest.id) { plugin in
+                    DisclosureGroup {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(plugin.manifest.tools, id: \.name) { tool in
+                                let toolID = TypeScriptPluginToolID(
+                                    pluginID: plugin.manifest.id,
+                                    toolName: tool.name
+                                )
+                                HStack(alignment: .top, spacing: 10) {
+                                    Image(systemName: "wrench.and.screwdriver")
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 18)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(tool.name)
+                                            .font(.callout.weight(.medium))
+                                        Text(tool.description)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                    Spacer(minLength: 8)
+                                    Image(systemName: "info.circle")
+                                        .foregroundStyle(.secondary)
+                                        .help(
+                                            "\(tool.name)\n"
+                                                + "\(tool.description)\n"
+                                                + "ID: \(toolID.rawValue)"
+                                        )
+                                    Text(pluginToolStatus(toolID, draft: draft))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 7)
+                                .contentShape(Rectangle())
+                                .help("\(tool.name): \(tool.description)")
+                            }
+                        }
+                        .padding(.top, 6)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Label(plugin.manifest.name, systemImage: "puzzlepiece.extension")
+                                .font(.callout.weight(.semibold))
+                            Text("v\(plugin.manifest.version)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "info.circle")
+                                .foregroundStyle(.secondary)
+                                .help(
+                                    "\(plugin.manifest.name)\n"
+                                        + "ID: \(plugin.manifest.id)\n"
+                                        + "Version: \(plugin.manifest.version)"
+                                )
+                            Spacer()
+                            Text("\(plugin.manifest.tools.count) \(plugin.manifest.tools.count == 1 ? "tool" : "tools")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .help("\(plugin.manifest.name) (\(plugin.manifest.id))\n\(plugin.manifest.tools.count) available tools")
+                }
+            }
+        }
+    }
+
+    private func pluginToolStatus(
+        _ id: TypeScriptPluginToolID,
+        draft: UserDynamicProfile?
+    ) -> String {
+        if !settings.agentTuning.experimental.thirdPartyPluginsEnabled {
+            return "Off"
+        }
+        guard let draft else { return "Available" }
+        if draft.pluginToolIDs.isEmpty || draft.resolvedPluginToolIDs.contains(id) {
+            return "Available"
+        }
+        return "Excluded"
     }
 
     /// Progressive disclosure keeps the common "all worker tools" path quiet,

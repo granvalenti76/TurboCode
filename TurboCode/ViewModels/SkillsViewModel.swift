@@ -21,6 +21,9 @@ final class SkillsViewModel {
     private let store: DynamicProfileStore
     private(set) var profiles: [UserDynamicProfile] = []
     private(set) var installedSkills: [TurboCodeSkillDefinition] = []
+    /// Profile editing only needs validated metadata; process activation stays
+    /// owned by the runtime and is intentionally not mirrored in ChatStore.
+    private(set) var discoveredTypeScriptPlugins: [TypeScriptPluginDescriptor] = []
     private(set) var baseline: UserDynamicProfile?
     var draft: UserDynamicProfile?
     var selection: ProfileLibrarySelection = .builtIn(.onDevice)
@@ -38,6 +41,7 @@ final class SkillsViewModel {
         do {
             profiles = try store.load()
             installedSkills = TurboCodeConfig.shared.loadSkills()
+            discoveredTypeScriptPlugins = TypeScriptPluginRegistry.live().discover().plugins
             errorMessage = nil
             if case .custom(let id) = selection {
                 selectCustom(id)
