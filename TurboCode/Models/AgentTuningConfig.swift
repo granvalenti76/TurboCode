@@ -95,13 +95,20 @@ nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
 /// New fields must default to disabled when decoding older configuration files.
 nonisolated public struct ExperimentalPolicy: Codable, Hashable, Sendable {
     public var safariMCPEnabled: Bool
+    /// Third-party Node plugins are an explicit trust-boundary opt-in. Keep
+    /// this disabled when decoding older configurations.
+    public var thirdPartyPluginsEnabled: Bool
 
-    public init(safariMCPEnabled: Bool = false) {
+    public init(
+        safariMCPEnabled: Bool = false,
+        thirdPartyPluginsEnabled: Bool = false
+    ) {
         self.safariMCPEnabled = safariMCPEnabled
+        self.thirdPartyPluginsEnabled = thirdPartyPluginsEnabled
     }
 
     private enum CodingKeys: String, CodingKey {
-        case safariMCPEnabled
+        case safariMCPEnabled, thirdPartyPluginsEnabled
     }
 
     public init(from decoder: Decoder) throws {
@@ -109,6 +116,10 @@ nonisolated public struct ExperimentalPolicy: Codable, Hashable, Sendable {
         safariMCPEnabled = try values.decodeIfPresent(
             Bool.self,
             forKey: .safariMCPEnabled
+        ) ?? false
+        thirdPartyPluginsEnabled = try values.decodeIfPresent(
+            Bool.self,
+            forKey: .thirdPartyPluginsEnabled
         ) ?? false
     }
 }

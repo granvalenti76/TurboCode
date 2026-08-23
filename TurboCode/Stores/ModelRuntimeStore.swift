@@ -15,6 +15,7 @@ final class ModelRuntimeStore {
     private(set) var dynamicProfiles: [UserDynamicProfile]
     private(set) var activeDynamicProfileID: UUID?
     private(set) var availableSkills: [TurboCodeSkillDefinition] = []
+    private(set) var activePluginTools: [TypeScriptPluginToolBinding] = []
     private var workspaceInstructionsRevision: String?
 
     var composerModel: String
@@ -386,8 +387,20 @@ final class ModelRuntimeStore {
             delegateTemperature: temperature(for: delegateModel),
             delegateToolIDs: activeDynamicProfile?.resolvedWorkerToolIDs,
             dropsCompletedToolCalls: shouldDropCompletedToolCalls,
-            workspaceInstructions: workspaceInstructions
+            workspaceInstructions: workspaceInstructions,
+            activePluginTools: agentTuning.experimental.thirdPartyPluginsEnabled
+                ? activePluginTools
+                : []
         )
+    }
+
+    /// Replaces the provider-neutral activation snapshot without changing the
+    /// persisted profile catalog. Session rebuild policy remains owned by the
+    /// caller that explicitly changes plugin activation.
+    func setActivePluginTools(_ tools: [TypeScriptPluginToolBinding]) {
+        activePluginTools = tools.sorted {
+            $0.snapshot.id.rawValue < $1.snapshot.id.rawValue
+        }
     }
 
     /// Detects instruction edits without rebuilding stable sessions on every turn.

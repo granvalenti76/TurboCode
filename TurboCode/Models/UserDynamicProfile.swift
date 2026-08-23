@@ -99,6 +99,9 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     var workerToolIDs: [String]?
     var greedyMode: Bool
     var toolIDs: [String]
+    /// External tool selections are persisted separately from the closed
+    /// built-in `ToolCapabilityID` catalog. Values use `pluginID/toolName`.
+    var pluginToolIDs: [String]
     var skillIDs: [String]
     let createdAt: Date
     var updatedAt: Date
@@ -114,6 +117,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         workerToolIDs: [String]? = nil,
         greedyMode: Bool = false,
         toolIDs: [String] = [],
+        pluginToolIDs: [String] = [],
         skillIDs: [String] = [],
         createdAt: Date = .now,
         updatedAt: Date = .now
@@ -128,6 +132,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         self.workerToolIDs = workerToolIDs?.uniqued()
         self.greedyMode = greedyMode
         self.toolIDs = toolIDs.uniqued()
+        self.pluginToolIDs = pluginToolIDs.uniqued()
         self.skillIDs = skillIDs.uniqued()
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -137,7 +142,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         case id, name, summary, baseModelID, workerModelID
         case codexModelID, codexReasoningEffort
         case workerToolIDs
-        case greedyMode, toolIDs, skillIDs
+        case greedyMode, toolIDs, pluginToolIDs, skillIDs
         case createdAt, updatedAt
     }
 
@@ -159,6 +164,10 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         )?.uniqued()
         greedyMode = try values.decodeIfPresent(Bool.self, forKey: .greedyMode) ?? false
         toolIDs = try values.decodeIfPresent([String].self, forKey: .toolIDs) ?? []
+        pluginToolIDs = try values.decodeIfPresent(
+            [String].self,
+            forKey: .pluginToolIDs
+        )?.uniqued() ?? []
         skillIDs = try values.decodeIfPresent([String].self, forKey: .skillIDs) ?? []
         createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
         updatedAt = try values.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
@@ -181,6 +190,12 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
             result.remove(.delegateTask)
         }
         return result
+    }
+
+    /// Resolves only well-formed external capability IDs. Built-in IDs never
+    /// enter this set, so provider adapters can apply separate policies.
+    var resolvedPluginToolIDs: Set<TypeScriptPluginToolID> {
+        Set(pluginToolIDs.compactMap(TypeScriptPluginToolID.init(rawValue:)))
     }
 
     /// The single source of truth for profile orchestration.

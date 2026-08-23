@@ -196,6 +196,7 @@ final class MessageSendCoordinator {
                 profile: profile,
                 safariMCPEnabled: tuning.experimental.safariMCPEnabled
             ),
+            pluginTools: modelRuntime.activePluginTools,
             codexModelID: profile?.codexModelID,
             codexReasoningEffort: profile?.codexReasoningEffort,
             delegationInvoker: invokerFactory.makeDelegateInvoker(

@@ -21,6 +21,55 @@ nonisolated struct TypeScriptPluginToolID: Codable, Sendable, Equatable, Hashabl
     var id: String { rawValue }
 }
 
+/// Immutable metadata shared by native and Codex provider adapters. The
+/// original JSON Schema remains intact here; provider-specific translation is
+/// deferred until a selected runtime consumes the snapshot.
+nonisolated struct TypeScriptPluginToolSnapshot: Sendable, Equatable {
+    let id: TypeScriptPluginToolID
+    let description: String
+    let inputSchema: PluginJSONValue
+
+    init(
+        id: TypeScriptPluginToolID,
+        description: String,
+        inputSchema: PluginJSONValue
+    ) {
+        self.id = id
+        self.description = description
+        self.inputSchema = inputSchema
+    }
+}
+
+/// A live binding couples provider-neutral metadata to the actor-owned Node
+/// host. It is copied into immutable session configuration; the host itself
+/// remains the sole owner of process lifetime and request serialization.
+nonisolated struct TypeScriptPluginToolBinding: @unchecked Sendable {
+    let snapshot: TypeScriptPluginToolSnapshot
+    private let host: TypeScriptPluginHost
+
+    init(
+        snapshot: TypeScriptPluginToolSnapshot,
+        host: TypeScriptPluginHost
+    ) {
+        self.snapshot = snapshot
+        self.host = host
+    }
+
+    func makeNativeAdapter() throws -> TypeScriptPluginToolAdapter {
+        try TypeScriptPluginToolAdapter(
+            snapshot: snapshot,
+            host: host
+        )
+    }
+
+    func call(arguments: PluginJSONValue) async throws -> String {
+        try await host.call(
+            tool: snapshot.id.toolName,
+            arguments: arguments
+        )
+    }
+}
+
 nonisolated struct TypeScriptPluginDescriptor: Sendable, Equatable {
     let manifest: TypeScriptPluginManifest
     let rootURL: URL

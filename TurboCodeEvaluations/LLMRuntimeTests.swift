@@ -149,6 +149,7 @@ struct LLMRuntimeTests {
                 workspaceName: "Fixture",
                 agentTuning: AgentTuningConfig(),
                 availableSkills: [],
+                pluginTools: [],
                 modelID: nil,
                 reasoningEffort: nil,
                 delegationInvoker: nil,

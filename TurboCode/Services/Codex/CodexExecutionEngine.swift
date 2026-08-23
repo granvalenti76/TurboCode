@@ -18,6 +18,35 @@ nonisolated struct CodexTurnRequest: Sendable {
     let reasoningEffort: CodexReasoningEffort
     let persistsModelPreference: Bool
     let delegationInvoker: (any AgentTaskInvoking)?
+    let pluginTools: [TypeScriptPluginToolBinding]
+
+    init(
+        turnID: TurnID,
+        turboThreadID: String,
+        prompt: String,
+        workspaceRoot: String,
+        workspaceName: String?,
+        agentTuning: AgentTuningConfig,
+        availableSkills: [TurboCodeSkillDefinition],
+        modelID: String,
+        reasoningEffort: CodexReasoningEffort,
+        persistsModelPreference: Bool,
+        delegationInvoker: (any AgentTaskInvoking)?,
+        pluginTools: [TypeScriptPluginToolBinding] = []
+    ) {
+        self.turnID = turnID
+        self.turboThreadID = turboThreadID
+        self.prompt = prompt
+        self.workspaceRoot = workspaceRoot
+        self.workspaceName = workspaceName
+        self.agentTuning = agentTuning
+        self.availableSkills = availableSkills
+        self.modelID = modelID
+        self.reasoningEffort = reasoningEffort
+        self.persistsModelPreference = persistsModelPreference
+        self.delegationInvoker = delegationInvoker
+        self.pluginTools = pluginTools
+    }
 }
 
 nonisolated struct CodexTurnResult: Sendable {
@@ -98,6 +127,7 @@ actor CodexExecutionEngine {
         let safariMCPEnabled: Bool
         let modelID: String
         let skillNames: [String]
+        let pluginToolNames: [String]
     }
 
     private let client: any CodexAppServerServing
@@ -208,11 +238,15 @@ actor CodexExecutionEngine {
         )
 
         let includesDelegation = request.delegationInvoker != nil
+        let pluginTools = request.agentTuning.experimental.thirdPartyPluginsEnabled
+            ? request.pluginTools
+            : []
         let configuration = ThreadConfiguration(
             includesDelegation: includesDelegation,
             safariMCPEnabled: request.agentTuning.experimental.safariMCPEnabled,
             modelID: snapshot.selectedModel.id,
-            skillNames: request.availableSkills.map(\.name)
+            skillNames: request.availableSkills.map(\.name),
+            pluginToolNames: pluginTools.map { $0.snapshot.id.rawValue }
         )
         let threadID: String
         if let existing = threadIDs[request.turboThreadID],
@@ -224,7 +258,8 @@ actor CodexExecutionEngine {
                 agentTuning: request.agentTuning,
                 includesDelegation: includesDelegation,
                 availableSkills: request.availableSkills,
-                safariMCPEnabled: request.agentTuning.experimental.safariMCPEnabled
+                safariMCPEnabled: request.agentTuning.experimental.safariMCPEnabled,
+                pluginTools: pluginTools
             )
             let workspaceInstructions = WorkspaceInstructionsLoader.load(
                 from: request.workspaceRoot
@@ -287,6 +322,7 @@ actor CodexExecutionEngine {
                         workspaceName: request.workspaceName,
                         agentTuning: request.agentTuning,
                         availableSkills: request.availableSkills,
+                        pluginTools: pluginTools,
                         delegationInvoker: request.delegationInvoker,
                         parentTurnID: request.turnID
                     )

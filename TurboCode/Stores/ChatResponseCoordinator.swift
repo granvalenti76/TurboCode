@@ -179,6 +179,7 @@ final class ChatResponseCoordinator {
         workspaceKind: String,
         agentTuning: AgentTuningConfig,
         availableSkills: [TurboCodeSkillDefinition],
+        pluginTools: [TypeScriptPluginToolBinding] = [],
         codexModelID: String?,
         codexReasoningEffort: CodexReasoningEffort?,
         delegationInvoker: (any AgentTaskInvoking)?,
@@ -227,6 +228,9 @@ final class ChatResponseCoordinator {
                 workspaceName: workspaceName,
                 agentTuning: agentTuning,
                 availableSkills: availableSkills,
+                pluginTools: agentTuning.experimental.thirdPartyPluginsEnabled
+                    ? pluginTools
+                    : [],
                 modelID: codexModelID,
                 reasoningEffort: codexReasoningEffort,
                 delegationInvoker: delegationInvoker,

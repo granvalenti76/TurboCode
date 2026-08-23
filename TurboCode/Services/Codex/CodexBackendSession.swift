@@ -12,6 +12,7 @@ actor CodexBackendSession: BackendSession {
     private let workspaceName: String?
     private let agentTuning: AgentTuningConfig
     private let availableSkills: [TurboCodeSkillDefinition]
+    private let pluginTools: [TypeScriptPluginToolBinding]
     private let modelID: String
     private let reasoningEffort: CodexReasoningEffort
     private let persistsModelPreference: Bool
@@ -36,6 +37,7 @@ actor CodexBackendSession: BackendSession {
         workspaceName: String? = nil,
         agentTuning: AgentTuningConfig,
         availableSkills: [TurboCodeSkillDefinition] = [],
+        pluginTools: [TypeScriptPluginToolBinding] = [],
         modelID: String = CodexAppServerClient.lunaModelID,
         reasoningEffort: CodexReasoningEffort = .medium,
         persistsModelPreference: Bool = true,
@@ -60,6 +62,7 @@ actor CodexBackendSession: BackendSession {
         self.workspaceName = workspaceName
         self.agentTuning = agentTuning
         self.availableSkills = availableSkills
+        self.pluginTools = pluginTools
         self.modelID = modelID
         self.reasoningEffort = reasoningEffort
         self.persistsModelPreference = persistsModelPreference
@@ -80,6 +83,7 @@ actor CodexBackendSession: BackendSession {
         let workspaceName = self.workspaceName
         let agentTuning = self.agentTuning
         let availableSkills = self.availableSkills
+        let pluginTools = self.pluginTools
         let modelID = self.modelID
         let reasoningEffort = self.reasoningEffort
         let persistsModelPreference = self.persistsModelPreference
@@ -114,7 +118,8 @@ actor CodexBackendSession: BackendSession {
                         modelID: modelID,
                         reasoningEffort: reasoningEffort,
                         persistsModelPreference: persistsModelPreference,
-                        delegationInvoker: delegationInvoker
+                        delegationInvoker: delegationInvoker,
+                        pluginTools: pluginTools
                     ),
                     events: CodexTurnEvents(
                         runtimeSnapshotChanged: { snapshot, persistsPreference in

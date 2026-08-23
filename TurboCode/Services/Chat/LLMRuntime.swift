@@ -26,6 +26,7 @@ struct CodexLLMExecutionConfiguration {
     let workspaceName: String?
     let agentTuning: AgentTuningConfig
     let availableSkills: [TurboCodeSkillDefinition]
+    let pluginTools: [TypeScriptPluginToolBinding]
     let modelID: String?
     let reasoningEffort: CodexReasoningEffort?
     let delegationInvoker: (any AgentTaskInvoking)?
@@ -109,6 +110,7 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
             workspaceName: configuration.workspaceName,
             agentTuning: configuration.agentTuning,
             availableSkills: configuration.availableSkills,
+            pluginTools: configuration.pluginTools,
             modelID: configuration.modelID
                 ?? codexRuntime.preferredExecutionModelID,
             reasoningEffort: configuration.reasoningEffort

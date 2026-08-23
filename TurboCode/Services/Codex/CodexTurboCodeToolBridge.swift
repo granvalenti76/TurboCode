@@ -114,7 +114,8 @@ nonisolated enum CodexTurboCodeToolBridge {
         agentTuning: AgentTuningConfig,
         includesDelegation: Bool = false,
         availableSkills: [TurboCodeSkillDefinition] = [],
-        safariMCPEnabled: Bool = false
+        safariMCPEnabled: Bool = false,
+        pluginTools: [TypeScriptPluginToolBinding] = []
     ) -> [CodexDynamicToolSpec] {
         let listTool = ListWorkspaceTool(workspaceRoot: workspaceRoot)
         let mapTool = SwiftWorkspaceMapTool(
@@ -249,6 +250,13 @@ nonisolated enum CodexTurboCodeToolBridge {
         if safariMCPEnabled {
             specifications.append(safariMCPSpecification)
         }
+        specifications.append(contentsOf: pluginTools.map { binding in
+            CodexDynamicToolSpec(
+                name: binding.snapshot.id.rawValue,
+                description: binding.snapshot.description,
+                inputSchema: codexJSONValue(from: binding.snapshot.inputSchema)
+            )
+        })
         return specifications
     }
 
@@ -288,9 +296,22 @@ nonisolated enum CodexTurboCodeToolBridge {
         workspaceName: String?,
         agentTuning: AgentTuningConfig,
         availableSkills: [TurboCodeSkillDefinition] = [],
+        pluginTools: [TypeScriptPluginToolBinding] = [],
         delegationInvoker: (any AgentTaskInvoking)? = nil,
         parentTurnID: TurnID? = nil
     ) async throws -> CodexToolExecution {
+        if let plugin = pluginTools.first(where: {
+            $0.snapshot.id.rawValue == call.tool
+        }) {
+            return .init(
+                result: .success(
+                    try await plugin.call(
+                        arguments: pluginJSONValue(from: call.arguments)
+                    )
+                ),
+                receipt: nil
+            )
+        }
         switch call.tool {
         case "list_workspace":
             let output = try await ListWorkspaceTool(
@@ -764,6 +785,32 @@ nonisolated enum CodexTurboCodeToolBridge {
         "type": .string("array"),
         "items": .object(["type": .string("string")])
     ])
+
+    private static func codexJSONValue(from value: PluginJSONValue) -> CodexJSONValue {
+        switch value {
+        case .null: .null
+        case .bool(let value): .bool(value)
+        case .integer(let value): .integer(value)
+        case .number(let value): .number(value)
+        case .string(let value): .string(value)
+        case .array(let values): .array(values.map(codexJSONValue(from:)))
+        case .object(let values):
+            .object(values.mapValues(codexJSONValue(from:)))
+        }
+    }
+
+    private static func pluginJSONValue(from value: CodexJSONValue) -> PluginJSONValue {
+        switch value {
+        case .null: .null
+        case .bool(let value): .bool(value)
+        case .integer(let value): .integer(value)
+        case .number(let value): .number(value)
+        case .string(let value): .string(value)
+        case .array(let values): .array(values.map(pluginJSONValue(from:)))
+        case .object(let values):
+            .object(values.mapValues(pluginJSONValue(from:)))
+        }
+    }
 
     private static func objectSchema(
         properties: [String: CodexJSONValue],

@@ -70,6 +70,7 @@ public final class ChatStore {
     let workbenchStore: WorkbenchStore
     let reviewDraftStore: ReviewDraftStore
     let codexRuntimeStore: CodexRuntimeStore
+    let typeScriptPluginActivationStore: TypeScriptPluginActivationStore
     let modelRuntimeStore: ModelRuntimeStore
     let agentRuntime: AgentRuntime
     private let llmRuntime: LLMRuntime
@@ -118,6 +119,16 @@ public final class ChatStore {
                 tuning: try TurboCodeConfig.shared.loadAgentTuning(),
                 workspaceRoot: workspaceRoot
             )
+            // Keep the process gate and provider snapshot aligned with the
+            // persisted setting before any session is rebuilt or used.
+            let pluginsEnabled = modelRuntimeStore
+                .agentTuning
+                .experimental
+                .thirdPartyPluginsEnabled
+            await typeScriptPluginActivationStore.setEnabled(pluginsEnabled)
+            modelRuntimeStore.setActivePluginTools(
+                await typeScriptPluginActivationStore.activeTools()
+            )
             await reloadRemoteModels()
         } catch {
             print("[TurboCode] Onboarding failed: \(error.localizedDescription)")
@@ -142,6 +153,7 @@ public final class ChatStore {
         let agentActivity = AgentActivityStore()
         let timeline = ChatTimelineStore()
         let codexRuntime = CodexRuntimeStore()
+        let typeScriptPluginActivation = TypeScriptPluginActivationStore()
         let nativeRunner = NativeResponseRunner()
         let reviewDraft = ReviewDraftStore()
         let modelRuntime = ModelRuntimeStore()
@@ -193,6 +205,7 @@ public final class ChatStore {
         self.workbenchStore = workbench
         self.reviewDraftStore = reviewDraft
         self.codexRuntimeStore = codexRuntime
+        self.typeScriptPluginActivationStore = typeScriptPluginActivation
         self.modelRuntimeStore = modelRuntime
         self.agentRuntime = agentRuntime
         self.llmRuntime = llmRuntime
@@ -687,6 +700,38 @@ public final class ChatStore {
 
     func applyAgentTuning(_ value: AgentTuningConfig) async {
         await messageSendCoordinator.applyAgentTuning(value)
+        let enabled = modelRuntimeStore.agentTuning.experimental.thirdPartyPluginsEnabled
+        await typeScriptPluginActivationStore.setEnabled(enabled)
+        modelRuntimeStore.setActivePluginTools(
+            await typeScriptPluginActivationStore.activeTools()
+        )
+    }
+
+    /// Starts a discovered plugin only after the global Settings/Agents trust
+    /// switch is enabled. Activation updates the immutable provider snapshot
+    /// and rebuilds the current session through the normal profile boundary.
+    func activateTypeScriptPlugin(
+        _ descriptor: TypeScriptPluginDescriptor
+    ) async throws {
+        _ = try await typeScriptPluginActivationStore.activate(descriptor)
+        modelRuntimeStore.setActivePluginTools(
+            await typeScriptPluginActivationStore.activeTools()
+        )
+        await profileSelectionCoordinator.rebuildSession(
+            discardingCapabilityContext: true
+        )
+    }
+
+    /// Deactivation terminates the child process before removing its tools
+    /// from the next provider session snapshot.
+    func deactivateTypeScriptPlugin(pluginID: String) async throws {
+        try await typeScriptPluginActivationStore.deactivate(pluginID: pluginID)
+        modelRuntimeStore.setActivePluginTools(
+            await typeScriptPluginActivationStore.activeTools()
+        )
+        await profileSelectionCoordinator.rebuildSession(
+            discardingCapabilityContext: true
+        )
     }
 
     private func refreshSkillsIfNeeded(forceRebuild: Bool = false) async {

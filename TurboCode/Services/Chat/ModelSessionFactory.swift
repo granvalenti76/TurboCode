@@ -23,6 +23,47 @@ nonisolated struct ModelSessionConfiguration: Sendable {
     let delegateToolIDs: Set<ToolCapabilityID>?
     let dropsCompletedToolCalls: Bool
     let workspaceInstructions: WorkspaceInstructions?
+    /// Activated external tools are an immutable process-backed snapshot. The
+    /// active profile still decides which of these bindings enter a session.
+    let activePluginTools: [TypeScriptPluginToolBinding]
+
+    init(
+        backend: ModelBackend,
+        activeRemoteModel: RemoteModelConfig?,
+        delegateRemoteModel: RemoteModelConfig,
+        orchestratorMode: OrchestratorMode,
+        workspaceRoot: String,
+        agentTuning: AgentTuningConfig,
+        availableSkills: [TurboCodeSkillDefinition],
+        documentationStore: ProductDocumentationStore,
+        activeDynamicProfile: UserDynamicProfile?,
+        reasoningEffort: ReasoningEffort?,
+        delegateReasoningEffort: ReasoningEffort?,
+        activeTemperature: Double?,
+        delegateTemperature: Double?,
+        delegateToolIDs: Set<ToolCapabilityID>?,
+        dropsCompletedToolCalls: Bool,
+        workspaceInstructions: WorkspaceInstructions?,
+        activePluginTools: [TypeScriptPluginToolBinding] = []
+    ) {
+        self.backend = backend
+        self.activeRemoteModel = activeRemoteModel
+        self.delegateRemoteModel = delegateRemoteModel
+        self.orchestratorMode = orchestratorMode
+        self.workspaceRoot = workspaceRoot
+        self.agentTuning = agentTuning
+        self.availableSkills = availableSkills
+        self.documentationStore = documentationStore
+        self.activeDynamicProfile = activeDynamicProfile
+        self.reasoningEffort = reasoningEffort
+        self.delegateReasoningEffort = delegateReasoningEffort
+        self.activeTemperature = activeTemperature
+        self.delegateTemperature = delegateTemperature
+        self.delegateToolIDs = delegateToolIDs
+        self.dropsCompletedToolCalls = dropsCompletedToolCalls
+        self.workspaceInstructions = workspaceInstructions
+        self.activePluginTools = activePluginTools
+    }
 }
 
 nonisolated struct ModelSessionEvents: Sendable {
@@ -434,7 +475,7 @@ nonisolated enum ModelSessionFactory {
         including allowedIDs: Set<ToolCapabilityID>? = nil,
         repositoryMapContextTokens: Int = 32_768
     ) -> [any Tool] {
-        plan.assignments.compactMap { assignment -> (any Tool)? in
+        var tools = plan.assignments.compactMap { assignment -> (any Tool)? in
             guard assignment.isRegistered,
                   allowedIDs?.contains(assignment.id) ?? true else { return nil }
             switch assignment.id {
@@ -507,6 +548,18 @@ nonisolated enum ModelSessionFactory {
                 return nil
             }
         }
+        guard configuration.agentTuning.experimental.thirdPartyPluginsEnabled else {
+            return tools
+        }
+        let selectedPluginIDs = configuration.activeDynamicProfile?
+            .resolvedPluginToolIDs ?? []
+        if plan.profile != .delegate {
+            tools.append(contentsOf: configuration.activePluginTools.compactMap { binding in
+                guard selectedPluginIDs.contains(binding.snapshot.id) else { return nil }
+                return try? binding.makeNativeAdapter()
+            })
+        }
+        return tools
     }
 
     /// Builds the shared worker invocation used by every coordinator adapter.

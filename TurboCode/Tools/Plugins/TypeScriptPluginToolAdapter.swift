@@ -14,15 +14,32 @@ struct TypeScriptPluginToolAdapter: @unchecked Sendable, Tool {
     private let toolName: String
 
     init(
+        snapshot: TypeScriptPluginToolSnapshot,
+        host: TypeScriptPluginHost
+    ) throws {
+        self.name = snapshot.id.rawValue
+        self.description = snapshot.description
+        self.toolName = snapshot.id.toolName
+        self.parameters = try Self.generationSchema(from: snapshot.inputSchema)
+        self.host = host
+    }
+
+    init(
         manifest: TypeScriptPluginManifest,
         tool: TypeScriptPluginToolManifest,
         host: TypeScriptPluginHost
     ) throws {
-        self.name = "\(manifest.id)/\(tool.name)"
-        self.description = tool.description
-        self.toolName = tool.name
-        self.parameters = try Self.generationSchema(from: tool.inputSchema)
-        self.host = host
+        try self.init(
+            snapshot: TypeScriptPluginToolSnapshot(
+                id: TypeScriptPluginToolID(
+                    pluginID: manifest.id,
+                    toolName: tool.name
+                ),
+                description: tool.description,
+                inputSchema: tool.inputSchema
+            ),
+            host: host
+        )
     }
 
     func call(arguments: GeneratedContent) async throws -> String {

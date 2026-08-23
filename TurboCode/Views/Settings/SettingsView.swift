@@ -210,6 +210,15 @@ struct AgentSettingsView: View {
                 Text("Allows an explicitly activated skill to control Safari through safaridriver MCP. Disabled by default.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Toggle(
+                    "Allow third-party plugins",
+                    isOn: s.agentTuning.experimental.thirdPartyPluginsEnabled
+                )
+
+                Text("Allows installed Node.js plugins to start and expose tools to selected profiles. Plugins run as normal local processes with filesystem, network, and subprocess access.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
