@@ -20,9 +20,9 @@ nonisolated enum TypeScriptPluginActivationError: LocalizedError, Sendable, Equa
     }
 }
 
-/// Owns explicit plugin activation and the process-backed tool adapters. The
-/// registry can be refreshed independently; only this actor is allowed to
-/// turn a discovered manifest into a live Node process.
+/// Owns process-backed plugin activation and tool adapters. The application
+/// automatically feeds valid discovered manifests here when the global
+/// third-party plugin switch is enabled.
 actor TypeScriptPluginActivationStore {
     private struct ActivePlugin {
         let host: TypeScriptPluginHost
@@ -86,6 +86,27 @@ actor TypeScriptPluginActivationStore {
         }
         active[descriptor.manifest.id] = ActivePlugin(host: host, tools: tools)
         return tools
+    }
+
+    /// Starts every newly discovered plugin in deterministic order. A broken
+    /// plugin is isolated to its own entry so one failed handshake cannot
+    /// prevent the remaining valid plugins from loading at startup.
+    func activateAll(
+        _ descriptors: [TypeScriptPluginDescriptor]
+    ) async -> [String] {
+        guard enabled else { return [] }
+        var failures: [String] = []
+        for descriptor in descriptors.sorted(by: { $0.manifest.id < $1.manifest.id }) {
+            guard active[descriptor.manifest.id] == nil else { continue }
+            do {
+                _ = try await activate(descriptor)
+            } catch {
+                failures.append(
+                    "\(descriptor.manifest.id): \(error.localizedDescription)"
+                )
+            }
+        }
+        return failures
     }
 
     func deactivate(pluginID: String) async throws {

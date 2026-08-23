@@ -1,7 +1,7 @@
 import Foundation
 
-/// Discovers metadata without launching Node. Process creation belongs only to
-/// explicit activation, so `/reload` can refresh this registry safely.
+/// Discovers metadata without launching Node. The application decides whether
+/// to activate the valid result based on the global trust-boundary setting.
 nonisolated struct TypeScriptPluginRegistry {
     private let pluginsRoot: URL
     private let fileManager: FileManager

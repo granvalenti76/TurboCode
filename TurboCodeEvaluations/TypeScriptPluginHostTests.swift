@@ -76,6 +76,12 @@ struct TypeScriptPluginHostTests {
         do {
             _ = try await host.start()
             Issue.record("The incompatible Node process was accepted")
+        } catch let error as NodeRuntimeError {
+            guard case let .incompatibleVersion(_, requiredMajor) = error,
+                  requiredMajor == major + 1 else {
+                Issue.record("Unexpected Node resolver error: \(error)")
+                return
+            }
         } catch let error as TypeScriptPluginHostError {
             guard case .handshakeFailed = error else {
                 Issue.record("Unexpected plugin host error: \(error)")

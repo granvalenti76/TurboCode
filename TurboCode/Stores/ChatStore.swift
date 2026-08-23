@@ -131,6 +131,7 @@ public final class ChatStore {
                 .experimental
                 .thirdPartyPluginsEnabled
             await typeScriptPluginActivationStore.setEnabled(pluginsEnabled)
+            await discoverAndActivateTypeScriptPlugins()
             modelRuntimeStore.setActivePluginTools(
                 await typeScriptPluginActivationStore.activeTools()
             )
@@ -707,9 +708,35 @@ public final class ChatStore {
         await messageSendCoordinator.applyAgentTuning(value)
         let enabled = modelRuntimeStore.agentTuning.experimental.thirdPartyPluginsEnabled
         await typeScriptPluginActivationStore.setEnabled(enabled)
+        await discoverAndActivateTypeScriptPlugins()
         modelRuntimeStore.setActivePluginTools(
             await typeScriptPluginActivationStore.activeTools()
         )
+        await profileSelectionCoordinator.rebuildSession(
+            discardingCapabilityContext: true
+        )
+    }
+
+    /// Loads every valid installed plugin when the global setting permits it.
+    /// Discovery failures and individual handshake failures are logged per
+    /// plugin so one bad extension never blocks the rest of startup.
+    private func discoverAndActivateTypeScriptPlugins() async {
+        guard modelRuntimeStore.agentTuning.experimental.thirdPartyPluginsEnabled else {
+            return
+        }
+        let discovery = TypeScriptPluginRegistry.live().discover()
+        for failure in discovery.failures {
+            print(
+                "[TurboCode] Ignoring TypeScript plugin at \(failure.rootURL.path): "
+                    + failure.message
+            )
+        }
+        let activationFailures = await typeScriptPluginActivationStore.activateAll(
+            discovery.plugins
+        )
+        for failure in activationFailures {
+            print("[TurboCode] Ignoring TypeScript plugin: \(failure)")
+        }
     }
 
     /// Starts a discovered plugin only after the global Settings/Agents trust

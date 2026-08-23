@@ -555,7 +555,10 @@ nonisolated enum ModelSessionFactory {
             .resolvedPluginToolIDs ?? []
         if plan.profile != .delegate {
             tools.append(contentsOf: configuration.activePluginTools.compactMap { binding in
-                guard selectedPluginIDs.contains(binding.snapshot.id) else { return nil }
+                guard selectedPluginIDs.isEmpty
+                        || selectedPluginIDs.contains(binding.snapshot.id) else {
+                    return nil
+                }
                 return try? binding.makeNativeAdapter()
             })
         }
