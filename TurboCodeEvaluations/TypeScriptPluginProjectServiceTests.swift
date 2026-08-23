@@ -49,6 +49,30 @@ struct TypeScriptPluginProjectServiceTests {
         #expect(installed.contains("\"version\":\"0.4.0\""))
     }
 
+    @Test("Provides the SDK to a copied plugin before Node starts")
+    func providesSDKToCopiedPlugin() throws {
+        let root = try makeRoot("RuntimeDependency")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let plugin = root.appendingPathComponent("plugin", isDirectory: true)
+        let sdk = root.appendingPathComponent("sdk", isDirectory: true)
+        try FileManager.default.createDirectory(at: plugin, withIntermediateDirectories: true)
+        try writeSDKPackage(at: sdk)
+        try Data("{\"dependencies\":{\"@granvalenti/turbocode-sdk\":\"file:./sdk\"}}".utf8)
+            .write(to: plugin.appendingPathComponent("package.json"))
+
+        try TypeScriptPluginRuntimeDependencyInstaller().ensureSDKPackage(
+            pluginRoot: plugin,
+            sdkPackageURL: sdk
+        )
+
+        #expect(FileManager.default.fileExists(
+            atPath: plugin.appendingPathComponent(
+                "node_modules/@granvalenti/turbocode-sdk/dist/index.js"
+            ).path
+        ))
+    }
+
     @Test("Builds a project and atomically stages its runtime files")
     func buildsAndStagesRuntime() async throws {
         let root = try makeRoot("Import")

@@ -133,8 +133,11 @@ final class MessageSendCoordinator {
     }
 
     func applyAgentTuning(_ value: AgentTuningConfig) async {
-        guard modelRuntime.applyAgentTuning(value) else { return }
-        await profiles.rebuildSession(discardingCapabilityContext: true)
+        // The facade owns the complete settings boundary: it updates the
+        // plugin snapshot and performs one rebuild after all capabilities are
+        // known. Rebuilding here first would race plugin activation during app
+        // startup and could leave the first turn in a permanent busy state.
+        _ = modelRuntime.applyAgentTuning(value)
     }
 
     func refreshSkillsIfNeeded(forceRebuild: Bool = false) async {

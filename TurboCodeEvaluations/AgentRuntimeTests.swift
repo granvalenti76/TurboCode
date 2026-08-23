@@ -419,6 +419,27 @@ struct AgentRuntimeTests {
         continuation.finish()
         _ = await execution.value
     }
+
+    @Test("ChatStore interrupt waits for runtime ownership to clear")
+    func chatStoreInterruptReleasesBusy() async {
+        let store = ChatStore(
+            conversationRepository: RuntimeObservationConversationRepository()
+        )
+        let turnID = TurnID(rawValue: "chat-store-interrupt")
+        let execution = Task { @MainActor in
+            await store.agentRuntime.runOperation(turnID: turnID) {
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+
+        while !store.busy {
+            await Task.yield()
+        }
+        await store.interrupt()
+
+        #expect(!store.busy)
+        _ = await execution.value
+    }
 }
 
 /// Keeps the Observation regression isolated from the user's session files;

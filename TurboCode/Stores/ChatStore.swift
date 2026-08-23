@@ -131,11 +131,6 @@ public final class ChatStore {
                 .experimental
                 .thirdPartyPluginsEnabled
             await typeScriptPluginActivationStore.setEnabled(pluginsEnabled)
-            await discoverAndActivateTypeScriptPlugins()
-            modelRuntimeStore.setActivePluginTools(
-                await typeScriptPluginActivationStore.activeTools()
-            )
-            await reloadRemoteModels()
         } catch {
             print("[TurboCode] Onboarding failed: \(error.localizedDescription)")
         }
@@ -189,6 +184,9 @@ public final class ChatStore {
         let workbench = WorkbenchStore()
         let conversations = ConversationStore()
         let typeScriptPluginActivation = TypeScriptPluginActivationStore(
+            sdkPackageURL: TurboCodeConfig.shared.sdkDirectoryURL
+                .appendingPathComponent("@granvalenti", isDirectory: true)
+                .appendingPathComponent("turbocode-sdk", isDirectory: true),
             sessionTranscript: {
                 let thread = conversations.activeThreadID.flatMap {
                     conversations.conversation(id: $0)
@@ -818,6 +816,10 @@ public final class ChatStore {
         if shouldInterruptCodex {
             await codexRuntimeStore.interrupt()
         }
+        // A cancellation request is only advisory for the detached provider
+        // operation. Await its unwind before returning so the runtime
+        // projection clears `busy` atomically with the Stop action.
+        await agentRuntime.cancelAndWaitForOperation()
         // Stop is terminal for the current response. Reject every approval
         // removed from its transient UI so neither a native continuation
         // nor a Codex server request remains orphaned.

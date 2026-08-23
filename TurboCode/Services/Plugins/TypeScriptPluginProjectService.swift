@@ -31,6 +31,64 @@ nonisolated struct TypeScriptPluginImportReceipt: Sendable, Equatable {
     let commands: [String]
 }
 
+/// Makes the canonical SDK available to a copied plugin generation. A plugin
+/// only needs its manifest, package metadata, and compiled `dist`; TurboCode
+/// supplies this local package link immediately before starting Node.
+nonisolated struct TypeScriptPluginRuntimeDependencyInstaller: @unchecked Sendable {
+    private static let sdkPackageName = "@granvalenti/turbocode-sdk"
+    private let fileManager: FileManager
+
+    init(fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+    }
+
+    func ensureSDKPackage(
+        pluginRoot: URL,
+        sdkPackageURL: URL?
+    ) throws {
+        guard let sdkPackageURL else { return }
+        let sdkManifest = sdkPackageURL.appendingPathComponent("package.json")
+        guard fileManager.fileExists(atPath: sdkManifest.path) else { return }
+
+        let packageURL = pluginRoot.appendingPathComponent("package.json")
+        guard let data = try? Data(contentsOf: packageURL),
+              let packageObject = try? JSONSerialization.jsonObject(with: data),
+              let package = packageObject as? [String: Any],
+              Self.declaresSDK(package) else {
+            return
+        }
+
+        let destination = pluginRoot
+            .appendingPathComponent("node_modules", isDirectory: true)
+            .appendingPathComponent("@granvalenti", isDirectory: true)
+            .appendingPathComponent("turbocode-sdk", isDirectory: true)
+        if fileManager.fileExists(atPath: destination.path) {
+            return
+        }
+        if (try? fileManager.destinationOfSymbolicLink(atPath: destination.path)) != nil {
+            try fileManager.removeItem(at: destination)
+        }
+        try fileManager.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try fileManager.createSymbolicLink(
+            at: destination,
+            withDestinationURL: sdkPackageURL
+        )
+    }
+
+    private static func declaresSDK(_ package: [String: Any]) -> Bool {
+        for key in ["dependencies", "optionalDependencies", "peerDependencies"] {
+            if let dependencies = package[key] as? [String: Any],
+               dependencies[sdkPackageName] != nil {
+                return true
+            }
+        }
+        return false
+    }
+}
+
 nonisolated enum TypeScriptPluginProjectError: LocalizedError, Sendable, Equatable {
     case projectNotFound(URL)
     case packageManifestMissing(URL)

@@ -33,7 +33,9 @@ discover it directly.
 
 When the project is opened in TurboCode, Bash discovers Node and exposes the SDK
 and plugin locations as environment variables. They keep the workflow portable
-across machines:
+across machines. TurboCode provisions the canonical SDK package automatically
+when the copied plugin is activated, so `node_modules` does not need to be
+copied into `~/.turbocode/plugins`:
 
 ```sh
 npm install --save "file:$TURBOCODE_SDK_PACKAGE"

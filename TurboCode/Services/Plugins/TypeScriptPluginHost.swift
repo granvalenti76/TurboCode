@@ -12,6 +12,7 @@ nonisolated struct TypeScriptPluginHostConfiguration: Sendable {
     let pluginRoot: URL
     let nodePolicy: NodeRuntimePolicy
     let requestTimeout: Duration
+    let sdkPackageURL: URL?
     /// Supplies a point-in-time copy of the active session. The provider is
     /// owned by app composition, so the host does not retain ChatStore or any
     /// Swift object inside the Node process.
@@ -22,12 +23,14 @@ nonisolated struct TypeScriptPluginHostConfiguration: Sendable {
         pluginRoot: URL,
         nodePolicy: NodeRuntimePolicy = .init(),
         requestTimeout: Duration = .seconds(10),
+        sdkPackageURL: URL? = nil,
         sessionTranscript: @escaping @MainActor @Sendable () async -> PluginJSONValue? = { nil }
     ) {
         self.manifest = manifest
         self.pluginRoot = pluginRoot
         self.nodePolicy = nodePolicy
         self.requestTimeout = requestTimeout
+        self.sdkPackageURL = sdkPackageURL
         self.sessionTranscript = sessionTranscript
     }
 }
@@ -64,8 +67,8 @@ actor TypeScriptPluginHost {
     private let configuration: TypeScriptPluginHostConfiguration
     private var process: Process?
     private var inputHandle: FileHandle?
-    private var readerTask: Task<Void, Never>?
-    private var errorReaderTask: Task<Void, Never>?
+    private var outputHandle: FileHandle?
+    private var errorHandle: FileHandle?
     private var outputBuffer = Data()
     private var errorBuffer = Data()
     private var lastStandardErrorLine: String?
@@ -81,6 +84,10 @@ actor TypeScriptPluginHost {
     func start() async throws -> TypeScriptPluginHandshake {
         guard !started else { throw TypeScriptPluginHostError.alreadyRunning }
         try configuration.manifest.validate(at: configuration.pluginRoot)
+        try TypeScriptPluginRuntimeDependencyInstaller().ensureSDKPackage(
+            pluginRoot: configuration.pluginRoot,
+            sdkPackageURL: configuration.sdkPackageURL
+        )
         let node = try NodeRuntimeResolver.resolve(policy: configuration.nodePolicy)
         let entrypoint = configuration.pluginRoot
             .appendingPathComponent(configuration.manifest.entrypoint)
@@ -110,9 +117,16 @@ actor TypeScriptPluginHost {
 
         let outputHandle = outputPipe.fileHandleForReading
         let errorHandle = errorPipe.fileHandleForReading
-        readerTask = Task.detached { [weak self, outputHandle] in
-            while !Task.isCancelled {
-                let data = outputHandle.availableData
+        self.outputHandle = outputHandle
+        self.errorHandle = errorHandle
+
+        // FileHandle's readiness callbacks run only when a pipe can be read.
+        // A permanent `Task.detached` + `availableData` loop would pin two
+        // cooperative Swift workers per plugin and eventually starve chat
+        // execution as more valid plugins are discovered.
+        outputHandle.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            Task { [weak self] in
                 guard !data.isEmpty else {
                     await self?.processDidStop()
                     return
@@ -120,10 +134,10 @@ actor TypeScriptPluginHost {
                 await self?.receive(data)
             }
         }
-        errorReaderTask = Task.detached { [weak self, errorHandle] in
-            while !Task.isCancelled {
-                let data = errorHandle.availableData
-                guard !data.isEmpty else { return }
+        errorHandle.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+            Task { [weak self] in
                 await self?.receiveStandardError(data)
             }
         }
@@ -178,10 +192,7 @@ actor TypeScriptPluginHost {
     }
 
     func shutdown() {
-        readerTask?.cancel()
-        readerTask = nil
-        errorReaderTask?.cancel()
-        errorReaderTask = nil
+        stopReadingPipes()
         for continuation in pending.values {
             continuation.resume(throwing: TypeScriptPluginHostError.processStopped)
         }
@@ -352,8 +363,18 @@ actor TypeScriptPluginHost {
 
     private func processDidStop() {
         guard started else { return }
+        stopReadingPipes()
         failPending(TypeScriptPluginHostError.processStopped)
         started = false
+    }
+
+    private func stopReadingPipes() {
+        outputHandle?.readabilityHandler = nil
+        errorHandle?.readabilityHandler = nil
+        try? outputHandle?.close()
+        try? errorHandle?.close()
+        outputHandle = nil
+        errorHandle = nil
     }
 
     private func requestTimedOut(id: Int, method: String) {
