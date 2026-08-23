@@ -8,6 +8,7 @@ struct TurboCodeApp: App {
     @Environment(\.openWindow) private var openWindow
     @State private var chatStore: ChatStore
     @State private var settingsStore = SettingsStore()
+    @State private var approvalStore = ApprovalStore()
 
     init() {
         let store = ChatStore()
@@ -21,9 +22,11 @@ struct TurboCodeApp: App {
                 .navigationTitle("")
                 .environment(chatStore)
                 .environment(settingsStore)
+                .environment(approvalStore)
                 .environment(\.chatFontSize, CGFloat(settingsStore.fontSize))
                 .preferredColorScheme(settingsStore.theme.colorScheme)
                 .task {
+                    approvalStore.start()
                     // First-launch onboarding
                     await chatStore.ensureOnboarding()
                     // Restore persisted sessions

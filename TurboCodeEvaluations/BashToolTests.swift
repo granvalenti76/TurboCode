@@ -65,4 +65,101 @@ struct BashToolTests {
         #expect(pluginWrite.contains("Exit code: 0"))
         #expect(FileManager.default.fileExists(atPath: pluginRoot.appendingPathComponent("demo/plugin.json").path))
     }
+
+    @Test("A missing workspace uses a disposable directory and requires approval for plugins")
+    func missingWorkspaceDoesNotBecomeThePluginRoot() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCode-BashTool-\(UUID().uuidString)", isDirectory: true)
+        let pluginRoot = URL(fileURLWithPath: "/private/tmp/TurboCode-BashPlugin-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: pluginRoot, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: pluginRoot)
+        }
+
+        let approvals = ApprovalCounter()
+        let tool = BashTool(
+            workspaceRoot: root.appendingPathComponent("deleted-workspace", isDirectory: true).path,
+            pluginRoot: pluginRoot.path,
+            sdkRoot: root.appendingPathComponent("sdk", isDirectory: true).path,
+            requestApproval: { request in
+                await approvals.increment()
+                return await request.action()
+            }
+        )
+        let relativeOutput = try await tool.call(
+            arguments: BashArguments(
+                command: "printf stray > marker.txt",
+                timeoutSeconds: 10,
+                maxOutputCharacters: 4_000
+            )
+        )
+
+        #expect(relativeOutput.contains("Workspace unavailable"))
+        #expect(!FileManager.default.fileExists(atPath: pluginRoot.appendingPathComponent("marker.txt").path))
+        #expect(await approvals.value == 0)
+
+        let pluginOutput = try await tool.call(
+            arguments: BashArguments(
+                command: "mkdir -p \"$TURBOCODE_PLUGIN_ROOT/reportistica\" && printf plugin > \"$TURBOCODE_PLUGIN_ROOT/reportistica/marker.txt\"",
+                timeoutSeconds: 10,
+                maxOutputCharacters: 4_000
+            )
+        )
+
+        #expect(pluginOutput.contains("Exit code: 0"))
+        #expect(await approvals.value == 1)
+        #expect(try String(
+            contentsOf: pluginRoot.appendingPathComponent("reportistica/marker.txt"),
+            encoding: .utf8
+        ) == "plugin")
+    }
+
+    @Test("Bash asks the host before accessing an external path")
+    func bashRequiresHostApprovalOutsideAllowedRoots() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCode-BashApproval-\(UUID().uuidString)", isDirectory: true)
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        let pluginRoot = root.appendingPathComponent("plugins", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: pluginRoot, withIntermediateDirectories: true)
+
+        let externalFile = URL(fileURLWithPath: "/private/tmp/TurboCode-BashApproval-\(UUID().uuidString).txt")
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: externalFile)
+        }
+
+        let approvals = ApprovalCounter()
+        let tool = BashTool(
+            workspaceRoot: workspace.path,
+            pluginRoot: pluginRoot.path,
+            sdkRoot: root.appendingPathComponent("sdk", isDirectory: true).path,
+            requestApproval: { request in
+                await approvals.increment()
+                return await request.action()
+            }
+        )
+        let output = try await tool.call(
+            arguments: BashArguments(
+                command: "printf approved > \(externalFile.path)",
+                timeoutSeconds: 10,
+                maxOutputCharacters: 4_000
+            )
+        )
+
+        #expect(output.contains("Exit code: 0"))
+        #expect(await approvals.value == 1)
+        #expect(try String(contentsOf: externalFile, encoding: .utf8) == "approved")
+    }
+}
+
+private actor ApprovalCounter {
+    private var count = 0
+
+    func increment() {
+        count += 1
+    }
+
+    var value: Int { count }
 }

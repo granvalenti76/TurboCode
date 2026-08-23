@@ -297,15 +297,9 @@ struct GitTool: Tool {
                 return result.rendered
             }
         )
-        await ToolApprovalRegistry.shared.register(request)
-
-        return """
-        TURBOCODE_APPROVAL_REQUIRED
-        approval_id: \(id)
-        operation: git.\(operation.rawValue)
-        path: \(workspaceRoot)
-        summary: \(summary)
-        """
+        // Keep the tool call suspended until the host-owned approval resolves;
+        // the model receives only the final Git result or an explicit denial.
+        return await ToolApprovalRegistry.shared.request(request)
     }
 
     private func refreshGitUIIfNeeded(result: GitCommandResult, mutatesRepository: Bool) async {

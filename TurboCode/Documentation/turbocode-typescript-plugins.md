@@ -12,10 +12,15 @@ Node 24 or newer and JSON-RPC 2.0 over JSONL on stdin/stdout. `/reload`
 restarts active plugin processes, rediscovers manifests, and refreshes the
 current session's tool snapshot without discarding the visible conversation.
 
-## Create and install a plugin
+## Create, install, and evolve a plugin
 
-Start with any Node/npm project in the active workspace. A practical project
-layout is:
+Start with any Node/npm project in the active workspace, or open an existing
+plugin directly from `~/.turbocode/plugins/<plugin-id>`. An installed plugin is
+an ordinary writable Node project, not a sealed artifact: the model can inspect
+and change its `plugin.json`, source, compiled output, package files, widgets,
+and dependencies whenever the task requires it.
+
+A practical project layout is:
 
 ```text
 my-plugin/
@@ -29,7 +34,9 @@ my-plugin/
 Use `@granvalenti/turbocode-sdk` from the installed SDK, define the plugin and
 its tools/widgets in TypeScript, and set `entrypoint` in `plugin.json` to the
 compiled runtime file. The manifest stays at the project root so TurboCode can
-discover it directly.
+discover it directly. When an installed plugin already exists, read its files
+first and continue from that project; no second registration or special import
+record is needed.
 
 When the project is opened in TurboCode, Bash discovers Node and exposes the SDK
 and plugin locations as environment variables. They keep the workflow portable
@@ -46,9 +53,10 @@ cp plugin.json package.json "$TURBOCODE_PLUGIN_ROOT/<plugin-id>/"
 cp -R dist "$TURBOCODE_PLUGIN_ROOT/<plugin-id>/"
 ```
 
-Copy the runtime files needed by the plugin, inspect the installed manifest and
-entrypoint, then use `/reload`. TurboCode discovers metadata first and starts
-the Node process when one of the plugin's tools is used. In Settings → Agents,
+Copy or build the runtime files needed by the plugin, inspect the installed
+manifest and entrypoint, then use `/reload`. If the plugin is already installed,
+edit and rebuild it in place, then reload. TurboCode discovers metadata first and
+starts the Node process when one of the plugin's tools is used. In Settings → Agents,
 enable third-party plugins for the profile that should expose them. The SDK
 package root is available as `TURBOCODE_SDK_ROOT`, the ready-to-use npm package
 as `TURBOCODE_SDK_PACKAGE`, and the plugin installation location as
@@ -100,13 +108,17 @@ transcript type.
         "required": ["query"]
       }
     }
-  ]
+  ],
+  "widgets": []
 }
 ```
 
-The host preserves the declared JSON Schema. A provider adapter may support a
-smaller representation, but a rich schema does not prevent the Node plugin
-from activating or serving another provider.
+The manifest contract is intentionally small: `manifestVersion`, identity,
+`entrypoint`, Node runtime, a `tools` array, and an optional `widgets` array.
+Each tool has `name`, `description`, and an object-root `inputSchema`. Each
+widget has `id`, `title`, `entrypoint`, and an optional `description`. The host
+preserves the declared JSON Schema; the model remains free to design the tool
+arguments, implementation, UI, and package structure around the user's task.
 
 ## Real examples
 
@@ -160,10 +172,12 @@ project service performs these checks in order:
 5. validate the compiled entrypoint and stage `dist/`, package metadata, and
    `node_modules` under the plugin root.
 
-The temporary generation replaces `~/.turbocode/plugins/<plugin-id>/` only
-after every step succeeds. A failed validation or build therefore leaves the
-previous installed generation untouched. The SDK installer copies only
-`package.json` and `dist/` to
+The project service uses a temporary generation when importing a workspace
+project, replacing `~/.turbocode/plugins/<plugin-id>/` only after every step
+succeeds. A failed validation or build therefore leaves the previous installed
+generation untouched. Direct Bash work on an already installed plugin is also
+supported: the installed directory is the live runtime, so edit it, build it,
+and reload when ready. The SDK installer copies only `package.json` and `dist/` to
 `~/.turbocode/sdk/@granvalenti/turbocode-sdk/`, then exposes the same package
 inside the build's `node_modules` tree.
 

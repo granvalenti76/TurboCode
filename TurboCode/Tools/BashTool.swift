@@ -23,6 +23,7 @@ struct BashTool: Tool {
     let taskScope: AgentTaskPathScope?
     private let pluginRoot: String
     private let sdkRoot: String
+    private let requestApproval: @Sendable (PendingToolApproval) async -> String
     private let service = BashService()
 
     init(
@@ -34,13 +35,17 @@ struct BashTool: Tool {
         pluginRoot: String = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".turbocode/plugins", isDirectory: true).path,
         sdkRoot: String = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".turbocode/sdk", isDirectory: true).path
+            .appendingPathComponent(".turbocode/sdk", isDirectory: true).path,
+        requestApproval: @escaping @Sendable (PendingToolApproval) async -> String = {
+            await ToolApprovalRegistry.shared.request($0)
+        }
     ) {
         self.workspaceRoot = workspaceRoot
         self.executionPolicy = executionPolicy
         self.taskScope = taskScope
         self.pluginRoot = pluginRoot
         self.sdkRoot = sdkRoot
+        self.requestApproval = requestApproval
     }
 
     func restricted(to scope: AgentTaskPathScope) -> Self {
@@ -49,7 +54,8 @@ struct BashTool: Tool {
             executionPolicy: executionPolicy,
             taskScope: scope,
             pluginRoot: pluginRoot,
-            sdkRoot: sdkRoot
+            sdkRoot: sdkRoot,
+            requestApproval: requestApproval
         )
     }
 
@@ -58,13 +64,21 @@ struct BashTool: Tool {
         """
         Run a zsh command from the workspace root. Use swift_package_manager for
         supported Swift package operations, xcode_project for Xcode builds and
-        tests, and this tool only for non-Xcode commands or precise inspection not
-        covered by structured tools. Use git for every Git operation. Prefer
-        read_file for source ranges and
-        the available structured editing tool for ordinary source changes. For a
-        TypeScript plugin workflow, bash may create/build files in the active
-        workspace and install only below TURBOCODE_PLUGIN_ROOT. TURBOCODE_SDK_ROOT
-        points to the SDK root and TURBOCODE_SDK_PACKAGE to its npm package.
+        tests, and this tool only for non-Xcode commands or workflows not covered
+        by structured tools. Use list_workspace (Browse Directory) for directory
+        listings, read_file for focused file ranges, and edit_file for source or
+        text changes. Use git for every Git operation. For a
+        TypeScript plugin workflow, bash may create, inspect, modify, and build
+        files in the active workspace or below TURBOCODE_PLUGIN_ROOT. An existing
+        installed plugin is a normal writable project directory. TURBOCODE_SDK_ROOT
+        points to the SDK root and TURBOCODE_SDK_PACKAGE to its npm package. If
+        the saved workspace path is unavailable, plugin commands run from
+        TURBOCODE_PLUGIN_ROOT so the installed plugins remain reachable.
+        Every invocation starts in the reported Working directory; cd does not
+        persist between invocations. Check pwd before any destructive relative
+        command and do not infer a previous listing belongs to this directory.
+        If the host sandbox blocks an external path, TurboCode asks the user and
+        reruns this exact command after approval; never invent an approval token.
         Output and execution time are bounded.
         """
     }
@@ -95,7 +109,8 @@ struct BashTool: Tool {
             outputLimit: outputLimit,
             allowNetworkAccess: executionPolicy.allowNetworkAccess,
             pluginRoot: pluginRoot,
-            sdkRoot: sdkRoot
+            sdkRoot: sdkRoot,
+            requestApproval: requestApproval
         )
     }
 }
@@ -110,20 +125,57 @@ private actor BashService {
         outputLimit: Int,
         allowNetworkAccess: Bool,
         pluginRoot: String,
-        sdkRoot: String
-    ) -> String {
-        let workspaceURL: URL
-        do {
-            workspaceURL = try WorkspacePathResolver.resolve(".", within: workspaceRoot)
-        } catch {
-            return "Error: \(error.localizedDescription)"
-        }
+        sdkRoot: String,
+        requestApproval: @Sendable (PendingToolApproval) async -> String
+    ) async -> String {
+        // Seatbelt makes the first decision. Only its denial can open a host-owned
+        // approval; no approval text produced by the model is parsed or trusted.
+        let result = execute(
+            command: command,
+            workspaceRoot: workspaceRoot,
+            timeoutSeconds: timeoutSeconds,
+            outputLimit: outputLimit,
+            allowNetworkAccess: allowNetworkAccess,
+            pluginRoot: pluginRoot,
+            sdkRoot: sdkRoot,
+            allowExternalAccess: false
+        )
+        guard Self.isSandboxDenial(result) else { return result }
 
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: workspaceURL.path, isDirectory: &isDirectory),
-              isDirectory.boolValue else {
-            return "Error: Workspace directory does not exist at '\(workspaceURL.path)'."
+        let authorized = await WorkspaceAccessGate.shared.authorizeExternalExecution(
+            tool: "Bash",
+            workspaceRoot: workspaceRoot,
+            targetDescription: "filesystem paths requested by this command",
+            command: command,
+            requestApproval: requestApproval
+        )
+        guard authorized else {
+            return "External filesystem access denied by the user. The command was not rerun."
         }
+        return execute(
+            command: command,
+            workspaceRoot: workspaceRoot,
+            timeoutSeconds: timeoutSeconds,
+            outputLimit: outputLimit,
+            allowNetworkAccess: allowNetworkAccess,
+            pluginRoot: pluginRoot,
+            sdkRoot: sdkRoot,
+            allowExternalAccess: true
+        )
+    }
+
+    private func execute(
+        command: String,
+        workspaceRoot: String,
+        timeoutSeconds: Int,
+        outputLimit: Int,
+        allowNetworkAccess: Bool,
+        pluginRoot: String,
+        sdkRoot: String,
+        allowExternalAccess: Bool
+    ) -> String {
+        let resolvedWorkspace = try? WorkspacePathResolver.resolve(".", within: workspaceRoot)
+        let activeWorkspaceURL = resolvedWorkspace.flatMap { Self.isDirectory($0) ? $0 : nil }
 
         let outputDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("TurboCode-Bash-\(UUID().uuidString)", isDirectory: true)
@@ -143,6 +195,10 @@ private actor BashService {
             return "Error preparing command output: \(error.localizedDescription)"
         }
         defer { try? FileManager.default.removeItem(at: outputDirectory) }
+        // A stale workspace must never redirect relative commands into a real
+        // user directory. The temporary directory is intentionally disposable;
+        // external roots remain reachable only after host authorization.
+        let workingDirectoryURL = activeWorkspaceURL ?? outputDirectory
 
         let stdoutHandle: FileHandle
         let stderrHandle: FileHandle
@@ -173,20 +229,19 @@ private actor BashService {
         process.arguments = [
             "-p",
             sandboxProfile(
-                workspacePath: workspaceURL.path,
+                workspacePath: workingDirectoryURL.path,
                 outputPath: outputDirectory.path,
                 allowNetworkAccess: allowNetworkAccess,
-                pluginRoot: pluginRoot,
-                sdkRoot: sdkRoot,
-                nodeRuntimeRoot: nodeRuntimeRoot
+                nodeRuntimeRoot: nodeRuntimeRoot,
+                allowExternalAccess: allowExternalAccess
             ),
             "/bin/zsh",
             "-fc",
             command
         ]
-        process.currentDirectoryURL = workspaceURL
+        process.currentDirectoryURL = workingDirectoryURL
         var commandEnvironment = ProcessInfo.processInfo.environment.merging([
-            "PWD": workspaceURL.path,
+            "PWD": workingDirectoryURL.path,
             "TMPDIR": outputDirectory.path,
             "HOME": homeDirectory.path,
             "XDG_CACHE_HOME": homeDirectory.appendingPathComponent(".cache").path,
@@ -239,7 +294,10 @@ private actor BashService {
         let duration = Date().timeIntervalSince(startedAt)
 
         var sections = [
-            "Working directory: \(workspaceURL.path)",
+            "Working directory: \(workingDirectoryURL.path)",
+            activeWorkspaceURL == nil
+                ? "Workspace unavailable: relative paths use a disposable directory."
+                : "Workspace: \(activeWorkspaceURL!.path)",
             "Exit code: \(process.terminationStatus)",
             String(format: "Duration: %.2fs", duration)
         ]
@@ -256,6 +314,21 @@ private actor BashService {
             sections.append("(no output)")
         }
         return sections.joined(separator: "\n\n")
+    }
+
+    private static func isSandboxDenial(_ result: String) -> Bool {
+        let normalized = result.lowercased()
+        return normalized.contains("operation not permitted")
+            || normalized.contains("permission denied")
+            || normalized.contains("sandbox") && normalized.contains("deny")
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(
+            atPath: url.path,
+            isDirectory: &isDirectory
+        ) && isDirectory.boolValue
     }
 
     private func installSwiftWrapper(in directory: URL) throws {
@@ -300,15 +373,12 @@ private actor BashService {
         workspacePath: String,
         outputPath: String,
         allowNetworkAccess: Bool,
-        pluginRoot: String,
-        sdkRoot: String,
-        nodeRuntimeRoot: String?
+        nodeRuntimeRoot: String?,
+        allowExternalAccess: Bool
     ) -> String {
         let workspace = profileEscaped(workspacePath)
         let output = profileEscaped(outputPath)
-        let plugin = profileEscaped(pluginRoot)
-        let sdk = profileEscaped(sdkRoot)
-        var readableRootPaths = [workspacePath, pluginRoot, sdkRoot]
+        var readableRootPaths = [workspacePath]
         if let nodeRuntimeRoot {
             readableRootPaths.append(nodeRuntimeRoot)
         }
@@ -316,35 +386,38 @@ private actor BashService {
             .map(readExceptionsProfile(for:))
             .joined(separator: " ")
         let networkPolicy = allowNetworkAccess ? "" : "(deny network*)"
+        let filePolicy = allowExternalAccess
+            ? ""
+            : """
+            (deny file-read*
+                (require-any
+                    (subpath "/Volumes")
+                    (subpath "/Network")
+                    (require-all
+                        (subpath "/Users")
+                        (require-not (require-any \(readableRoots))))
+                    (require-all
+                        (subpath "/private/tmp")
+                        (require-not
+                            (require-any
+                                (literal "\(output)")
+                                (subpath "\(output)"))))))
+            (deny file-write*)
+            (allow file-write* (subpath "\(output)"))
+            (allow file-write* (subpath "/var/folders"))
+            (allow file-write* (subpath "/private/var/folders"))
+            (allow file-write* (literal "\(workspace)"))
+            (allow file-write* (subpath "\(workspace)"))
+            (allow file-write* (literal "\(workspace)/.build"))
+            (allow file-write* (subpath "\(workspace)/.build"))
+            (allow file-write* (literal "\(workspace)/.swiftpm"))
+            (allow file-write* (subpath "\(workspace)/.swiftpm"))
+            """
         return """
         (version 1)
         (allow default)
         \(networkPolicy)
-        (deny file-read*
-            (require-any
-                (subpath "/Volumes")
-                (subpath "/Network")
-                (require-all
-                    (subpath "/Users")
-                    (require-not (require-any \(readableRoots))))
-                (require-all
-                    (subpath "/private/tmp")
-                    (require-not
-                        (require-any
-                            (literal "\(output)")
-                            (subpath "\(output)"))))))
-        (deny file-write*)
-        (allow file-write* (subpath "\(output)"))
-        (allow file-write* (subpath "/var/folders"))
-        (allow file-write* (subpath "/private/var/folders"))
-        (allow file-write* (literal "\(workspace)"))
-        (allow file-write* (subpath "\(workspace)"))
-        (allow file-write* (literal "\(plugin)"))
-        (allow file-write* (subpath "\(plugin)"))
-        (allow file-write* (literal "\(workspace)/.build"))
-        (allow file-write* (subpath "\(workspace)/.build"))
-        (allow file-write* (literal "\(workspace)/.swiftpm"))
-        (allow file-write* (subpath "\(workspace)/.swiftpm"))
+        \(filePolicy)
         (allow file-write-data (literal "/dev/null"))
         """
     }

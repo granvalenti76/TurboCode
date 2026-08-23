@@ -272,7 +272,7 @@ struct InputFieldView: View {
             SlashCommandSuggestion(
                 command: "/reload",
                 insertion: "/reload",
-                description: "Reload profiles without rebuilding this session",
+                description: "Reload profiles and TypeScript plugins",
                 icon: "arrow.clockwise"
             )
         ] + chatStore.availableSkills.map {

@@ -25,6 +25,7 @@ nonisolated enum TypeScriptPluginActivationError: LocalizedError, Sendable, Equa
 /// third-party plugin switch is enabled.
 actor TypeScriptPluginActivationStore {
     private struct ActivePlugin {
+        let descriptor: TypeScriptPluginDescriptor
         let host: TypeScriptPluginHost
         let tools: [TypeScriptPluginToolBinding]
     }
@@ -57,6 +58,11 @@ actor TypeScriptPluginActivationStore {
         guard active[descriptor.manifest.id] == nil else {
             throw TypeScriptPluginActivationError.alreadyActive(descriptor.manifest.id)
         }
+        await publish(
+            descriptor,
+            stage: .activating,
+            detail: "Starting Node and validating the plugin handshake."
+        )
         let host = TypeScriptPluginHost(
             configuration: TypeScriptPluginHostConfiguration(
                 manifest: descriptor.manifest,
@@ -67,31 +73,50 @@ actor TypeScriptPluginActivationStore {
                 sessionTranscript: sessionTranscript
             )
         )
-        let handshake = try await host.start()
-        guard handshake.tools == descriptor.manifest.tools.map(\.name) else {
-            await host.shutdown()
-            throw TypeScriptPluginActivationError.invalidToolList(descriptor.manifest.id)
-        }
-        // Activation is a process concern, not a Foundation Models schema
-        // gate. A provider adapter may omit a rich JSON Schema while the
-        // Node plugin remains active and available to other providers.
-        let tools = descriptor.manifest.tools.map { tool in
-            TypeScriptPluginToolBinding(
-                snapshot: TypeScriptPluginToolSnapshot(
-                    id: TypeScriptPluginToolID(
-                        pluginID: descriptor.manifest.id,
-                        toolName: tool.name
+        do {
+            let handshake = try await host.start()
+            guard handshake.tools == descriptor.manifest.tools.map(\.name) else {
+                await host.shutdown()
+                throw TypeScriptPluginActivationError.invalidToolList(descriptor.manifest.id)
+            }
+            // Activation is a process concern, not a Foundation Models schema
+            // gate. A provider adapter may omit a rich JSON Schema while the
+            // Node plugin remains active and available to other providers.
+            let tools = descriptor.manifest.tools.map { tool in
+                TypeScriptPluginToolBinding(
+                    snapshot: TypeScriptPluginToolSnapshot(
+                        id: TypeScriptPluginToolID(
+                            pluginID: descriptor.manifest.id,
+                            toolName: tool.name
+                        ),
+                        description: tool.description,
+                        inputSchema: tool.inputSchema
                     ),
-                    description: tool.description,
-                    inputSchema: tool.inputSchema
-                ),
-                manifest: descriptor.manifest,
-                pluginRoot: descriptor.rootURL,
-                host: host
+                    manifest: descriptor.manifest,
+                    pluginRoot: descriptor.rootURL,
+                    host: host
+                )
+            }
+            active[descriptor.manifest.id] = ActivePlugin(
+                descriptor: descriptor,
+                host: host,
+                tools: tools
             )
+            await publish(
+                descriptor,
+                stage: .ready,
+                detail: "Handshake verified; \(tools.count) tool(s) are callable."
+            )
+            return tools
+        } catch {
+            await host.shutdown()
+            await publish(
+                descriptor,
+                stage: .failed,
+                detail: "Activation failed: \(error.localizedDescription)"
+            )
+            throw error
         }
-        active[descriptor.manifest.id] = ActivePlugin(host: host, tools: tools)
-        return tools
     }
 
     /// Starts every newly discovered plugin in deterministic order. A broken
@@ -120,6 +145,11 @@ actor TypeScriptPluginActivationStore {
             throw TypeScriptPluginActivationError.notActive(pluginID)
         }
         await plugin.host.shutdown()
+        await publish(
+            plugin.descriptor,
+            stage: .installed,
+            detail: "Installed on disk; the Node host is stopped."
+        )
     }
 
     func activeTools() -> [TypeScriptPluginToolBinding] {
@@ -140,6 +170,11 @@ actor TypeScriptPluginActivationStore {
         guard !enabled else { return }
         for plugin in active.values {
             await plugin.host.shutdown()
+            await publish(
+                plugin.descriptor,
+                stage: .installed,
+                detail: "Installed on disk; third-party plugins are disabled."
+            )
         }
         active.removeAll()
     }
@@ -151,7 +186,26 @@ actor TypeScriptPluginActivationStore {
     func shutdown() async {
         for plugin in active.values {
             await plugin.host.shutdown()
+            await publish(
+                plugin.descriptor,
+                stage: .installed,
+                detail: "Installed on disk; waiting for activation."
+            )
         }
         active.removeAll()
+    }
+
+    private func publish(
+        _ descriptor: TypeScriptPluginDescriptor,
+        stage: TypeScriptPluginLifecycleStage,
+        detail: String
+    ) async {
+        await MainActor.run {
+            TypeScriptPluginRuntimeStore.shared.update(
+                descriptor: descriptor,
+                stage: stage,
+                detail: detail
+            )
+        }
     }
 }

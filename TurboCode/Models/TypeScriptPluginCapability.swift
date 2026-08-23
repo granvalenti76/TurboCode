@@ -129,6 +129,25 @@ nonisolated struct TypeScriptPluginToolResultEnvelope: Codable, Hashable, Sendab
     let text: String
     let isError: Bool
     let widget: TypeScriptPluginWidgetReceipt?
+
+    init(
+        text: String,
+        isError: Bool,
+        widget: TypeScriptPluginWidgetReceipt?
+    ) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            self.text = trimmed
+        } else if isError {
+            self.text = "Plugin tool failed without diagnostics."
+        } else if let widget {
+            self.text = "\(widget.title) rendered."
+        } else {
+            self.text = "Plugin tool completed."
+        }
+        self.isError = isError
+        self.widget = widget
+    }
 }
 
 /// Foundation Models tools currently return text. This compact envelope keeps

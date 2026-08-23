@@ -544,7 +544,26 @@ public struct PendingToolApproval: Sendable {
     public let path: String
     public let destination: String?
     public let summary: String
+    public let command: String?
     let action: @Sendable () async -> String
+
+    nonisolated init(
+        id: String,
+        operation: String,
+        path: String,
+        destination: String?,
+        summary: String,
+        command: String? = nil,
+        action: @escaping @Sendable () async -> String
+    ) {
+        self.id = id
+        self.operation = operation
+        self.path = path
+        self.destination = destination
+        self.summary = summary
+        self.command = command
+        self.action = action
+    }
 }
 
 public actor ToolApprovalRegistry {
@@ -580,16 +599,15 @@ public actor ToolApprovalRegistry {
     }
 
     private func present(_ request: PendingToolApproval) async {
-        await MainActor.run {
-            let presentation = ApprovalRequest(
-                id: request.id,
-                operation: request.operation,
-                path: request.path,
-                destination: request.destination,
-                summary: request.summary
-            )
-            ChatStore.shared?.presentApproval(presentation)
-        }
+        let presentation = ApprovalRequest(
+            id: request.id,
+            operation: request.operation,
+            path: request.path,
+            destination: request.destination,
+            summary: request.summary,
+            command: request.command
+        )
+        await ToolApprovalPresentationBroker.shared.publish(.present(presentation))
     }
 
     public func approve(id: String) async -> ToolApprovalResolution {
@@ -625,9 +643,7 @@ public actor ToolApprovalRegistry {
     private func cancel(id: String) async {
         guard let registered = requests.removeValue(forKey: id) else { return }
         registered.continuation?.resume(returning: "Action cancelled.")
-        await MainActor.run {
-            ChatStore.shared?.dismissApproval(id: id)
-        }
+        await ToolApprovalPresentationBroker.shared.publish(.dismiss(id))
     }
 }
 

@@ -7,11 +7,15 @@ nonisolated public struct ApprovalRequest: Sendable {
     public let path: String
     public let destination: String?
     public let summary: String
+    public let command: String?
 
     /// Produces a concise action label while retaining the model-provided
     /// summary as a fallback for operations unknown to this app version.
     public var displaySummary: String {
         let item = URL(fileURLWithPath: path).lastPathComponent
+        if operation.hasPrefix("workspace.external.") {
+            return "Allow access outside the active workspace?"
+        }
         switch operation {
         case "createDirectory": return "Create \(item)"
         case "write": return "Write \(item)"
@@ -29,13 +33,15 @@ nonisolated public struct ApprovalRequest: Sendable {
         operation: String,
         path: String,
         destination: String? = nil,
-        summary: String
+        summary: String,
+        command: String? = nil
     ) {
         self.id = id
         self.operation = operation
         self.path = path
         self.destination = destination
         self.summary = summary
+        self.command = command
     }
 
     /// Decodes the compatibility text envelope emitted by external model

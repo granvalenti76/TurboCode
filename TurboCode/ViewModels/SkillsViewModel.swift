@@ -41,7 +41,9 @@ final class SkillsViewModel {
         do {
             profiles = try store.load()
             installedSkills = TurboCodeConfig.shared.loadSkills()
-            discoveredTypeScriptPlugins = TypeScriptPluginRegistry.live().discover().plugins
+            let pluginDiscovery = TypeScriptPluginRegistry.live().discover()
+            TypeScriptPluginRuntimeStore.shared.recordDiscovery(pluginDiscovery)
+            discoveredTypeScriptPlugins = pluginDiscovery.plugins
             errorMessage = nil
             if case .custom(let id) = selection {
                 selectCustom(id)

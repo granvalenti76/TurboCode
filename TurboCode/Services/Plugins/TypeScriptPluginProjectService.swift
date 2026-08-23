@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// The bounded result of one npm command. Output is retained only for
@@ -588,21 +589,36 @@ nonisolated struct TypeScriptPluginProjectService: @unchecked Sendable {
         return String(diagnostic.prefix(limit)) + "\n[diagnostics truncated]"
     }
 
-    private static func runCommand(
+    nonisolated static func runCommand(
         executable: URL,
         arguments: [String],
         workingDirectory: URL,
         timeout: TimeInterval
     ) async throws -> TypeScriptPluginCommandResult {
         try await Task.detached(priority: nil) {
+            let outputDirectory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("TurboCode-PluginCommand-\(UUID().uuidString)", isDirectory: true)
+            let stdoutURL = outputDirectory.appendingPathComponent("stdout.txt")
+            let stderrURL = outputDirectory.appendingPathComponent("stderr.txt")
+            try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: outputDirectory) }
+            FileManager.default.createFile(atPath: stdoutURL.path, contents: nil)
+            FileManager.default.createFile(atPath: stderrURL.path, contents: nil)
+            let stdoutHandle = try FileHandle(forWritingTo: stdoutURL)
+            let stderrHandle = try FileHandle(forWritingTo: stderrURL)
+            defer {
+                try? stdoutHandle.close()
+                try? stderrHandle.close()
+            }
+
             let process = Process()
-            let output = Pipe()
-            let error = Pipe()
             process.executableURL = executable
             process.arguments = arguments
             process.currentDirectoryURL = workingDirectory
-            process.standardOutput = output
-            process.standardError = error
+            // Regular files are drained by the kernel while npm runs. Pipes
+            // would block a verbose child once their bounded buffer fills.
+            process.standardOutput = stdoutHandle
+            process.standardError = stderrHandle
             try process.run()
 
             let deadline = Date().addingTimeInterval(timeout)
@@ -613,20 +629,35 @@ nonisolated struct TypeScriptPluginProjectService: @unchecked Sendable {
             if process.isRunning {
                 timedOut = true
                 process.terminate()
+                let terminationDeadline = Date().addingTimeInterval(1)
+                while process.isRunning, Date() < terminationDeadline {
+                    try? await Task.sleep(for: .milliseconds(25))
+                }
+                if process.isRunning {
+                    kill(process.processIdentifier, SIGKILL)
+                }
             }
             process.waitUntilExit()
+            try? stdoutHandle.close()
+            try? stderrHandle.close()
             return TypeScriptPluginCommandResult(
                 exitCode: process.terminationStatus,
-                standardOutput: String(
-                    data: output.fileHandleForReading.readDataToEndOfFile(),
-                    encoding: .utf8
-                ) ?? "",
-                standardError: String(
-                    data: error.fileHandleForReading.readDataToEndOfFile(),
-                    encoding: .utf8
-                ) ?? "",
+                standardOutput: readBoundedText(at: stdoutURL),
+                standardError: readBoundedText(at: stderrURL),
                 timedOut: timedOut
             )
         }.value
+    }
+
+    private nonisolated static func readBoundedText(
+        at url: URL,
+        limit: Int = 64_000
+    ) -> String {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return "" }
+        defer { try? handle.close() }
+        let data = (try? handle.read(upToCount: limit)) ?? Data()
+        let text = String(data: data, encoding: .utf8) ?? ""
+        let size = (try? handle.seekToEnd()) ?? UInt64(data.count)
+        return size > UInt64(data.count) ? text + "\n[output truncated]" : text
     }
 }

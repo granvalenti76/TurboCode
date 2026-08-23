@@ -6,6 +6,7 @@ struct SkillsView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var viewModel = SkillsViewModel()
+    @State private var pluginRuntime = TypeScriptPluginRuntimeStore.shared
     @State private var newProfilePresented = false
     @State private var suggestedBaseModel: ProfileBaseModelID = .onDevice
     @State private var suggestedDelegationEnabled = false
@@ -306,7 +307,7 @@ struct SkillsView: View {
                     }
                 }
 
-                if !viewModel.discoveredTypeScriptPlugins.isEmpty {
+                if !viewModel.discoveredTypeScriptPlugins.isEmpty || !pluginRuntime.orderedSnapshots.isEmpty {
                     typeScriptPluginSection()
                 }
             }
@@ -502,7 +503,7 @@ struct SkillsView: View {
                     }
                 }
 
-                if !viewModel.discoveredTypeScriptPlugins.isEmpty {
+                if !viewModel.discoveredTypeScriptPlugins.isEmpty || !pluginRuntime.orderedSnapshots.isEmpty {
                     typeScriptPluginSection(draft: draft)
                 }
 
@@ -594,6 +595,18 @@ struct SkillsView: View {
                                         + "Version: \(plugin.manifest.version)"
                                 )
                             Spacer()
+                            if let lifecycle = pluginRuntime.snapshots[plugin.manifest.id] {
+                                Label(
+                                    lifecycleLabel(lifecycle.stage),
+                                    systemImage: lifecycleIcon(lifecycle.stage)
+                                )
+                                .font(.caption)
+                                .foregroundStyle(lifecycleColor(lifecycle.stage))
+                                .help(
+                                    "\(lifecycle.detail)\n"
+                                        + "Path: \(lifecycle.rootURL.path)"
+                                )
+                            }
                             Text("\(plugin.manifest.tools.count) \(plugin.manifest.tools.count == 1 ? "tool" : "tools")")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -601,7 +614,72 @@ struct SkillsView: View {
                     }
                     .help("\(plugin.manifest.name) (\(plugin.manifest.id))\n\(plugin.manifest.tools.count) available tools")
                 }
+
+                ForEach(failedPluginSnapshots) { plugin in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(plugin.name)
+                                .font(.callout.weight(.semibold))
+                            Text(plugin.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                            Text(plugin.rootURL.path)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        Spacer(minLength: 8)
+                        Text("Failed")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                    .padding(.vertical, 6)
+                }
             }
+        }
+    }
+
+    private var failedPluginSnapshots: [TypeScriptPluginLifecycleSnapshot] {
+        let discoveredIDs = Set(viewModel.discoveredTypeScriptPlugins.map(\.manifest.id))
+        return pluginRuntime.orderedSnapshots.filter {
+            $0.stage == .failed && !discoveredIDs.contains($0.id)
+        }
+    }
+
+    private func lifecycleLabel(_ stage: TypeScriptPluginLifecycleStage) -> String {
+        switch stage {
+        case .discovered: "Discovered"
+        case .validating: "Validating"
+        case .building: "Building"
+        case .awaitingAuthorization: "Authorization"
+        case .installed: "Installed"
+        case .activating: "Loading"
+        case .ready: "Ready"
+        case .denied: "Denied"
+        case .failed: "Failed"
+        }
+    }
+
+    private func lifecycleIcon(_ stage: TypeScriptPluginLifecycleStage) -> String {
+        switch stage {
+        case .ready: "checkmark.circle.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        case .denied: "hand.raised.fill"
+        case .building, .validating, .activating, .awaitingAuthorization: "clock"
+        case .discovered, .installed: "circle"
+        }
+    }
+
+    private func lifecycleColor(_ stage: TypeScriptPluginLifecycleStage) -> Color {
+        switch stage {
+        case .ready: .green
+        case .failed: .red
+        case .denied: .orange
+        default: .secondary
         }
     }
 

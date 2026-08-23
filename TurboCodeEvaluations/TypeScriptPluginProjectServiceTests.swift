@@ -158,6 +158,20 @@ struct TypeScriptPluginProjectServiceTests {
         ) == "previous-generation")
     }
 
+    @Test("Plugin commands cannot block on verbose output")
+    func verboseCommandOutputIsDrainedWithoutTimingOut() async throws {
+        let result = try await TypeScriptPluginProjectService.runCommand(
+            executable: URL(fileURLWithPath: "/bin/zsh"),
+            arguments: ["-fc", "yes plugin-output | head -c 200000"],
+            workingDirectory: FileManager.default.temporaryDirectory,
+            timeout: 5
+        )
+
+        #expect(result.succeeded)
+        #expect(!result.timedOut)
+        #expect(result.standardOutput.contains("[output truncated]"))
+    }
+
     private struct CommandCall: Sendable, Equatable {
         let executable: URL
         let arguments: [String]

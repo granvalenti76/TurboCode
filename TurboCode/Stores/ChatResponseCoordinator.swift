@@ -785,8 +785,9 @@ final class ChatResponseCoordinator {
         let result = ToolResult(
             id: call.id,
             turnID: invocation.turnID,
-            status: .succeeded,
+            status: pluginResult?.isError == true ? .failed : .succeeded,
             output: outputText,
+            errorMessage: pluginResult?.isError == true ? outputText : nil,
             durationMilliseconds: max(
                 0,
                 Int(Date().timeIntervalSince(invocation.startedAt) * 1_000)
