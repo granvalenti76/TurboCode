@@ -21,23 +21,35 @@ struct BashTool: Tool {
     let workspaceRoot: String
     let executionPolicy: ExecutionPolicy
     let taskScope: AgentTaskPathScope?
+    private let pluginRoot: String
+    private let sdkRoot: String
     private let service = BashService()
 
     init(
         workspaceRoot: String,
         executionPolicy: ExecutionPolicy = ExecutionPolicy(),
-        taskScope: AgentTaskPathScope? = nil
+        taskScope: AgentTaskPathScope? = nil,
+        // Bash runs from non-main-actor workers too; derive the same canonical
+        // locations without touching the MainActor-isolated configuration object.
+        pluginRoot: String = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".turbocode/plugins", isDirectory: true).path,
+        sdkRoot: String = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".turbocode/sdk", isDirectory: true).path
     ) {
         self.workspaceRoot = workspaceRoot
         self.executionPolicy = executionPolicy
         self.taskScope = taskScope
+        self.pluginRoot = pluginRoot
+        self.sdkRoot = sdkRoot
     }
 
     func restricted(to scope: AgentTaskPathScope) -> Self {
         Self(
             workspaceRoot: workspaceRoot,
             executionPolicy: executionPolicy,
-            taskScope: scope
+            taskScope: scope,
+            pluginRoot: pluginRoot,
+            sdkRoot: sdkRoot
         )
     }
 
@@ -49,10 +61,11 @@ struct BashTool: Tool {
         tests, and this tool only for non-Xcode commands or precise inspection not
         covered by structured tools. Use git for every Git operation. Prefer
         read_file for source ranges and
-        the available structured editing tool for text changes. The macOS process
-        sandbox keeps workspace sources read-only while allowing SwiftPM artifacts in
-        .build and .swiftpm, plus compiler files in the per-user temporary directory.
-        Output and execution time are bounded to keep model context small.
+        the available structured editing tool for ordinary source changes. For a
+        TypeScript plugin workflow, bash may create/build files in the active
+        workspace and install only below TURBOCODE_PLUGIN_ROOT. TURBOCODE_SDK_ROOT
+        points to the SDK root and TURBOCODE_SDK_PACKAGE to its npm package.
+        Output and execution time are bounded.
         """
     }
     var includesSchemaInInstructions: Bool { true }
@@ -80,7 +93,9 @@ struct BashTool: Tool {
             workspaceRoot: workspaceRoot,
             timeoutSeconds: timeout,
             outputLimit: outputLimit,
-            allowNetworkAccess: executionPolicy.allowNetworkAccess
+            allowNetworkAccess: executionPolicy.allowNetworkAccess,
+            pluginRoot: pluginRoot,
+            sdkRoot: sdkRoot
         )
     }
 }
@@ -93,7 +108,9 @@ private actor BashService {
         workspaceRoot: String,
         timeoutSeconds: Int,
         outputLimit: Int,
-        allowNetworkAccess: Bool
+        allowNetworkAccess: Bool,
+        pluginRoot: String,
+        sdkRoot: String
     ) -> String {
         let workspaceURL: URL
         do {
@@ -137,28 +154,52 @@ private actor BashService {
         }
 
         let process = Process()
+        // GUI-launched apps often miss the shell's Node manager PATH. Reuse the
+        // plugin resolver so npm, npx, and node scripts see the same supported
+        // Node installation that TurboCode would use to launch a plugin.
+        let nodeExecutable = try? NodeRuntimeResolver.resolve()
+        let nodeBinDirectory = nodeExecutable?.deletingLastPathComponent().path
+        let nodeRuntimeRoot = nodeExecutable?.deletingLastPathComponent()
+            .deletingLastPathComponent().path
+        let sdkPackage = URL(fileURLWithPath: sdkRoot)
+            .appendingPathComponent("@granvalenti/turbocode-sdk", isDirectory: true)
+            .path
+        let inheritedPath = ProcessInfo.processInfo.environment["PATH"]
+            ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        let commandPath = [nodeBinDirectory, inheritedPath]
+            .compactMap { $0 }
+            .joined(separator: ":")
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
         process.arguments = [
             "-p",
             sandboxProfile(
                 workspacePath: workspaceURL.path,
                 outputPath: outputDirectory.path,
-                allowNetworkAccess: allowNetworkAccess
+                allowNetworkAccess: allowNetworkAccess,
+                pluginRoot: pluginRoot,
+                sdkRoot: sdkRoot,
+                nodeRuntimeRoot: nodeRuntimeRoot
             ),
             "/bin/zsh",
             "-fc",
             command
         ]
         process.currentDirectoryURL = workspaceURL
-        let inheritedPath = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        process.environment = ProcessInfo.processInfo.environment.merging([
+        var commandEnvironment = ProcessInfo.processInfo.environment.merging([
             "PWD": workspaceURL.path,
             "TMPDIR": outputDirectory.path,
             "HOME": homeDirectory.path,
             "XDG_CACHE_HOME": homeDirectory.appendingPathComponent(".cache").path,
-            "PATH": "\(binDirectory.path):\(inheritedPath)",
+            "TURBOCODE_PLUGIN_ROOT": pluginRoot,
+            "TURBOCODE_SDK_ROOT": sdkRoot,
+            "TURBOCODE_SDK_PACKAGE": sdkPackage,
+            "PATH": "\(binDirectory.path):\(commandPath)",
             "GIT_CONFIG_GLOBAL": "/dev/null"
         ]) { _, new in new }
+        if let nodeExecutable {
+            commandEnvironment["TURBOCODE_NODE_PATH"] = nodeExecutable.path
+        }
+        process.environment = commandEnvironment
         process.standardOutput = stdoutHandle
         process.standardError = stderrHandle
 
@@ -258,11 +299,22 @@ private actor BashService {
     private func sandboxProfile(
         workspacePath: String,
         outputPath: String,
-        allowNetworkAccess: Bool
+        allowNetworkAccess: Bool,
+        pluginRoot: String,
+        sdkRoot: String,
+        nodeRuntimeRoot: String?
     ) -> String {
         let workspace = profileEscaped(workspacePath)
         let output = profileEscaped(outputPath)
-        let workspaceReadExceptions = readExceptionsProfile(for: workspacePath)
+        let plugin = profileEscaped(pluginRoot)
+        let sdk = profileEscaped(sdkRoot)
+        var readableRootPaths = [workspacePath, pluginRoot, sdkRoot]
+        if let nodeRuntimeRoot {
+            readableRootPaths.append(nodeRuntimeRoot)
+        }
+        let readableRoots = readableRootPaths
+            .map(readExceptionsProfile(for:))
+            .joined(separator: " ")
         let networkPolicy = allowNetworkAccess ? "" : "(deny network*)"
         return """
         (version 1)
@@ -274,7 +326,7 @@ private actor BashService {
                 (subpath "/Network")
                 (require-all
                     (subpath "/Users")
-                    (require-not \(workspaceReadExceptions)))
+                    (require-not (require-any \(readableRoots))))
                 (require-all
                     (subpath "/private/tmp")
                     (require-not
@@ -285,6 +337,10 @@ private actor BashService {
         (allow file-write* (subpath "\(output)"))
         (allow file-write* (subpath "/var/folders"))
         (allow file-write* (subpath "/private/var/folders"))
+        (allow file-write* (literal "\(workspace)"))
+        (allow file-write* (subpath "\(workspace)"))
+        (allow file-write* (literal "\(plugin)"))
+        (allow file-write* (subpath "\(plugin)"))
         (allow file-write* (literal "\(workspace)/.build"))
         (allow file-write* (subpath "\(workspace)/.build"))
         (allow file-write* (literal "\(workspace)/.swiftpm"))

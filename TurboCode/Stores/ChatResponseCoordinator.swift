@@ -160,7 +160,7 @@ final class ChatResponseCoordinator {
         // path and stale callbacks cannot insert widgets into a newer thread.
         if case .toolFinished(let result) = event,
            let receipt = result.receipt {
-            present(receipt)
+            present(receipt, toolCallID: result.id)
         }
         return true
     }
@@ -770,7 +770,7 @@ final class ChatResponseCoordinator {
             // whichever turn happens to be current now.
             return
         }
-        let outputText = output.segments.compactMap { segment -> String? in
+        let rawOutputText = output.segments.compactMap { segment -> String? in
             switch segment {
             case .text(let value):
                 return value.content
@@ -780,6 +780,8 @@ final class ChatResponseCoordinator {
                 return nil
             }
         }.joined()
+        let pluginResult = TypeScriptPluginToolResultCodec.decode(rawOutputText)
+        let outputText = TypeScriptPluginToolResultCodec.visibleText(rawOutputText)
         let result = ToolResult(
             id: call.id,
             turnID: invocation.turnID,
@@ -789,11 +791,12 @@ final class ChatResponseCoordinator {
                 0,
                 Int(Date().timeIntervalSince(invocation.startedAt) * 1_000)
             ),
-            receipt: ToolReceiptRouter.receipt(
-                for: call,
-                output: output,
-                workspaceName: workspaceName
-            )
+            receipt: pluginResult?.widget.map(ToolReceipt.pluginWidget)
+                ?? ToolReceiptRouter.receipt(
+                    for: call,
+                    output: output,
+                    workspaceName: workspaceName
+                )
         )
         guard await acceptBackendEvent(.toolFinished(result)) else { return }
         if let activeDiagnosticsRunID {
@@ -895,10 +898,12 @@ final class ChatResponseCoordinator {
         return "\(label) · \(summary)"
     }
 
-    private func present(_ receipt: ToolReceipt) {
+    private func present(_ receipt: ToolReceipt, toolCallID: String) {
         switch receipt {
         case .workspaceListing(let listing):
             timeline.presentWorkspaceListing(listing)
+        case .pluginWidget(let widget):
+            timeline.presentPluginWidget(widget, toolCallID: toolCallID)
         }
     }
 

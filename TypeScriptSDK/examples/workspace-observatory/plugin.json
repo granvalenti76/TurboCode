@@ -1,0 +1,28 @@
+{
+  "manifestVersion": 1,
+  "id": "workspace-observatory",
+  "name": "Workspace Observatory",
+  "version": "0.1.0",
+  "entrypoint": "dist/index.js",
+  "runtime": { "kind": "node", "node": ">=24.0.0" },
+  "tools": [
+    {
+      "name": "openObservatory",
+      "description": "Open an interactive workspace and session observatory.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "widgets": [
+    {
+      "id": "workspace-observatory",
+      "title": "Workspace Observatory",
+      "entrypoint": "dist/widget.html",
+      "description": "An interactive dashboard for workspace and session signals."
+    }
+  ]
+}

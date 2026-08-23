@@ -49,6 +49,10 @@ struct ChatBlockView: View {
             if let listing = block.workspaceListing {
                 WorkspaceListingWidget(blockID: block.id, listing: listing)
             }
+        case .pluginWidget:
+            if let widget = block.pluginWidget {
+                PluginWidgetView(widget: widget)
+            }
         }
     }
 

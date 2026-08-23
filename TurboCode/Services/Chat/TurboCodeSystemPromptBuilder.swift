@@ -70,11 +70,19 @@ nonisolated enum TurboCodeSystemPromptBuilder {
                 """)
         }
 
+        if tools.contains(.bash) {
+            sections.append(typeScriptPluginSection)
+        }
+
         if !context.workspaceRoot.isEmpty {
             sections.append("""
                 Workspace:
                 \(context.workspaceRoot)
-                All file operations must remain inside this workspace.
+                Ordinary file operations remain inside this workspace. When the
+                TypeScript plugin workflow is active, Bash uses the canonical
+                TURBOCODE_PLUGIN_ROOT, TURBOCODE_SDK_ROOT, and
+                TURBOCODE_SDK_PACKAGE locations described above for plugin
+                installation and SDK access.
                 """)
         }
 
@@ -152,7 +160,7 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             lines.append("- Use xcode_project for Xcode discovery, builds, and tests.")
         }
         if tools.contains(.bash) {
-            lines.append("- Use bash only for bounded non-Git commands that have no dedicated structured tool; it cannot write workspace files.")
+            lines.append("- Use bash for bounded project commands and workflows. It discovers the supported Node runtime; for TypeScript plugins use TURBOCODE_SDK_PACKAGE for the npm SDK dependency, TURBOCODE_SDK_ROOT for SDK files, and TURBOCODE_PLUGIN_ROOT for installation.")
         }
         if tools.contains(.swiftPackageManager) {
             lines.append("- Use swift_package_manager, not bash, for supported Swift Package Manager initialization, dependency, build, test, run, resolution, cleanup, and inspection actions.")
@@ -193,5 +201,18 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         workspace at \(workspaceRoot), then synthesize its result for the user.
         """
     }
+
+    private static let typeScriptPluginSection = """
+        TypeScript plugin workflow:
+        A TurboCode TypeScript plugin is a normal Node/npm project with plugin.json
+        at its root and a compiled entrypoint declared by that manifest. Build it
+        in the active workspace with the installed @granvalenti/turbocode-sdk,
+        using TURBOCODE_SDK_PACKAGE for the npm dependency. Install the validated
+        runtime under TURBOCODE_PLUGIN_ROOT/<manifest.id>, then inspect
+        the installed files and reload discovery before reporting completion.
+        The plugin project, its tools, and its widgets are designed by the model
+        for the user's task; skills and .codex-plugin bundles are separate product
+        concepts with separate layouts.
+        """
 
 }

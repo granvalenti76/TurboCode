@@ -156,7 +156,8 @@ private extension ChatBlock {
             gitCommit: stored.gitCommit,
             gitStatus: stored.gitStatus,
             productGuide: stored.productGuide,
-            workspaceListing: stored.workspaceListing
+            workspaceListing: stored.workspaceListing,
+            pluginWidget: stored.pluginWidget
         )
     }
 }
@@ -174,7 +175,8 @@ private extension StoredBlock {
             gitCommit: block.gitCommit,
             gitStatus: block.gitStatus,
             productGuide: block.productGuide,
-            workspaceListing: block.workspaceListing
+            workspaceListing: block.workspaceListing,
+            pluginWidget: block.pluginWidget
         )
     }
 }

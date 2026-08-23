@@ -24,6 +24,31 @@ struct TypeScriptPluginProjectServiceTests {
         #expect(!FileManager.default.fileExists(atPath: installed.appendingPathComponent("src/index.ts").path))
     }
 
+    @Test("Refreshes an installed SDK when its package version changes")
+    func refreshesStaleSDKPackage() throws {
+        let root = try makeRoot("SDKRefresh")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let source = root.appendingPathComponent("sdk-source", isDirectory: true)
+        let destinationRoot = root.appendingPathComponent(".turbocode", isDirectory: true)
+        let destination = destinationRoot
+            .appendingPathComponent("sdk/@granvalenti/turbocode-sdk", isDirectory: true)
+        try writeSDKPackage(at: source, version: "0.4.0")
+        try writeSDKPackage(at: destination, version: "0.3.8")
+
+        let service = TypeScriptPluginProjectService(
+            pluginsRoot: destinationRoot.appendingPathComponent("plugins", isDirectory: true),
+            sdkRoot: destinationRoot.appendingPathComponent("sdk", isDirectory: true)
+        )
+
+        _ = try service.bootstrapSDK(from: source)
+        let installed = try String(
+            contentsOf: destination.appendingPathComponent("package.json"),
+            encoding: .utf8
+        )
+        #expect(installed.contains("\"version\":\"0.4.0\""))
+    }
+
     @Test("Builds a project and atomically stages its runtime files")
     func buildsAndStagesRuntime() async throws {
         let root = try makeRoot("Import")
@@ -199,7 +224,7 @@ struct TypeScriptPluginProjectServiceTests {
             .write(to: root.appendingPathComponent("src/index.ts"))
     }
 
-    private func writeSDKPackage(at root: URL) throws {
+    private func writeSDKPackage(at root: URL, version: String = "0.1.0") throws {
         try FileManager.default.createDirectory(
             at: root.appendingPathComponent("dist", isDirectory: true),
             withIntermediateDirectories: true
@@ -208,7 +233,7 @@ struct TypeScriptPluginProjectServiceTests {
             at: root.appendingPathComponent("src", isDirectory: true),
             withIntermediateDirectories: true
         )
-        try Data("{\"name\":\"@granvalenti/turbocode-sdk\"}".utf8)
+        try Data("{\"name\":\"@granvalenti/turbocode-sdk\",\"version\":\"\(version)\"}".utf8)
             .write(to: root.appendingPathComponent("package.json"))
         try Data("compiled sdk".utf8)
             .write(to: root.appendingPathComponent("dist/index.js"))

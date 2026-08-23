@@ -18,6 +18,7 @@ nonisolated public struct ChatBlock: Identifiable, Sendable, Hashable {
     public var gitStatus: GitStatusBlock?
     public var productGuide: ProductGuideBlock?
     public var workspaceListing: WorkspaceListingBlock?
+    public var pluginWidget: TypeScriptPluginWidgetReceipt?
 
     public init(
         id: String = UUID().uuidString,
@@ -30,7 +31,8 @@ nonisolated public struct ChatBlock: Identifiable, Sendable, Hashable {
         gitCommit: GitCommitBlock? = nil,
         gitStatus: GitStatusBlock? = nil,
         productGuide: ProductGuideBlock? = nil,
-        workspaceListing: WorkspaceListingBlock? = nil
+        workspaceListing: WorkspaceListingBlock? = nil,
+        pluginWidget: TypeScriptPluginWidgetReceipt? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -43,6 +45,7 @@ nonisolated public struct ChatBlock: Identifiable, Sendable, Hashable {
         self.gitStatus = gitStatus
         self.productGuide = productGuide
         self.workspaceListing = workspaceListing
+        self.pluginWidget = pluginWidget
     }
 }
 
@@ -59,6 +62,7 @@ nonisolated public enum ChatBlockKind: String, Sendable, Hashable, CaseIterable 
     case gitStatus = "git_status"
     case productGuide = "product_guide"
     case workspaceListing = "workspace_listing"
+    case pluginWidget = "plugin_widget"
 }
 
 // MARK: - Git Status Block

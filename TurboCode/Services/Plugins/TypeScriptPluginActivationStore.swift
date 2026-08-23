@@ -31,7 +31,7 @@ actor TypeScriptPluginActivationStore {
 
     private let nodePolicy: NodeRuntimePolicy
     private let requestTimeout: Duration
-    private let sessionTranscript: @Sendable () async -> PluginJSONValue?
+    private let sessionTranscript: @MainActor @Sendable () async -> PluginJSONValue?
     private var enabled: Bool
     private var active: [String: ActivePlugin] = [:]
 
@@ -39,7 +39,7 @@ actor TypeScriptPluginActivationStore {
         nodePolicy: NodeRuntimePolicy = .init(),
         requestTimeout: Duration = .seconds(10),
         enabled: Bool = false,
-        sessionTranscript: @escaping @Sendable () async -> PluginJSONValue? = { nil }
+        sessionTranscript: @escaping @MainActor @Sendable () async -> PluginJSONValue? = { nil }
     ) {
         self.nodePolicy = nodePolicy
         self.requestTimeout = requestTimeout
@@ -81,6 +81,8 @@ actor TypeScriptPluginActivationStore {
                     description: tool.description,
                     inputSchema: tool.inputSchema
                 ),
+                manifest: descriptor.manifest,
+                pluginRoot: descriptor.rootURL,
                 host: host
             )
         }

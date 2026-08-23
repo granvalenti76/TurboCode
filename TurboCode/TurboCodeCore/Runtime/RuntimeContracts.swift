@@ -334,6 +334,7 @@ nonisolated struct ToolCall: Codable, Hashable, Sendable {
 /// display text and cannot bypass the runtime's TurnID acceptance gate.
 nonisolated enum ToolReceipt: Codable, Hashable, Sendable {
     case workspaceListing(WorkspaceListingBlock)
+    case pluginWidget(TypeScriptPluginWidgetReceipt)
 }
 
 /// Normalized completion of a tool invocation.

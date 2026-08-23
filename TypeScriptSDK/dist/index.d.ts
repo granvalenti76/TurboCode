@@ -28,9 +28,20 @@ export type PluginSession = {
     /** Returns a read-only snapshot, or null when no session is active. */
     transcript(): Promise<SessionTranscript | null>;
 };
+export type PluginWidgetDefinition = {
+    id: string;
+    title: string;
+    entrypoint: string;
+    description?: string;
+};
+export type PluginWidgetInvocation = {
+    id: string;
+    props?: JSONValue;
+};
 export type PluginToolResult = {
     text: string;
     isError?: boolean;
+    widget?: PluginWidgetInvocation;
 };
 export type PluginToolContext = {
     pluginId: string;
@@ -49,6 +60,7 @@ export type PluginDefinition = {
     name: string;
     version: string;
     tools: PluginToolDefinition[];
+    widgets?: PluginWidgetDefinition[];
 };
 export type PluginManifest = {
     manifestVersion: 1;
@@ -65,7 +77,9 @@ export type PluginManifest = {
         description: string;
         inputSchema: ToolInputSchema;
     }>;
+    widgets: PluginWidgetDefinition[];
 };
+export declare function defineWidget(definition: PluginWidgetDefinition): PluginWidgetDefinition;
 export declare function defineTool(definition: PluginToolDefinition): PluginToolDefinition;
 export declare function definePlugin(definition: PluginDefinition): PluginDefinition;
 export declare function manifestFor(plugin: PluginDefinition, entrypoint: string): PluginManifest;

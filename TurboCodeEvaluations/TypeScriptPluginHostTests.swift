@@ -48,10 +48,32 @@ struct TypeScriptPluginHostTests {
             tool: "echo",
             arguments: .object(["value": .string("hello")])
         )
-        #expect(result == "hello")
+        #expect(result.text == "hello")
+        #expect(result.widget == nil)
 
         await host.shutdown()
         #expect(await !host.isRunning())
+    }
+
+    @Test("Widget results survive the model text envelope")
+    func widgetResultEnvelopeRoundTrips() throws {
+        let widget = TypeScriptPluginWidgetReceipt(
+            pluginID: "demo",
+            widgetID: "dashboard",
+            title: "Dashboard",
+            entrypoint: "dist/widget.html",
+            pluginRoot: "/tmp/demo",
+            props: .object(["value": .integer(3)])
+        )
+        let result = TypeScriptPluginToolResultEnvelope(
+            text: "Dashboard ready",
+            isError: false,
+            widget: widget
+        )
+
+        let encoded = TypeScriptPluginToolResultCodec.encodeForModel(result)
+        #expect(TypeScriptPluginToolResultCodec.visibleText(encoded) == "Dashboard ready")
+        #expect(TypeScriptPluginToolResultCodec.decode(encoded) == result)
     }
 
     @Test("The host rejects a Node version outside its policy")
@@ -135,7 +157,7 @@ struct TypeScriptPluginHostTests {
             ])
         )
 
-        #expect(result.contains("remember this decision"))
+        #expect(result.text.contains("remember this decision"))
         await host.shutdown()
     }
 

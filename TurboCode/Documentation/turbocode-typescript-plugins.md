@@ -8,8 +8,53 @@ TurboCode installs TypeScript plugins under one canonical root:
 
 Each plugin is a normal Node/npm project with a `plugin.json`, a compiled
 entrypoint, and any dependencies it owns. The current runtime contract is
-Node 24 or newer and JSON-RPC 2.0 over JSONL on stdin/stdout. TurboCode starts Node
-lazily when the plugin is activated; `/reload` only rediscovers metadata.
+Node 24 or newer and JSON-RPC 2.0 over JSONL on stdin/stdout. `/reload`
+restarts active plugin processes, rediscovers manifests, and refreshes the
+current session's tool snapshot without discarding the visible conversation.
+
+## Create and install a plugin
+
+Start with any Node/npm project in the active workspace. A practical project
+layout is:
+
+```text
+my-plugin/
+├── package.json
+├── plugin.json
+├── tsconfig.json
+├── src/index.ts
+└── dist/index.js
+```
+
+Use `@granvalenti/turbocode-sdk` from the installed SDK, define the plugin and
+its tools/widgets in TypeScript, and set `entrypoint` in `plugin.json` to the
+compiled runtime file. The manifest stays at the project root so TurboCode can
+discover it directly.
+
+When the project is opened in TurboCode, Bash discovers Node and exposes the SDK
+and plugin locations as environment variables. They keep the workflow portable
+across machines:
+
+```sh
+npm install --save "file:$TURBOCODE_SDK_PACKAGE"
+npm exec -- tsc --noEmit
+npm run build
+mkdir -p "$TURBOCODE_PLUGIN_ROOT/<plugin-id>"
+cp plugin.json package.json "$TURBOCODE_PLUGIN_ROOT/<plugin-id>/"
+cp -R dist "$TURBOCODE_PLUGIN_ROOT/<plugin-id>/"
+```
+
+Copy the runtime files needed by the plugin, inspect the installed manifest and
+entrypoint, then use `/reload`. TurboCode discovers metadata first and starts
+the Node process when one of the plugin's tools is used. In Settings → Agents,
+enable third-party plugins for the profile that should expose them. The SDK
+package root is available as `TURBOCODE_SDK_ROOT`, the ready-to-use npm package
+as `TURBOCODE_SDK_PACKAGE`, and the plugin installation location as
+`TURBOCODE_PLUGIN_ROOT`.
+
+Skills and TypeScript plugins are both useful extension mechanisms: a skill is
+instructional content, while a TypeScript plugin contributes executable tools
+and optional widgets. They have different project layouts and can coexist.
 
 ## Runtime model
 
@@ -75,6 +120,31 @@ The SDK directory contains complete tool implementations:
 See `TypeScriptSDK/README.md` for build/install notes and the complete SDK
 surface.
 
+## Custom response widgets
+
+A plugin can provide a fully custom HTML/JavaScript widget instead of using a
+TurboCode-native presentation. Declare the widget in the SDK definition and
+return its id from a tool. TurboCode creates a lazy WebKit surface inside the
+response only for that result; it does not create a global WebView for the
+application.
+
+The widget entrypoint is loaded from the installed plugin directory and may
+contain any bundled frontend code. The host injects a small bridge:
+
+```js
+window.turbocode.emit({ type: "action", action: "refresh" });
+window.turbocode.resize(420);
+window.addEventListener("turbocode-props", (event) => render(event.detail));
+window.addEventListener("turbocode-host-event", (event) => {
+  // event.detail contains type, action, accepted, and receivedAt.
+});
+```
+
+This is a UI surface, not a SwiftUI extension point. The plugin owns its DOM,
+CSS, JavaScript, framework, interactions, and local state. TurboCode owns the
+WebView lifecycle, installed-file boundary, and the explicit host acknowledgement
+bridge. `TypeScriptSDK/examples/workspace-observatory/` is the reference demo.
+
 ## Project validation and import
 
 TurboCode treats the user project as the source of truth and builds a temporary
@@ -95,7 +165,7 @@ previous installed generation untouched. The SDK installer copies only
 `~/.turbocode/sdk/@granvalenti/turbocode-sdk/`, then exposes the same package
 inside the build's `node_modules` tree.
 
-This slice provides the import/build service and its focused coverage. Provider
-profile selection and native Enable/Cancel confirmation remain the next
-integration boundary; `/reload` will consume the installed registry once that
-boundary is wired.
+The project validation/import service can perform the same build checks and
+stage a validated generation atomically. The Bash workflow is useful when the
+model is designing a plugin directly in the workspace and wants full control
+over its source layout, build scripts, and installation files.

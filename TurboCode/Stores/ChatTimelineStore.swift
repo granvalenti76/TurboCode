@@ -128,6 +128,20 @@ final class ChatTimelineStore {
         insertBeforeActivePlaceholderOrAppend(block)
     }
 
+    /// Inserts a plugin-owned UI surface only when a tool explicitly returns
+    /// one. The widget remains a value in the timeline; WebKit is created by
+    /// the response view only while this block is rendered.
+    func presentPluginWidget(_ widget: TypeScriptPluginWidgetReceipt, toolCallID: String) {
+        let block = ChatBlock(
+            id: "plugin-widget-\(toolCallID)",
+            kind: .pluginWidget,
+            text: widget.title,
+            pluginWidget: widget
+        )
+        guard !blocks.contains(where: { $0.id == block.id }) else { return }
+        insertBeforeActivePlaceholderOrAppend(block)
+    }
+
     func beginDiffPatch(
         id: String,
         editGroupID: String?,

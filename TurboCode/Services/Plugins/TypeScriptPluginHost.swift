@@ -15,14 +15,14 @@ nonisolated struct TypeScriptPluginHostConfiguration: Sendable {
     /// Supplies a point-in-time copy of the active session. The provider is
     /// owned by app composition, so the host does not retain ChatStore or any
     /// Swift object inside the Node process.
-    let sessionTranscript: @Sendable () async -> PluginJSONValue?
+    let sessionTranscript: @MainActor @Sendable () async -> PluginJSONValue?
 
     init(
         manifest: TypeScriptPluginManifest,
         pluginRoot: URL,
         nodePolicy: NodeRuntimePolicy = .init(),
         requestTimeout: Duration = .seconds(10),
-        sessionTranscript: @escaping @Sendable () async -> PluginJSONValue? = { nil }
+        sessionTranscript: @escaping @MainActor @Sendable () async -> PluginJSONValue? = { nil }
     ) {
         self.manifest = manifest
         self.pluginRoot = pluginRoot
@@ -151,7 +151,10 @@ actor TypeScriptPluginHost {
         }
     }
 
-    func call(tool: String, arguments: PluginJSONValue) async throws -> String {
+    func call(
+        tool: String,
+        arguments: PluginJSONValue
+    ) async throws -> TypeScriptPluginToolCallResult {
         guard started else { throw TypeScriptPluginHostError.notRunning }
         let value = try await request(
             method: "tools/call",
@@ -163,7 +166,11 @@ actor TypeScriptPluginHost {
         guard let text = value["text"]?.stringValue else {
             throw TypeScriptPluginHostError.invalidResponse("tools/call did not return text")
         }
-        return text
+        return TypeScriptPluginToolCallResult(
+            text: text,
+            isError: value["isError"]?.boolValue ?? false,
+            widget: Self.decodeWidget(from: value["widget"])
+        )
     }
 
     func isRunning() -> Bool {
@@ -371,6 +378,20 @@ actor TypeScriptPluginHost {
         } catch {
             throw TypeScriptPluginHostError.handshakeFailed("invalid handshake payload")
         }
+    }
+
+    private static func decodeWidget(
+        from value: PluginJSONValue?
+    ) -> TypeScriptPluginWidgetInvocation? {
+        guard let value,
+              let data = try? JSONEncoder().encode(value),
+              let widget = try? JSONDecoder().decode(
+                  TypeScriptPluginWidgetInvocation.self,
+                  from: data
+              ) else {
+            return nil
+        }
+        return widget
     }
 
     private static func nodeMajor(_ version: String) -> Int? {

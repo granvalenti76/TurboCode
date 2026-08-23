@@ -246,7 +246,7 @@ actor CodexExecutionEngine {
             safariMCPEnabled: request.agentTuning.experimental.safariMCPEnabled,
             modelID: snapshot.selectedModel.id,
             skillNames: request.availableSkills.map(\.name),
-            pluginToolNames: pluginTools.map { $0.snapshot.id.rawValue }
+            pluginToolNames: pluginTools.map { $0.snapshot.id.codexName }
         )
         let threadID: String
         if let existing = threadIDs[request.turboThreadID],

@@ -2,8 +2,8 @@ import Foundation
 import FoundationModels
 
 /// Adapts one validated external tool to Foundation Models without inventing
-/// a generic `run_plugin` capability. The model sees the plugin's real name and
-/// the same primitive object schema that Codex receives.
+/// a generic `run_plugin` capability. The model sees a provider-safe alias while
+/// the host call below keeps the plugin's original tool name.
 struct TypeScriptPluginToolAdapter: @unchecked Sendable, Tool {
     let name: String
     let description: String
@@ -11,14 +11,20 @@ struct TypeScriptPluginToolAdapter: @unchecked Sendable, Tool {
     let parameters: GenerationSchema
 
     private let host: TypeScriptPluginHost
+    private let manifest: TypeScriptPluginManifest
+    private let pluginRoot: URL
     private let toolName: String
 
     init(
         snapshot: TypeScriptPluginToolSnapshot,
+        manifest: TypeScriptPluginManifest,
+        pluginRoot: URL,
         host: TypeScriptPluginHost
     ) throws {
-        self.name = snapshot.id.rawValue
+        self.name = snapshot.id.codexName
         self.description = snapshot.description
+        self.manifest = manifest
+        self.pluginRoot = pluginRoot
         self.toolName = snapshot.id.toolName
         self.parameters = try Self.generationSchema(from: snapshot.inputSchema)
         self.host = host
@@ -27,6 +33,7 @@ struct TypeScriptPluginToolAdapter: @unchecked Sendable, Tool {
     init(
         manifest: TypeScriptPluginManifest,
         tool: TypeScriptPluginToolManifest,
+        pluginRoot: URL,
         host: TypeScriptPluginHost
     ) throws {
         try self.init(
@@ -38,6 +45,8 @@ struct TypeScriptPluginToolAdapter: @unchecked Sendable, Tool {
                 description: tool.description,
                 inputSchema: tool.inputSchema
             ),
+            manifest: manifest,
+            pluginRoot: pluginRoot,
             host: host
         )
     }
@@ -52,7 +61,27 @@ struct TypeScriptPluginToolAdapter: @unchecked Sendable, Tool {
         } catch {
             throw TypeScriptPluginToolAdapterError.invalidArguments
         }
-        return try await host.call(tool: toolName, arguments: value)
+        let result = try await host.call(tool: toolName, arguments: value)
+        let widget = result.widget.flatMap { invocation -> TypeScriptPluginWidgetReceipt? in
+            guard let definition = manifest.widgets.first(where: { $0.id == invocation.id }) else {
+                return nil
+            }
+            return TypeScriptPluginWidgetReceipt(
+                pluginID: manifest.id,
+                widgetID: definition.id,
+                title: definition.title,
+                entrypoint: definition.entrypoint,
+                pluginRoot: pluginRoot.path,
+                props: invocation.props
+            )
+        }
+        return TypeScriptPluginToolResultCodec.encodeForModel(
+            TypeScriptPluginToolResultEnvelope(
+                text: result.text,
+                isError: result.isError,
+                widget: widget
+            )
+        )
     }
 
     private static func generationSchema(

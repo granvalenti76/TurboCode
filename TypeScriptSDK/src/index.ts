@@ -36,7 +36,23 @@ export type PluginSession = {
   transcript(): Promise<SessionTranscript | null>;
 };
 
-export type PluginToolResult = { text: string; isError?: boolean };
+export type PluginWidgetDefinition = {
+  id: string;
+  title: string;
+  entrypoint: string;
+  description?: string;
+};
+
+export type PluginWidgetInvocation = {
+  id: string;
+  props?: JSONValue;
+};
+
+export type PluginToolResult = {
+  text: string;
+  isError?: boolean;
+  widget?: PluginWidgetInvocation;
+};
 
 export type PluginToolContext = {
   pluginId: string;
@@ -61,6 +77,7 @@ export type PluginDefinition = {
   name: string;
   version: string;
   tools: PluginToolDefinition[];
+  widgets?: PluginWidgetDefinition[];
 };
 
 export type PluginManifest = {
@@ -75,7 +92,17 @@ export type PluginManifest = {
     description: string;
     inputSchema: ToolInputSchema;
   }>;
+  widgets: PluginWidgetDefinition[];
 };
+
+export function defineWidget(
+  definition: PluginWidgetDefinition,
+): PluginWidgetDefinition {
+  if (!definition.id || !definition.title || !definition.entrypoint) {
+    throw new Error("A plugin widget needs an id, title, and entrypoint.");
+  }
+  return definition;
+}
 
 type JSONRPCID = number | string;
 type JSONRPCRequest = {
@@ -120,6 +147,14 @@ export function definePlugin(
     }
     names.add(tool.name);
   }
+  const widgetIDs = new Set<string>();
+  for (const widget of definition.widgets ?? []) {
+    defineWidget(widget);
+    if (widgetIDs.has(widget.id)) {
+      throw new Error(`Duplicate plugin widget: ${widget.id}`);
+    }
+    widgetIDs.add(widget.id);
+  }
   return definition;
 }
 
@@ -140,6 +175,7 @@ export function manifestFor(
       description,
       inputSchema,
     })),
+    widgets: (validated.widgets ?? []).map((widget) => ({ ...widget })),
   };
 }
 

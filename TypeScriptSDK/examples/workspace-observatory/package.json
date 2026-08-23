@@ -1,0 +1,11 @@
+{
+  "name": "workspace-observatory",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": { "build": "tsc --project tsconfig.json" },
+  "dependencies": {
+    "@granvalenti/turbocode-sdk": "file:../.."
+  },
+  "devDependencies": { "typescript": "^5.9.0" }
+}

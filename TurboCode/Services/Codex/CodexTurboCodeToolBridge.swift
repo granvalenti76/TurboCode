@@ -89,7 +89,8 @@ nonisolated enum CodexTurboCodeToolBridge {
                     .editFile,
                     .swiftPackageManager,
                     .xcodeProject,
-                    .git
+                    .git,
+                    .bash
                 ] + (availableSkills.isEmpty ? [] : [.loadSkill])
                 + (dynamicTools.contains(where: {
                     $0.name == ToolCapabilityID.createSkill.rawValue
@@ -128,6 +129,10 @@ nonisolated enum CodexTurboCodeToolBridge {
             executionPolicy: agentTuning.execution
         )
         let ripgrepTool = RipgrepTool(
+            workspaceRoot: workspaceRoot,
+            executionPolicy: agentTuning.execution
+        )
+        let bashTool = BashTool(
             workspaceRoot: workspaceRoot,
             executionPolicy: agentTuning.execution
         )
@@ -206,6 +211,18 @@ nonisolated enum CodexTurboCodeToolBridge {
                 )
             ),
             .init(
+                name: bashTool.name,
+                description: bashTool.description,
+                inputSchema: objectSchema(
+                    properties: [
+                        "command": stringSchema("zsh command to run from the active workspace."),
+                        "timeoutSeconds": nullableIntegerSchema(),
+                        "maxOutputCharacters": nullableIntegerSchema()
+                    ],
+                    required: ["command"]
+                )
+            ),
+            .init(
                 name: editTool.name,
                 description: editTool.description,
                 inputSchema: applyEditsSchema
@@ -252,7 +269,7 @@ nonisolated enum CodexTurboCodeToolBridge {
         }
         specifications.append(contentsOf: pluginTools.map { binding in
             CodexDynamicToolSpec(
-                name: binding.snapshot.id.rawValue,
+                name: binding.snapshot.id.codexName,
                 description: binding.snapshot.description,
                 inputSchema: codexJSONValue(from: binding.snapshot.inputSchema)
             )
@@ -279,6 +296,7 @@ nonisolated enum CodexTurboCodeToolBridge {
                 filePattern: optionalString("filePattern", in: call),
                 filesOnly: optionalBoolean("filesOnly", in: call)
             )
+        case "bash": "Running shell command"
         case "apply_edits": "Editing files"
         case "swift_package_manager": "Working with Swift package"
         case "xcode_project": "Working with Xcode project"
@@ -301,15 +319,16 @@ nonisolated enum CodexTurboCodeToolBridge {
         parentTurnID: TurnID? = nil
     ) async throws -> CodexToolExecution {
         if let plugin = pluginTools.first(where: {
-            $0.snapshot.id.rawValue == call.tool
+            $0.snapshot.id.codexName == call.tool
         }) {
+            let pluginResult = try await plugin.call(
+                arguments: pluginJSONValue(from: call.arguments)
+            )
             return .init(
-                result: .success(
-                    try await plugin.call(
-                        arguments: pluginJSONValue(from: call.arguments)
-                    )
-                ),
-                receipt: nil
+                result: pluginResult.isError
+                    ? .failure(pluginResult.text)
+                    : .success(pluginResult.text),
+                receipt: pluginResult.widget.map(ToolReceipt.pluginWidget)
             )
         }
         switch call.tool {
@@ -368,6 +387,16 @@ nonisolated enum CodexTurboCodeToolBridge {
                     hidden: optionalBoolean("hidden", in: call),
                     maxResults: optionalInteger("maxResults", in: call)
                 ))
+            return .init(result: .success(text), receipt: nil)
+        case "bash":
+            let text = try await BashTool(
+                workspaceRoot: workspaceRoot,
+                executionPolicy: agentTuning.execution
+            ).call(arguments: BashArguments(
+                command: try requiredString("command", in: call),
+                timeoutSeconds: optionalInteger("timeoutSeconds", in: call),
+                maxOutputCharacters: optionalInteger("maxOutputCharacters", in: call)
+            ))
             return .init(result: .success(text), receipt: nil)
         case "apply_edits":
             let text = try await ApplyEditsTool(workspaceRoot: workspaceRoot)

@@ -98,7 +98,7 @@ public final class ChatStore {
                     await self?.compactContext()
                 },
                 reload: { [weak self] in
-                    await self?.reloadProfilesPreservingSession()
+                    await self?.reloadPluginsPreservingSession()
                 },
                 runTask: { [weak self] goal in
                     await self?.runIndependentTask(goal)
@@ -159,7 +159,6 @@ public final class ChatStore {
         let agentActivity = AgentActivityStore()
         let timeline = ChatTimelineStore()
         let codexRuntime = CodexRuntimeStore()
-        let typeScriptPluginActivation = TypeScriptPluginActivationStore()
         let nativeRunner = NativeResponseRunner()
         let reviewDraft = ReviewDraftStore()
         let modelRuntime = ModelRuntimeStore()
@@ -189,6 +188,18 @@ public final class ChatStore {
         )
         let workbench = WorkbenchStore()
         let conversations = ConversationStore()
+        let typeScriptPluginActivation = TypeScriptPluginActivationStore(
+            sessionTranscript: {
+                let thread = conversations.activeThreadID.flatMap {
+                    conversations.conversation(id: $0)
+                }
+                return TypeScriptPluginSessionTranscript(
+                    sessionID: thread?.id,
+                    title: thread?.title,
+                    blocks: timeline.blocks
+                ).jsonValue
+            }
+        )
         let conversationPersistence = ConversationPersistenceService(
             repository: conversationRepository
         )
@@ -413,6 +424,21 @@ public final class ChatStore {
     /// session. Composer-owned `/reload` uses this non-invalidating path.
     func reloadProfilesPreservingSession() async {
         await profileSelectionCoordinator.reloadDynamicProfilesPreservingSession()
+    }
+
+    /// Restarts plugin processes and refreshes their manifest/tool snapshot
+    /// without discarding the visible conversation. `/reload` uses this path
+    /// so a newly copied or edited plugin becomes available immediately.
+    func reloadPluginsPreservingSession() async {
+        await profileSelectionCoordinator.reloadDynamicProfilesPreservingSession()
+        await typeScriptPluginActivationStore.shutdown()
+        await discoverAndActivateTypeScriptPlugins()
+        modelRuntimeStore.setActivePluginTools(
+            await typeScriptPluginActivationStore.activeTools()
+        )
+        await profileSelectionCoordinator.rebuildSession(
+            discardingCapabilityContext: true
+        )
     }
 
     public func reloadRemoteModels() async {

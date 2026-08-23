@@ -1,5 +1,5 @@
 {
-  "version": "1.6.0",
+  "version": "1.7.0",
   "documents": [
     {
       "id": "capabilities",
@@ -46,9 +46,9 @@
     {
       "id": "typescript-plugins",
       "title": "TypeScript Plugins",
-      "summary": "How to install Node 24 or newer plugins, expose tools, and read a session transcript snapshot.",
+      "summary": "How to create, build, install, discover, and use Node 24 or newer TypeScript plugins, tools, and widgets.",
       "file": "turbocode-typescript-plugins.md",
-      "keywords": ["TypeScript", "plugin", "plugins", "Node", "npm", "SDK", "transcript", "session", "JSON-RPC"]
+      "keywords": ["TypeScript", "plugin", "plugins", "extension", "create", "build", "install", "Node", "npm", "SDK", "widget", "transcript", "session", "JSON-RPC"]
     }
   ]
 }

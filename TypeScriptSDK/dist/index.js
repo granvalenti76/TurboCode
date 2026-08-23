@@ -1,6 +1,12 @@
 import readline from "node:readline";
 export const PROTOCOL_VERSION = 1;
 export const NODE_ENGINE = ">=24.0.0";
+export function defineWidget(definition) {
+    if (!definition.id || !definition.title || !definition.entrypoint) {
+        throw new Error("A plugin widget needs an id, title, and entrypoint.");
+    }
+    return definition;
+}
 export function defineTool(definition) {
     if (!definition.name || !definition.description) {
         throw new Error("A plugin tool needs a name and description.");
@@ -25,6 +31,14 @@ export function definePlugin(definition) {
         }
         names.add(tool.name);
     }
+    const widgetIDs = new Set();
+    for (const widget of definition.widgets ?? []) {
+        defineWidget(widget);
+        if (widgetIDs.has(widget.id)) {
+            throw new Error(`Duplicate plugin widget: ${widget.id}`);
+        }
+        widgetIDs.add(widget.id);
+    }
     return definition;
 }
 export function manifestFor(plugin, entrypoint) {
@@ -41,6 +55,7 @@ export function manifestFor(plugin, entrypoint) {
             description,
             inputSchema,
         })),
+        widgets: (validated.widgets ?? []).map((widget) => ({ ...widget })),
     };
 }
 /**

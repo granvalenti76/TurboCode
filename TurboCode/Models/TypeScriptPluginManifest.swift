@@ -2,7 +2,7 @@ import Foundation
 
 /// JSON value used at the plugin boundary. Keeping the tree typed prevents
 /// plugin payloads from crossing the actor boundary as `[String: Any]`.
-nonisolated enum PluginJSONValue: Codable, Sendable, Equatable {
+nonisolated enum PluginJSONValue: Codable, Sendable, Equatable, Hashable {
     case null
     case bool(Bool)
     case integer(Int)
@@ -57,6 +57,11 @@ nonisolated enum PluginJSONValue: Codable, Sendable, Equatable {
         guard case .integer(let value) = self else { return nil }
         return value
     }
+
+    var boolValue: Bool? {
+        guard case .bool(let value) = self else { return nil }
+        return value
+    }
 }
 
 nonisolated struct TypeScriptPluginRuntime: Codable, Sendable, Equatable {
@@ -75,6 +80,13 @@ nonisolated struct TypeScriptPluginToolManifest: Codable, Sendable, Equatable {
     let inputSchema: PluginJSONValue
 }
 
+nonisolated struct TypeScriptPluginWidgetManifest: Codable, Sendable, Equatable {
+    let id: String
+    let title: String
+    let entrypoint: String
+    let description: String?
+}
+
 /// Versioned metadata for one compiled TypeScript plugin.
 nonisolated struct TypeScriptPluginManifest: Codable, Sendable, Equatable {
     static let currentManifestVersion = 1
@@ -89,6 +101,7 @@ nonisolated struct TypeScriptPluginManifest: Codable, Sendable, Equatable {
     let entrypoint: String
     let runtime: TypeScriptPluginRuntime
     let tools: [TypeScriptPluginToolManifest]
+    let widgets: [TypeScriptPluginWidgetManifest]
 
     init(
         manifestVersion: Int = Self.currentManifestVersion,
@@ -97,7 +110,8 @@ nonisolated struct TypeScriptPluginManifest: Codable, Sendable, Equatable {
         version: String,
         entrypoint: String,
         runtime: TypeScriptPluginRuntime = .init(),
-        tools: [TypeScriptPluginToolManifest]
+        tools: [TypeScriptPluginToolManifest],
+        widgets: [TypeScriptPluginWidgetManifest] = []
     ) {
         self.manifestVersion = manifestVersion
         self.id = id
@@ -106,6 +120,26 @@ nonisolated struct TypeScriptPluginManifest: Codable, Sendable, Equatable {
         self.entrypoint = entrypoint
         self.runtime = runtime
         self.tools = tools
+        self.widgets = widgets
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case manifestVersion, id, name, version, entrypoint, runtime, tools, widgets
+    }
+
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        manifestVersion = try values.decode(Int.self, forKey: .manifestVersion)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        version = try values.decode(String.self, forKey: .version)
+        entrypoint = try values.decode(String.self, forKey: .entrypoint)
+        runtime = try values.decode(TypeScriptPluginRuntime.self, forKey: .runtime)
+        tools = try values.decode([TypeScriptPluginToolManifest].self, forKey: .tools)
+        widgets = try values.decodeIfPresent(
+            [TypeScriptPluginWidgetManifest].self,
+            forKey: .widgets
+        ) ?? []
     }
 
     /// Validates host-owned fields before a child process is allowed to run.
@@ -133,8 +167,26 @@ nonisolated struct TypeScriptPluginManifest: Codable, Sendable, Equatable {
             }
             try Self.validateSchema(tool.inputSchema, toolName: tool.name)
         }
-
         let root = pluginRoot.standardizedFileURL.resolvingSymlinksInPath()
+        var widgetIDs = Set<String>()
+        for widget in widgets {
+            guard isValidIdentifier(widget.id),
+                  !widget.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  widgetIDs.insert(widget.id).inserted else {
+                throw TypeScriptPluginManifestError.invalidWidget(widget.id)
+            }
+            let widgetURL = pluginRoot.appendingPathComponent(widget.entrypoint)
+                .standardizedFileURL
+            let resolvedWidget = widgetURL.resolvingSymlinksInPath()
+            guard resolvedWidget.path.hasPrefix(root.path + "/") else {
+                throw TypeScriptPluginManifestError.invalidWidget(widget.entrypoint)
+            }
+            if requireEntrypoint,
+               !FileManager.default.isReadableFile(atPath: resolvedWidget.path) {
+                throw TypeScriptPluginManifestError.invalidWidget(widget.entrypoint)
+            }
+        }
+
         let entryURL = pluginRoot.appendingPathComponent(entrypoint).standardizedFileURL
         let resolvedEntry = entryURL.resolvingSymlinksInPath()
         guard resolvedEntry.path.hasPrefix(root.path + "/") else {
@@ -179,6 +231,7 @@ nonisolated enum TypeScriptPluginManifestError: LocalizedError, Sendable, Equata
     case unsupportedNodeRange(String)
     case noTools
     case invalidToolName(String)
+    case invalidWidget(String)
     case unsupportedSchema(String)
     case invalidEntrypoint(String)
 
@@ -194,6 +247,8 @@ nonisolated enum TypeScriptPluginManifestError: LocalizedError, Sendable, Equata
             "A TypeScript plugin must declare at least one tool."
         case .invalidToolName(let name):
             "Invalid or duplicate plugin tool name: \(name)."
+        case .invalidWidget(let value):
+            "Invalid or duplicate plugin widget: \(value)."
         case .unsupportedSchema(let tool):
             "Tool \(tool) uses a JSON Schema shape not supported by TurboCode."
         case .invalidEntrypoint(let path):

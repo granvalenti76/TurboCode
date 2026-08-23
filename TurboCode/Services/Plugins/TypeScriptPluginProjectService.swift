@@ -216,15 +216,30 @@ nonisolated struct TypeScriptPluginProjectService: @unchecked Sendable {
             .appendingPathComponent("turbocode-sdk", isDirectory: true)
         let packageJSON = destination.appendingPathComponent("package.json")
         let entrypoint = destination.appendingPathComponent("dist/index.js")
-        guard !fileManager.fileExists(atPath: packageJSON.path)
-                || !fileManager.fileExists(atPath: entrypoint.path) else {
+        let sourceVersion = packageVersion(at: sourcePackageURL)
+        let installedVersion = packageVersion(at: destination)
+        if fileManager.fileExists(atPath: packageJSON.path),
+           fileManager.fileExists(atPath: entrypoint.path),
+           sourceVersion == installedVersion {
             return destination
         }
+
         try TypeScriptPluginSDKInstaller(fileManager: fileManager).install(
             from: sourcePackageURL,
             to: destination
         )
         return destination
+    }
+
+    private func packageVersion(at packageRoot: URL) -> String? {
+        let packageJSON = packageRoot.appendingPathComponent("package.json")
+        guard let data = try? Data(contentsOf: packageJSON),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let dictionary = object as? [String: Any],
+              let version = dictionary["version"] as? String else {
+            return nil
+        }
+        return version
     }
 
     /// Runs the complete build gate and atomically installs the resulting
