@@ -140,7 +140,8 @@ actor TypeScriptPluginHost {
             guard handshake.protocolVersion == TypeScriptPluginManifest.supportedProtocolVersion,
                   handshake.pluginID == configuration.manifest.id,
                   handshake.tools == configuration.manifest.tools.map(\.name),
-                  Self.nodeMajor(handshake.nodeVersion) == configuration.nodePolicy.supportedMajor else {
+                  Self.nodeMajor(handshake.nodeVersion)
+                    .map({ $0 >= configuration.nodePolicy.supportedMajor }) == true else {
                 throw TypeScriptPluginHostError.handshakeFailed("manifest, protocol, tool list, or Node version mismatch")
             }
             return handshake

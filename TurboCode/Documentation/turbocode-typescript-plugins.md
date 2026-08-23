@@ -8,7 +8,7 @@ TurboCode installs TypeScript plugins under one canonical root:
 
 Each plugin is a normal Node/npm project with a `plugin.json`, a compiled
 entrypoint, and any dependencies it owns. The current runtime contract is
-Node 24.x and JSON-RPC 2.0 over JSONL on stdin/stdout. TurboCode starts Node
+Node 24 or newer and JSON-RPC 2.0 over JSONL on stdin/stdout. TurboCode starts Node
 lazily when the plugin is activated; `/reload` only rediscovers metadata.
 
 ## Runtime model
@@ -42,7 +42,7 @@ transcript type.
   "name": "Session Search",
   "version": "0.1.0",
   "entrypoint": "dist/index.js",
-  "runtime": { "kind": "node", "node": "24.x" },
+  "runtime": { "kind": "node", "node": ">=24.0.0" },
   "tools": [
     {
       "name": "findInSession",

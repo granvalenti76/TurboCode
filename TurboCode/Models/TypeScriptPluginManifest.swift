@@ -63,7 +63,7 @@ nonisolated struct TypeScriptPluginRuntime: Codable, Sendable, Equatable {
     let kind: String
     let node: String
 
-    init(node: String = "24.x") {
+    init(node: String = TypeScriptPluginManifest.supportedNodeRange) {
         self.kind = "node"
         self.node = node
     }
@@ -80,6 +80,7 @@ nonisolated struct TypeScriptPluginManifest: Codable, Sendable, Equatable {
     static let currentManifestVersion = 1
     static let supportedProtocolVersion = 1
     static let supportedNodeMajor = 24
+    static let supportedNodeRange = ">=24.0.0"
 
     let manifestVersion: Int
     let id: String
@@ -117,7 +118,9 @@ nonisolated struct TypeScriptPluginManifest: Codable, Sendable, Equatable {
         guard isValidIdentifier(id), !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw TypeScriptPluginManifestError.invalidIdentifier
         }
-        guard runtime.kind == "node", runtime.node == "24.x" else {
+        guard runtime.kind == "node",
+              runtime.node == Self.supportedNodeRange
+                || runtime.node == "24.x" else {
             throw TypeScriptPluginManifestError.unsupportedNodeRange(runtime.node)
         }
         guard !tools.isEmpty else {
@@ -186,7 +189,7 @@ nonisolated enum TypeScriptPluginManifestError: LocalizedError, Sendable, Equata
         case .invalidIdentifier:
             "Plugin identifiers and names must be non-empty safe identifiers."
         case .unsupportedNodeRange(let range):
-            "TypeScript plugins require Node 24.x; manifest requested \(range)."
+            "TypeScript plugins require Node 24 or newer; manifest requested \(range)."
         case .noTools:
             "A TypeScript plugin must declare at least one tool."
         case .invalidToolName(let name):

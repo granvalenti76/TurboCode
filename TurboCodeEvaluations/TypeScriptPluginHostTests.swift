@@ -133,7 +133,7 @@ struct TypeScriptPluginHostTests {
         await host.shutdown()
     }
 
-    @Test("Manifest rejects a non-24.x runtime declaration")
+    @Test("Manifest rejects a runtime below the supported Node minimum")
     func rejectsUnsupportedManifestRuntime() throws {
         let fixture = try makeFixture(
             runtime: TypeScriptPluginRuntime(node: "22.x")
@@ -146,6 +146,16 @@ struct TypeScriptPluginHostTests {
         } catch let error as TypeScriptPluginManifestError {
             #expect(error == .unsupportedNodeRange("22.x"))
         }
+    }
+
+    @Test("Manifest accepts the open Node minimum range")
+    func acceptsOpenNodeRange() throws {
+        let fixture = try makeFixture(
+            runtime: TypeScriptPluginRuntime(node: ">=24.0.0")
+        )
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        try fixture.manifest.validate(at: fixture.root)
     }
 
     private struct Fixture {

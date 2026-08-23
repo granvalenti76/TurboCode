@@ -56,9 +56,9 @@ nonisolated enum NodeRuntimeError: LocalizedError, Sendable, Equatable {
     var errorDescription: String? {
         switch self {
         case .executableNotFound:
-            "Node 24.x was not found. Install Node 24.x or configure TURBOCODE_NODE_PATH."
+            "Node 24 or newer was not found. Install a supported Node version or configure TURBOCODE_NODE_PATH."
         case .incompatibleVersion(let version, let requiredMajor):
-            "Node \(version) is incompatible; TurboCode requires Node \(requiredMajor).x."
+            "Node \(version) is incompatible; TurboCode requires Node \(requiredMajor) or newer."
         }
     }
 }

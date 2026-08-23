@@ -1,7 +1,7 @@
 import readline from "node:readline";
 
 export const PROTOCOL_VERSION = 1 as const;
-export const NODE_ENGINE = ">=24.0.0 <25.0.0" as const;
+export const NODE_ENGINE = ">=24.0.0" as const;
 
 export type JSONValue =
   | null
@@ -69,7 +69,7 @@ export type PluginManifest = {
   name: string;
   version: string;
   entrypoint: string;
-  runtime: { kind: "node"; node: "24.x" };
+  runtime: { kind: "node"; node: ">=24.0.0" };
   tools: Array<{
     name: string;
     description: string;
@@ -134,7 +134,7 @@ export function manifestFor(
     name: validated.name,
     version: validated.version,
     entrypoint,
-    runtime: { kind: "node", node: "24.x" },
+    runtime: { kind: "node", node: ">=24.0.0" },
     tools: validated.tools.map(({ name, description, inputSchema }) => ({
       name,
       description,

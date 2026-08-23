@@ -185,11 +185,41 @@ nonisolated struct TypeScriptPluginProjectService: @unchecked Sendable {
         )
     }
 
+    /// Finds the SDK package shipped with the app. Debug builds also support
+    /// the repository checkout so onboarding works directly from Xcode before
+    /// an archive resource has been added.
+    @MainActor
+    static func liveSDKSourceURL() -> URL? {
+        let candidates: [URL] = [
+            Bundle.main.url(forResource: "TypeScriptSDK", withExtension: nil),
+            URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("TypeScriptSDK", isDirectory: true)
+        ].compactMap { $0 }
+        let fileManager = FileManager.default
+        return candidates.first { source in
+            fileManager.fileExists(
+                atPath: source.appendingPathComponent("package.json").path
+            ) && fileManager.fileExists(
+                atPath: source.appendingPathComponent("dist/index.js").path
+            )
+        }
+    }
+
     /// Installs a compiled SDK package at the canonical user-local path.
     func bootstrapSDK(from sourcePackageURL: URL) throws -> URL {
         let destination = sdkRoot
             .appendingPathComponent("@granvalenti", isDirectory: true)
             .appendingPathComponent("turbocode-sdk", isDirectory: true)
+        let packageJSON = destination.appendingPathComponent("package.json")
+        let entrypoint = destination.appendingPathComponent("dist/index.js")
+        guard !fileManager.fileExists(atPath: packageJSON.path)
+                || !fileManager.fileExists(atPath: entrypoint.path) else {
+            return destination
+        }
         try TypeScriptPluginSDKInstaller(fileManager: fileManager).install(
             from: sourcePackageURL,
             to: destination
@@ -373,9 +403,9 @@ nonisolated struct TypeScriptPluginProjectService: @unchecked Sendable {
             .split(separator: ".")
             .first
             .flatMap { Int($0) }
-        guard let major, major == nodePolicy.supportedMajor else {
+        guard let major, major >= nodePolicy.supportedMajor else {
             throw TypeScriptPluginProjectError.nodeVersionUnavailable(
-                "Node \(version) is incompatible; TurboCode requires Node \(nodePolicy.supportedMajor).x."
+                "Node \(version) is incompatible; TurboCode requires Node \(nodePolicy.supportedMajor) or newer."
             )
         }
     }

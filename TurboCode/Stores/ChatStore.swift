@@ -115,6 +115,11 @@ public final class ChatStore {
     public func ensureOnboarding() async {
         do {
             try TurboCodeConfig.shared.performOnboarding()
+            if let sdkSource = TypeScriptPluginProjectService.liveSDKSourceURL() {
+                _ = try TypeScriptPluginProjectService.live().bootstrapSDK(
+                    from: sdkSource
+                )
+            }
             modelRuntimeStore.applyOnboarding(
                 tuning: try TurboCodeConfig.shared.loadAgentTuning(),
                 workspaceRoot: workspaceRoot

@@ -1,6 +1,6 @@
 # @granvalenti/turbocode-sdk
 
-SDK for TurboCode TypeScript plugins. It targets Node 24.x and does not
+SDK for TurboCode TypeScript plugins. It requires Node 24 or newer and does not
 depend on React. A plugin is a normal Node program: it can use npm packages,
 the filesystem, network access, and child processes. TurboCode-specific
 objects are not injected into Node; the stable APIs cross the JSON-RPC host
