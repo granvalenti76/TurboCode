@@ -250,13 +250,13 @@ nonisolated struct TypeScriptPluginProjectService: @unchecked Sendable {
     @MainActor
     static func liveSDKSourceURL() -> URL? {
         let candidates: [URL] = [
-            Bundle.main.url(forResource: "TypeScriptSDK", withExtension: nil),
+            Bundle.main.url(forResource: "TurboCodeSDK", withExtension: nil),
             URL(fileURLWithPath: #filePath)
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
                 .deletingLastPathComponent()
-                .appendingPathComponent("TypeScriptSDK", isDirectory: true)
+                .appendingPathComponent("TurboCodeSDK", isDirectory: true)
         ].compactMap { $0 }
         let fileManager = FileManager.default
         return candidates.first { source in

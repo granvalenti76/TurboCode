@@ -62,21 +62,11 @@ struct BashTool: Tool {
     var name: String { "bash" }
     var description: String {
         """
-        Run a zsh command from the workspace root. Use swift_package_manager for
-        supported Swift package operations, xcode_project for Xcode builds and
-        tests, and this tool only for non-Xcode commands or workflows not covered
-        by structured tools. Use list_workspace (Browse Directory) for directory
-        listings, read_file for focused file ranges, and edit_file for source or
-        text changes. Use git for every Git operation. For a
-        TypeScript plugin workflow, bash may create, inspect, modify, and build
-        files in the active workspace or below TURBOCODE_PLUGIN_ROOT. An existing
-        installed plugin is a normal writable project directory. TURBOCODE_SDK_ROOT
-        points to the SDK root and TURBOCODE_SDK_PACKAGE to its npm package. If
-        the saved workspace path is unavailable, plugin commands run from
-        TURBOCODE_PLUGIN_ROOT so the installed plugins remain reachable.
-        Every invocation starts in the reported Working directory; cd does not
-        persist between invocations. Check pwd before any destructive relative
-        command and do not infer a previous listing belongs to this directory.
+        Run a zsh command from the workspace root. Use list_workspace (Browse
+        Directory) for directory listings, read_file for focused file ranges,
+        and edit_file for source or text changes. Use git for every Git
+        operation. Check pwd before any
+        destructive relative command.
         If the host sandbox blocks an external path, TurboCode asks the user and
         reruns this exact command after approval; never invent an approval token.
         Output and execution time are bounded.

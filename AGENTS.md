@@ -149,10 +149,10 @@ handoff check before editing:
 2. Read the relevant milestone sections in `TODO.md` and `FUTURE.md`, then
    inspect only the declarations and tests touched by the next slice. Keep
    `TODO.md` updates limited to the active release scope.
-3. For the current 0.3.5 runtime/UI separation, preserve the compatibility
-   path through `ChatStore` and `ChatResponseCoordinator` until the provider
-   matrix and rollback criteria are proven. The next slice must be selected
-   from the open exit criteria, not inferred from unrelated backlog items.
+3. Treat the 0.3.7 runtime/UI execution boundary at commit `a99e3e5` as the
+   completed code checkpoint. The remaining release gate is the fresh PCC
+   measurement recorded in `TODO.md`; do not invent another runtime refactor
+   or move that work into the product/UX scope of 0.4.0.
 4. Keep provider configuration external. `~/.turbocode/models.json` is the
    ground truth for endpoint and model selection; never modify it as part of
    tests, never hardcode a model name into production or evaluation code, and
@@ -177,7 +177,18 @@ Comments are part of the implementation deliverable, not optional polish. Every 
 
 ## Testing Guidelines
 
-Tests use Apple's Swift Testing framework (`import Testing`), with descriptive `@Suite` and `@Test` labels and `#expect` assertions. Name test methods by observable behavior, for example `recentSessionsAreLimitedAndOrdered()`. Add focused coverage in `TurboCodeEvaluations/` for changed logic; update golden evaluations only when intended agent behavior changes. Run the shared evaluation scheme before opening a pull request.
+Tests use Apple's Swift Testing framework (`import Testing`), with descriptive
+`@Suite` and `@Test` labels and `#expect` assertions. Name test methods by
+observable behavior, for example `recentSessionsAreLimitedAndOrdered()`. Add
+focused coverage in `TurboCodeEvaluations/` for changed logic; update golden
+evaluations only when intended agent behavior changes.
+
+During implementation, run only the focused suites that exercise the files,
+contracts, or behavior changed by the current slice. Do not run the complete
+evaluation scheme after every slice. Run it only when the user explicitly asks
+for it or at an explicitly approved final release/pull-request gate. Pure
+documentation changes do not require a test run unless they alter generated or
+validated documentation behavior.
 
 ## Commit & Pull Request Guidelines
 

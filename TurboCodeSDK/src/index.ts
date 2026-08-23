@@ -1,8 +1,25 @@
+/**
+ * Public TypeScript SDK for TurboCode plugins.
+ *
+ * This module defines the typed plugin authoring surface and the runtime bridge
+ * used by a plugin process. TurboCode owns the host boundary, approvals,
+ * cancellation, timeouts, and presentation; plugin code receives only the
+ * value-based APIs exposed by this module. The runtime communicates with the
+ * host through JSON-RPC 2.0 messages framed as one JSON object per stdout line.
+ *
+ * Keep this file provider-neutral and free of Swift or application-store
+ * dependencies. Changes to the exported types are SDK contract changes and
+ * must remain compatible with the host protocol version.
+ */
 import readline from "node:readline";
 
+/** Version of the JSON-RPC contract understood by the TurboCode host. */
 export const PROTOCOL_VERSION = 1 as const;
+
+/** Minimum Node.js engine required by the plugin runtime. */
 export const NODE_ENGINE = ">=24.0.0" as const;
 
+/** Recursive set of values that can cross the JSON-RPC boundary. */
 export type JSONValue =
   | null
   | boolean
@@ -11,10 +28,13 @@ export type JSONValue =
   | JSONValue[]
   | { [key: string]: JSONValue };
 
-/** JSON Schema is passed through to the selected TurboCode provider. */
+/** JSON Schema passed through to the selected TurboCode provider. */
 export type JSONSchema = { [key: string]: JSONValue };
+
+/** Object-root JSON Schema required for a plugin tool's arguments. */
 export type ToolInputSchema = JSONSchema & { type: "object" };
 
+/** One provider-neutral entry in the active TurboCode session transcript. */
 export type SessionTranscriptEntry = {
   id: string;
   kind: string;
@@ -24,6 +44,7 @@ export type SessionTranscriptEntry = {
   providerID: string | null;
 };
 
+/** Read-only snapshot returned by the host for the active session. */
 export type SessionTranscript = {
   sessionID: string | null;
   title: string | null;
@@ -31,11 +52,13 @@ export type SessionTranscript = {
   entries: SessionTranscriptEntry[];
 };
 
+/** Host APIs available to a plugin while a tool is executing. */
 export type PluginSession = {
   /** Returns a read-only snapshot, or null when no session is active. */
   transcript(): Promise<SessionTranscript | null>;
 };
 
+/** Declarative widget metadata exposed by a plugin in its manifest. */
 export type PluginWidgetDefinition = {
   id: string;
   title: string;
@@ -43,28 +66,38 @@ export type PluginWidgetDefinition = {
   description?: string;
 };
 
+/** Widget request returned by a tool result for host-side rendering. */
 export type PluginWidgetInvocation = {
   id: string;
   props?: JSONValue;
 };
 
+/** Normalized textual result and optional widget request returned by a tool. */
 export type PluginToolResult = {
   text: string;
   isError?: boolean;
   widget?: PluginWidgetInvocation;
 };
 
+/** Context supplied to every plugin tool invocation. */
 export type PluginToolContext = {
   pluginId: string;
   signal: AbortSignal;
   session: PluginSession;
 };
 
+/**
+ * Function implemented by a plugin tool.
+ *
+ * The handler may return plain text for simple tools or a structured result
+ * when it needs to mark an error or request a declarative widget.
+ */
 export type PluginToolHandler = (
   arguments_: Record<string, unknown>,
   context: PluginToolContext,
 ) => PluginToolResult | string | Promise<PluginToolResult | string>;
 
+/** Tool metadata and implementation registered by a plugin. */
 export type PluginToolDefinition = {
   name: string;
   description: string;
@@ -72,6 +105,7 @@ export type PluginToolDefinition = {
   handler: PluginToolHandler;
 };
 
+/** Complete in-process definition used to validate and run a plugin. */
 export type PluginDefinition = {
   id: string;
   name: string;
@@ -80,6 +114,7 @@ export type PluginDefinition = {
   widgets?: PluginWidgetDefinition[];
 };
 
+/** Manifest metadata serialized for TurboCode discovery and activation. */
 export type PluginManifest = {
   manifestVersion: 1;
   id: string;
@@ -95,6 +130,13 @@ export type PluginManifest = {
   widgets: PluginWidgetDefinition[];
 };
 
+/**
+ * Validates and returns a declarative widget definition.
+ *
+ * @param definition Widget metadata to validate.
+ * @returns The same definition after validation.
+ * @throws If the widget is missing an id, title, or entrypoint.
+ */
 export function defineWidget(
   definition: PluginWidgetDefinition,
 ): PluginWidgetDefinition {
@@ -104,13 +146,18 @@ export function defineWidget(
   return definition;
 }
 
+/** JSON-RPC request identifier accepted by the host protocol. */
 type JSONRPCID = number | string;
+
+/** Internal JSON-RPC request received from TurboCode. */
 type JSONRPCRequest = {
   jsonrpc: "2.0";
   id: JSONRPCID;
   method: string;
   params?: Record<string, JSONValue>;
 };
+
+/** Internal JSON-RPC response sent to TurboCode. */
 type JSONRPCResponse = {
   jsonrpc: "2.0";
   id: JSONRPCID | null;
@@ -118,6 +165,13 @@ type JSONRPCResponse = {
   error?: { code: number; message: string };
 };
 
+/**
+ * Validates and returns a plugin tool definition.
+ *
+ * @param definition Tool metadata and handler to validate.
+ * @returns The same definition after validation.
+ * @throws If required metadata is missing or the input schema is not object-rooted.
+ */
 export function defineTool(
   definition: PluginToolDefinition,
 ): PluginToolDefinition {
@@ -130,6 +184,13 @@ export function defineTool(
   return definition;
 }
 
+/**
+ * Validates a complete plugin definition, including unique tool and widget ids.
+ *
+ * @param definition Plugin metadata, tools, and optional widgets to validate.
+ * @returns The same definition after validation.
+ * @throws If required metadata is missing, no tools are registered, or an id is duplicated.
+ */
 export function definePlugin(
   definition: PluginDefinition,
 ): PluginDefinition {
@@ -158,6 +219,17 @@ export function definePlugin(
   return definition;
 }
 
+/**
+ * Builds the host-discoverable manifest for a validated plugin.
+ *
+ * Runtime handlers are intentionally omitted: the manifest contains only the
+ * metadata TurboCode needs before starting the plugin process.
+ *
+ * @param plugin Plugin definition to validate and describe.
+ * @param entrypoint Path to the compiled plugin entrypoint.
+ * @returns A JSON-serializable manifest for TurboCode discovery.
+ * @throws If the plugin definition is invalid.
+ */
 export function manifestFor(
   plugin: PluginDefinition,
   entrypoint: string,
@@ -180,10 +252,16 @@ export function manifestFor(
 }
 
 /**
- * Runs one plugin over TurboCode's stdio JSON-RPC protocol. This is a normal
- * Node process: filesystem, network, subprocesses and npm dependencies are
- * available. TurboCode-specific state is requested through explicit APIs so
- * the process remains decoupled from Swift objects.
+ * Runs one plugin over TurboCode's stdio JSON-RPC protocol.
+ *
+ * This is a normal Node process: filesystem, network, subprocesses, and npm
+ * dependencies are available. TurboCode-specific state is requested through
+ * explicit value-based APIs so the process remains decoupled from Swift
+ * objects. The function resolves when the host closes stdin.
+ *
+ * @param plugin Plugin definition to validate and serve.
+ * @returns A promise that resolves after the host closes the plugin input.
+ * @throws If plugin startup or message output fails.
  */
 export async function runPlugin(plugin: PluginDefinition): Promise<void> {
   const validated = definePlugin(plugin);
@@ -239,6 +317,7 @@ export async function runPlugin(plugin: PluginDefinition): Promise<void> {
 
   await inputClosed;
 
+  /** Parses and dispatches one line received from the TurboCode host. */
   async function handleMessage(line: string): Promise<void> {
     let message: JSONRPCRequest | JSONRPCResponse;
     try {
@@ -263,6 +342,7 @@ export async function runPlugin(plugin: PluginDefinition): Promise<void> {
     }
   }
 
+  /** Handles one host request and converts failures into JSON-RPC errors. */
   async function handleHostRequest(request: JSONRPCRequest): Promise<void> {
     try {
       if (request.method === "initialize") {
@@ -313,6 +393,7 @@ export async function runPlugin(plugin: PluginDefinition): Promise<void> {
   }
 }
 
+/** Validates the shape of a transcript returned by the host. */
 function decodeTranscript(value: JSONValue): SessionTranscript {
   if (!isRecord(value) || !Array.isArray(value.entries)) {
     throw new Error("TurboCode returned an invalid session transcript.");
@@ -320,23 +401,28 @@ function decodeTranscript(value: JSONValue): SessionTranscript {
   return value as unknown as SessionTranscript;
 }
 
+/** Narrows an unknown JSON value to a non-array object record. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Produces a collision-safe map key for a JSON-RPC request identifier. */
 function idKey(id: JSONRPCID): string {
   return `${typeof id}:${String(id)}`;
 }
 
+/** Writes a successful JSON-RPC response to stdout. */
 function writeResult(id: JSONRPCID, result: JSONValue): void {
   writeMessage({ jsonrpc: "2.0", id, result });
 }
 
+/** Writes a JSON-RPC error response when the request has an identifier. */
 function writeError(id: JSONRPCID | null, code: number, message: string): void {
   if (id === null) return;
   writeMessage({ jsonrpc: "2.0", id, error: { code, message } });
 }
 
+/** Serializes one JSON-RPC message as a single stdout line. */
 function writeMessage(message: JSONRPCRequest | JSONRPCResponse): void {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }

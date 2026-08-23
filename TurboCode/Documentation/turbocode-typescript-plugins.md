@@ -57,10 +57,9 @@ Copy or build the runtime files needed by the plugin, inspect the installed
 manifest and entrypoint, then use `/reload`. If the plugin is already installed,
 edit and rebuild it in place, then reload. TurboCode discovers metadata first and
 starts the Node process when one of the plugin's tools is used. In Settings → Agents,
-enable third-party plugins for the profile that should expose them. The SDK
-package root is available as `TURBOCODE_SDK_ROOT`, the ready-to-use npm package
-as `TURBOCODE_SDK_PACKAGE`, and the plugin installation location as
-`TURBOCODE_PLUGIN_ROOT`.
+enable third-party plugins for the profile that should expose them. The
+ready-to-use local npm package is available as `TURBOCODE_SDK_PACKAGE`, and the
+plugin installation location as `TURBOCODE_PLUGIN_ROOT`.
 
 Skills and TypeScript plugins are both useful extension mechanisms: a skill is
 instructional content, while a TypeScript plugin contributes executable tools
@@ -124,14 +123,14 @@ arguments, implementation, UI, and package structure around the user's task.
 
 The SDK directory contains complete tool implementations:
 
-- `TypeScriptSDK/examples/session-search.ts` searches previous conversation
+- `TurboCodeSDK/examples/session-search.ts` searches previous conversation
   entries through `context.session.transcript()`.
-- `TypeScriptSDK/examples/local-planner.ts` writes a Markdown plan using
+- `TurboCodeSDK/examples/local-planner.ts` writes a Markdown plan using
   `node:fs/promises` and `node:path`.
-- `TypeScriptSDK/examples/http-lookup.ts` calls an HTTP JSON endpoint with
+- `TurboCodeSDK/examples/http-lookup.ts` calls an HTTP JSON endpoint with
   the tool cancellation signal.
 
-See `TypeScriptSDK/README.md` for build/install notes and the complete SDK
+See `TurboCodeSDK/README.md` for build/install notes and the complete SDK
 surface.
 
 ## Custom response widgets
@@ -157,7 +156,7 @@ window.addEventListener("turbocode-host-event", (event) => {
 This is a UI surface, not a SwiftUI extension point. The plugin owns its DOM,
 CSS, JavaScript, framework, interactions, and local state. TurboCode owns the
 WebView lifecycle, installed-file boundary, and the explicit host acknowledgement
-bridge. `TypeScriptSDK/examples/workspace-observatory/` is the reference demo.
+bridge. `TurboCodeSDK/examples/workspace-observatory/` is the reference demo.
 
 ## Project validation and import
 
