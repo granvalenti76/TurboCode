@@ -380,7 +380,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.3.3;
+				MARKETING_VERSION = 0.4;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -437,7 +437,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.3.3;
+				MARKETING_VERSION = 0.4;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
