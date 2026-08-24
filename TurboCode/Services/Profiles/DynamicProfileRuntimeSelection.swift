@@ -1,7 +1,13 @@
 import Foundation
 
 /// Resolves disk skills at the same capability boundary as dynamic tools.
+/// Built-in profiles suppress only TurboCode's oversized product guide; user
+/// skills remain available, while custom profiles can explicitly re-enable it.
 nonisolated enum DynamicProfileRuntimeSelection {
+    /// The built-in product guide is opt-in because it duplicates core runtime
+    /// context and is too large for the default model prefix.
+    static let builtInSuppressedSkillName = "turbocode"
+
     /// Reserved built-in skill name for the opt-in Safari MCP integration.
     /// Keeping the filter here prevents disabled experimental content from
     /// entering any Foundation Models profile, including Codex handoffs.
@@ -21,7 +27,11 @@ nonisolated enum DynamicProfileRuntimeSelection {
         let experimentalFiltered = safariMCPEnabled
             ? canonical
             : canonical.filter { $0.name != safariMCPSkillName }
-        guard let profile else { return experimentalFiltered }
+        guard let profile else {
+            return experimentalFiltered.filter {
+                $0.name != builtInSuppressedSkillName
+            }
+        }
         let allowed = Set(profile.skillIDs)
         return experimentalFiltered.filter { allowed.contains($0.name) }
     }

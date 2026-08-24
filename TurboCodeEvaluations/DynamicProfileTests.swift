@@ -437,6 +437,52 @@ struct DynamicProfileTests {
         #expect(profile.resolvedToolIDs == [.git, .loadSkill])
     }
 
+    @Test("Built-in profiles suppress only the TurboCode skill")
+    func builtInProfilesSuppressOnlyTurboCodeSkill() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let skillURL = root.appendingPathComponent("SKILL.md")
+        try Data(
+            """
+            ---
+            name: turbocode
+            description: TurboCode guidance
+            ---
+            Follow TurboCode guidance.
+            """.utf8
+        ).write(to: skillURL)
+        let skill = try TurboCodeSkillDefinition(contentsOf: skillURL)
+        let userSkillURL = root.appendingPathComponent("user-skill.md")
+        try Data(
+            """
+            ---
+            name: user-skill
+            description: User guidance
+            ---
+            Follow user guidance.
+            """.utf8
+        ).write(to: userSkillURL)
+        let userSkill = try TurboCodeSkillDefinition(contentsOf: userSkillURL)
+
+        let builtInSkills = DynamicProfileRuntimeSelection.skills(
+            from: [skill, userSkill],
+            profile: nil
+        )
+        #expect(builtInSkills.map(\.name) == ["user-skill"])
+
+        let override = UserDynamicProfile(
+            name: "TurboCode override",
+            baseModelID: .llama,
+            skillIDs: [skill.name]
+        )
+        #expect(
+            DynamicProfileRuntimeSelection.skills(
+                from: [skill, userSkill],
+                profile: override
+            ).map(\.name) == ["turbocode"]
+        )
+    }
+
     @Test("A custom plan registers only explicitly selected compatible tools")
     func customToolPlanIsExclusive() {
         let context = ToolAccessContext(
