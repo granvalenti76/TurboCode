@@ -214,26 +214,7 @@ struct ChatBlockView: View {
     }
 
     private var visibleAssistantText: String {
-        let approvalKeys = Set(["approval_id", "operation", "path", "destination", "summary"])
-        var isSkippingApproval = false
-        var visibleLines: [String] = []
-
-        for line in block.text.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.contains("TURBOCODE_APPROVAL_REQUIRED") {
-                isSkippingApproval = true
-                continue
-            }
-            if isSkippingApproval {
-                let key = trimmed.split(separator: ":", maxSplits: 1).first.map(String.init) ?? ""
-                if trimmed.isEmpty || approvalKeys.contains(key) { continue }
-                isSkippingApproval = false
-            }
-            visibleLines.append(line)
-        }
-
-        return visibleLines.joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        block.text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func copyAssistantResponse() {

@@ -105,6 +105,22 @@ struct WorkspaceInstructionsTests {
         #expect(!prompt.contains("write_ondevice"))
     }
 
+    @Test("Bash prompt names the SDK variable and simple plugin path")
+    func bashPromptKeepsOnlyPluginLocations() {
+        let prompt = TurboCodeSystemPromptBuilder.build(
+            makePromptContext(
+                toolIDs: [.bash],
+                toolNames: ["bash"]
+            )
+        )
+
+        #expect(prompt.contains("TURBOCODE_SDK_PACKAGE"))
+        #expect(prompt.contains("plugins are installed in ~/.turbocode/plugins"))
+        #expect(!prompt.contains("TURBOCODE_PLUGIN_ROOT"))
+        #expect(!prompt.contains("TypeScript plugin workflow — SDK-first is mandatory"))
+        #expect(!prompt.contains("JSON-RPC handshake plus one real tool call"))
+    }
+
     @Test("Prompt includes the shared personality exactly once")
     func promptUsesSharedPersonality() {
         let prompt = TurboCodeSystemPromptBuilder.build(

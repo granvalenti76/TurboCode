@@ -25,17 +25,17 @@ The plugin can be shaped freely: add the tools, schemas, session APIs, widgets,
 packages, and frontend files that fit the product you are building. Use the
 installed SDK package `@granvalenti/turbocode-sdk` in the project dependencies.
 When Bash runs inside TurboCode, it discovers the supported Node runtime and
-provides `TURBOCODE_SDK_PACKAGE` for npm and `TURBOCODE_PLUGIN_ROOT` for the
-discovery root. The shell resolves the package path before npm stores it, so the
-same commands work across machines:
+provides `TURBOCODE_SDK_PACKAGE` for npm. Plugins are installed in
+`~/.turbocode/plugins`. The shell resolves the SDK package path before npm stores
+it, so the same commands work across machines:
 
 ```sh
 npm install --save "file:$TURBOCODE_SDK_PACKAGE"
 npm exec -- tsc --noEmit
 npm run build
-mkdir -p "$TURBOCODE_PLUGIN_ROOT/<plugin-id>"
-cp plugin.json package.json "$TURBOCODE_PLUGIN_ROOT/<plugin-id>/"
-cp -R dist "$TURBOCODE_PLUGIN_ROOT/<plugin-id>/"
+mkdir -p ~/.turbocode/plugins/<plugin-id>
+cp plugin.json package.json ~/.turbocode/plugins/<plugin-id>/
+cp -R dist ~/.turbocode/plugins/<plugin-id>/
 ```
 
 After copying the built runtime, inspect the installed files and reload

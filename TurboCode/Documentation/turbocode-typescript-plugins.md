@@ -39,8 +39,8 @@ first and continue from that project; no second registration or special import
 record is needed.
 
 When the project is opened in TurboCode, Bash discovers Node and exposes the SDK
-and plugin locations as environment variables. They keep the workflow portable
-across machines. TurboCode provisions the canonical SDK package automatically
+package through `TURBOCODE_SDK_PACKAGE`. TypeScript plugins are installed in
+`~/.turbocode/plugins`. TurboCode provisions the canonical SDK package automatically
 when the copied plugin is activated, so `node_modules` does not need to be
 copied into `~/.turbocode/plugins`:
 
@@ -48,9 +48,9 @@ copied into `~/.turbocode/plugins`:
 npm install --save "file:$TURBOCODE_SDK_PACKAGE"
 npm exec -- tsc --noEmit
 npm run build
-mkdir -p "$TURBOCODE_PLUGIN_ROOT/<plugin-id>"
-cp plugin.json package.json "$TURBOCODE_PLUGIN_ROOT/<plugin-id>/"
-cp -R dist "$TURBOCODE_PLUGIN_ROOT/<plugin-id>/"
+mkdir -p ~/.turbocode/plugins/<plugin-id>
+cp plugin.json package.json ~/.turbocode/plugins/<plugin-id>/
+cp -R dist ~/.turbocode/plugins/<plugin-id>/
 ```
 
 Copy or build the runtime files needed by the plugin, inspect the installed
@@ -59,7 +59,7 @@ edit and rebuild it in place, then reload. TurboCode discovers metadata first an
 starts the Node process when one of the plugin's tools is used. In Settings → Agents,
 enable third-party plugins for the profile that should expose them. The
 ready-to-use local npm package is available as `TURBOCODE_SDK_PACKAGE`, and the
-plugin installation location as `TURBOCODE_PLUGIN_ROOT`.
+plugin installation location is `~/.turbocode/plugins`.
 
 Skills and TypeScript plugins are both useful extension mechanisms: a skill is
 instructional content, while a TypeScript plugin contributes executable tools

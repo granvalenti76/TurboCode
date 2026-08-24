@@ -4,6 +4,49 @@ import Testing
 
 @Suite("Bash tool")
 struct BashToolTests {
+    @Test("Bash exposes only the SDK package locator")
+    func bashExposesOnlySDKPackageLocator() async throws {
+        let workspace = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCode-BashSDKEnvironment-\(UUID().uuidString)", isDirectory: true)
+        let sdkRoot = workspace.appendingPathComponent("sdk", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let tool = BashTool(workspaceRoot: workspace.path, sdkRoot: sdkRoot.path)
+
+        let output = try await tool.call(
+            arguments: BashArguments(
+                command: "test -z \"${TURBOCODE_SDK_ROOT+x}\" && test -z \"${TURBOCODE_PLUGIN_ROOT+x}\" && test -z \"${TURBOCODE_NODE_PATH+x}\" && printf '%s' \"$TURBOCODE_SDK_PACKAGE\"",
+                timeoutSeconds: 10,
+                maxOutputCharacters: 4_000
+            )
+        )
+
+        #expect(output.contains("Exit code: 0"))
+        #expect(output.contains(
+            sdkRoot.appendingPathComponent("@granvalenti/turbocode-sdk").path
+        ))
+    }
+
+    @Test("The shell derives PWD from its process working directory")
+    func shellDerivesWorkingDirectory() async throws {
+        let workspace = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCode-BashPWD-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let tool = BashTool(workspaceRoot: workspace.path)
+
+        let output = try await tool.call(
+            arguments: BashArguments(
+                command: "test \"$PWD\" = \"$(pwd)\" && printf '%s' \"$PWD\"",
+                timeoutSeconds: 10,
+                maxOutputCharacters: 4_000
+            )
+        )
+
+        #expect(output.contains("Exit code: 0"))
+        #expect(output.contains(workspace.path))
+    }
+
     @Test("Bash can build and install workspace plugin files", .timeLimit(.minutes(1)))
     func bashCanBuildAndInstallWorkspacePluginFiles() async throws {
         let repositoryRoot = URL(fileURLWithPath: #filePath)
@@ -57,7 +100,7 @@ struct BashToolTests {
 
         let pluginWrite = try await tool.call(
             arguments: BashArguments(
-                command: "mkdir -p \"$TURBOCODE_PLUGIN_ROOT/demo\" && printf '{\"id\":\"demo\"}' > \"$TURBOCODE_PLUGIN_ROOT/demo/plugin.json\"",
+                command: "mkdir -p ~/.turbocode/plugins/demo && printf '{\"id\":\"demo\"}' > ~/.turbocode/plugins/demo/plugin.json",
                 timeoutSeconds: 10,
                 maxOutputCharacters: 4_000
             )
@@ -101,7 +144,7 @@ struct BashToolTests {
 
         let pluginOutput = try await tool.call(
             arguments: BashArguments(
-                command: "mkdir -p \"$TURBOCODE_PLUGIN_ROOT/reportistica\" && printf plugin > \"$TURBOCODE_PLUGIN_ROOT/reportistica/marker.txt\"",
+                command: "mkdir -p ~/.turbocode/plugins/reportistica && printf plugin > ~/.turbocode/plugins/reportistica/marker.txt",
                 timeoutSeconds: 10,
                 maxOutputCharacters: 4_000
             )

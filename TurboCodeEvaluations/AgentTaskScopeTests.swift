@@ -198,7 +198,6 @@ struct AgentTaskScopeTests {
 
         #expect(approval.count == 1)
         #expect(result.contains("Deleted"))
-        #expect(!result.contains("TURBOCODE_APPROVAL_REQUIRED"))
         #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("Outside.swift").path))
     }
 

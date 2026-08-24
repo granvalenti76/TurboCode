@@ -102,10 +102,6 @@ actor TypeScriptPluginHost {
             entrypoint.path
         ]
         process.currentDirectoryURL = configuration.pluginRoot
-        var environment = ProcessInfo.processInfo.environment
-        environment["TURBOCODE_PLUGIN_ID"] = configuration.manifest.id
-        environment["TURBOCODE_PLUGIN_PROTOCOL"] = String(TypeScriptPluginManifest.supportedProtocolVersion)
-        process.environment = environment
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
         process.standardError = errorPipe

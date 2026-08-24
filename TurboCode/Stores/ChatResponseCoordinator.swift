@@ -1031,33 +1031,7 @@ final class ChatResponseCoordinator {
     }
 
     private static func userVisibleAssistantText(_ text: String) -> String {
-        let approvalKeys = Set([
-            "approval_id", "operation", "path", "destination", "summary"
-        ])
-        var isSkippingApproval = false
-        var visibleLines: [String] = []
-        for line in text.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(
-                in: .whitespacesAndNewlines
-            )
-            if trimmed.contains("TURBOCODE_APPROVAL_REQUIRED") {
-                isSkippingApproval = true
-                continue
-            }
-            if isSkippingApproval {
-                let key = trimmed.split(
-                    separator: ":",
-                    maxSplits: 1
-                ).first.map(String.init) ?? ""
-                if trimmed.isEmpty || approvalKeys.contains(key) {
-                    continue
-                }
-                isSkippingApproval = false
-            }
-            visibleLines.append(line)
-        }
-        return visibleLines.joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

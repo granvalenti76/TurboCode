@@ -70,18 +70,12 @@ nonisolated enum TurboCodeSystemPromptBuilder {
                 """)
         }
 
-        if tools.contains(.bash) {
-            sections.append(typeScriptPluginSection)
-        }
-
         if !context.workspaceRoot.isEmpty {
             sections.append("""
                 Workspace:
                 \(context.workspaceRoot)
-                Ordinary file operations remain inside this workspace. When the
-                TypeScript plugin workflow is active, Bash uses the canonical
-                TURBOCODE_PLUGIN_ROOT and TURBOCODE_SDK_PACKAGE locations
-                described above for plugin installation and SDK access.
+                Ordinary file operations remain inside this workspace. TypeScript
+                plugins are installed in ~/.turbocode/plugins.
                 """)
         }
 
@@ -159,7 +153,7 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             lines.append("- Use xcode_project for Xcode discovery, builds, and tests.")
         }
         if tools.contains(.bash) {
-            lines.append("- Use bash for bounded project commands and workflows not covered by structured tools. It discovers the supported Node runtime; for TypeScript plugins use TURBOCODE_SDK_PACKAGE for the local SDK dependency and TURBOCODE_PLUGIN_ROOT for installation. Relative paths start at the Working directory reported by bash; verify pwd before destructive commands, and remember cd does not persist between calls.")
+            lines.append("- Use bash for bounded project commands and workflows not covered by structured tools. It discovers the supported Node runtime; for TypeScript plugins use TURBOCODE_SDK_PACKAGE for the local SDK dependency. Relative paths start at the Working directory reported by bash; verify pwd before destructive commands, and remember cd does not persist between calls.")
         }
         if tools.contains(.swiftPackageManager) {
             lines.append("- Use swift_package_manager, not bash, for supported Swift Package Manager initialization, dependency, build, test, run, resolution, cleanup, and inspection actions.")
@@ -177,9 +171,6 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             || tools.contains(.writeOnDevice)
             || tools.contains(.fileSystem) {
             lines.append("- Preserve real newline characters and blank paragraph breaks in long-form content.")
-        }
-        if tools.contains(.fileSystem) || tools.contains(.git) {
-            lines.append("- If a tool returns TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user's decision without exposing the technical block.")
         }
         if tools.contains(.listWorkspace)
             || tools.contains(.editFile)
@@ -200,78 +191,5 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         workspace at \(workspaceRoot), then synthesize its result for the user.
         """
     }
-
-    private static let typeScriptPluginSection = """
-        TypeScript plugin workflow — SDK-first is mandatory:
-        A TurboCode TypeScript plugin is an ordinary Node/npm project. Its runtime
-        directory is TURBOCODE_PLUGIN_ROOT/<manifest.id>, and that directory is
-        writable: an existing installed plugin may be inspected, edited, rebuilt,
-        and reloaded in place at any time. There is no separate registration file
-        or immutable installation layer.
-        The TurboCode SDK is an external runtime dependency outside the current
-        workspace. Do not expect it to be present in the workspace and do not
-        copy or recreate it there; resolve the local package through
-        TURBOCODE_SDK_PACKAGE.
-
-        Before writing plugin code:
-        1. Check TURBOCODE_SDK_PACKAGE.
-        2. Resolve it to an absolute path and report the path found.
-        3. Verify that the directory contains package.json, dist/index.d.ts, and
-           dist/index.js.
-        4. Never search for or install @granvalenti/turbocode-sdk from the npm
-           registry. Use only the local package named by TURBOCODE_SDK_PACKAGE.
-        5. If TURBOCODE_SDK_PACKAGE is unavailable, search explicitly for
-           ~/.turbocode/sdk/@granvalenti/turbocode-sdk, resolve the absolute path,
-           verify it, and report it before proceeding.
-        6. Read the SDK package.json, dist/index.d.ts, and README before choosing
-           the implementation and configure npm with a local file: dependency.
-
-        The TypeScript entrypoint must use the SDK contract: definePlugin,
-        defineTool, defineWidget when a widget is needed, and runPlugin. A plugin
-        must expose at least one real tool; tools: [] is invalid. Declaring a
-        widget in plugin.json is not enough to display it: a tool must return
-        widget: { id, props } using the declared widget id.
-
-        The host contract is one versioned plugin.json at the plugin root. Use
-        these field names and shapes:
-        {
-          "manifestVersion": 1,
-          "id": "my-plugin",
-          "name": "My Plugin",
-          "version": "0.1.0",
-          "entrypoint": "dist/index.js",
-          "runtime": { "kind": "node", "node": ">=24.0.0" },
-          "tools": [
-            {
-              "name": "myTool",
-              "description": "What the tool does.",
-              "inputSchema": {
-                "type": "object",
-                "properties": {},
-                "required": []
-              }
-            }
-          ],
-          "widgets": []
-        }
-        Tools and widgets are arrays. A widget entry has id, title, entrypoint,
-        and optional description; its entrypoint is a file inside the plugin
-        directory. Add the tools, widgets, UI, and dependencies that fit the
-        user's task; the host only needs this manifest contract and a runnable
-        compiled entrypoint.
-
-        For a new plugin, design the project wherever the user is working, build
-        it, and copy or stage its runtime under TURBOCODE_PLUGIN_ROOT. For an
-        existing plugin, read its package.json, plugin.json, source, and dist,
-        then change the files directly when that is the natural workflow. Before
-        installation, run tsc --noEmit, build the plugin, verify that the
-        manifest entrypoint exists and matches the compiled output, and perform a
-        JSON-RPC handshake plus one real tool call. After a change, use /reload
-        so the current session receives the new manifest and tools. Do not claim
-        the plugin works until the expected tool call succeeds.
-        The plugin project, its tools, and its widgets are designed by the model
-        for the user's task; skills and .codex-plugin bundles are separate product
-        concepts with separate layouts.
-        """
 
 }

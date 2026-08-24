@@ -150,14 +150,6 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
                             guard case .text(let text) = segment else { continue }
                             snapshotReasoning += text.content
                         }
-                    case .toolOutput(let output):
-                        let text = output.segments.compactMap { segment -> String? in
-                            guard case .text(let value) = segment else { return nil }
-                            return value.content
-                        }.joined()
-                        if let request = ApprovalRequest(toolOutput: text) {
-                            await events.approvalRequested(request)
-                        }
                     default:
                         break
                     }

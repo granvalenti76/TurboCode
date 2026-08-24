@@ -43,32 +43,4 @@ nonisolated public struct ApprovalRequest: Sendable {
         self.summary = summary
         self.command = command
     }
-
-    /// Decodes the compatibility text envelope emitted by external model
-    /// adapters that cannot deliver approval requests through typed events.
-    public init?(toolOutput: String) {
-        guard toolOutput.contains("TURBOCODE_APPROVAL_REQUIRED") else { return nil }
-
-        var values: [String: String] = [:]
-        for line in toolOutput.components(separatedBy: .newlines) {
-            let parts = line.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
-            guard parts.count == 2 else { continue }
-            let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
-            let value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
-            values[key] = value
-        }
-
-        guard let id = values["approval_id"],
-              let operation = values["operation"],
-              let path = values["path"],
-              let summary = values["summary"] else { return nil }
-
-        self.init(
-            id: id,
-            operation: operation,
-            path: path,
-            destination: values["destination"],
-            summary: summary
-        )
-    }
 }

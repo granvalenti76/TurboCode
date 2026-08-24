@@ -173,11 +173,23 @@ private actor BashService {
         let stderrURL = outputDirectory.appendingPathComponent("stderr.txt")
         let binDirectory = outputDirectory.appendingPathComponent("bin", isDirectory: true)
         let homeDirectory = outputDirectory.appendingPathComponent("home", isDirectory: true)
+        let turboCodeDirectory = homeDirectory
+            .appendingPathComponent(".turbocode", isDirectory: true)
+        let pluginDirectory = turboCodeDirectory
+            .appendingPathComponent("plugins", isDirectory: true)
 
         do {
             try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: binDirectory, withIntermediateDirectories: true)
             try FileManager.default.createDirectory(at: homeDirectory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: turboCodeDirectory, withIntermediateDirectories: true)
+            // Bash keeps an isolated HOME, but plugin instructions use the normal
+            // user-facing path. Map only that path to the canonical installation
+            // root without exposing the rest of the real home directory.
+            try FileManager.default.createSymbolicLink(
+                at: pluginDirectory,
+                withDestinationURL: URL(fileURLWithPath: pluginRoot, isDirectory: true)
+            )
             try installSwiftWrapper(in: binDirectory)
             FileManager.default.createFile(atPath: stdoutURL.path, contents: nil)
             FileManager.default.createFile(atPath: stderrURL.path, contents: nil)
@@ -231,19 +243,20 @@ private actor BashService {
         ]
         process.currentDirectoryURL = workingDirectoryURL
         var commandEnvironment = ProcessInfo.processInfo.environment.merging([
-            "PWD": workingDirectoryURL.path,
             "TMPDIR": outputDirectory.path,
             "HOME": homeDirectory.path,
             "XDG_CACHE_HOME": homeDirectory.appendingPathComponent(".cache").path,
-            "TURBOCODE_PLUGIN_ROOT": pluginRoot,
-            "TURBOCODE_SDK_ROOT": sdkRoot,
             "TURBOCODE_SDK_PACKAGE": sdkPackage,
             "PATH": "\(binDirectory.path):\(commandPath)",
             "GIT_CONFIG_GLOBAL": "/dev/null"
         ]) { _, new in new }
-        if let nodeExecutable {
-            commandEnvironment["TURBOCODE_NODE_PATH"] = nodeExecutable.path
-        }
+        // Let zsh derive PWD from currentDirectoryURL. The SDK package is the
+        // only public TurboCode locator; strip legacy variables even when the
+        // app inherited them from its launcher.
+        commandEnvironment.removeValue(forKey: "PWD")
+        commandEnvironment.removeValue(forKey: "TURBOCODE_SDK_ROOT")
+        commandEnvironment.removeValue(forKey: "TURBOCODE_PLUGIN_ROOT")
+        commandEnvironment.removeValue(forKey: "TURBOCODE_NODE_PATH")
         process.environment = commandEnvironment
         process.standardOutput = stdoutHandle
         process.standardError = stderrHandle

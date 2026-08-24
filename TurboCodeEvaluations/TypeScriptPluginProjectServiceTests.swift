@@ -20,8 +20,33 @@ struct TypeScriptPluginProjectServiceTests {
         let installed = try service.bootstrapSDK(from: source)
 
         #expect(FileManager.default.fileExists(atPath: installed.appendingPathComponent("package.json").path))
+        #expect(FileManager.default.fileExists(atPath: installed.appendingPathComponent("README.md").path))
         #expect(FileManager.default.fileExists(atPath: installed.appendingPathComponent("dist/index.js").path))
         #expect(!FileManager.default.fileExists(atPath: installed.appendingPathComponent("src/index.ts").path))
+    }
+
+    @Test("Backfills the SDK README without requiring a version change")
+    func backfillsMissingSDKReadme() throws {
+        let root = try makeRoot("SDKReadme")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let source = root.appendingPathComponent("sdk-source", isDirectory: true)
+        let destinationRoot = root.appendingPathComponent(".turbocode", isDirectory: true)
+        let destination = destinationRoot
+            .appendingPathComponent("sdk/@granvalenti/turbocode-sdk", isDirectory: true)
+        try writeSDKPackage(at: source, version: "0.4.0")
+        try writeSDKPackage(at: destination, version: "0.4.0")
+        try FileManager.default.removeItem(at: destination.appendingPathComponent("README.md"))
+        let service = TypeScriptPluginProjectService(
+            pluginsRoot: destinationRoot.appendingPathComponent("plugins", isDirectory: true),
+            sdkRoot: destinationRoot.appendingPathComponent("sdk", isDirectory: true)
+        )
+
+        _ = try service.bootstrapSDK(from: source)
+
+        #expect(FileManager.default.fileExists(
+            atPath: destination.appendingPathComponent("README.md").path
+        ))
     }
 
     @Test("Refreshes an installed SDK when its package version changes")
@@ -273,6 +298,8 @@ struct TypeScriptPluginProjectServiceTests {
         )
         try Data("{\"name\":\"@granvalenti/turbocode-sdk\",\"version\":\"\(version)\"}".utf8)
             .write(to: root.appendingPathComponent("package.json"))
+        try Data("# TurboCode SDK\n".utf8)
+            .write(to: root.appendingPathComponent("README.md"))
         try Data("compiled sdk".utf8)
             .write(to: root.appendingPathComponent("dist/index.js"))
         try Data("source sdk".utf8)

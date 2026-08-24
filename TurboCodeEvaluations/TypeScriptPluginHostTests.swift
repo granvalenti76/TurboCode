@@ -217,8 +217,8 @@ struct TypeScriptPluginHostTests {
           }
           if (message.method === 'initialize') {
             reply(message.id, {
-              protocolVersion: 1,
-              pluginID: process.env.TURBOCODE_PLUGIN_ID,
+              protocolVersion: message.params.protocolVersion,
+              pluginID: message.params.pluginID,
               nodeVersion: process.version,
               tools: ['echo']
             });

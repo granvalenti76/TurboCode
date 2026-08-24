@@ -128,9 +128,9 @@ nonisolated enum TypeScriptPluginProjectError: LocalizedError, Sendable, Equatab
     }
 }
 
-/// Installs only the compiled SDK package surface. The source project remains
-/// a normal npm project, while plugin builds receive the stable package name
-/// through `node_modules/@granvalenti/turbocode-sdk`.
+/// Installs the compiled SDK package surface and its model-readable guide. The
+/// source project remains a normal npm project, while plugin builds receive the
+/// stable package name through `node_modules/@granvalenti/turbocode-sdk`.
 nonisolated struct TypeScriptPluginSDKInstaller: @unchecked Sendable {
     private let fileManager: FileManager
 
@@ -144,8 +144,10 @@ nonisolated struct TypeScriptPluginSDKInstaller: @unchecked Sendable {
     ) throws {
         let source = sourcePackageURL.standardizedFileURL
         let packageJSON = source.appendingPathComponent("package.json")
+        let readme = source.appendingPathComponent("README.md")
         let dist = source.appendingPathComponent("dist", isDirectory: true)
         guard fileManager.fileExists(atPath: packageJSON.path),
+              fileManager.fileExists(atPath: readme.path),
               fileManager.fileExists(atPath: dist.path) else {
             throw TypeScriptPluginProjectError.sdkPackageInvalid(source)
         }
@@ -165,6 +167,10 @@ nonisolated struct TypeScriptPluginSDKInstaller: @unchecked Sendable {
         try fileManager.copyItem(
             at: packageJSON,
             to: staging.appendingPathComponent("package.json")
+        )
+        try fileManager.copyItem(
+            at: readme,
+            to: staging.appendingPathComponent("README.md")
         )
         try fileManager.copyItem(
             at: dist,
@@ -263,6 +269,8 @@ nonisolated struct TypeScriptPluginProjectService: @unchecked Sendable {
             fileManager.fileExists(
                 atPath: source.appendingPathComponent("package.json").path
             ) && fileManager.fileExists(
+                atPath: source.appendingPathComponent("README.md").path
+            ) && fileManager.fileExists(
                 atPath: source.appendingPathComponent("dist/index.js").path
             )
         }
@@ -274,10 +282,12 @@ nonisolated struct TypeScriptPluginProjectService: @unchecked Sendable {
             .appendingPathComponent("@granvalenti", isDirectory: true)
             .appendingPathComponent("turbocode-sdk", isDirectory: true)
         let packageJSON = destination.appendingPathComponent("package.json")
+        let readme = destination.appendingPathComponent("README.md")
         let entrypoint = destination.appendingPathComponent("dist/index.js")
         let sourceVersion = packageVersion(at: sourcePackageURL)
         let installedVersion = packageVersion(at: destination)
         if fileManager.fileExists(atPath: packageJSON.path),
+           fileManager.fileExists(atPath: readme.path),
            fileManager.fileExists(atPath: entrypoint.path),
            sourceVersion == installedVersion {
             return destination

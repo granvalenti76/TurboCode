@@ -21,7 +21,6 @@ struct RemoveFileToolTests {
 
         #expect(result == "Removed Old.swift.")
         #expect(!FileManager.default.fileExists(atPath: file.path))
-        #expect(!result.contains("TURBOCODE_APPROVAL_REQUIRED"))
     }
 
     @Test("Keeps the file when approval is denied")
