@@ -741,9 +741,9 @@ final class ChatResponseCoordinator {
                 AgentActivityRuntimeMapping.tool(from: call, owner: owner)
             )
         }
-        guard call.toolName != "diff_patch",
-              call.toolName != "apply_edits",
-              call.toolName != "edit_file" else { return }
+        // Every provider tool gets one transient live affordance. Native
+        // receipts and edit widgets still own the completed detail; this
+        // activity only answers the immediate question: what is running now?
         toolInteractions.beginActivity(
             id: call.id,
             toolName: call.toolName,
