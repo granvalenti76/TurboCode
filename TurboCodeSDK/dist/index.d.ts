@@ -10,9 +10,17 @@ export type JSONValue = null | boolean | number | string | JSONValue[] | {
 export type JSONSchema = {
     [key: string]: JSONValue;
 };
-/** Object-root JSON Schema required for a plugin tool's arguments. */
+/**
+ * Cross-provider object schema required for a plugin tool's arguments.
+ *
+ * TurboCode's native Foundation Models adapter currently represents every
+ * declared property as required, so plugin authors must list every property
+ * in `required`. Use an empty array for a tool with no arguments.
+ */
 export type ToolInputSchema = JSONSchema & {
     type: "object";
+    properties: JSONSchema;
+    required: string[];
 };
 /** One provider-neutral entry in the active TurboCode session transcript. */
 export type SessionTranscriptEntry = {
@@ -112,7 +120,8 @@ export declare function defineWidget(definition: PluginWidgetDefinition): Plugin
  *
  * @param definition Tool metadata and handler to validate.
  * @returns The same definition after validation.
- * @throws If required metadata is missing or the input schema is not object-rooted.
+ * @throws If required metadata or the cross-provider input schema contract is
+ * missing.
  */
 export declare function defineTool(definition: PluginToolDefinition): PluginToolDefinition;
 /**

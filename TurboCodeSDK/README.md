@@ -75,6 +75,16 @@ const plugin = definePlugin({
 await runPlugin(plugin);
 ```
 
+### Input schema contract
+
+Every tool uses an object-rooted JSON Schema with both `properties` and
+`required`. The `required` array is always present: use `required: []` when the
+tool has no arguments. For cross-provider compatibility, every declared
+property must appear in `required`; optional properties are not currently
+representable by TurboCode's native Foundation Models adapter. Keep
+`additionalProperties: false` unless the tool intentionally accepts extra
+fields.
+
 The handler receives the decoded tool arguments and a context. It may return a
 string or an object such as:
 

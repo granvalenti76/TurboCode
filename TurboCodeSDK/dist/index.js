@@ -34,7 +34,8 @@ export function defineWidget(definition) {
  *
  * @param definition Tool metadata and handler to validate.
  * @returns The same definition after validation.
- * @throws If required metadata is missing or the input schema is not object-rooted.
+ * @throws If required metadata or the cross-provider input schema contract is
+ * missing.
  */
 export function defineTool(definition) {
     if (!definition.name || !definition.description) {
@@ -42,6 +43,20 @@ export function defineTool(definition) {
     }
     if (definition.inputSchema.type !== "object") {
         throw new Error("Plugin tool schemas must be JSON objects.");
+    }
+    const properties = definition.inputSchema.properties;
+    const required = definition.inputSchema.required;
+    if (properties === null
+        || Array.isArray(properties)
+        || typeof properties !== "object"
+        || !Array.isArray(required)
+        || !required.every((name) => typeof name === "string")) {
+        throw new Error("Plugin tool schemas need object properties and a required string array.");
+    }
+    const propertyNames = new Set(Object.keys(properties));
+    if (required.length !== propertyNames.size
+        || required.some((name) => !propertyNames.has(name))) {
+        throw new Error("Plugin tool schemas must list every property in required.");
     }
     return definition;
 }

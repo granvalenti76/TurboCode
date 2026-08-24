@@ -28,7 +28,7 @@ const plugin = definePlugin({
           message: { type: "string" },
           tone: { type: "string", enum: ["info", "success", "warning", "error"] },
         },
-        required: ["title", "message"],
+        required: ["title", "message", "tone"],
         additionalProperties: false,
       },
       async handler(arguments_) {
