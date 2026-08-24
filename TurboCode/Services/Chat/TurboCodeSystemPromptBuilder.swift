@@ -74,8 +74,11 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             sections.append("""
                 Workspace:
                 \(context.workspaceRoot)
-                Ordinary file operations remain inside this workspace. TypeScript
-                plugins are installed in ~/.turbocode/plugins.
+                This workspace is the default working directory.
+                You can create and maintain TurboCode TypeScript plugins autonomously.
+                The SDK, documentation, and examples are installed in ~/.turbocode/sdk;
+                inspect them to learn the current plugin contract.
+                TypeScript plugins are installed in ~/.turbocode/plugins.
                 """)
         }
 
@@ -153,7 +156,7 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             lines.append("- xcode_project provides Xcode discovery, builds, tests, and compact diagnostics.")
         }
         if tools.contains(.bash) {
-            lines.append("- bash runs arbitrary zsh commands. It discovers the supported Node runtime; for TypeScript plugins TURBOCODE_SDK_PACKAGE names the local SDK dependency. Relative paths start at the reported Working directory and cd does not persist between calls; external filesystem access pauses for host approval.")
+            lines.append("- bash runs arbitrary zsh commands. It discovers the supported Node runtime. Relative paths start at the reported Working directory and cd does not persist between calls; external filesystem access pauses for host approval.")
         }
         if tools.contains(.swiftPackageManager) {
             lines.append("- swift_package_manager provides structured Swift package initialization, dependency, build, test, run, cleanup, and inspection actions.")

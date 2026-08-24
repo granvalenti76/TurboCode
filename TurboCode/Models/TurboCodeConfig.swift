@@ -423,14 +423,6 @@ public final class TurboCodeConfig {
     is loaded on demand when relevant. Users can type `/skills`, `/skill <name>`, or
     `/<skill-name>` in the composer.
 
-    ## TypeScript plugins
-
-    TypeScript plugins are executable extensions, separate from instructional
-    skills. TurboCode discovers them under `~/.turbocode/plugins/<plugin-id>`,
-    exposes the installed SDK and plugin roots to Bash through environment
-    variables, and reloads changed manifests and processes with `/reload`. In
-    **Settings > Agents**, third-party plugins must be enabled before their tools
-    and optional widgets are exposed to the selected profile.
     """
 
     private static let skillCreatorSkill = """
