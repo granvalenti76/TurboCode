@@ -1,16 +1,16 @@
 # @granvalenti/turbocode-sdk
 
-SDK for TurboCode TypeScript plugins. It requires Node 24 or newer and does not
-depend on React. A plugin is a normal Node program: it can use npm packages,
-the filesystem, network access, and child processes. TurboCode-specific
-objects are not injected into Node; the stable APIs cross the JSON-RPC host
-boundary.
+SDK for TypeScript plugins that run in TurboCode. A plugin is a normal Node.js
+program: it defines tools, can optionally expose HTML widgets, and communicates
+with TurboCode through the SDK runtime. The SDK requires Node.js 24 or newer
+and uses ES modules.
 
-## Create a plugin in a workspace
+If you want a working starting point, open [`examples/README.md`](examples/README.md)
+and choose the smallest example that matches the plugin you are building.
 
-Create a regular Node/npm project wherever the active workspace calls for it.
-Keep `plugin.json` at the project root, place the TypeScript entrypoint under
-`src/`, and compile the runtime to the path declared by the manifest:
+## The plugin shape
+
+A small plugin normally looks like this:
 
 ```text
 my-plugin/
@@ -21,30 +21,28 @@ my-plugin/
 └── dist/index.js
 ```
 
-The plugin can be shaped freely: add the tools, schemas, session APIs, widgets,
-packages, and frontend files that fit the product you are building. Use the
-installed SDK package `@granvalenti/turbocode-sdk` in the project dependencies.
-When Bash runs inside TurboCode, it discovers the supported Node runtime and
-provides `TURBOCODE_SDK_PACKAGE` for npm. Plugins are installed in
-`~/.turbocode/plugins`. The shell resolves the SDK package path before npm stores
-it, so the same commands work across machines:
+`plugin.json` describes the plugin to TurboCode before Node starts. The
+compiled `dist/index.js` is the runtime entrypoint. A widget is an HTML file
+declared in the manifest, for example `widget.html` at the project root or
+`dist/widget.html` under the compiled output.
 
-```sh
-npm install --save "file:$TURBOCODE_SDK_PACKAGE"
-npm exec -- tsc --noEmit
-npm run build
-mkdir -p ~/.turbocode/plugins/<plugin-id>
-cp plugin.json package.json ~/.turbocode/plugins/<plugin-id>/
-cp -R dist ~/.turbocode/plugins/<plugin-id>/
-```
+## Runtime API
 
-After copying the built runtime, inspect the installed files and reload
-TurboCode. Enable third-party plugins in Settings → Agents for the profile that
-should use the plugin. A TypeScript plugin contributes executable tools and
-optional widgets; a skill contributes reusable instructions. They can live in
-the same workspace with their own layouts.
+The usual runtime uses four functions:
 
-## Minimal plugin
+- `definePlugin` describes the plugin and its tools/widgets.
+- `defineTool` describes one callable tool and its JSON Schema.
+- `defineWidget` describes one HTML surface.
+- `runPlugin` starts the JSON-RPC process owned by TurboCode.
+
+The SDK also exports types and `manifestFor`. `manifestFor` is useful to a
+build script that wants to produce `plugin.json`; it is not needed by the
+running plugin. Keep the manifest available before TurboCode discovers the
+plugin, then let the runtime only define the plugin and call `runPlugin`.
+
+## A tool
+
+This is the smallest useful `src/index.ts`:
 
 ```ts
 import {
@@ -77,9 +75,15 @@ const plugin = definePlugin({
 await runPlugin(plugin);
 ```
 
-## Session transcript
+The handler receives the decoded tool arguments and a context. It may return a
+string or an object such as:
 
-The tool context exposes a typed, read-only snapshot of the active session:
+```ts
+return { text: "The operation completed." };
+```
+
+Set `isError: true` when the result should be presented as an error. The
+context also provides an `AbortSignal` and a read-only session transcript:
 
 ```ts
 async handler(_arguments, context) {
@@ -88,38 +92,37 @@ async handler(_arguments, context) {
 }
 ```
 
-The snapshot includes `sessionID`, `title`, `updatedAt`, and timeline entries
-with `id`, `kind`, `text`, `createdAt`, `model`, and `providerID`. A plugin can
-read it while its tool is running; the host takes a value snapshot and never
-hands out a mutable session or `ChatStore` reference.
+## A widget
 
-## Custom widgets
-
-Plugins may declare their own HTML/JavaScript surfaces. TurboCode creates a
-WebView only when a tool returns a widget invocation; ordinary tool results
-remain text-only.
+Widgets are ordinary HTML/CSS/JavaScript files. Declare one with
+`defineWidget`, include it in the plugin, and return its id from a tool:
 
 ```ts
 const widget = defineWidget({
-  id: "dashboard",
-  title: "Project Dashboard",
-  entrypoint: "dist/dashboard.html",
+  id: "status-card",
+  title: "Status Card",
+  entrypoint: "widget.html",
 });
 
 const plugin = definePlugin({
-  id: "project-tools",
-  name: "Project Tools",
+  id: "status-plugin",
+  name: "Status Plugin",
   version: "0.1.0",
   widgets: [widget],
   tools: [
     defineTool({
-      name: "openDashboard",
-      description: "Open the project dashboard.",
-      inputSchema: { type: "object", properties: {}, required: [] },
+      name: "openStatus",
+      description: "Open the status card.",
+      inputSchema: {
+        type: "object",
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      },
       async handler() {
         return {
-          text: "Dashboard ready.",
-          widget: { id: widget.id, props: { theme: "dark" } },
+          text: "Status card ready.",
+          widget: { id: widget.id, props: { state: "ready" } },
         };
       },
     }),
@@ -127,34 +130,77 @@ const plugin = definePlugin({
 });
 ```
 
-The widget owns its HTML, CSS, JavaScript, framework, layout, and local state.
-The host exposes `window.turbocode.emit(...)`, `resize(...)`, and the
-`turbocode-props` event. An action such as
-`window.turbocode.emit({ type: "action", action: "pulse" })` receives a
-`turbocode-host-event` acknowledgement with the action, acceptance, and receipt
-time; the widget remains responsible for rendering the result. A widget cannot
-access Swift, SwiftUI, `ChatStore`, or provider sessions.
+TurboCode creates the WebView when a tool result contains a widget invocation.
+The widget owns its HTML, CSS, JavaScript, layout, and local state. It can use
+the host bridge exposed as `window.turbocode`:
 
-## Installing a plugin
-
-Build the project and install the resulting directory at:
-
-```text
-~/.turbocode/plugins/<plugin-id>/
+```js
+window.turbocode.emit({ type: "ready" });
+window.turbocode.emit({ type: "action", action: "refresh" });
+window.turbocode.resize({ width: 360, height: 220 });
 ```
 
-That directory contains `plugin.json`, the compiled entrypoint, and the
-plugin's normal `package.json`/`node_modules` when it has dependencies. A
-reload discovers metadata without starting Node. Activation starts one lazy
-Node process for the selected plugin.
+The `turbocode-props` event carries the `props` object returned by the tool.
+Widgets do not access Swift, SwiftUI, `ChatStore`, or provider sessions.
 
-## Robustness boundary
+## Manifest
 
-The host owns JSONL framing, protocol/version checks, Node version checks,
-timeouts, process termination, and malformed-response handling. These are
-runtime integrity guarantees, not a capability allowlist. The plugin remains
-an ordinary Node process and is responsible for its own application-level
-permissions and error handling.
+Keep `plugin.json` at the plugin root. A minimal manifest is:
 
-See `examples/` for three usable plugins: session search, a local planning
-file, and an HTTP-backed lookup.
+```json
+{
+  "manifestVersion": 1,
+  "id": "workspace-helper",
+  "name": "Workspace Helper",
+  "version": "0.1.0",
+  "entrypoint": "dist/index.js",
+  "runtime": { "kind": "node", "node": ">=24.0.0" },
+  "tools": [
+    {
+      "name": "echo",
+      "description": "Echo one string.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "value": { "type": "string" } },
+        "required": ["value"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "widgets": []
+}
+```
+
+Manifest entrypoints are relative to the installed plugin directory. The
+manifest contains metadata only; tool handlers are registered by the compiled
+runtime.
+
+## Build and install
+
+Inside a plugin project, the canonical SDK package is always installed at
+`~/.turbocode/sdk/@granvalenti/turbocode-sdk`:
+
+```sh
+npm install --save "file:$HOME/.turbocode/sdk/@granvalenti/turbocode-sdk"
+npm exec -- tsc --noEmit
+npm run build
+```
+
+Install the resulting project under `~/.turbocode/plugins/<plugin-id>/` with
+its `plugin.json`, `package.json`, compiled `dist/`, widget files, and any
+runtime dependencies. After installation, reload TurboCode and enable
+third-party plugins for the profile that should use it.
+
+The plugin is a regular Node process, so it may use npm packages, the
+filesystem, network access, and child processes. TurboCode owns JSONL framing,
+protocol checks, timeouts, cancellation, and host-side presentation.
+
+## Examples
+
+The [`examples/`](examples/) directory contains complete projects and focused
+single-file references. Start with [`examples/README.md`](examples/README.md),
+then open the example source and its manifest/package files together.
+
+All complete projects are intended to build as written. They use the same
+SDK APIs shown above and keep their manifest and runtime entrypoint visible so
+the relationship is easy to follow.

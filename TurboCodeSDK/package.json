@@ -13,7 +13,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "examples"
   ],
   "scripts": {
     "build": "tsc --project tsconfig.json",
