@@ -73,19 +73,28 @@ struct BashToolTests {
             encoding: .utf8
         )
 
-        let pluginRoot = workspace.appendingPathComponent("InstalledPlugins", isDirectory: true)
-        try FileManager.default.createDirectory(at: pluginRoot, withIntermediateDirectories: true)
+        let shellHome = workspace.appendingPathComponent("ShellHome", isDirectory: true)
+        let pluginRoot = shellHome.appendingPathComponent(
+            ".turbocode/plugins",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: shellHome, withIntermediateDirectories: true)
         let tool = BashTool(
             workspaceRoot: workspace.path,
-            pluginRoot: pluginRoot.path,
-            sdkRoot: workspace.path
+            sdkRoot: workspace.path,
+            homeDirectory: shellHome.path
         )
         let output = try await tool.call(
-            arguments: BashArguments(command: "swift build", timeoutSeconds: 50, maxOutputCharacters: 12_000)
+            // The test requests SwiftPM's own sandbox policy explicitly; Bash
+            // no longer rewrites commands or injects this flag on the model's behalf.
+            arguments: BashArguments(
+                command: "swift build --disable-sandbox",
+                timeoutSeconds: 50,
+                maxOutputCharacters: 12_000
+            )
         )
 
         #expect(output.contains("Exit code: 0"))
-        #expect(!output.contains("not accessible or not writable"))
         #expect(FileManager.default.fileExists(atPath: workspace.appendingPathComponent(".build").path))
 
         let workspaceWrite = try await tool.call(
@@ -113,18 +122,18 @@ struct BashToolTests {
     func missingWorkspaceDoesNotBecomeThePluginRoot() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("TurboCode-BashTool-\(UUID().uuidString)", isDirectory: true)
-        let pluginRoot = URL(fileURLWithPath: "/private/tmp/TurboCode-BashPlugin-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: pluginRoot, withIntermediateDirectories: true)
+        let shellHome = URL(fileURLWithPath: "/private/tmp/TurboCode-BashHome-\(UUID().uuidString)", isDirectory: true)
+        let pluginRoot = shellHome.appendingPathComponent(".turbocode/plugins", isDirectory: true)
         defer {
             try? FileManager.default.removeItem(at: root)
-            try? FileManager.default.removeItem(at: pluginRoot)
+            try? FileManager.default.removeItem(at: shellHome)
         }
 
         let approvals = ApprovalCounter()
         let tool = BashTool(
             workspaceRoot: root.appendingPathComponent("deleted-workspace", isDirectory: true).path,
-            pluginRoot: pluginRoot.path,
             sdkRoot: root.appendingPathComponent("sdk", isDirectory: true).path,
+            homeDirectory: shellHome.path,
             requestApproval: { request in
                 await approvals.increment()
                 return await request.action()
@@ -163,9 +172,8 @@ struct BashToolTests {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("TurboCode-BashApproval-\(UUID().uuidString)", isDirectory: true)
         let workspace = root.appendingPathComponent("workspace", isDirectory: true)
-        let pluginRoot = root.appendingPathComponent("plugins", isDirectory: true)
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: pluginRoot, withIntermediateDirectories: true)
+        let shellHome = root.appendingPathComponent("home", isDirectory: true)
 
         let externalFile = URL(fileURLWithPath: "/private/tmp/TurboCode-BashApproval-\(UUID().uuidString).txt")
         defer {
@@ -176,8 +184,8 @@ struct BashToolTests {
         let approvals = ApprovalCounter()
         let tool = BashTool(
             workspaceRoot: workspace.path,
-            pluginRoot: pluginRoot.path,
             sdkRoot: root.appendingPathComponent("sdk", isDirectory: true).path,
+            homeDirectory: shellHome.path,
             requestApproval: { request in
                 await approvals.increment()
                 return await request.action()

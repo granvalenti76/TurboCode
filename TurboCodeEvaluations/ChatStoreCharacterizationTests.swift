@@ -6,6 +6,20 @@ import Testing
 @MainActor
 @Suite("ChatStore characterization")
 struct ChatStoreCharacterizationTests {
+    @Test("External approvals identify the tool and exact targets")
+    func externalApprovalPresentationIsSpecific() {
+        let request = ApprovalRequest(
+            id: "external",
+            operation: "workspace.external.file_system.write",
+            path: "/tmp/source.txt",
+            destination: "/tmp/destination.txt",
+            summary: "External write"
+        )
+
+        #expect(request.displaySummary == "Allow file system to write outside the active workspace?")
+        #expect(request.externalTargetDetails == "/tmp/source.txt\n/tmp/destination.txt")
+    }
+
     @Test("Approval requests are presented once in FIFO order")
     func approvalQueueIsFIFOAndDeduplicated() {
         let store = ChatStore(

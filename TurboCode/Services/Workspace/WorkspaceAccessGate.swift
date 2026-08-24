@@ -29,6 +29,41 @@ actor WorkspaceAccessGate {
 
     private static let granted = "TURBOCODE_HOST_ACCESS_GRANTED"
 
+    /// Suspends one explicit external filesystem operation and executes it only
+    /// after approval. Targets are re-resolved immediately before execution so
+    /// a symlink cannot be redirected while the user is reviewing the request.
+    func performExternalOperation(
+        tool: String,
+        operation: WorkspaceAccessOperation,
+        workspaceRoot: String,
+        targets: [ResolvedWorkspacePath],
+        command: String? = nil,
+        requestApproval: @Sendable (PendingToolApproval) async -> String = {
+            await ToolApprovalRegistry.shared.request($0)
+        },
+        action: @escaping @Sendable () async -> String
+    ) async -> String {
+        let workspace = Self.canonical(URL(fileURLWithPath: workspaceRoot)).path
+        let paths = targets.map(\.url.path)
+        let targetDescription = paths.joined(separator: "\n")
+        let summary = "Allow \(tool) to \(operation.rawValue) outside the active workspace?\nWorkspace: \(workspace)\nTarget: \(targetDescription)"
+        let request = PendingToolApproval(
+            id: UUID().uuidString,
+            operation: "workspace.external.\(tool).\(operation.rawValue)",
+            path: paths.first ?? targetDescription,
+            destination: paths.dropFirst().first,
+            summary: summary,
+            command: command,
+            action: {
+                guard targets.allSatisfy(WorkspacePathResolver.isUnchanged) else {
+                    return "Error: \(WorkspaceAccessGateError.targetChanged.localizedDescription)"
+                }
+                return await action()
+            }
+        )
+        return await requestApproval(request)
+    }
+
     func authorizeExternalExecution(
         tool: String,
         workspaceRoot: String,

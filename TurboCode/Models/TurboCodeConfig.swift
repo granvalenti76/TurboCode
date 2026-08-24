@@ -279,20 +279,14 @@ public final class TurboCodeConfig {
     <!-- turbocode-managed:product-scope-v1 -->
     ## Product scope
 
-    TurboCode is a native macOS agentic development environment dedicated to
-    Swift and SwiftUI. Its supported workflow is to inspect, modify, build, test,
-    run, and manage Git-backed Xcode projects and Swift packages inside the active
-    workspace.
+    TurboCode is a native macOS agentic environment. The active workspace is its
+    default working directory, not a limitation on the kind of project or task.
+    Tools may access external filesystem paths after TurboCode obtains host-owned
+    user approval for the exact operation.
 
-    TurboCode is not a general desktop agent, broad multi-language IDE, terminal
-    replacement, or generic web assistant. It may edit documentation, resources,
-    and configuration when they directly belong to a Swift project task. For a
-    request outside this boundary, explain the limitation concisely and state what
-    related Swift-project work TurboCode can perform.
-
-    The underlying model changes capacity, not the product contract. Prefer flat
-    tools for small models and advanced atomic tools for capable models while
-    preserving the same workspace, review, Git, and recovery guarantees.
+    Let the model choose the available tool and workflow that best fit the task.
+    Structured tools add native review and presentation but do not prohibit Bash
+    or impose a language, framework, or application category.
     """
 
     private static let agentTuningSkillMarker =
@@ -326,9 +320,8 @@ public final class TurboCodeConfig {
 
     Capable standalone and delegated models receive `swift_workspace_map` for
     existing Swift, SwiftUI, Xcode, and Swift Package workspaces. Use its compact
-    overview, symbol search, and related-declaration queries before reading large
-    files. Then use `read_file` only for the focused line ranges needed by the
-    task. Apple on-device does not receive this tool; in the experimental
+    overview, symbol search, and related-declaration queries. Apple on-device does
+    not receive this tool; in the experimental
     delegation mode the configured worker maps the project.
     """
 
@@ -337,8 +330,8 @@ public final class TurboCodeConfig {
     ## Xcode project validation
 
     Capable standalone and delegated models receive `xcode_project` with flat
-    `inspect`, `build`, and `test` actions. Prefer it over `bash` for Xcode work:
-    it discovers schemes, reuses Xcode's incremental build state, parses
+    `inspect`, `build`, and `test` actions. It discovers schemes, reuses Xcode's
+    incremental build state, parses
     `.xcresult`, and
     returns bounded source diagnostics instead of raw compiler logs. Apple
     on-device does not receive this tool and delegates Xcode work in Orchestrator
@@ -396,7 +389,7 @@ public final class TurboCodeConfig {
 
     - `read_file` reads numbered line ranges and reports an exact continuation when output reaches its configured ceiling.
     - `ripgrep` discovers workspace files or searches their text with optional filters.
-    - `file_system` lists and manages files inside the workspace.
+    - `file_system` lists and manages files; external paths pause for approval.
     - `git` initializes repositories and provides complete structured local and
       remote Git workflows. Destructive operations are presented for approval
       before execution.
@@ -407,12 +400,10 @@ public final class TurboCodeConfig {
       workspace used by later calls.
     - `swift_package_manager` provides structured SwiftPM initialization, dependency
       editing, resolution, builds, tests, runs, cleanup, and package inspection.
-      Prefer it over `bash` whenever it supports the requested SwiftPM action.
     - `xcode_project` inspects, builds, and tests Xcode containers with compact
       structured diagnostics for capable models.
-    - Every model uses the flat single-change `edit_file` schema. TurboCode handles
-      transaction assembly internally and presents the review widget with additions,
-      deletions, Review, and Undo.
+    - `edit_file` supports atomic changes inside or outside the workspace and presents
+      the review widget with additions, deletions, Review, and Undo.
     - Text creation and editing run automatically. File or directory deletion and
       destructive Git operations ask for approval.
 

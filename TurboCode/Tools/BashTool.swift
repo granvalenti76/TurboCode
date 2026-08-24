@@ -21,8 +21,8 @@ struct BashTool: Tool {
     let workspaceRoot: String
     let executionPolicy: ExecutionPolicy
     let taskScope: AgentTaskPathScope?
-    private let pluginRoot: String
     private let sdkRoot: String
+    private let homeDirectory: String
     private let requestApproval: @Sendable (PendingToolApproval) async -> String
     private let service = BashService()
 
@@ -30,12 +30,11 @@ struct BashTool: Tool {
         workspaceRoot: String,
         executionPolicy: ExecutionPolicy = ExecutionPolicy(),
         taskScope: AgentTaskPathScope? = nil,
-        // Bash runs from non-main-actor workers too; derive the same canonical
-        // locations without touching the MainActor-isolated configuration object.
-        pluginRoot: String = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".turbocode/plugins", isDirectory: true).path,
         sdkRoot: String = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".turbocode/sdk", isDirectory: true).path,
+        // Production uses the real home so `~` keeps its normal shell meaning.
+        // Tests may inject a disposable home without changing runtime behavior.
+        homeDirectory: String = FileManager.default.homeDirectoryForCurrentUser.path,
         requestApproval: @escaping @Sendable (PendingToolApproval) async -> String = {
             await ToolApprovalRegistry.shared.request($0)
         }
@@ -43,8 +42,8 @@ struct BashTool: Tool {
         self.workspaceRoot = workspaceRoot
         self.executionPolicy = executionPolicy
         self.taskScope = taskScope
-        self.pluginRoot = pluginRoot
         self.sdkRoot = sdkRoot
+        self.homeDirectory = homeDirectory
         self.requestApproval = requestApproval
     }
 
@@ -53,8 +52,8 @@ struct BashTool: Tool {
             workspaceRoot: workspaceRoot,
             executionPolicy: executionPolicy,
             taskScope: scope,
-            pluginRoot: pluginRoot,
             sdkRoot: sdkRoot,
+            homeDirectory: homeDirectory,
             requestApproval: requestApproval
         )
     }
@@ -62,11 +61,8 @@ struct BashTool: Tool {
     var name: String { "bash" }
     var description: String {
         """
-        Run a zsh command from the workspace root. Use list_workspace (Browse
-        Directory) for directory listings, read_file for focused file ranges,
-        and edit_file for source or text changes. Use git for every Git
-        operation. Check pwd before any
-        destructive relative command.
+        Run any zsh command from the workspace root. Check pwd before destructive
+        relative commands.
         If the host sandbox blocks an external path, TurboCode asks the user and
         reruns this exact command after approval; never invent an approval token.
         Output and execution time are bounded.
@@ -75,9 +71,6 @@ struct BashTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: BashArguments) async throws -> String {
-        if let taskScope, !taskScope.isWorkspaceWide {
-            return "Error: bash requires an entire-workspace task scope because command paths cannot be safely narrowed."
-        }
         let command = arguments.command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !command.isEmpty else {
             return "Error: command cannot be empty."
@@ -98,8 +91,8 @@ struct BashTool: Tool {
             timeoutSeconds: timeout,
             outputLimit: outputLimit,
             allowNetworkAccess: executionPolicy.allowNetworkAccess,
-            pluginRoot: pluginRoot,
             sdkRoot: sdkRoot,
+            homeDirectory: homeDirectory,
             requestApproval: requestApproval
         )
     }
@@ -114,8 +107,8 @@ private actor BashService {
         timeoutSeconds: Int,
         outputLimit: Int,
         allowNetworkAccess: Bool,
-        pluginRoot: String,
         sdkRoot: String,
+        homeDirectory: String,
         requestApproval: @Sendable (PendingToolApproval) async -> String
     ) async -> String {
         // Seatbelt makes the first decision. Only its denial can open a host-owned
@@ -126,8 +119,8 @@ private actor BashService {
             timeoutSeconds: timeoutSeconds,
             outputLimit: outputLimit,
             allowNetworkAccess: allowNetworkAccess,
-            pluginRoot: pluginRoot,
             sdkRoot: sdkRoot,
+            homeDirectory: homeDirectory,
             allowExternalAccess: false
         )
         guard Self.isSandboxDenial(result) else { return result }
@@ -148,8 +141,8 @@ private actor BashService {
             timeoutSeconds: timeoutSeconds,
             outputLimit: outputLimit,
             allowNetworkAccess: allowNetworkAccess,
-            pluginRoot: pluginRoot,
             sdkRoot: sdkRoot,
+            homeDirectory: homeDirectory,
             allowExternalAccess: true
         )
     }
@@ -160,8 +153,8 @@ private actor BashService {
         timeoutSeconds: Int,
         outputLimit: Int,
         allowNetworkAccess: Bool,
-        pluginRoot: String,
         sdkRoot: String,
+        homeDirectory: String,
         allowExternalAccess: Bool
     ) -> String {
         let resolvedWorkspace = try? WorkspacePathResolver.resolve(".", within: workspaceRoot)
@@ -171,26 +164,10 @@ private actor BashService {
             .appendingPathComponent("TurboCode-Bash-\(UUID().uuidString)", isDirectory: true)
         let stdoutURL = outputDirectory.appendingPathComponent("stdout.txt")
         let stderrURL = outputDirectory.appendingPathComponent("stderr.txt")
-        let binDirectory = outputDirectory.appendingPathComponent("bin", isDirectory: true)
-        let homeDirectory = outputDirectory.appendingPathComponent("home", isDirectory: true)
-        let turboCodeDirectory = homeDirectory
-            .appendingPathComponent(".turbocode", isDirectory: true)
-        let pluginDirectory = turboCodeDirectory
-            .appendingPathComponent("plugins", isDirectory: true)
+        let shellHome = URL(fileURLWithPath: homeDirectory, isDirectory: true)
 
         do {
             try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
-            try FileManager.default.createDirectory(at: binDirectory, withIntermediateDirectories: true)
-            try FileManager.default.createDirectory(at: homeDirectory, withIntermediateDirectories: true)
-            try FileManager.default.createDirectory(at: turboCodeDirectory, withIntermediateDirectories: true)
-            // Bash keeps an isolated HOME, but plugin instructions use the normal
-            // user-facing path. Map only that path to the canonical installation
-            // root without exposing the rest of the real home directory.
-            try FileManager.default.createSymbolicLink(
-                at: pluginDirectory,
-                withDestinationURL: URL(fileURLWithPath: pluginRoot, isDirectory: true)
-            )
-            try installSwiftWrapper(in: binDirectory)
             FileManager.default.createFile(atPath: stdoutURL.path, contents: nil)
             FileManager.default.createFile(atPath: stderrURL.path, contents: nil)
         } catch {
@@ -244,11 +221,10 @@ private actor BashService {
         process.currentDirectoryURL = workingDirectoryURL
         var commandEnvironment = ProcessInfo.processInfo.environment.merging([
             "TMPDIR": outputDirectory.path,
-            "HOME": homeDirectory.path,
-            "XDG_CACHE_HOME": homeDirectory.appendingPathComponent(".cache").path,
+            "HOME": shellHome.path,
+            "XDG_CACHE_HOME": outputDirectory.appendingPathComponent("cache").path,
             "TURBOCODE_SDK_PACKAGE": sdkPackage,
-            "PATH": "\(binDirectory.path):\(commandPath)",
-            "GIT_CONFIG_GLOBAL": "/dev/null"
+            "PATH": commandPath
         ]) { _, new in new }
         // Let zsh derive PWD from currentDirectoryURL. The SDK package is the
         // only public TurboCode locator; strip legacy variables even when the
@@ -332,44 +308,6 @@ private actor BashService {
             atPath: url.path,
             isDirectory: &isDirectory
         ) && isDirectory.boolValue
-    }
-
-    private func installSwiftWrapper(in directory: URL) throws {
-        let url = directory.appendingPathComponent("swift")
-        let script = """
-        #!/bin/zsh
-        has_argument() {
-          local target="$1"
-          shift
-          for argument in "$@"; do
-            if [[ "$argument" == "$target" || "$argument" == "$target="* ]]; then
-              return 0
-            fi
-          done
-          return 1
-        }
-
-        case "$1" in
-          build|test|run|package)
-            subcommand="$1"
-            shift
-            injected_arguments=()
-            has_argument --disable-sandbox "$@" || injected_arguments+=(--disable-sandbox)
-            has_argument --cache-path "$@" || injected_arguments+=(--cache-path "$HOME/.swiftpm/cache")
-            has_argument --config-path "$@" || injected_arguments+=(--config-path "$HOME/.swiftpm/configuration")
-            has_argument --security-path "$@" || injected_arguments+=(--security-path "$HOME/.swiftpm/security")
-            exec /usr/bin/swift "$subcommand" "${injected_arguments[@]}" "$@"
-            ;;
-          *)
-            exec /usr/bin/swift "$@"
-            ;;
-        esac
-        """
-        try script.write(to: url, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755],
-            ofItemAtPath: url.path
-        )
     }
 
     private func sandboxProfile(

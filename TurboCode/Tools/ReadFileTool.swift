@@ -25,29 +25,36 @@ struct ReadFileTool: Tool {
     let workspaceRoot: String
     let executionPolicy: ExecutionPolicy
     let taskScope: AgentTaskPathScope?
+    private let requestApproval: @Sendable (PendingToolApproval) async -> String
 
     init(
         workspaceRoot: String,
         executionPolicy: ExecutionPolicy = ExecutionPolicy(),
-        taskScope: AgentTaskPathScope? = nil
+        taskScope: AgentTaskPathScope? = nil,
+        requestApproval: @escaping @Sendable (PendingToolApproval) async -> String = {
+            await ToolApprovalRegistry.shared.request($0)
+        }
     ) {
         self.workspaceRoot = workspaceRoot
         self.executionPolicy = executionPolicy
         self.taskScope = taskScope
+        self.requestApproval = requestApproval
     }
 
     func restricted(to scope: AgentTaskPathScope) -> Self {
         Self(
             workspaceRoot: workspaceRoot,
             executionPolicy: executionPolicy,
-            taskScope: scope
+            taskScope: scope,
+            requestApproval: requestApproval
         )
     }
 
     var name: String { "read_file" }
     var description: String {
         """
-        Read all or a precise inclusive line range from a UTF-8 text file in the workspace.
+        Read all or a precise inclusive line range from a UTF-8 text file. Paths outside
+        the active workspace are available after host approval.
         Every returned source line is prefixed with its one-based line number, and the
         response reports a stable content revision, selected range, total line count, and
         approximate token cost. Large results stop on a line boundary and report the next
@@ -57,18 +64,33 @@ struct ReadFileTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: ReadFileArguments) async throws -> String {
+        let target: ResolvedWorkspacePath
         do {
-            try taskScope?.validate(arguments.filePath)
-        } catch {
-            return "Error: \(error.localizedDescription)"
-        }
-        let fileURL: URL
-        do {
-            fileURL = try WorkspacePathResolver.resolve(arguments.filePath, within: workspaceRoot)
+            target = try WorkspacePathResolver.resolveForAccess(
+                arguments.filePath,
+                within: workspaceRoot
+            )
         } catch {
             return "Error: \(error.localizedDescription)"
         }
 
+        if target.isInsideWorkspace {
+            return read(arguments: arguments, fileURL: target.url)
+        }
+
+        return await WorkspaceAccessGate.shared.performExternalOperation(
+            tool: name,
+            operation: .read,
+            workspaceRoot: workspaceRoot,
+            targets: [target],
+            requestApproval: requestApproval,
+            action: { [self] in
+                read(arguments: arguments, fileURL: target.url)
+            }
+        )
+    }
+
+    private func read(arguments: ReadFileArguments, fileURL: URL) -> String {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory),
               !isDirectory.boolValue,

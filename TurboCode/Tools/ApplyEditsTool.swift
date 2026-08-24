@@ -60,23 +60,32 @@ struct ApplyEditsTool: Tool {
     let workspaceRoot: String
     let reportsChanges: Bool
     let taskScope: AgentTaskPathScope?
+    private let requestApproval: @Sendable (PendingToolApproval) async -> String
+    private let preauthorizedExternalPaths: Set<String>
     private let editService = ApplyEditsService()
     private let patchService = DiffPatchService()
 
     init(
         workspaceRoot: String,
         reportsChanges: Bool = true,
-        taskScope: AgentTaskPathScope? = nil
+        taskScope: AgentTaskPathScope? = nil,
+        preauthorizedExternalPaths: Set<String> = [],
+        requestApproval: @escaping @Sendable (PendingToolApproval) async -> String = {
+            await ToolApprovalRegistry.shared.request($0)
+        }
     ) {
         self.workspaceRoot = workspaceRoot
         self.reportsChanges = reportsChanges
         self.taskScope = taskScope
+        self.preauthorizedExternalPaths = preauthorizedExternalPaths
+        self.requestApproval = requestApproval
     }
 
     var name: String { "apply_edits" }
     var description: String {
         """
-        Atomically create or edit UTF-8 text files in the active workspace. First use read_file
+        Atomically create or edit UTF-8 text files. Paths outside the active workspace
+        are available after host approval. First use read_file
         to obtain current line numbers and the file revision. For existing files, provide
         that revision and use replace_lines, insert_before, insert_after, or delete_lines.
         All line numbers refer to the same original revision; TurboCode handles ordering,
@@ -90,16 +99,66 @@ struct ApplyEditsTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: ApplyEditsArguments) async throws -> String {
+        let targets: [ResolvedWorkspacePath]
+        do {
+            targets = try arguments.files.map {
+                try WorkspacePathResolver.resolveForAccess(
+                    $0.filePath,
+                    within: workspaceRoot
+                )
+            }
+        } catch {
+            return "Edit transaction rejected: \(error.localizedDescription)"
+        }
+
+        let externalTargets = targets.filter {
+            !$0.isInsideWorkspace
+                && !preauthorizedExternalPaths.contains($0.url.path)
+        }
+        let transactionRoot = WorkspacePathResolver.transactionRoot(
+            workspaceRoot: workspaceRoot,
+            targets: targets
+        )
+        if !externalTargets.isEmpty {
+            return await WorkspaceAccessGate.shared.performExternalOperation(
+                tool: name,
+                operation: .write,
+                workspaceRoot: workspaceRoot,
+                targets: externalTargets,
+                requestApproval: requestApproval,
+                action: { [self] in
+                    await apply(
+                        arguments: arguments,
+                        targets: targets,
+                        transactionRoot: transactionRoot
+                    )
+                }
+            )
+        }
+        return await apply(
+            arguments: arguments,
+            targets: targets,
+            transactionRoot: transactionRoot
+        )
+    }
+
+    private func apply(
+        arguments: ApplyEditsArguments,
+        targets: [ResolvedWorkspacePath],
+        transactionRoot: String
+    ) async -> String {
         let transactionID = UUID().uuidString
         let prepared: PreparedChangeTransaction
         do {
-            // Validate the complete atomic transaction before preparing a diff;
-            // one out-of-scope file rejects the whole edit.
-            for request in arguments.files {
-                try taskScope?.validate(request.filePath)
-            }
-            prepared = try await editService.prepare(arguments: arguments, workspaceRoot: workspaceRoot)
-            try await patchService.check(patch: prepared.patch, workspaceRoot: workspaceRoot)
+            prepared = try await editService.prepare(
+                arguments: arguments,
+                targets: targets,
+                transactionRoot: transactionRoot
+            )
+            try await patchService.check(
+                patch: prepared.patch,
+                workspaceRoot: transactionRoot
+            )
         } catch {
             if case DiffPatchError.revisionConflict(let path) = error {
                 // A stable machine prefix lets the bounded runner classify the
@@ -121,13 +180,17 @@ struct ApplyEditsTool: Tool {
                     patch: prepared.patch,
                     files: prepared.files,
                     reviewFiles: prepared.reviewFiles,
+                    workspaceRoot: transactionRoot,
                     status: .running
                 )
             }
         }
 
         do {
-            try await patchService.apply(patch: prepared.patch, workspaceRoot: workspaceRoot)
+            try await patchService.apply(
+                patch: prepared.patch,
+                workspaceRoot: transactionRoot
+            )
             if reportsChanges {
                 await MainActor.run {
                     ChatStore.shared?.updateDiffPatchBlock(id: transactionID, status: .applied)
@@ -158,29 +221,36 @@ struct EditFileTool: Tool {
     let workspaceRoot: String
     let reportsChanges: Bool
     let taskScope: AgentTaskPathScope?
+    private let requestApproval: @Sendable (PendingToolApproval) async -> String
 
     init(
         workspaceRoot: String,
         reportsChanges: Bool = true,
-        taskScope: AgentTaskPathScope? = nil
+        taskScope: AgentTaskPathScope? = nil,
+        requestApproval: @escaping @Sendable (PendingToolApproval) async -> String = {
+            await ToolApprovalRegistry.shared.request($0)
+        }
     ) {
         self.workspaceRoot = workspaceRoot
         self.reportsChanges = reportsChanges
         self.taskScope = taskScope
+        self.requestApproval = requestApproval
     }
 
     func restricted(to scope: AgentTaskPathScope) -> Self {
         Self(
             workspaceRoot: workspaceRoot,
             reportsChanges: reportsChanges,
-            taskScope: scope
+            taskScope: scope,
+            requestApproval: requestApproval
         )
     }
 
     var name: String { "edit_file" }
     var description: String {
         """
-        Apply one atomic change to one UTF-8 text file. Read the relevant range with
+        Apply one atomic change to one UTF-8 text file. External paths are available
+        after host approval. Read the relevant range with
         read_file immediately before editing and copy its Revision exactly. Choose one
         operation. For replace_lines and delete_lines, startLine and endLine are the
         inclusive one-based range. For insert_before or insert_after, set both line
@@ -196,11 +266,6 @@ struct EditFileTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: EditFileArguments) async throws -> String {
-        do {
-            try taskScope?.validate(arguments.filePath)
-        } catch {
-            return "Edit transaction rejected: \(error.localizedDescription)"
-        }
         let usesLineRange = !["create", "replace_file"].contains(arguments.operation)
         let operation = LineEditOperation(
             operation: arguments.operation,
@@ -216,7 +281,8 @@ struct EditFileTool: Tool {
         return try await ApplyEditsTool(
             workspaceRoot: workspaceRoot,
             reportsChanges: reportsChanges,
-            taskScope: taskScope
+            taskScope: taskScope,
+            requestApproval: requestApproval
         ).call(
             arguments: ApplyEditsArguments(files: [request])
         )
@@ -224,6 +290,7 @@ struct EditFileTool: Tool {
 }
 
 struct PreparedChangeTransaction: Sendable {
+    let workspaceRoot: String
     let patch: String
     let files: [DiffPatchFileChange]
     let reviewFiles: [DiffReviewFileSnapshot]
@@ -238,16 +305,48 @@ private struct PreparedLineEdit {
 }
 
 actor ApplyEditsService {
-    func prepare(arguments: ApplyEditsArguments, workspaceRoot: String) throws -> PreparedChangeTransaction {
+    /// Compatibility entry point for workspace-only callers and focused tests.
+    /// Tool execution uses the resolved-target overload so external grants can
+    /// retain the exact canonical paths reviewed by the user.
+    func prepare(
+        arguments: ApplyEditsArguments,
+        workspaceRoot: String
+    ) throws -> PreparedChangeTransaction {
+        let targets = try arguments.files.map {
+            try WorkspacePathResolver.resolveForAccess(
+                $0.filePath,
+                within: workspaceRoot
+            )
+        }
+        guard targets.allSatisfy(\.isInsideWorkspace) else {
+            throw DiffPatchError.unsafePath(
+                targets.first(where: { !$0.isInsideWorkspace })?.url.path ?? workspaceRoot
+            )
+        }
+        return try prepare(
+            arguments: arguments,
+            targets: targets,
+            transactionRoot: workspaceRoot
+        )
+    }
+
+    func prepare(
+        arguments: ApplyEditsArguments,
+        targets: [ResolvedWorkspacePath],
+        transactionRoot: String
+    ) throws -> PreparedChangeTransaction {
         guard !arguments.files.isEmpty else {
             throw DiffPatchError.invalidEdit("No files were provided.")
+        }
+        guard arguments.files.count == targets.count else {
+            throw DiffPatchError.invalidEdit("The resolved edit targets changed before preparation.")
         }
 
         var seenPaths = Set<String>()
         var changes: [(path: String, old: String?, new: String)] = []
-        for request in arguments.files {
-            let url = try WorkspacePathResolver.resolve(request.filePath, within: workspaceRoot)
-            let relativePath = try relativePath(for: url, workspaceRoot: workspaceRoot)
+        for (request, target) in zip(arguments.files, targets) {
+            let url = target.url
+            let relativePath = try relativePath(for: url, workspaceRoot: transactionRoot)
             guard seenPaths.insert(relativePath).inserted else {
                 throw DiffPatchError.invalidEdit("File '\(relativePath)' appears more than once in the transaction.")
             }
@@ -289,7 +388,7 @@ actor ApplyEditsService {
         }
 
         let patch = try makePatch(changes: changes)
-        let files = try DiffPatchParser.parse(patch, workspaceRoot: workspaceRoot)
+        let files = try DiffPatchParser.parse(patch, workspaceRoot: transactionRoot)
         let reviewFiles = changes.map { change in
             DiffReviewFileSnapshot(
                 path: change.path,
@@ -298,6 +397,7 @@ actor ApplyEditsService {
             )
         }
         return PreparedChangeTransaction(
+            workspaceRoot: transactionRoot,
             patch: patch,
             files: files,
             reviewFiles: reviewFiles

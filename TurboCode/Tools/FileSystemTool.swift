@@ -54,7 +54,7 @@ struct FileSystemArguments {
 // MARK: - Tool
 
 /// Performs file system operations on the local machine using Foundation APIs.
-/// All paths are validated against the workspace root for safety.
+/// External targets cross the shared host-owned approval ring before execution.
 struct FileSystemTool: Tool {
     typealias Arguments = FileSystemArguments
     typealias Output = String
@@ -86,12 +86,10 @@ struct FileSystemTool: Tool {
     var name: String { "file_system" }
     var description: String {
         """
-        Perform file system operations on the workspace.
-        For directory listings always use the dedicated list_workspace tool,
-        which returns structured metadata for TurboCode's native timeline UI.
-        The list operation below remains available for compatibility only.
+        Perform file system operations on workspace or absolute paths. Operations
+        outside the active workspace continue after host approval.
         Supported operations:
-        - list: Compatibility directory listing; prefer list_workspace
+        - list: List directory contents
         - info: Get file metadata (size, dates, type)
         - find: Search for files matching a pattern
         - createDirectory: Create a new directory (parent directories are created automatically)
@@ -106,11 +104,6 @@ struct FileSystemTool: Tool {
         For articles, biographies, documentation, and other long-form prose, preserve
         readable paragraphs separated by blank lines. Never write the whole document
         as one long line.
-        Prefer read_file for numbered source ranges and the active structured editor
-        for existing source and text files in Git workspaces. Use git for every Git
-        operation, swift_package_manager for Swift package work, and bash only for
-        builds, tests, or read-only inspection without a dedicated structured tool.
-        All paths must be within the workspace root.
         """
     }
     var includesSchemaInInstructions: Bool { true }
@@ -121,10 +114,11 @@ struct FileSystemTool: Tool {
             return "Error: Unknown operation '\(arguments.operation)'. Valid: \(FileOperation.allCases.map(\.rawValue).joined(separator: ", "))"
         }
 
-        // 2. Resolve paths (relative paths are resolved against workspaceRoot)
-        let resolvedPath: String
+        // Relative paths start at the active workspace; absolute paths keep
+        // their normal filesystem meaning and cross the approval ring if needed.
+        let source: ResolvedWorkspacePath
         do {
-            resolvedPath = try resolveAndValidatePath(
+            source = try resolveTarget(
                 arguments.path,
                 allowingWorkspaceRoot: operation.allowsWorkspaceRoot
             )
@@ -132,59 +126,143 @@ struct FileSystemTool: Tool {
             return "Error: \(error.localizedDescription)"
         }
 
-        var resolvedDest: String?
+        var destination: ResolvedWorkspacePath?
         if let dest = arguments.destination, (operation == .copy || operation == .move) {
             do {
-                resolvedDest = try resolveAndValidatePath(dest, allowingWorkspaceRoot: false)
+                destination = try resolveTarget(dest, allowingWorkspaceRoot: false)
             } catch {
                 return "Error: \(error.localizedDescription)"
             }
         }
 
-        // 3. Execute
+        if operation == .write || operation == .append {
+            guard let content = arguments.content else {
+                return "Error: 'content' is required for \(operation.rawValue)."
+            }
+            if !source.isInsideWorkspace {
+                return await WorkspaceAccessGate.shared.performExternalOperation(
+                    tool: name,
+                    operation: .write,
+                    workspaceRoot: workspaceRoot,
+                    targets: [source],
+                    requestApproval: requestApproval,
+                    action: { [self] in
+                        do {
+                            return try await applyTextChange(
+                                path: source.url.path,
+                                content: content,
+                                append: operation == .append,
+                                preauthorizedExternalPaths: [source.url.path]
+                            )
+                        } catch {
+                            return "Error: \(error.localizedDescription)"
+                        }
+                    }
+                )
+            }
+            return try await applyTextChange(
+                path: source.url.path,
+                content: content,
+                append: operation == .append,
+                preauthorizedExternalPaths: []
+            )
+        }
+
+        let resolvedDestination = destination
+        let targets = [source, resolvedDestination].compactMap { $0 }
+        if targets.contains(where: { !$0.isInsideWorkspace }) {
+            // Destructive actions retain change detection while using the
+            // external ring as their single approval instead of stacking gates.
+            let expectedSnapshots = operation == .move || operation == .delete
+                ? targets.map { fileSnapshot(at: $0.url.path) }
+                : nil
+            return await WorkspaceAccessGate.shared.performExternalOperation(
+                tool: name,
+                operation: accessOperation(for: operation),
+                workspaceRoot: workspaceRoot,
+                targets: targets,
+                requestApproval: requestApproval,
+                action: { [self] in
+                    if let expectedSnapshots,
+                       zip(targets, expectedSnapshots).contains(where: {
+                           fileSnapshot(at: $0.0.url.path) != $0.1
+                       }) {
+                        return "Error: The destructive target changed before approval."
+                    }
+                    return await executeResolved(
+                        operation: operation,
+                        path: source.url.path,
+                        destination: resolvedDestination?.url.path,
+                        pattern: arguments.pattern,
+                        bypassDestructiveApproval: true
+                    )
+                }
+            )
+        }
+
+        return await executeResolved(
+            operation: operation,
+            path: source.url.path,
+            destination: resolvedDestination?.url.path,
+            pattern: arguments.pattern,
+            bypassDestructiveApproval: false
+        )
+    }
+
+    private func executeResolved(
+        operation: FileOperation,
+        path: String,
+        destination: String?,
+        pattern: String?,
+        bypassDestructiveApproval: Bool
+    ) async -> String {
         switch operation {
-        case .list:              return listDirectory(at: resolvedPath)
-        case .info:              return fileInfo(at: resolvedPath)
-        case .find:              return await findFiles(in: resolvedPath, pattern: arguments.pattern)
-        case .createDirectory:   return await execute(operation: .createDirectory, path: resolvedPath, destination: nil, content: nil)
-        case .write:
-            guard let content = arguments.content else { return "Error: 'content' is required for write." }
-            return try await applyTextChange(path: resolvedPath, content: content, append: false)
-        case .append:
-            guard let content = arguments.content else { return "Error: 'content' is required for append." }
-            return try await applyTextChange(path: resolvedPath, content: content, append: true)
+        case .list: return listDirectory(at: path)
+        case .info: return fileInfo(at: path)
+        case .find: return await findFiles(in: path, pattern: pattern)
+        case .createDirectory:
+            return await execute(
+                operation: .createDirectory,
+                path: path,
+                destination: nil,
+                content: nil
+            )
+        case .write, .append:
+            return "Error: Text mutations must use the atomic edit path."
         case .copy:
-            guard let dest = resolvedDest else { return "Error: 'destination' is required for copy." }
-            return await execute(operation: .copy, path: resolvedPath, destination: dest, content: nil)
+            guard let destination else { return "Error: 'destination' is required for copy." }
+            return await execute(operation: .copy, path: path, destination: destination, content: nil)
         case .move:
-            guard let dest = resolvedDest else { return "Error: 'destination' is required for move." }
+            guard let destination else { return "Error: 'destination' is required for move." }
+            if bypassDestructiveApproval {
+                return await execute(operation: .move, path: path, destination: destination, content: nil)
+            }
             return await requestMoveApproval(
-                path: resolvedPath,
-                destination: dest,
-                requestedPath: arguments.path,
-                requestedDestination: arguments.destination ?? ""
+                path: path,
+                destination: destination,
+                requestedPath: path,
+                requestedDestination: destination
             )
         case .delete:
+            if bypassDestructiveApproval {
+                return await execute(operation: .delete, path: path, destination: nil, content: nil)
+            }
             return await requestDeletionApproval(
-                path: resolvedPath,
-                requestedPath: arguments.path
+                path: path,
+                requestedPath: path
             )
         }
     }
 
     // MARK: - Path Resolution & Validation
 
-    /// Resolves a potentially relative path against the workspace root,
-    /// then validates it's within the workspace boundary.
+    /// Re-resolves a workspace path immediately before a destructive action.
     /// Returns the resolved absolute path on success, throws on error.
     private func resolveAndValidatePath(
         _ path: String,
         allowingWorkspaceRoot: Bool
     ) throws -> String {
-        // Canonicalize before applying the delegated scope so both checks
-        // reason about the same symlink-resolved path.
         let resolvedPath = try WorkspacePathResolver.resolve(path, within: workspaceRoot).path
-        try taskScope?.validate(resolvedPath)
 
         if !allowingWorkspaceRoot {
             let workspacePath = try WorkspacePathResolver.resolve(".", within: workspaceRoot).path
@@ -193,6 +271,34 @@ struct FileSystemTool: Tool {
             }
         }
         return resolvedPath
+    }
+
+    private func resolveTarget(
+        _ path: String,
+        allowingWorkspaceRoot: Bool
+    ) throws -> ResolvedWorkspacePath {
+        let target = try WorkspacePathResolver.resolveForAccess(
+            path,
+            within: workspaceRoot
+        )
+        if !allowingWorkspaceRoot,
+           target.isInsideWorkspace,
+           target.url.path == URL(fileURLWithPath: workspaceRoot)
+            .standardizedFileURL.resolvingSymlinksInPath().path {
+            throw FileSystemError.workspaceRootMutation
+        }
+        return target
+    }
+
+    private func accessOperation(for operation: FileOperation) -> WorkspaceAccessOperation {
+        switch operation {
+        case .list, .info, .find:
+            .read
+        case .createDirectory, .write, .append, .copy:
+            .write
+        case .move, .delete:
+            .destructive
+        }
     }
 
     // MARK: - Safe Operations
@@ -368,7 +474,12 @@ struct FileSystemTool: Tool {
 
     // MARK: - Transactional Text Changes
 
-    private func applyTextChange(path: String, content: String, append: Bool) async throws -> String {
+    private func applyTextChange(
+        path: String,
+        content: String,
+        append: Bool,
+        preauthorizedExternalPaths: Set<String>
+    ) async throws -> String {
         let exists = FileManager.default.fileExists(atPath: path)
         if append && !exists {
             return "Error: File not found at '\(path)'. Use 'write' to create a new file."
@@ -405,7 +516,11 @@ struct FileSystemTool: Tool {
             revision: revision,
             operations: [operation]
         )
-        return try await ApplyEditsTool(workspaceRoot: workspaceRoot).call(
+        return try await ApplyEditsTool(
+            workspaceRoot: workspaceRoot,
+            preauthorizedExternalPaths: preauthorizedExternalPaths,
+            requestApproval: requestApproval
+        ).call(
             arguments: ApplyEditsArguments(files: [request])
         )
     }
@@ -680,11 +795,30 @@ private struct FileSnapshot: Sendable, Equatable {
 
 // MARK: - Shared Workspace Path Validation
 
-/// Resolves relative and absolute paths while enforcing a strict workspace
-/// boundary. Both the workspace and candidate are symlink-resolved so a link
-/// inside the workspace cannot be used to access files outside it.
+/// A canonical filesystem target together with the unresolved URL needed to
+/// detect symlink retargeting while an external approval is pending.
+nonisolated struct ResolvedWorkspacePath: Sendable, Equatable {
+    let requestedURL: URL
+    let url: URL
+    let isInsideWorkspace: Bool
+}
+
+/// Resolves relative and absolute paths. Callers that are strictly
+/// workspace-bound use `resolve`; tools with a host approval path use
+/// `resolveForAccess` and send external targets through `WorkspaceAccessGate`.
 enum WorkspacePathResolver {
     nonisolated static func resolve(_ path: String, within workspaceRoot: String) throws -> URL {
+        let target = try resolveForAccess(path, within: workspaceRoot)
+        guard target.isInsideWorkspace else {
+            throw FileSystemError.outsideWorkspace(path: path, workspace: workspaceRoot)
+        }
+        return target.url
+    }
+
+    nonisolated static func resolveForAccess(
+        _ path: String,
+        within workspaceRoot: String
+    ) throws -> ResolvedWorkspacePath {
         guard !workspaceRoot.isEmpty else {
             throw FileSystemError.noWorkspace
         }
@@ -700,18 +834,41 @@ enum WorkspacePathResolver {
             candidateURL = workspaceURL.appendingPathComponent(path)
         }
 
-        let resolvedURL = candidateURL
+        let requestedURL = candidateURL.standardizedFileURL
+        let resolvedURL = requestedURL
             .standardizedFileURL
             .resolvingSymlinksInPath()
         let workspacePath = workspaceURL.path
         let candidatePath = resolvedURL.path
+        return ResolvedWorkspacePath(
+            requestedURL: requestedURL,
+            url: resolvedURL,
+            isInsideWorkspace: candidatePath == workspacePath
+                || candidatePath.hasPrefix(workspacePath + "/")
+        )
+    }
 
-        guard candidatePath == workspacePath
-                || candidatePath.hasPrefix(workspacePath + "/") else {
-            throw FileSystemError.outsideWorkspace(path: path, workspace: workspaceRoot)
+    nonisolated static func isUnchanged(_ target: ResolvedWorkspacePath) -> Bool {
+        target.requestedURL.standardizedFileURL.resolvingSymlinksInPath() == target.url
+    }
+
+    /// Generated edit patches remain relative and reversible by using the
+    /// narrowest common root that contains the workspace and approved targets.
+    nonisolated static func transactionRoot(
+        workspaceRoot: String,
+        targets: [ResolvedWorkspacePath]
+    ) -> String {
+        let urls = [URL(fileURLWithPath: workspaceRoot).standardizedFileURL]
+            + targets.map(\.url)
+        guard var common = urls.first?.pathComponents else { return workspaceRoot }
+        for url in urls.dropFirst() {
+            let components = url.pathComponents
+            let sharedCount = zip(common, components)
+                .prefix { $0.0 == $0.1 }
+                .count
+            common = Array(common.prefix(sharedCount))
         }
-
-        return resolvedURL
+        return NSString.path(withComponents: common)
     }
 }
 

@@ -135,28 +135,28 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             lines.append("- Use turbocode_guide only for explicit questions about TurboCode itself, and answer from its official documentation.")
         }
         if tools.contains(.listWorkspace) {
-            lines.append("- Use list_workspace (Browse Directory) for directory listings; pass a workspace-relative path and use . for the root. Do not use bash for routine listings.")
+            lines.append("- Prefer list_workspace when its native Browse Directory widget is useful; pass a workspace-relative path and use . for the root. Bash remains available for directory listings.")
         }
         if tools.contains(.readFile) {
-            lines.append("- Use read_file for focused numbered source ranges instead of printing files through bash.")
+            lines.append("- read_file returns numbered UTF-8 ranges with revisions and can request approval for external paths.")
         }
         if tools.contains(.searchWorkspace) {
             lines.append("- Use ripgrep flexibly to discover files or search workspace content; narrow its optional filters only when useful.")
         }
         if tools.contains(.editFile) {
-            lines.append("- Use edit_file for source and text changes. Before editing an existing file, read the relevant range and pass its revision. Never generate unified diff hunks or edit files through bash when edit_file covers the change.")
+            lines.append("- Prefer edit_file when its native Review and Undo widget is useful; existing files require the revision returned by read_file. Bash remains available for file changes.")
         }
         if tools.contains(.git) {
-            lines.append("- Use git for every Git operation.")
+            lines.append("- Prefer git when its native status, diff, commit, or branch widgets are useful; Bash remains available for Git commands.")
         }
         if tools.contains(.xcodeProject) {
-            lines.append("- Use xcode_project for Xcode discovery, builds, and tests.")
+            lines.append("- xcode_project provides Xcode discovery, builds, tests, and compact diagnostics.")
         }
         if tools.contains(.bash) {
-            lines.append("- Use bash for bounded project commands and workflows not covered by structured tools. It discovers the supported Node runtime; for TypeScript plugins use TURBOCODE_SDK_PACKAGE for the local SDK dependency. Relative paths start at the Working directory reported by bash; verify pwd before destructive commands, and remember cd does not persist between calls.")
+            lines.append("- bash runs arbitrary zsh commands. It discovers the supported Node runtime; for TypeScript plugins TURBOCODE_SDK_PACKAGE names the local SDK dependency. Relative paths start at the reported Working directory and cd does not persist between calls; external filesystem access pauses for host approval.")
         }
         if tools.contains(.swiftPackageManager) {
-            lines.append("- Use swift_package_manager, not bash, for supported Swift Package Manager initialization, dependency, build, test, run, resolution, cleanup, and inspection actions.")
+            lines.append("- swift_package_manager provides structured Swift package initialization, dependency, build, test, run, cleanup, and inspection actions.")
         }
         if tools.contains(.writeOnDevice) {
             lines.append("- Use write_ondevice once with complete content for a requested root-level text file.")

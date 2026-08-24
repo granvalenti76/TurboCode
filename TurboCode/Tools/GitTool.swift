@@ -68,8 +68,9 @@ struct GitTool: Tool {
         switchBranch, merge, rebase, fetch, pull, and push for normal workflows.
         discard, clean, resetHard, forceDeleteBranch, rebase, and forcePush may
         require user approval because they can discard work or rewrite history.
-        Paths must remain inside the workspace. Never use bash for an operation
-        supported by this tool.
+        Paths remain inside the workspace. Prefer this tool when TurboCode's
+        native Git widgets and structured repository refresh are useful; Bash
+        remains available for Git commands.
         """
     }
     var includesSchemaInInstructions: Bool { true }

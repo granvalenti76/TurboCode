@@ -6,8 +6,8 @@ import Testing
 @MainActor
 @Suite("Agent task scope")
 struct AgentTaskScopeTests {
-    @Test("Read and search tools reject paths outside delegated scope")
-    func readAndSearchRejectOutsideScope() async throws {
+    @Test("Read treats delegated paths as hints while search remains scoped")
+    func readIgnoresDelegatedHintWhileSearchRemainsScoped() async throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let scope = AgentTaskPathScope(
@@ -31,7 +31,7 @@ struct AgentTaskScopeTests {
                 limit: nil
             )
         )
-        let rejectedRead = try await read.call(
+        let workspaceRead = try await read.call(
             arguments: ReadFileArguments(
                 filePath: "Outside.swift",
                 startLine: nil,
@@ -56,12 +56,12 @@ struct AgentTaskScopeTests {
         )
 
         #expect(allowedRead.contains("let allowed = true"))
-        #expect(rejectedRead.contains("outside the delegated task scope"))
+        #expect(workspaceRead.contains("let outside = true"))
         #expect(rejectedSearch.contains("outside the delegated task scope"))
     }
 
-    @Test("Edit tool rejects before creating an out-of-scope file")
-    func editRejectsBeforeMutation() async throws {
+    @Test("Edit treats delegated paths as hints")
+    func editIgnoresDelegatedHint() async throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let tool = EditFileTool(
@@ -84,9 +84,9 @@ struct AgentTaskScopeTests {
             )
         )
 
-        #expect(output.contains("outside the delegated task scope"))
+        #expect(output.hasPrefix("Applied 1 file change"))
         #expect(
-            !FileManager.default.fileExists(
+            FileManager.default.fileExists(
                 atPath: fixture.root.appendingPathComponent("Forbidden.swift").path
             )
         )
@@ -109,8 +109,8 @@ struct AgentTaskScopeTests {
         }
     }
 
-    @Test("Filesystem and listing tools reject paths outside delegated scope")
-    func filesystemAndListingRejectOutsideScope() async throws {
+    @Test("Filesystem treats delegated paths as hints while listing remains scoped")
+    func filesystemIgnoresDelegatedHintWhileListingRemainsScoped() async throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let scope = AgentTaskPathScope(
@@ -133,8 +133,70 @@ struct AgentTaskScopeTests {
             arguments: ListWorkspaceArguments(path: ".")
         )
 
-        #expect(fileResult.contains("outside the delegated task scope"))
+        #expect(fileResult.contains("Outside.swift"))
         #expect(listingResult.errorMessage?.contains("outside the delegated task scope") == true)
+    }
+
+    @Test("External filesystem reads and writes continue after one approval")
+    func externalFilesystemOperationsUseOneApproval() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCode-ExternalFilesystem-\(UUID().uuidString)", isDirectory: true)
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let external = root.appendingPathComponent("external.txt")
+        try "before\n".write(to: external, atomically: true, encoding: .utf8)
+        let approval = FileSystemApprovalProbe()
+        let tool = FileSystemTool(
+            workspaceRoot: workspace.path,
+            requestApproval: { request in await approval.handle(request) }
+        )
+
+        let info = try await tool.call(arguments: FileSystemArguments(
+            operation: "info",
+            path: external.path,
+            destination: nil,
+            pattern: nil,
+            content: nil
+        ))
+        let write = try await tool.call(arguments: FileSystemArguments(
+            operation: "write",
+            path: external.path,
+            destination: nil,
+            pattern: nil,
+            content: "after\n"
+        ))
+
+        #expect(approval.count == 2)
+        #expect(info.contains("external.txt"))
+        #expect(write.hasPrefix("Applied 1 file change"))
+        #expect(try String(contentsOf: external, encoding: .utf8) == "after\n")
+    }
+
+    @Test("Denied external filesystem writes do not inspect or mutate the target")
+    func deniedExternalFilesystemWriteDoesNotMutate() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCode-DeniedFilesystem-\(UUID().uuidString)", isDirectory: true)
+        let workspace = root.appendingPathComponent("workspace", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let external = root.appendingPathComponent("external.txt")
+        try "before\n".write(to: external, atomically: true, encoding: .utf8)
+        let tool = FileSystemTool(
+            workspaceRoot: workspace.path,
+            requestApproval: { _ in "Action cancelled by the user." }
+        )
+
+        let result = try await tool.call(arguments: FileSystemArguments(
+            operation: "write",
+            path: external.path,
+            destination: nil,
+            pattern: nil,
+            content: "after\n"
+        ))
+
+        #expect(result == "Action cancelled by the user.")
+        #expect(try String(contentsOf: external, encoding: .utf8) == "before\n")
     }
 
     @Test("Filesystem mutations cannot target the workspace root")
@@ -142,8 +204,13 @@ struct AgentTaskScopeTests {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let approval = FileSystemApprovalProbe()
+        let scope = AgentTaskPathScope(
+            workspaceRoot: fixture.root.path,
+            suggestedPaths: ["Sources"]
+        )
         let tool = FileSystemTool(
             workspaceRoot: fixture.root.path,
+            taskScope: scope,
             requestApproval: { request in
                 await approval.handle(request)
             }
@@ -237,6 +304,45 @@ struct AgentTaskScopeTests {
         #expect(!FileManager.default.fileExists(atPath: destination.path))
     }
 
+    @Test("External destructive operations reject a target changed during approval")
+    func externalDeleteRevalidatesBeforeExecution() async throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let external = URL(
+            fileURLWithPath: "/private/tmp/TurboCode-ExternalDelete-\(UUID().uuidString).txt"
+        )
+        defer { try? FileManager.default.removeItem(at: external) }
+        try "original\n".write(to: external, atomically: true, encoding: .utf8)
+        let approval = FileSystemApprovalProbe()
+        approval.beforeAction = {
+            try? "replacement with a different size\n".write(
+                to: external,
+                atomically: true,
+                encoding: .utf8
+            )
+        }
+        let tool = FileSystemTool(
+            workspaceRoot: fixture.root.path,
+            requestApproval: { request in
+                await approval.handle(request)
+            }
+        )
+
+        let result = try await tool.call(
+            arguments: FileSystemArguments(
+                operation: "delete",
+                path: external.path,
+                destination: nil,
+                pattern: nil,
+                content: nil
+            )
+        )
+
+        #expect(approval.count == 1)
+        #expect(result.contains("changed before approval"))
+        #expect(FileManager.default.fileExists(atPath: external.path))
+    }
+
     @Test("Find reports truncation only when a 201st match exists")
     func findReportsAccurateTruncation() async throws {
         let fixture = try makeFixture()
@@ -280,8 +386,8 @@ struct AgentTaskScopeTests {
         #expect(truncatedResult.contains("truncated"))
     }
 
-    @Test("Workspace-wide execution tools refuse narrow delegated scopes")
-    func workspaceWideToolsRefuseNarrowScope() async throws {
+    @Test("Bash treats delegated paths as hints while structured Git remains scoped")
+    func bashIgnoresDelegatedHintWhileGitRemainsScoped() async throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let scope = AgentTaskPathScope(
@@ -302,7 +408,8 @@ struct AgentTaskScopeTests {
             arguments: GitArguments(operation: "status", paths: nil, branch: nil, message: nil, remote: nil, limit: nil)
         )
 
-        #expect(bashResult.contains("entire-workspace task scope"))
+        #expect(bashResult.contains("Exit code: 0"))
+        #expect(bashResult.contains(fixture.root.path))
         #expect(gitResult.contains("entire-workspace task scope"))
     }
 

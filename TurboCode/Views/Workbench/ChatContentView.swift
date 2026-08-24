@@ -143,7 +143,7 @@ struct ChatContentView: View {
                     Text(commandPreview(command))
                         .font(.system(size: 11, design: .monospaced))
                         .textSelection(.enabled)
-                        .lineLimit(1)
+                        .lineLimit(3)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(10)
                         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -152,6 +152,25 @@ struct ChatContentView: View {
                                 .strokeBorder(.separator.opacity(0.55), lineWidth: 0.5)
                         }
                         .accessibilityLabel("Bash command")
+                }
+            } else if let targets = approval.externalTargetDetails {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("External path")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text(targets)
+                        .font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(.separator.opacity(0.55), lineWidth: 0.5)
+                        }
+                        .accessibilityLabel("External path")
                 }
             }
 
@@ -184,7 +203,7 @@ struct ChatContentView: View {
     }
 
     private func commandPreview(_ command: String) -> String {
-        command.count > 20 ? String(command.prefix(20)) + "…" : command
+        command.count > 100 ? String(command.prefix(100)) + "…" : command
     }
 }
 

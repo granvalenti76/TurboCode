@@ -953,12 +953,13 @@ public final class ChatStore {
         patch: String,
         files: [DiffPatchFileChange],
         reviewFiles: [DiffReviewFileSnapshot] = [],
+        workspaceRoot transactionRoot: String? = nil,
         status: DiffPatchStatus
     ) {
         reviewCoordinator.beginDiffPatch(
             id: id,
             editGroupID: responseCoordinator.activeEditGroupID,
-            workspaceRoot: workspaceRoot,
+            workspaceRoot: transactionRoot ?? workspaceRoot,
             patch: patch,
             files: files,
             reviewFiles: reviewFiles,
