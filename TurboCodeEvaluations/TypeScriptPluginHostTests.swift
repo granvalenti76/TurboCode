@@ -76,6 +76,17 @@ struct TypeScriptPluginHostTests {
         #expect(TypeScriptPluginToolResultCodec.decode(encoded) == result)
     }
 
+    @Test("Widget invocations accept omitted props")
+    func widgetInvocationDefaultsMissingProps() throws {
+        let invocation = try JSONDecoder().decode(
+            TypeScriptPluginWidgetInvocation.self,
+            from: Data(#"{"id":"mouse-glow-card"}"#.utf8)
+        )
+
+        #expect(invocation.id == "mouse-glow-card")
+        #expect(invocation.props == .object([:]))
+    }
+
     @Test("The host rejects a Node version outside its policy")
     func rejectsIncompatibleNodeVersion() async throws {
         let fixture = try makeFixture()

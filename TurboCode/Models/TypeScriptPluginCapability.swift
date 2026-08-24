@@ -62,9 +62,23 @@ nonisolated struct TypeScriptPluginWidgetInvocation: Codable, Sendable, Equatabl
     let id: String
     let props: PluginJSONValue
 
+    private enum CodingKeys: String, CodingKey {
+        case id, props
+    }
+
     init(id: String, props: PluginJSONValue = .object([:])) {
         self.id = id
         self.props = props
+    }
+
+    /// `props` is optional on the TypeScript wire contract. Keep the host
+    /// representation non-optional so WebKit always receives a JSON object,
+    /// while accepting the common `{ widget: { id } }` shorthand.
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        props = try values.decodeIfPresent(PluginJSONValue.self, forKey: .props)
+            ?? .object([:])
     }
 }
 
