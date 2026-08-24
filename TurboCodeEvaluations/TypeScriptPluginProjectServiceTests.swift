@@ -22,6 +22,9 @@ struct TypeScriptPluginProjectServiceTests {
         #expect(FileManager.default.fileExists(atPath: installed.appendingPathComponent("package.json").path))
         #expect(FileManager.default.fileExists(atPath: installed.appendingPathComponent("README.md").path))
         #expect(FileManager.default.fileExists(atPath: installed.appendingPathComponent("dist/index.js").path))
+        #expect(FileManager.default.fileExists(
+            atPath: installed.appendingPathComponent("examples/README.md").path
+        ))
         #expect(!FileManager.default.fileExists(atPath: installed.appendingPathComponent("src/index.ts").path))
     }
 
@@ -46,6 +49,30 @@ struct TypeScriptPluginProjectServiceTests {
 
         #expect(FileManager.default.fileExists(
             atPath: destination.appendingPathComponent("README.md").path
+        ))
+    }
+
+    @Test("Backfills SDK examples without requiring a version change")
+    func backfillsMissingSDKExamples() throws {
+        let root = try makeRoot("SDKExamples")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let source = root.appendingPathComponent("sdk-source", isDirectory: true)
+        let destinationRoot = root.appendingPathComponent(".turbocode", isDirectory: true)
+        let destination = destinationRoot
+            .appendingPathComponent("sdk/@granvalenti/turbocode-sdk", isDirectory: true)
+        try writeSDKPackage(at: source, version: "0.4.0")
+        try writeSDKPackage(at: destination, version: "0.4.0")
+        try FileManager.default.removeItem(at: destination.appendingPathComponent("examples"))
+        let service = TypeScriptPluginProjectService(
+            pluginsRoot: destinationRoot.appendingPathComponent("plugins", isDirectory: true),
+            sdkRoot: destinationRoot.appendingPathComponent("sdk", isDirectory: true)
+        )
+
+        _ = try service.bootstrapSDK(from: source)
+
+        #expect(FileManager.default.fileExists(
+            atPath: destination.appendingPathComponent("examples/README.md").path
         ))
     }
 
@@ -296,6 +323,10 @@ struct TypeScriptPluginProjectServiceTests {
             at: root.appendingPathComponent("src", isDirectory: true),
             withIntermediateDirectories: true
         )
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("examples", isDirectory: true),
+            withIntermediateDirectories: true
+        )
         try Data("{\"name\":\"@granvalenti/turbocode-sdk\",\"version\":\"\(version)\"}".utf8)
             .write(to: root.appendingPathComponent("package.json"))
         try Data("# TurboCode SDK\n".utf8)
@@ -304,5 +335,7 @@ struct TypeScriptPluginProjectServiceTests {
             .write(to: root.appendingPathComponent("dist/index.js"))
         try Data("source sdk".utf8)
             .write(to: root.appendingPathComponent("src/index.ts"))
+        try Data("# SDK examples\n".utf8)
+            .write(to: root.appendingPathComponent("examples/README.md"))
     }
 }

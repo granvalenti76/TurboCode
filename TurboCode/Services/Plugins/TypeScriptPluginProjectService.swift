@@ -128,8 +128,8 @@ nonisolated enum TypeScriptPluginProjectError: LocalizedError, Sendable, Equatab
     }
 }
 
-/// Installs the compiled SDK package surface and its model-readable guide. The
-/// source project remains a normal npm project, while plugin builds receive the
+/// Installs the compiled SDK package surface, guide, and examples. The source
+/// project remains a normal npm project, while plugin builds receive the
 /// stable package name through `node_modules/@granvalenti/turbocode-sdk`.
 nonisolated struct TypeScriptPluginSDKInstaller: @unchecked Sendable {
     private let fileManager: FileManager
@@ -146,9 +146,11 @@ nonisolated struct TypeScriptPluginSDKInstaller: @unchecked Sendable {
         let packageJSON = source.appendingPathComponent("package.json")
         let readme = source.appendingPathComponent("README.md")
         let dist = source.appendingPathComponent("dist", isDirectory: true)
+        let examples = source.appendingPathComponent("examples", isDirectory: true)
         guard fileManager.fileExists(atPath: packageJSON.path),
               fileManager.fileExists(atPath: readme.path),
-              fileManager.fileExists(atPath: dist.path) else {
+              fileManager.fileExists(atPath: dist.path),
+              fileManager.fileExists(atPath: examples.path) else {
             throw TypeScriptPluginProjectError.sdkPackageInvalid(source)
         }
 
@@ -175,6 +177,10 @@ nonisolated struct TypeScriptPluginSDKInstaller: @unchecked Sendable {
         try fileManager.copyItem(
             at: dist,
             to: staging.appendingPathComponent("dist", isDirectory: true)
+        )
+        try fileManager.copyItem(
+            at: examples,
+            to: staging.appendingPathComponent("examples", isDirectory: true)
         )
         try replaceDirectory(
             staging,
@@ -272,6 +278,8 @@ nonisolated struct TypeScriptPluginProjectService: @unchecked Sendable {
                 atPath: source.appendingPathComponent("README.md").path
             ) && fileManager.fileExists(
                 atPath: source.appendingPathComponent("dist/index.js").path
+            ) && fileManager.fileExists(
+                atPath: source.appendingPathComponent("examples", isDirectory: true).path
             )
         }
     }
@@ -284,11 +292,13 @@ nonisolated struct TypeScriptPluginProjectService: @unchecked Sendable {
         let packageJSON = destination.appendingPathComponent("package.json")
         let readme = destination.appendingPathComponent("README.md")
         let entrypoint = destination.appendingPathComponent("dist/index.js")
+        let examples = destination.appendingPathComponent("examples", isDirectory: true)
         let sourceVersion = packageVersion(at: sourcePackageURL)
         let installedVersion = packageVersion(at: destination)
         if fileManager.fileExists(atPath: packageJSON.path),
            fileManager.fileExists(atPath: readme.path),
            fileManager.fileExists(atPath: entrypoint.path),
+           fileManager.fileExists(atPath: examples.path),
            sourceVersion == installedVersion {
             return destination
         }

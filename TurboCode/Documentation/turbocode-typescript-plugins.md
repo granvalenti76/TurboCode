@@ -176,7 +176,8 @@ project, replacing `~/.turbocode/plugins/<plugin-id>/` only after every step
 succeeds. A failed validation or build therefore leaves the previous installed
 generation untouched. Direct Bash work on an already installed plugin is also
 supported: the installed directory is the live runtime, so edit it, build it,
-and reload when ready. The SDK installer copies only `package.json` and `dist/` to
+and reload when ready. The SDK installer copies `package.json`, `README.md`,
+`dist/`, and `examples/` to
 `~/.turbocode/sdk/@granvalenti/turbocode-sdk/`, then exposes the same package
 inside the build's `node_modules` tree.
 
