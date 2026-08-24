@@ -1,0 +1,17 @@
+{
+  "name": "turbocode-example-session-handoff",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "build": "tsc --project tsconfig.json && node scripts/copy-widget.mjs",
+    "check": "tsc --project tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@granvalenti/turbocode-sdk": "file:../.."
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  }
+}

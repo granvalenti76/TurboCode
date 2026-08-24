@@ -5,7 +5,77 @@ All notable changes to TurboCode are documented in this file.
 The project follows Semantic Versioning while its public API and persisted
 formats continue to evolve before 1.0.
 
-## [Unreleased]
+## [0.4.0] - 2026-08-24
+
+TurboCode 0.4.0 makes the app feel less like a closed workspace and more like a
+real local coding environment. Bash can run the command the task requires; the
+extra gate appears only when the command reaches outside the active workspace.
+TypeScript plugins are now practical to build, install, and extend, including
+by asking the model to create one. Smaller local models also have fewer
+artificial rules to work around, so they have more room to find a useful path
+through the task.
+
+### Features
+
+- Bash is no longer shaped by a model-facing list of permitted commands or
+  extra path restrictions. It can be used as a normal command line for the
+  task at hand. When a command leaves the active workspace, TurboCode shows the
+  user what is about to run and waits for approval before continuing.
+- The same approval boundary now covers tool access to files outside the
+  workspace. TurboCode can read, edit, copy, move, or otherwise operate on
+  local paths after the user approves the exact operation; the tool layer, not
+  the model, owns the boundary and checks the target again before execution.
+- Added a small TypeScript plugin workflow. A plugin is a normal Node project
+  with a manifest and TypeScript tools: the user can write one, or ask the
+  model to create the project, add a tool, build it, and reload it into the
+  session.
+- Added the `@granvalenti/turbocode-sdk` with session access, cancellation,
+  tool definitions, and custom response widgets. The SDK ships with complete
+  examples for session search, local planning, HTTP lookup, echo tools, and a
+  status-card widget under
+  `~/.turbocode/sdk/@granvalenti/turbocode-sdk/examples/`.
+- Added automatic plugin discovery, profile activation, build validation,
+  atomic installation, `/reload`, process timeouts, cancellation, and crash
+  recovery. A failed build leaves the previously working plugin untouched.
+- Plugin tools can now return custom cards/widgets in the conversation, while
+  the main view shows a small activity entry for every tool call, even when a
+  tool has no dedicated native presentation.
+- Native and Codex sessions now share the same runtime lifecycle for turns,
+  tools, approvals, cancellation, and completion. This keeps the interface
+  responsive and prevents late results from an old request from appearing in a
+  newer conversation state.
+- Introduced `TurboCodeCore`, the provider- and UI-neutral core behind the
+  application. It now gives turns, tool results, structured widgets,
+  cancellation, and session persistence one shared ownership boundary instead
+  of leaving them spread across SwiftUI stores. Existing JSON sessions remain
+  compatible; the core is currently an in-app extraction boundary, not yet a
+  public Swift package.
+
+### Fixes
+
+- Removed coordinator-authored path scopes, per-tool allowlists, callback gates,
+  and other artificial model-facing choreography that could trap a model in
+  loops or produce false `path_outside_scope` errors. Safety now comes from the
+  host approval, review, revision, and destructive-operation flows instead of
+  from extra instructions that limit the model's choices.
+- Aligned the SDK README, TypeScript signatures, generated runtime package,
+  examples, and Swift host contract. A plugin author now sees the same tool
+  and widget API in the documentation, compiler surface, and running app.
+- Fixed plugin reloads so updating a valid plugin refreshes its tools without
+  throwing away the current conversation. Plugin process failures and slow
+  requests no longer block the chat runtime indefinitely.
+- Fixed widget results that did not include props: declaring a widget is enough
+  for TurboCode to preserve and render it.
+- Fixed the built-in profiles so they do not automatically load the oversized
+  `turbocode` documentation skill. User-created skills are still available,
+  and an explicit profile override can enable it when needed.
+
+### Safari MCP
+
+- Safari MCP was already introduced in 0.3.3, so it is not a new 0.4.0 feature.
+  It remains available as an experimental, coordinator-only integration. It is
+  disabled by default and can be enabled from **Settings > Agents >
+  Experimental**; when it is off, TurboCode does not register the capability.
 
 ## [0.3.3] - 2026-08-21
 

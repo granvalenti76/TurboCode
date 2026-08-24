@@ -39,6 +39,19 @@ npm install
 npm run build
 ```
 
+### `session-handoff/`
+
+A practical continuity plugin inspired by session handoff and stateful todo
+extensions. It saves structured work state, lists and reloads previous
+handoffs, and renders a compact Continuity Card with the current step, next
+step, risks, files, and transcript metadata.
+
+```sh
+cd session-handoff
+npm install
+npm run build
+```
+
 Each complete project contains its own `package.json`, `plugin.json`,
 `tsconfig.json`, and source. The manifest points to the compiled runtime and
 the widget entrypoint after the project is built.
