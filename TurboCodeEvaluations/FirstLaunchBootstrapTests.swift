@@ -114,7 +114,8 @@ struct FirstLaunchBootstrapTests {
         #expect(llama.name == configuredLlama.name)
         #expect(llama.url == configuredLlama.url)
         #expect(llama.modelName == configuredLlama.modelName)
-        #expect(modelIDs.isSuperset(of: ["llama", "apple-pcc", "deepseek"]))
+        #expect(modelIDs.isSuperset(of: ["llama", "deepseek"]))
+        #expect(!modelIDs.contains("apple-pcc"))
     }
 
     @Test("Onboarding migrates 0.1 configuration and profiles without changing their intent")
@@ -228,7 +229,7 @@ struct FirstLaunchBootstrapTests {
 
         let ids = viewModel.modelOptions(settings: SettingsStore()).map(\.id)
 
-        #expect(ids == [.onDevice, .llama, .pcc, .deepseek])
+        #expect(ids == [.onDevice, .llama, .deepseek])
     }
 
     private func makeEmptyHome() throws -> URL {

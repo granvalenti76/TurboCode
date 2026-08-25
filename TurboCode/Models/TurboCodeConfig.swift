@@ -222,7 +222,20 @@ public final class TurboCodeConfig {
             contents += "\n\n" + Self.xcodeProjectSkillSection + "\n"
             changed = true
         }
-        if !contents.contains(Self.pccSetupSkillMarker) {
+        if let markerRange = contents.range(of: Self.pccSetupSkillMarker) {
+            let sectionEnd = contents.range(
+                of: "\n\n<!-- turbocode-managed:",
+                range: markerRange.upperBound..<contents.endIndex
+            )?.lowerBound ?? contents.endIndex
+            let currentSection = contents[markerRange.lowerBound..<sectionEnd]
+            if String(currentSection) != Self.pccSetupSkillSection {
+                contents.replaceSubrange(
+                    markerRange.lowerBound..<sectionEnd,
+                    with: Self.pccSetupSkillSection
+                )
+                changed = true
+            }
+        } else {
             contents += "\n\n" + Self.pccSetupSkillSection + "\n"
             changed = true
         }
@@ -261,7 +274,7 @@ public final class TurboCodeConfig {
     ## Tool context policy
 
     Preserving the useful context window is a core TurboCode product principle.
-    Foundation Apple, Apple PCC, Llama, and the orchestrator discard completed
+    Foundation Apple, Llama, and the orchestrator discard completed
     tool-call exchanges before later generations. Keep this behavior when adding
     profiles or providers: tool results should accomplish the operation without
     permanently consuming the prompt budget.
@@ -340,22 +353,13 @@ public final class TurboCodeConfig {
 
     private static let pccSetupSkillSection = """
     <!-- turbocode-managed:pcc-setup-v1 -->
-    ## Apple PCC setup
+    ## Apple PCC status
 
-    Apple on-device is loaded directly by the Foundation Models framework and
-    needs no local server. Apple PCC uses the framework's local Chat Completions
-    bridge. When the user asks how to configure or start PCC, tell them to open
-    Terminal and run:
-
-    ```shell
-    fm serve --port 1976
-    ```
-
-    The process must remain running while PCC is in use. TurboCode already
-    configures `http://127.0.0.1:1976/v1` with model `pcc`, so no API key or manual
-    endpoint change is required. The local health endpoint is
-    `http://127.0.0.1:1976/health`. Then the user can select Apple PCC in Standalone
-    mode or as the delegate in **TurboCode > Settings > Agents > Orchestrator**.
+    Apple PCC through `fm serve` is retired and is not a selectable TurboCode
+    profile, override, composer model, or delegated worker. Do not recommend
+    starting `fm serve` or configuring the old PCC endpoint.
+    PCC-RETIREMENT: remove this managed compatibility section with the legacy
+    provider code.
     """
 
     private static let turboCodeSkill = """
@@ -373,7 +377,7 @@ public final class TurboCodeConfig {
     - Standalone gives the selected model direct access to workspace tools.
     - Orchestrator uses the Apple on-device model to coordinate work and delegates
       complex coding tasks to the configured powerful model.
-    - Available backends can include Foundation Apple, Apple PCC, and Llama-server.
+    - Available backends can include Foundation Apple and Llama-server.
 
     \(providerCredentialsSkillSection)
 
@@ -541,7 +545,11 @@ public final class TurboCodeConfig {
 
     public func loadRemoteModels() throws -> [RemoteModelConfig] {
         guard FileManager.default.fileExists(atPath: modelsURL.path) else { return [] }
+        // PCC remains decodable so old configuration files stay readable, but
+        // Apple's retired `fm serve` route must not re-enter the app through
+        // persisted model metadata.
         return try JSONDecoder().decode([RemoteModelConfig].self, from: Data(contentsOf: modelsURL))
+            .filter { !$0.isRetiredPCC }
     }
 
     private func migrateRemoteModels() throws {
@@ -574,6 +582,7 @@ nonisolated public enum RemoteModelProvider: String, Codable, Hashable, Sendable
 
 nonisolated public enum RemoteModelRole: String, Codable, Hashable, Sendable {
     case local
+    // PCC-RETIREMENT: remove after old models.json records no longer need decoding.
     case pcc
     case premium
 }
@@ -615,6 +624,13 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
     public var repositoryMap: RemoteRepositoryMapCapability
     public var credential: String?
     public var enabled: Bool
+
+    /// Temporary compatibility gate for model records written before Apple
+    /// disabled the PCC model behind `fm serve`.
+    // PCC-RETIREMENT: remove this property together with `RemoteModelRole.pcc`.
+    public var isRetiredPCC: Bool {
+        role == .pcc || id == "apple-pcc"
+    }
 
     public init(
         id: String,
@@ -684,16 +700,6 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
             url: "http://127.0.0.1:8080/v1",
             modelName: "local-model",
             temperature: 0.6
-        ),
-        RemoteModelConfig(
-            id: "apple-pcc",
-            name: "Apple PCC",
-            url: "http://127.0.0.1:1976/v1",
-            modelName: "pcc",
-            temperature: 0.6,
-            role: .pcc,
-            reasoningTransport: .none,
-            supportsReasoning: false
         ),
         RemoteModelConfig(
             id: "deepseek",

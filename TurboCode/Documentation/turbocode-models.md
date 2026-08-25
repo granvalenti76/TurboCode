@@ -12,8 +12,8 @@ worker tool bundle configured by the profile and a text-only worker with no
 tools; TurboCode owns runtime identifiers, workspace safety, approval,
 cancellation, and verification when applicable. Custom on-device profiles can
 also include `delegate_task`; the built-in On-device profile remains direct by
-default. DeepSeek, Codex, and Llama support this capability, while Apple PCC,
-Llama, or DeepSeek can be selected as the worker.
+default. DeepSeek, Codex, and Llama support this capability; Llama or DeepSeek
+can be selected as the worker.
 
 The menu item **On-Device (Experimental)** preserves the older compatibility
 path. In that mode Apple on-device may send a free-text task through
@@ -56,25 +56,19 @@ advertises `delegate_task` and routes it through the shared worker and Activity
 pipeline; coding tasks use the applicable verification path. Direct Codex
 profiles do not receive that tool.
 
-## Configure Apple PCC
+## Apple PCC status
 
-Apple on-device and Apple Private Cloud Compute are two different backends. The on-device model is loaded directly by the Foundation Models framework and does not require a server. TurboCode reaches PCC through the local Chat Completions server supplied by Apple's `fm` command-line tool.
-
-Open Terminal and start the server on TurboCode's default port:
-
-```shell
-fm serve
-```
-
-Keep that Terminal process running while using PCC. TurboCode's default PCC entry points to `http://127.0.0.1:1976/v1` and selects the `pcc` model, so no endpoint editing or API key is required. Then choose **Apple PCC** as a profile model, or include **Delegate Task** in a custom profile and choose PCC as its worker.
-
-If PCC is unavailable, first check that `fm serve` is still running. The server also exposes `http://127.0.0.1:1976/health` for a local health check. Availability of the PCC model itself is determined by Apple's Foundation Models service and the current system environment.
+Apple's PCC model exposed through `fm serve` is retired in the current
+Foundation Models environment. TurboCode no longer exposes it as a default
+profile, custom-profile override, composer model, or delegated worker. Legacy
+PCC records remain readable only long enough for the compatibility code marked
+`PCC-RETIREMENT` to be removed.
 
 ## Repository mapping and context budgets
 
 For existing Swift, SwiftUI, Xcode, and Swift Package projects, capable models use `swift_workspace_map` before opening source files. The tool returns declaration signatures, line numbers, short documentation comments, project markers, and focused symbol queries without placing file bodies in the model context.
 
-Apple on-device does not receive the repository map, including in the experimental delegation mode. The configured coding model performs project discovery. Llama and Apple PCC use a compact map designed around a conservative 32k context window. DeepSeek uses the enhanced map, which can also expose imports and type relationships.
+Apple on-device does not receive the repository map, including in the experimental delegation mode. The configured coding model performs project discovery. Llama uses a compact map designed around a conservative 32k context window. DeepSeek uses the enhanced map, which can also expose imports and type relationships.
 
 The map is cached incrementally under `~/.turbocode/cache/repository-maps/`. TurboCode rescans only Swift files whose size or modification time changed. The cache contains declarations and workspace-relative paths, never source bodies.
 
@@ -82,4 +76,4 @@ The map is cached incrementally under `~/.turbocode/cache/repository-maps/`. Tur
 
 Capable standalone and delegated models receive `xcode_project`. Its flat actions inspect the active `.xcworkspace` or `.xcodeproj`, build a scheme, or run its tests. Apple on-device does not receive this execution tool; the experimental delegation mode passes the operation to the selected capable backend.
 
-Llama and Apple PCC receive compact compiler and test diagnostics suited to a conservative 32k context. DeepSeek and Codex can receive richer project context while still avoiding unbounded raw `xcodebuild` logs. Builds reuse the DerivedData normally managed by Xcode, including work already compiled from the application; temporary `.xcresult` bundles are removed after parsing.
+Llama receives compact compiler and test diagnostics suited to a conservative 32k context. DeepSeek and Codex can receive richer project context while still avoiding unbounded raw `xcodebuild` logs. Builds reuse the DerivedData normally managed by Xcode, including work already compiled from the application; temporary `.xcresult` bundles are removed after parsing.

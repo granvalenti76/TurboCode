@@ -10,7 +10,9 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
     /// Only provider-backed defaults belong in the profile library. Codex is
     /// configured contextually for delegated profiles; direct Codex selection
     /// remains owned by the composer.
-    static let builtInCases: [Self] = [.onDevice, .llama, .pcc, .deepseek]
+    // PCC-RETIREMENT: remove the legacy enum case after persisted profiles
+    // have been migrated away from Apple's retired `fm serve` model.
+    static let builtInCases: [Self] = [.onDevice, .llama, .deepseek]
     /// These models expose the structured `delegate_task` route when selected
     /// in a custom profile. The built-in on-device profile remains direct;
     /// opting into this capability is an explicit override choice.
@@ -18,11 +20,11 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
     /// Models available when creating or editing a custom profile. Codex is
     /// intentionally not a built-in standalone profile, but it is a valid
     /// override model with its own App Server and reasoning configuration.
-    static let profileCases: [Self] = [.onDevice, .llama, .pcc, .deepseek, .codex]
+    static let profileCases: [Self] = [.onDevice, .llama, .deepseek, .codex]
     /// Compatibility alias for integrations that still describe the route as
     /// coordinator/worker. New UI and runtime code should use `delegationCases`.
     static let coordinatorCases: [Self] = delegationCases
-    static let workerCases: [Self] = [.pcc, .llama, .deepseek]
+    static let workerCases: [Self] = [.llama, .deepseek]
 
     var id: String { rawValue }
 

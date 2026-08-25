@@ -18,7 +18,7 @@ The `test` action runs the scheme tests and summarizes the total, passed, failed
 
 ## Model availability
 
-Apple on-device does not run Xcode builds or tests directly. Llama and Apple PCC receive compact output designed for a 32k working context. DeepSeek receives an enhanced but still bounded diagnostic report. In the experimental on-device delegation mode, the Apple model delegates Xcode validation to the configured capable model.
+Apple on-device does not run Xcode builds or tests directly. Llama receives compact output designed for a 32k working context. DeepSeek receives an enhanced but still bounded diagnostic report. In the experimental on-device delegation mode, the Apple model delegates Xcode validation to the configured capable model.
 
 ## Timeouts and build state
 

@@ -734,6 +734,7 @@ nonisolated enum ModelSessionFactory {
     private static func backend(for role: RemoteModelRole) -> ModelBackend {
         switch role {
         case .local: .llamaServer
+        // PCC-RETIREMENT: remove the retired provider route with its backend.
         case .pcc: .foundationServe
         case .premium: .premium
         }

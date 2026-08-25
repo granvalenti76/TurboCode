@@ -126,6 +126,7 @@ final class ToolsViewModel {
     private func roleLabel(_ role: RemoteModelRole) -> String {
         switch role {
         case .local: "Local"
+        // PCC-RETIREMENT: remove the legacy model case with the role enum.
         case .pcc: "Private Cloud Compute"
         case .premium: "Premium"
         }
@@ -141,6 +142,7 @@ final class ToolsViewModel {
     private func modelIcon(_ model: RemoteModelConfig) -> String {
         switch model.role {
         case .local: "desktopcomputer"
+        // PCC-RETIREMENT: remove the legacy model case with the role enum.
         case .pcc: "cloud"
         case .premium: "sparkles"
         }

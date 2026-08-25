@@ -301,6 +301,7 @@ final class SkillsViewModel {
         switch id {
         case .onDevice: subtitle = "Private and optimized for compact tool schemas"
         case .llama: subtitle = "Local OpenAI-compatible model"
+        // PCC-RETIREMENT: remove the legacy model case with the profile enum.
         case .pcc: subtitle = "Private Cloud Compute"
         case .deepseek: subtitle = "Enhanced coding model"
         case .codex: subtitle = "Codex App Server with ChatGPT"

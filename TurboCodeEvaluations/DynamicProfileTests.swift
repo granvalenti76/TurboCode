@@ -14,7 +14,7 @@ struct DynamicProfileTests {
         let profile = UserDynamicProfile(
             name: "GitHub PR Assistant",
             summary: "Handles pull requests",
-            baseModelID: .pcc,
+            baseModelID: .llama,
             greedyMode: true,
             toolIDs: ["git", "read_file", "git"],
             skillIDs: ["pull-request-review"]
@@ -118,9 +118,10 @@ struct DynamicProfileTests {
 
         #expect(options.map(\.id) == ProfileBaseModelID.profileCases)
         #expect(options.contains(where: { $0.id == .codex && $0.isAvailable }))
+        #expect(!options.contains(where: { $0.id == .pcc }))
     }
 
-    @Test("Coordinator workers are persisted and legacy routes keep their fallback")
+    @Test("Coordinator workers reject retired PCC and keep their fallback")
     func coordinatorWorkerSelectionMigrates() throws {
         let route = UserDynamicProfile(
             name: "Codex plus PCC",
@@ -133,8 +134,7 @@ struct DynamicProfileTests {
             from: JSONEncoder().encode(route)
         )
         #expect(
-            decoded.resolvedWorkerModelID(fallback: "llama")
-                == ProfileBaseModelID.pcc.rawValue
+            decoded.resolvedWorkerModelID(fallback: "llama") == "llama"
         )
 
         var object = try #require(
@@ -419,10 +419,23 @@ struct DynamicProfileTests {
 
     @Test("Profile option families enforce supported coordinator routes")
     func profileOptionFamiliesAreScoped() {
-        #expect(ProfileBaseModelID.builtInCases == [.onDevice, .llama, .pcc, .deepseek])
+        #expect(ProfileBaseModelID.builtInCases == [.onDevice, .llama, .deepseek])
         #expect(ProfileBaseModelID.coordinatorCases == [.onDevice, .llama, .deepseek, .codex])
-        #expect(ProfileBaseModelID.workerCases == [.pcc, .llama, .deepseek])
+        #expect(ProfileBaseModelID.workerCases == [.llama, .deepseek])
         #expect(!ProfileBaseModelID.workerCases.contains(.codex))
+    }
+
+    @Test("Retired PCC overrides are hidden from the profile store")
+    func retiredPCCOverridesAreNotLoaded() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = DynamicProfileStore(fileURL: root.appendingPathComponent("profiles.json"))
+        let pcc = UserDynamicProfile(name: "Old PCC", baseModelID: .pcc)
+        let llama = UserDynamicProfile(name: "Local", baseModelID: .llama)
+
+        try store.save([pcc, llama])
+
+        #expect(try store.load() == [llama])
     }
 
     @Test("Selected skills implicitly expose only the skill loader")

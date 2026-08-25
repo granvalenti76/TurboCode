@@ -8,6 +8,7 @@ import Foundation
 public enum ModelBackend: String, CaseIterable, Codable, Hashable, Sendable {
     case llamaServer = "Llama-server"
     case foundationApple = "Foundation Apple"
+    // PCC-RETIREMENT: remove the legacy backend identity with `fm serve` support.
     case foundationServe = "Apple PCC"
     case premium = "Premium"
     case codex = "Codex"

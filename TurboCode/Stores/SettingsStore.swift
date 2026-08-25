@@ -137,6 +137,9 @@ public final class SettingsStore {
         remoteModels = (try? TurboCodeConfig.shared.loadRemoteModels())
             .flatMap { $0.isEmpty ? nil : $0 }
             ?? RemoteModelConfig.defaults
+        // PCC-RETIREMENT: remove this defensive filter with the legacy model
+        // role once old settings files no longer need compatibility handling.
+        remoteModels.removeAll { $0.isRetiredPCC }
     }
 
     public func isConfigured(_ model: RemoteModelConfig) -> Bool {

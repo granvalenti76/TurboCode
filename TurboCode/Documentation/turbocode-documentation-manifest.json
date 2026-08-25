@@ -18,9 +18,9 @@
     {
       "id": "models",
       "title": "Models and Orchestrator Mode",
-      "summary": "How to configure Apple PCC and Codex, and when to use on-device, standalone, or delegated models.",
+      "summary": "How to use Codex and when to use on-device, standalone, or delegated models.",
       "file": "turbocode-models.md",
-      "keywords": ["model", "Apple", "on-device", "orchestrator", "Llama", "PCC", "Private Cloud Compute", "Codex", "ChatGPT", "DeepSeek", "delegate", "configure", "configuro", "setup", "fm serve", "terminal", "1976", "endpoint"]
+      "keywords": ["model", "Apple", "on-device", "orchestrator", "Llama", "Codex", "ChatGPT", "DeepSeek", "delegate", "configure", "configuro", "setup"]
     },
     {
       "id": "xcode-tools",

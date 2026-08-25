@@ -906,6 +906,7 @@ enum AgentProfileVersion {
     static func value(for backend: ModelBackend, mode: OrchestratorMode) -> String {
         if mode == .orchestrator { return "orchestrator-v2" }
         switch backend {
+        // PCC-RETIREMENT: remove the retired diagnostic prefix with the backend.
         case .foundationServe: return "pcc-layout-guard-v6"
         case .foundationApple: return "ondevice-layout-guard-v6"
         case .llamaServer: return "llama-layout-guard-v6"

@@ -322,6 +322,7 @@ final class ProfileSelectionCoordinator {
 
         let legacyRole: RemoteModelRole? = switch identifier {
         case ModelBackend.llamaServer.rawValue: .local
+        // PCC-RETIREMENT: remove the legacy identifier migration with the backend.
         case ModelBackend.foundationServe.rawValue: .pcc
         default: nil
         }

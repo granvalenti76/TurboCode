@@ -86,6 +86,11 @@ final class ModelRuntimeStore {
         let configuredRemoteModels = (try? TurboCodeConfig.shared.loadRemoteModels())
             .flatMap { $0.isEmpty ? nil : $0 }
             ?? RemoteModelConfig.defaults
+        // PCC-RETIREMENT: keep this defensive gate until the legacy backend
+        // and role are removed from persisted/runtime compatibility code.
+        let selectableRemoteModels = configuredRemoteModels.filter {
+            !$0.isRetiredPCC
+        }
         let savedProfileID = UserDefaults.standard.string(
             forKey: "activeDynamicProfileID"
         ).flatMap(UUID.init(uuidString:))
@@ -102,7 +107,7 @@ final class ModelRuntimeStore {
         // availability is checked when the user selects the model or sends a
         // request, never while the application is bootstrapping.
         let initialRemote = Self.initialRemoteModel(
-            from: configuredRemoteModels,
+            from: selectableRemoteModels,
             selectedID: selectedID
         )
         let restoredProfile = savedProfile.flatMap { profile in
@@ -113,7 +118,7 @@ final class ModelRuntimeStore {
                 : nil
         }
 
-        remoteModels = configuredRemoteModels
+        remoteModels = selectableRemoteModels
         activeRemoteModelID = initialRemote.id
         dynamicProfiles = loadedProfiles
         activeDynamicProfileID = mode == .standalone
@@ -260,7 +265,8 @@ final class ModelRuntimeStore {
     func reloadRemoteModels() -> Bool {
         guard let loaded = try? TurboCodeConfig.shared.loadRemoteModels(),
               !loaded.isEmpty else { return false }
-        remoteModels = loaded
+        // PCC-RETIREMENT: this compatibility gate can go with the backend.
+        remoteModels = loaded.filter { !$0.isRetiredPCC }
         // Loading model metadata is safe at startup; credential validation is
         // deliberately deferred to an explicit model selection or request.
         let selected = loaded.first(where: {
@@ -423,6 +429,7 @@ final class ModelRuntimeStore {
     private static func backend(for role: RemoteModelRole) -> ModelBackend {
         switch role {
         case .local: .llamaServer
+        // PCC-RETIREMENT: remove the retired provider route with its backend.
         case .pcc: .foundationServe
         case .premium: .premium
         }
