@@ -40,6 +40,22 @@ struct CodexExecutionEngineTests {
         #expect(context?.contains("Restored response.") == true)
     }
 
+    @Test("Editorial Codex turns advertise no dynamic workspace tools")
+    func editorialTurnsAreToolless() async throws {
+        let transport = RecordingCodexTransport()
+        let engine = CodexExecutionEngine(client: transport)
+
+        _ = try await engine.runTurn(
+            request: request(allowsTools: false),
+            events: .none
+        )
+
+        #expect(await transport.dynamicToolCounts == [0])
+        let instructions = await transport.developerInstructions
+        #expect(instructions.count == 1)
+        #expect((instructions.first ?? "").contains("Do not call tools"))
+    }
+
     @Test("Approval resolution remains one-shot inside the engine")
     func approvalResolutionIsOneShot() async throws {
         let approval = CodexApprovalRequest(
@@ -62,7 +78,7 @@ struct CodexExecutionEngineTests {
         #expect(await transport.resolvedApprovalIDs == ["codex-7"])
     }
 
-    private func request() -> CodexTurnRequest {
+    private func request(allowsTools: Bool = true) -> CodexTurnRequest {
         CodexTurnRequest(
             turnID: TurnID(rawValue: "engine-turn"),
             turboThreadID: "turbo-thread",
@@ -74,7 +90,8 @@ struct CodexExecutionEngineTests {
             modelID: CodexAppServerClient.lunaModelID,
             reasoningEffort: .medium,
             persistsModelPreference: true,
-            delegationInvoker: nil
+            delegationInvoker: nil,
+            allowsTools: allowsTools
         )
     }
 }
@@ -99,6 +116,8 @@ private actor RecordingCodexTransport: CodexAppServerServing {
     private(set) var turnThreadIDs: [String] = []
     private(set) var additionalContexts: [String?] = []
     private(set) var resolvedApprovalIDs: [String] = []
+    private(set) var dynamicToolCounts: [Int] = []
+    private(set) var developerInstructions: [String] = []
 
     init(events: [CodexTurnEvent] = [
         .completed(status: "completed", errorMessage: nil)
@@ -146,6 +165,8 @@ private actor RecordingCodexTransport: CodexAppServerServing {
         developerInstructions: String
     ) async throws -> String {
         threadStartCount += 1
+        dynamicToolCounts.append(dynamicTools.count)
+        self.developerInstructions.append(developerInstructions)
         return "thread-\(threadStartCount)"
     }
 

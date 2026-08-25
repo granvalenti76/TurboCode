@@ -51,6 +51,29 @@ public final class ChatStore {
         modelRuntimeStore.orchestratorMode
     }
 
+    /// Creates the isolated client used by the editorial desk. The model
+    /// configuration is snapshotted when the modal opens; the client then
+    /// executes through the same runtime admission gate as chat.
+    func makeEditorialModelClient() -> any EditorialModelClient {
+        let configuration = modelRuntimeStore.makeSessionConfiguration(
+            workspaceRoot: workspaceRoot
+        )
+        return TurboCodeEditorialModelClient(
+            runtime: llmRuntime,
+            configuration: configuration,
+            modelName: modelRuntimeStore.composerModel,
+            codexConfiguration: configuration.backend == .codex
+                ? EditorialCodexConfiguration(
+                    turboThreadID: "editorial-desk-\(UUID().uuidString)",
+                    modelID: codexRuntimeStore.preferredExecutionModelID,
+                    reasoningEffort: codexRuntimeStore.reasoningEffort,
+                    agentTuning: configuration.agentTuning,
+                    availableSkills: configuration.availableSkills
+                )
+                : nil
+        )
+    }
+
     /// Changes the routing mode as one awaited runtime transition. Swift
     /// property setters cannot suspend, so keeping mutation in a method avoids
     /// an untracked Task racing the next profile or send action.
@@ -610,6 +633,29 @@ public final class ChatStore {
             for: text
         ) else { return }
         await sendMessage(text, promptText: promptText, visibleInTimeline: true)
+    }
+
+    /// Publishes the editorial transcript as a normal visible turn in the
+    /// canonical session. The desk owns the file write; ChatStore only
+    /// rehydrates the document and its selected ground truth into chat.
+    func publishEditorialDraft(
+        document: String,
+        fileName: String,
+        sources: [EditorialSource]
+    ) async {
+        let prompt = EditorialPromptBuilder.makeCanonicalPublishPrompt(
+            document: document,
+            fileName: fileName,
+            sources: sources
+        )
+        guard let promptText = await messageSendCoordinator.preparePrompt(for: prompt) else {
+            return
+        }
+        await sendMessage(
+            "Published editorial draft: \(fileName)",
+            promptText: promptText,
+            visibleInTimeline: true
+        )
     }
 
     /// Sends all valid inline annotations as one explicit user request. The

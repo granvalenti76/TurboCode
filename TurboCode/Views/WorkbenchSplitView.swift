@@ -5,6 +5,7 @@ import SwiftUI
 struct WorkbenchSplitView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var editorialDeskPresented = false
 
     private let sidebarWidth: Double = 268
     private let mainMinWidth: Double = 520
@@ -59,6 +60,21 @@ struct WorkbenchSplitView: View {
         .sheet(isPresented: customProfilesPresented) {
             CustomProfilesSheet()
         }
+        // Keep the editorial feature behind one reversible integration point:
+        // removing the module only removes this toolbar action and its sheet.
+        .sheet(isPresented: $editorialDeskPresented) {
+            EditorialDeskSheet(
+                workspaceRoot: chatStore.workspaceRoot,
+                modelClient: chatStore.makeEditorialModelClient(),
+                publishToCanonicalSession: { document, fileName, sources in
+                    await chatStore.publishEditorialDraft(
+                        document: document,
+                        fileName: fileName,
+                        sources: sources
+                    )
+                }
+            )
+        }
         // Keep this sheet on the stable workbench root. A receipt row lives in
         // a LazyVStack and may be rebuilt while a response or session changes.
         .sheet(item: diffPatchReviewBinding) { presentation in
@@ -83,6 +99,19 @@ struct WorkbenchSplitView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    editorialDeskPresented = true
+                } label: {
+                    Image(systemName: "newspaper")
+                }
+                .disabled(chatStore.workspaceRoot.isEmpty)
+                .help(
+                    chatStore.workspaceRoot.isEmpty
+                        ? "Choose a workspace to open the editorial desk"
+                        : "Open editorial desk"
+                )
+                .accessibilityLabel("Open editorial desk")
+
                 Button {
                     chatStore.toggleRightPanel(.activity)
                 } label: {

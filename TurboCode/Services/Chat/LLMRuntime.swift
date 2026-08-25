@@ -20,8 +20,7 @@ struct NativeLLMExecutionConfiguration {
 /// Provider configuration needed to build one Codex backend adapter.
 /// Presentation callbacks remain explicit output ports; the factory owns the
 /// Codex process adapter and does not leak it back through this value.
-@MainActor
-struct CodexLLMExecutionConfiguration {
+nonisolated struct CodexLLMExecutionConfiguration: Sendable {
     let turboThreadID: String
     let workspaceName: String?
     let agentTuning: AgentTuningConfig
@@ -30,6 +29,9 @@ struct CodexLLMExecutionConfiguration {
     let modelID: String?
     let reasoningEffort: CodexReasoningEffort?
     let delegationInvoker: (any AgentTaskInvoking)?
+    /// Editorial Desk reuses the runtime gate while opting out of all
+    /// workspace tools and approval flows.
+    let allowsTools: Bool
     let activityStarted: @MainActor @Sendable (
         CodexDynamicToolCall,
         String
@@ -38,6 +40,39 @@ struct CodexLLMExecutionConfiguration {
     let approvalRequested: @MainActor @Sendable (
         ApprovalRequest
     ) async -> Void
+
+    init(
+        turboThreadID: String,
+        workspaceName: String?,
+        agentTuning: AgentTuningConfig,
+        availableSkills: [TurboCodeSkillDefinition],
+        pluginTools: [TypeScriptPluginToolBinding],
+        modelID: String?,
+        reasoningEffort: CodexReasoningEffort?,
+        delegationInvoker: (any AgentTaskInvoking)?,
+        allowsTools: Bool = true,
+        activityStarted: @escaping @MainActor @Sendable (
+            CodexDynamicToolCall,
+            String
+        ) async -> Void,
+        activityEnded: @escaping @MainActor @Sendable (String) async -> Void,
+        approvalRequested: @escaping @MainActor @Sendable (
+            ApprovalRequest
+        ) async -> Void
+    ) {
+        self.turboThreadID = turboThreadID
+        self.workspaceName = workspaceName
+        self.agentTuning = agentTuning
+        self.availableSkills = availableSkills
+        self.pluginTools = pluginTools
+        self.modelID = modelID
+        self.reasoningEffort = reasoningEffort
+        self.delegationInvoker = delegationInvoker
+        self.allowsTools = allowsTools
+        self.activityStarted = activityStarted
+        self.activityEnded = activityEnded
+        self.approvalRequested = approvalRequested
+    }
 }
 
 /// Builds concrete provider adapters exclusively inside the LLM runtime layer.
@@ -117,6 +152,7 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
                 ?? codexRuntime.reasoningEffort,
             persistsModelPreference: persistsModelPreference,
             delegationInvoker: configuration.delegationInvoker,
+            allowsTools: configuration.allowsTools,
             runtimeSnapshotChanged: { [weak codexRuntime] snapshot, persists in
                 codexRuntime?.applyExecutionSnapshot(
                     snapshot,

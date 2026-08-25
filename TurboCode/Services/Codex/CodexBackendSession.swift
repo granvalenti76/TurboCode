@@ -17,6 +17,7 @@ actor CodexBackendSession: BackendSession {
     private let reasoningEffort: CodexReasoningEffort
     private let persistsModelPreference: Bool
     private let delegationInvoker: (any AgentTaskInvoking)?
+    private let allowsTools: Bool
     private let runtimeSnapshotChanged: @MainActor @Sendable (
         CodexRuntimeSnapshot,
         Bool
@@ -42,6 +43,7 @@ actor CodexBackendSession: BackendSession {
         reasoningEffort: CodexReasoningEffort = .medium,
         persistsModelPreference: Bool = true,
         delegationInvoker: (any AgentTaskInvoking)? = nil,
+        allowsTools: Bool = true,
         runtimeSnapshotChanged: @escaping @MainActor @Sendable (
             CodexRuntimeSnapshot,
             Bool
@@ -67,6 +69,7 @@ actor CodexBackendSession: BackendSession {
         self.reasoningEffort = reasoningEffort
         self.persistsModelPreference = persistsModelPreference
         self.delegationInvoker = delegationInvoker
+        self.allowsTools = allowsTools
         self.runtimeSnapshotChanged = runtimeSnapshotChanged
         self.activityStarted = activityStarted
         self.activityEnded = activityEnded
@@ -88,6 +91,7 @@ actor CodexBackendSession: BackendSession {
         let reasoningEffort = self.reasoningEffort
         let persistsModelPreference = self.persistsModelPreference
         let delegationInvoker = self.delegationInvoker
+        let allowsTools = self.allowsTools
         let runtimeSnapshotChanged = self.runtimeSnapshotChanged
         let activityStarted = self.activityStarted
         let activityEnded = self.activityEnded
@@ -119,7 +123,8 @@ actor CodexBackendSession: BackendSession {
                         reasoningEffort: reasoningEffort,
                         persistsModelPreference: persistsModelPreference,
                         delegationInvoker: delegationInvoker,
-                        pluginTools: pluginTools
+                        pluginTools: pluginTools,
+                        allowsTools: allowsTools
                     ),
                     events: CodexTurnEvents(
                         runtimeSnapshotChanged: { snapshot, persistsPreference in
