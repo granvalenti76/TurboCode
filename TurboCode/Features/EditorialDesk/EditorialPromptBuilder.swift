@@ -106,6 +106,9 @@ nonisolated enum EditorialPromptBuilder {
                 "type=\"\(escaped(type.name))\" symbol=\"\(escaped(type.systemImage))\" color=\"\(escaped(type.colorHex))\""
             )
         }
+        if let date = metadata.dateString {
+            lines.append("date=\"\(escaped(date))\"")
+        }
         return lines.isEmpty ? "none" : lines.joined(separator: "\n")
     }
 

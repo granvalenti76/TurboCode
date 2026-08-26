@@ -193,22 +193,36 @@ nonisolated public struct EditorialDeskCatalog: Codable, Hashable, Sendable {
 
 /// Metadata selected for one draft. The complete catalog entries are carried
 /// through publishing so the Markdown front matter preserves their symbols
-/// and type color alongside the human-readable labels.
+/// and type color alongside the human-readable labels. The date is optional so
+/// a draft can remain date-free until the editor explicitly adds one.
 nonisolated public struct EditorialDeskMetadata: Codable, Hashable, Sendable {
     public var section: EditorialDeskSection?
     public var type: EditorialDeskType?
+    public var date: Date?
 
     public init(
         section: EditorialDeskSection?,
-        type: EditorialDeskType?
+        type: EditorialDeskType?,
+        date: Date? = nil
     ) {
         self.section = section
         self.type = type
+        self.date = date
     }
 
-    public static let empty = EditorialDeskMetadata(section: nil, type: nil)
+    public static let empty = EditorialDeskMetadata(section: nil, type: nil, date: nil)
 
-    public var isEmpty: Bool { section == nil && type == nil }
+    public var isEmpty: Bool { section == nil && type == nil && date == nil }
+
+    public var dateString: String? {
+        guard let date else { return nil }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .iso8601)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
 }
 
 /// Describes where an editorial ground-truth source came from without

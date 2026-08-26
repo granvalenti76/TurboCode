@@ -14,6 +14,9 @@ struct EditorialDeskSheet: View {
     @State private var selectedInspectorTab: InspectorTab = .info
     @State private var selectedSectionID: UUID?
     @State private var selectedTypeID: UUID?
+    @State private var selectedDate: Date?
+    @State private var datePickerDate = Date()
+    @State private var datePickerPresented = false
     @State private var actionMenuPresented = false
     @State private var selectedLine = 4
     @State private var sourceImporterPresented = false
@@ -58,7 +61,8 @@ struct EditorialDeskSheet: View {
                 articleCanvas
                 inspector
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+            .layoutPriority(1)
 
             Divider()
             footer
@@ -297,6 +301,71 @@ struct EditorialDeskSheet: View {
         .background(Color(nsColor: .textBackgroundColor))
     }
 
+    /// Date belongs to the inspector's document metadata, alongside author
+    /// and location, rather than to the taxonomy controls in the top bar.
+    private var dateInspectorField: some View {
+        Button {
+            datePickerDate = selectedDate ?? Date()
+            datePickerPresented = true
+        } label: {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Date")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 7) {
+                    Text(selectedDate.map(displayDate) ?? "Add date")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Image(systemName: "calendar")
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $datePickerPresented, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Publication date")
+                    .font(.headline)
+
+                DatePicker(
+                    "Date",
+                    selection: $datePickerDate,
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.graphical)
+                .labelsHidden()
+
+                Divider()
+
+                HStack {
+                    if selectedDate != nil {
+                        Button("Clear") {
+                            selectedDate = nil
+                            datePickerPresented = false
+                        }
+                    }
+                    Spacer()
+                    Button("Cancel") {
+                        datePickerPresented = false
+                    }
+                    Button("Done") {
+                        selectedDate = datePickerDate
+                        datePickerPresented = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(16)
+            .frame(width: 300)
+        }
+        .help("Choose publication date")
+    }
+
+    private func displayDate(_ date: Date) -> String {
+        date.formatted(date: .abbreviated, time: .omitted)
+    }
+
     private var selectedSection: EditorialDeskSection? {
         guard let id = selectedSectionID else { return nil }
         return settings.editorialDeskCatalog.sections.first { $0.id == id }
@@ -361,68 +430,72 @@ struct EditorialDeskSheet: View {
     }
 
     private var articleCanvas: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            articleHeader
-            Divider()
+        GeometryReader { _ in
+            VStack(alignment: .leading, spacing: 0) {
+                articleHeader
+                Divider()
 
-            ZStack(alignment: .topLeading) {
-                HStack(alignment: .top, spacing: 0) {
-                    if !viewModel.documentContent.isEmpty {
-                        lineNumberGutter
-                    }
+                ZStack(alignment: .topLeading) {
+                    HStack(alignment: .top, spacing: 0) {
+                        if !viewModel.documentContent.isEmpty {
+                            lineNumberGutter
+                        }
 
-                    ZStack(alignment: .topLeading) {
-                        EditorialCanvasTextView(
-                            text: Binding(
-                                get: { viewModel.documentContent },
-                                set: { viewModel.updateBody($0) }
+                        ZStack(alignment: .topLeading) {
+                            EditorialCanvasTextView(
+                                text: Binding(
+                                    get: { viewModel.documentContent },
+                                    set: { viewModel.updateBody($0) }
+                                )
                             )
-                        )
 
-                        if viewModel.documentContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            emptyDocumentPrompt
-                                .allowsHitTesting(false)
+                            if viewModel.documentContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                emptyDocumentPrompt
+                                    .allowsHitTesting(false)
+                            }
                         }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .padding(.vertical, 14)
+                    .padding(.vertical, 14)
 
-                if selectedTab != .write {
-                    intakePanel
-                        .padding(.horizontal, 28)
-                        .padding(.top, 16)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                }
+                    if selectedTab != .write {
+                        intakePanel
+                            .padding(.horizontal, 28)
+                            .padding(.top, 16)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    }
 
-                if viewModel.hasDocument {
-                    Button {
-                        withAnimation(.snappy(duration: 0.18)) {
-                            actionMenuPresented.toggle()
+                    if viewModel.hasDocument {
+                        Button {
+                            withAnimation(.snappy(duration: 0.18)) {
+                                actionMenuPresented.toggle()
+                            }
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.tint)
+                                .frame(width: 28, height: 28)
+                                .background(.background, in: Circle())
+                                .overlay { Circle().strokeBorder(.separator, lineWidth: 0.5) }
+                                .shadow(color: .black.opacity(0.1), radius: 3, y: 1)
                         }
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.tint)
-                            .frame(width: 28, height: 28)
-                            .background(.background, in: Circle())
-                            .overlay { Circle().strokeBorder(.separator, lineWidth: 0.5) }
-                            .shadow(color: .black.opacity(0.1), radius: 3, y: 1)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Open editorial actions")
-                    .padding(.leading, 16)
-                    .padding(.top, 124)
+                        .buttonStyle(.plain)
+                        .help("Open editorial actions")
+                        .padding(.leading, 16)
+                        .padding(.top, 124)
 
-                    if actionMenuPresented {
-                        editorialActionMenu
-                            .transition(.scale(scale: 0.96, anchor: .topLeading).combined(with: .opacity))
-                            .padding(.top, 124)
-                            .padding(.trailing, 20)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
+                        if actionMenuPresented {
+                            editorialActionMenu
+                                .transition(.scale(scale: 0.96, anchor: .topLeading).combined(with: .opacity))
+                                .padding(.top, 124)
+                                .padding(.trailing, 20)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .clipped()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
@@ -663,7 +736,7 @@ struct EditorialDeskSheet: View {
         VStack(alignment: .leading, spacing: 18) {
             if viewModel.hasDocument {
                 inspectorField("Author", value: "Add author", disclosure: true)
-                inspectorField("Date", value: "Add date", icon: "calendar")
+                dateInspectorField
                 inspectorField("Location", value: "Add location", icon: "mappin")
             } else {
                 emptyInspectorState(
@@ -974,7 +1047,8 @@ struct EditorialDeskSheet: View {
         let sources = viewModel.selectedSources
         let metadata = EditorialDeskMetadata(
             section: selectedSection,
-            type: selectedType
+            type: selectedType,
+            date: selectedDate
         )
         Task { @MainActor in
             do {

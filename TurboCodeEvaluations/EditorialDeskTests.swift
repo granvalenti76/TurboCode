@@ -113,6 +113,8 @@ struct EditorialDeskTests {
 
     @Test("canonical publish prompt carries selected editorial metadata")
     func canonicalPublishPromptCarriesEditorialMetadata() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let metadata = EditorialDeskMetadata(
             section: EditorialDeskSection(
                 name: "Politics",
@@ -122,7 +124,8 @@ struct EditorialDeskTests {
                 name: "Breaking",
                 systemImage: "bolt.fill",
                 colorHex: "#FF3B30"
-            )
+            ),
+            date: calendar.date(from: DateComponents(year: 2026, month: 8, day: 26, hour: 12))
         )
 
         let prompt = EditorialPromptBuilder.makeCanonicalPublishPrompt(
@@ -136,6 +139,7 @@ struct EditorialDeskTests {
         #expect(prompt.contains("section=\"Politics\""))
         #expect(prompt.contains("type=\"Breaking\""))
         #expect(prompt.contains("color=\"#FF3B30\""))
+        #expect(prompt.contains("date=\"2026-08-26\""))
     }
 
     @Test("structured model response decodes from a JSON fence")
@@ -271,6 +275,8 @@ struct EditorialDeskTests {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let metadata = EditorialDeskMetadata(
             section: EditorialDeskSection(
                 name: "Politics",
@@ -280,7 +286,8 @@ struct EditorialDeskTests {
                 name: "Breaking",
                 systemImage: "bolt.fill",
                 colorHex: "#FF3B30"
-            )
+            ),
+            date: calendar.date(from: DateComponents(year: 2026, month: 8, day: 26, hour: 12))
         )
         let publication = try EditorialDraftPublisher.publish(
             document: "Published article",
@@ -296,6 +303,7 @@ struct EditorialDeskTests {
         #expect(contents.contains("editorial_type: \"Breaking\""))
         #expect(contents.contains("editorial_type_symbol: \"bolt.fill\""))
         #expect(contents.contains("editorial_type_color: \"#FF3B30\""))
+        #expect(contents.contains("editorial_date: \"2026-08-26\""))
         #expect(contents.hasSuffix("---\n\nPublished article"))
     }
 

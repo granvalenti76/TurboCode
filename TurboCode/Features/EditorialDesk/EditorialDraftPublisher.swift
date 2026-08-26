@@ -78,6 +78,9 @@ nonisolated enum EditorialDraftPublisher {
             lines.append("editorial_type_symbol: \(frontMatterValue(type.systemImage))")
             lines.append("editorial_type_color: \(frontMatterValue(type.colorHex))")
         }
+        if let date = metadata.dateString {
+            lines.append("editorial_date: \(frontMatterValue(date))")
+        }
         lines.append("---")
         return lines.joined(separator: "\n") + "\n\n" + document
     }
