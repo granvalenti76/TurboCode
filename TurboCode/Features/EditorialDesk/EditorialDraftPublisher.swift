@@ -32,6 +32,7 @@ nonisolated enum EditorialDraftPublisher {
         document: String,
         title: String,
         workspaceRoot: String,
+        metadata: EditorialDeskMetadata = .empty,
         fileManager: FileManager = .default,
         now: Date = Date()
     ) throws -> EditorialPublication {
@@ -54,8 +55,40 @@ nonisolated enum EditorialDraftPublisher {
             ?? "Untitled-Draft-\(temporaryStamp(now))"
         let fileName = uniqueFileName(baseName: baseName, in: workspaceURL, fileManager: fileManager)
         let targetURL = try WorkspacePathResolver.resolve(fileName, within: workspaceRoot)
-        try Data(trimmedDocument.utf8).write(to: targetURL, options: .atomic)
+        let serializedDocument = markdownDocument(trimmedDocument, metadata: metadata)
+        try Data(serializedDocument.utf8).write(to: targetURL, options: .atomic)
         return EditorialPublication(fileName: fileName, url: targetURL)
+    }
+
+    /// Uses standard Markdown front matter so editors and scripts can inspect
+    /// newsroom metadata without requiring a TurboCode-specific file format.
+    private static func markdownDocument(
+        _ document: String,
+        metadata: EditorialDeskMetadata
+    ) -> String {
+        guard !metadata.isEmpty else { return document }
+
+        var lines = ["---"]
+        if let section = metadata.section {
+            lines.append("editorial_section: \(frontMatterValue(section.name))")
+            lines.append("editorial_section_symbol: \(frontMatterValue(section.systemImage))")
+        }
+        if let type = metadata.type {
+            lines.append("editorial_type: \(frontMatterValue(type.name))")
+            lines.append("editorial_type_symbol: \(frontMatterValue(type.systemImage))")
+            lines.append("editorial_type_color: \(frontMatterValue(type.colorHex))")
+        }
+        lines.append("---")
+        return lines.joined(separator: "\n") + "\n\n" + document
+    }
+
+    private static func frontMatterValue(_ value: String) -> String {
+        let escaped = value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+        return "\"\(escaped)\""
     }
 
     private static func safeBaseName(_ title: String) -> String? {

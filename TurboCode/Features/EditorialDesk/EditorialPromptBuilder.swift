@@ -64,7 +64,8 @@ nonisolated enum EditorialPromptBuilder {
     static func makeCanonicalPublishPrompt(
         document: String,
         fileName: String,
-        sources: [EditorialSource]
+        sources: [EditorialSource],
+        metadata: EditorialDeskMetadata = .empty
     ) -> String {
         let sourceText = sources.enumerated().map { index, source in
             """
@@ -85,10 +86,27 @@ nonisolated enum EditorialPromptBuilder {
         \(document)
         </published_editorial_document>
 
+        <editorial_metadata>
+        \(metadataDescription(metadata))
+        </editorial_metadata>
+
         <ground_truth_sources>
         \(sourceText)
         </ground_truth_sources>
         """
+    }
+
+    private static func metadataDescription(_ metadata: EditorialDeskMetadata) -> String {
+        var lines: [String] = []
+        if let section = metadata.section {
+            lines.append("section=\"\(escaped(section.name))\" symbol=\"\(escaped(section.systemImage))\"")
+        }
+        if let type = metadata.type {
+            lines.append(
+                "type=\"\(escaped(type.name))\" symbol=\"\(escaped(type.systemImage))\" color=\"\(escaped(type.colorHex))\""
+            )
+        }
+        return lines.isEmpty ? "none" : lines.joined(separator: "\n")
     }
 
     private static func escaped(_ value: String) -> String {

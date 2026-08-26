@@ -4,6 +4,36 @@ import Testing
 
 @Suite("Editorial desk")
 struct EditorialDeskTests {
+    @Test("default editorial catalog is neutral and empty")
+    func defaultEditorialCatalogIsEmpty() {
+        #expect(EditorialDeskCatalog.default.sections.isEmpty)
+        #expect(EditorialDeskCatalog.default.types.isEmpty)
+    }
+
+    @Test("editorial catalog round-trips its configurable metadata")
+    func editorialCatalogRoundTrips() throws {
+        let catalog = EditorialDeskCatalog(
+            sections: [
+                EditorialDeskSection(
+                    name: "Culture",
+                    systemImage: "books.vertical"
+                )
+            ],
+            types: [
+                EditorialDeskType(
+                    name: "Analysis",
+                    systemImage: "chart.bar.xaxis",
+                    colorHex: "#34C759"
+                )
+            ]
+        )
+
+        let data = try JSONEncoder().encode(catalog)
+        let decoded = try JSONDecoder().decode(EditorialDeskCatalog.self, from: data)
+
+        #expect(decoded == catalog)
+    }
+
     @Test("A new desk is empty and direct writing builds the document")
     @MainActor
     func newDeskStartsEmptyAndSupportsDirectWriting() {
@@ -64,6 +94,33 @@ struct EditorialDeskTests {
         #expect(prompt.contains("Published article"))
         #expect(prompt.contains("Authoritative programme claim"))
         #expect(prompt.contains("Treat the published document as the canonical editorial transcript"))
+    }
+
+    @Test("canonical publish prompt carries selected editorial metadata")
+    func canonicalPublishPromptCarriesEditorialMetadata() {
+        let metadata = EditorialDeskMetadata(
+            section: EditorialDeskSection(
+                name: "Politics",
+                systemImage: "building.columns"
+            ),
+            type: EditorialDeskType(
+                name: "Breaking",
+                systemImage: "bolt.fill",
+                colorHex: "#FF3B30"
+            )
+        )
+
+        let prompt = EditorialPromptBuilder.makeCanonicalPublishPrompt(
+            document: "Published article",
+            fileName: "Politics.md",
+            sources: [],
+            metadata: metadata
+        )
+
+        #expect(prompt.contains("<editorial_metadata>"))
+        #expect(prompt.contains("section=\"Politics\""))
+        #expect(prompt.contains("type=\"Breaking\""))
+        #expect(prompt.contains("color=\"#FF3B30\""))
     }
 
     @Test("structured model response decodes from a JSON fence")
@@ -190,6 +247,41 @@ struct EditorialDeskTests {
         #expect(second.fileName == "Politics---Lead-2.md")
         #expect(String(data: try Data(contentsOf: first.url), encoding: .utf8) == "First draft")
         #expect(String(data: try Data(contentsOf: second.url), encoding: .utf8) == "Second draft")
+    }
+
+    @Test("publish serializes editorial metadata as Markdown front matter")
+    func publisherSerializesEditorialMetadata() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EditorialMetadataPublicationTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let metadata = EditorialDeskMetadata(
+            section: EditorialDeskSection(
+                name: "Politics",
+                systemImage: "building.columns"
+            ),
+            type: EditorialDeskType(
+                name: "Breaking",
+                systemImage: "bolt.fill",
+                colorHex: "#FF3B30"
+            )
+        )
+        let publication = try EditorialDraftPublisher.publish(
+            document: "Published article",
+            title: "Politics",
+            workspaceRoot: root.path,
+            metadata: metadata
+        )
+
+        let contents = try String(contentsOf: publication.url, encoding: .utf8)
+        #expect(contents.hasPrefix("---\n"))
+        #expect(contents.contains("editorial_section: \"Politics\""))
+        #expect(contents.contains("editorial_section_symbol: \"building.columns\""))
+        #expect(contents.contains("editorial_type: \"Breaking\""))
+        #expect(contents.contains("editorial_type_symbol: \"bolt.fill\""))
+        #expect(contents.contains("editorial_type_color: \"#FF3B30\""))
+        #expect(contents.hasSuffix("---\n\nPublished article"))
     }
 
     @Test("publish creates a temporary name when the title is empty")

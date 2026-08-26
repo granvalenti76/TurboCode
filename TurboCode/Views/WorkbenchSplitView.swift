@@ -74,11 +74,12 @@ struct WorkbenchSplitView: View {
             EditorialDeskSheet(
                 workspaceRoot: chatStore.workspaceRoot,
                 modelClient: chatStore.makeEditorialModelClient(),
-                publishToCanonicalSession: { document, fileName, sources in
+                publishToCanonicalSession: { document, fileName, sources, metadata in
                     await chatStore.publishEditorialDraft(
                         document: document,
                         fileName: fileName,
-                        sources: sources
+                        sources: sources,
+                        metadata: metadata
                     )
                 }
             )

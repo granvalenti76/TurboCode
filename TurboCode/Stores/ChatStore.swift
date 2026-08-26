@@ -641,12 +641,14 @@ public final class ChatStore {
     func publishEditorialDraft(
         document: String,
         fileName: String,
-        sources: [EditorialSource]
+        sources: [EditorialSource],
+        metadata: EditorialDeskMetadata = .empty
     ) async {
         let prompt = EditorialPromptBuilder.makeCanonicalPublishPrompt(
             document: document,
             fileName: fileName,
-            sources: sources
+            sources: sources,
+            metadata: metadata
         )
         guard let promptText = await messageSendCoordinator.preparePrompt(for: prompt) else {
             return

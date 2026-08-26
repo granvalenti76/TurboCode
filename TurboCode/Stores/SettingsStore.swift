@@ -18,6 +18,14 @@ public final class SettingsStore {
         didSet { UserDefaults.standard.set(maxChatWidth, forKey: "maxChatWidth") }
     }
     public var workspacePaths: [String] = []
+    /// The newsroom taxonomy used by Editorial Desk metadata menus and
+    /// persisted independently from provider and agent configuration.
+    public var editorialDeskCatalog: EditorialDeskCatalog = .default {
+        didSet {
+            guard !isLoadingEditorialDeskCatalog else { return }
+            saveEditorialDeskCatalog()
+        }
+    }
 
     public var agentTuning: AgentTuningConfig = .default {
         didSet {
@@ -71,6 +79,7 @@ public final class SettingsStore {
 
     private var isLoadingCredentials = false
     private var isLoadingAgentTuning = false
+    private var isLoadingEditorialDeskCatalog = false
 
     public init() {}
 
@@ -108,6 +117,7 @@ public final class SettingsStore {
         }
         reloadAgentTuning()
         reloadRemoteModels()
+        loadEditorialDeskCatalog()
         // Do not read provider secrets while restoring general settings. The
         // Provider pane loads this value only when the user opens it.
     }
@@ -165,6 +175,47 @@ public final class SettingsStore {
         defaults.set(language, forKey: "language")
         defaults.set(fontSize, forKey: "fontSize")
         defaults.set(maxChatWidth, forKey: "maxChatWidth")
+    }
+
+    private func loadEditorialDeskCatalog() {
+        isLoadingEditorialDeskCatalog = true
+        defer { isLoadingEditorialDeskCatalog = false }
+
+        guard let data = UserDefaults.standard.data(forKey: "editorialDeskCatalog"),
+              let catalog = try? JSONDecoder().decode(
+                  EditorialDeskCatalog.self,
+                  from: data
+              ) else {
+            editorialDeskCatalog = .default
+            saveEditorialDeskCatalog()
+            return
+        }
+        if isLegacyEditorialMockCatalog(catalog) {
+            // The first prototype shipped illustrative newsroom values. They
+            // must not become implicit harness configuration for real teams.
+            editorialDeskCatalog = .default
+            saveEditorialDeskCatalog()
+        } else {
+            editorialDeskCatalog = catalog
+        }
+    }
+
+    private func saveEditorialDeskCatalog() {
+        guard let data = try? JSONEncoder().encode(editorialDeskCatalog) else { return }
+        UserDefaults.standard.set(data, forKey: "editorialDeskCatalog")
+    }
+
+    private func isLegacyEditorialMockCatalog(_ catalog: EditorialDeskCatalog) -> Bool {
+        guard catalog.sections.count == 1,
+              catalog.types.count == 1,
+              catalog.sections[0].name == "Politica",
+              catalog.sections[0].systemImage == "building.columns",
+              catalog.types[0].name == "Breaking",
+              catalog.types[0].systemImage == "bolt.fill",
+              catalog.types[0].colorHex.caseInsensitiveCompare("#FF3B30") == .orderedSame else {
+            return false
+        }
+        return true
     }
 }
 

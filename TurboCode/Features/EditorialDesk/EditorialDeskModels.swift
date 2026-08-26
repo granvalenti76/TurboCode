@@ -20,6 +20,85 @@ nonisolated enum EditorialDeskTab: String, CaseIterable, Identifiable, Sendable 
     }
 }
 
+/// User-configurable editorial grouping shown by the desk metadata bar.
+/// Sections intentionally store only presentation data so a newsroom can
+/// define its own taxonomy without changing the editorial workflow.
+nonisolated public struct EditorialDeskSection: Identifiable, Codable, Hashable, Sendable {
+    public let id: UUID
+    public var name: String
+    public var systemImage: String
+
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        systemImage: String
+    ) {
+        self.id = id
+        self.name = name
+        self.systemImage = systemImage
+    }
+}
+
+/// User-configurable article type. The color is stored as a hex string so the
+/// catalog stays platform-neutral and can be persisted without archiving
+/// SwiftUI or AppKit color objects.
+nonisolated public struct EditorialDeskType: Identifiable, Codable, Hashable, Sendable {
+    public let id: UUID
+    public var name: String
+    public var systemImage: String
+    public var colorHex: String
+
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        systemImage: String,
+        colorHex: String
+    ) {
+        self.id = id
+        self.name = name
+        self.systemImage = systemImage
+        self.colorHex = colorHex
+    }
+}
+
+/// The complete user-owned editorial taxonomy persisted by Settings.
+nonisolated public struct EditorialDeskCatalog: Codable, Hashable, Sendable {
+    public var sections: [EditorialDeskSection]
+    public var types: [EditorialDeskType]
+
+    public init(
+        sections: [EditorialDeskSection],
+        types: [EditorialDeskType]
+    ) {
+        self.sections = sections
+        self.types = types
+    }
+
+    /// An empty catalog keeps the harness domain-neutral. Teams populate the
+    /// newsroom taxonomy from Settings instead of inheriting mockup values.
+    public static let `default` = EditorialDeskCatalog(sections: [], types: [])
+}
+
+/// Metadata selected for one draft. The complete catalog entries are carried
+/// through publishing so the Markdown front matter preserves their symbols
+/// and type color alongside the human-readable labels.
+nonisolated public struct EditorialDeskMetadata: Codable, Hashable, Sendable {
+    public var section: EditorialDeskSection?
+    public var type: EditorialDeskType?
+
+    public init(
+        section: EditorialDeskSection?,
+        type: EditorialDeskType?
+    ) {
+        self.section = section
+        self.type = type
+    }
+
+    public static let empty = EditorialDeskMetadata(section: nil, type: nil)
+
+    public var isEmpty: Bool { section == nil && type == nil }
+}
+
 /// Describes where an editorial ground-truth source came from without
 /// restricting the material to a fixed file-name or document-type catalog.
 nonisolated enum EditorialSourceOrigin: Hashable, Sendable {

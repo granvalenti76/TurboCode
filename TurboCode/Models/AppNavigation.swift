@@ -29,6 +29,7 @@ public enum RightPanelMode: String, Sendable, Hashable, CaseIterable {
 /// Settings tabs whose controls are connected to persisted product behavior.
 public enum SettingsSection: String, Sendable, Hashable, CaseIterable {
     case general
+    case editorialDesk
     case providers
     case agents
     case shortcuts

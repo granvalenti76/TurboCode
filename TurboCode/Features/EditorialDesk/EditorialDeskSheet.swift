@@ -8,9 +8,12 @@ import AppKit
 /// remain projected into the modal rather than the main chat timeline.
 struct EditorialDeskSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(SettingsStore.self) private var settings
     @State private var viewModel: EditorialDeskViewModel
     @State private var selectedTab: EditorialDeskTab = .write
     @State private var selectedInspectorTab: InspectorTab = .info
+    @State private var selectedSectionID: UUID?
+    @State private var selectedTypeID: UUID?
     @State private var actionMenuPresented = false
     @State private var selectedLine = 4
     @State private var sourceImporterPresented = false
@@ -28,12 +31,12 @@ struct EditorialDeskSheet: View {
     }
 
     private let workspaceRoot: String
-    private let publishToCanonicalSession: @MainActor (String, String, [EditorialSource]) async -> Void
+    private let publishToCanonicalSession: @MainActor (String, String, [EditorialSource], EditorialDeskMetadata) async -> Void
 
     init(
         workspaceRoot: String,
         modelClient: (any EditorialModelClient)? = nil,
-        publishToCanonicalSession: @escaping @MainActor (String, String, [EditorialSource]) async -> Void = { _, _, _ in }
+        publishToCanonicalSession: @escaping @MainActor (String, String, [EditorialSource], EditorialDeskMetadata) async -> Void = { _, _, _, _ in }
     ) {
         self.workspaceRoot = workspaceRoot
         self.publishToCanonicalSession = publishToCanonicalSession
@@ -213,6 +216,61 @@ struct EditorialDeskSheet: View {
     private var metadataBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 12) {
+                // The catalog menus provide behavior only; the custom capsule
+                // owns both the visible chrome and its dynamic text width.
+                Menu {
+                    if settings.editorialDeskCatalog.sections.isEmpty {
+                        Text("Configure sections in Settings")
+                    } else {
+                        ForEach(settings.editorialDeskCatalog.sections) { option in
+                            Button {
+                                selectedSectionID = option.id
+                            } label: {
+                                Label(option.name, systemImage: option.systemImage)
+                            }
+                        }
+                    }
+                } label: {
+                    metadataChip(
+                        icon: selectedSection?.systemImage ?? "tag",
+                        title: "Section",
+                        value: selectedSection?.name ?? "",
+                        isPlaceholder: selectedSection == nil
+                    )
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize(horizontal: true, vertical: false)
+                .disabled(settings.editorialDeskCatalog.sections.isEmpty)
+
+                Menu {
+                    if settings.editorialDeskCatalog.types.isEmpty {
+                        Text("Configure article types in Settings")
+                    } else {
+                        ForEach(settings.editorialDeskCatalog.types) { option in
+                            Button {
+                                selectedTypeID = option.id
+                            } label: {
+                                Label(option.name, systemImage: option.systemImage)
+                            }
+                        }
+                    }
+                } label: {
+                    metadataChip(
+                        icon: selectedType?.systemImage ?? "bolt",
+                        // Once selected, the type name replaces the generic
+                        // placeholder exactly like the editorial reference.
+                        title: selectedType == nil ? "Type" : "",
+                        value: selectedType?.name ?? "",
+                        tint: selectedType.map { editorialColor($0.colorHex) } ?? .secondary,
+                        isPlaceholder: selectedType == nil
+                    )
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize(horizontal: true, vertical: false)
+                .disabled(settings.editorialDeskCatalog.types.isEmpty)
+
                 if viewModel.hasDocument {
                     metadataChip(icon: "textformat", title: "Style", value: "Choose style")
                 }
@@ -224,7 +282,10 @@ struct EditorialDeskSheet: View {
                         tint: .green
                     )
                 }
-                if !viewModel.hasDocument && viewModel.sources.isEmpty {
+                if !viewModel.hasDocument,
+                   viewModel.sources.isEmpty,
+                   selectedSection == nil,
+                   selectedType == nil {
                     Text("Start with a document or a source")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
@@ -236,19 +297,39 @@ struct EditorialDeskSheet: View {
         .background(Color(nsColor: .textBackgroundColor))
     }
 
+    private var selectedSection: EditorialDeskSection? {
+        guard let id = selectedSectionID else { return nil }
+        return settings.editorialDeskCatalog.sections.first { $0.id == id }
+    }
+
+    private var selectedType: EditorialDeskType? {
+        guard let id = selectedTypeID else { return nil }
+        return settings.editorialDeskCatalog.types.first { $0.id == id }
+    }
+
+    private func editorialColor(_ hex: String) -> Color {
+        let normalized = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard let value = UInt64(normalized, radix: 16) else { return .accentColor }
+        return Color(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
+
     private func metadataChip(
         icon: String,
         title: String,
         value: String,
-        tint: Color = .secondary
+        tint: Color = .secondary,
+        isPlaceholder: Bool = false
     ) -> some View {
         HStack(spacing: 7) {
-            Image(systemName: icon).foregroundStyle(tint)
-            if !title.isEmpty {
-                Text("\(title):").foregroundStyle(.secondary)
-            }
-            Text(value)
-                .foregroundStyle(tint == Color.secondary ? Color.primary : tint)
+            Image(systemName: icon)
+                .foregroundStyle(isPlaceholder ? Color.secondary : tint)
+            // Borderless macOS menus may collapse sibling Text views in their
+            // label. A single composed Text keeps the selected catalog value.
+            metadataChipText(title: title, value: value, tint: tint)
             Image(systemName: "chevron.down")
                 .font(.system(size: 8, weight: .semibold))
                 .foregroundStyle(.tertiary)
@@ -256,8 +337,27 @@ struct EditorialDeskSheet: View {
         .font(.system(size: 12, weight: .medium))
         .padding(.horizontal, 12)
         .frame(height: 30)
+        // A menu can otherwise retain the placeholder's intrinsic width and
+        // clip a longer catalog value selected later in the same presentation.
+        .fixedSize(horizontal: true, vertical: false)
         .background(.regularMaterial, in: Capsule())
         .overlay { Capsule().strokeBorder(.separator, lineWidth: 0.5) }
+    }
+
+    private func metadataChipText(
+        title: String,
+        value: String,
+        tint: Color
+    ) -> Text {
+        let valueColor = tint == Color.secondary ? Color.primary : tint
+        if title.isEmpty {
+            return Text(value).foregroundColor(valueColor)
+        }
+        if value.isEmpty {
+            return Text("\(title):").foregroundColor(.secondary)
+        }
+        return Text("\(title): ").foregroundColor(.secondary)
+            + Text(value).foregroundColor(valueColor)
     }
 
     private var articleCanvas: some View {
@@ -872,14 +972,24 @@ struct EditorialDeskSheet: View {
         let document = viewModel.draftText
         let title = viewModel.documentTitle
         let sources = viewModel.selectedSources
+        let metadata = EditorialDeskMetadata(
+            section: selectedSection,
+            type: selectedType
+        )
         Task { @MainActor in
             do {
                 let publication = try EditorialDraftPublisher.publish(
                     document: document,
                     title: title,
-                    workspaceRoot: workspaceRoot
+                    workspaceRoot: workspaceRoot,
+                    metadata: metadata
                 )
-                await publishToCanonicalSession(document, publication.fileName, sources)
+                await publishToCanonicalSession(
+                    document,
+                    publication.fileName,
+                    sources,
+                    metadata
+                )
                 isPublishing = false
                 dismiss()
             } catch {

@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - SettingsTabView — native macOS settings with a sidebar-style TabView
 
@@ -11,6 +12,10 @@ struct SettingsTabView: View {
             GeneralSettingsView()
                 .tabItem { Label("General", systemImage: "slider.horizontal.3") }
                 .tag(SettingsSection.general)
+
+            EditorialDeskSettingsView()
+                .tabItem { Label("Editorial Desk", systemImage: "newspaper") }
+                .tag(SettingsSection.editorialDesk)
 
             ProviderSettingsView()
                 .tabItem { Label("Providers", systemImage: "network") }
@@ -28,6 +33,249 @@ struct SettingsTabView: View {
         .tabViewStyle(.sidebarAdaptable)
         .frame(minWidth: 600, minHeight: 400)
         .environment(settings)
+    }
+}
+
+// MARK: - Editorial Desk Settings
+
+struct EditorialDeskSettingsView: View {
+    @Environment(SettingsStore.self) private var settings
+
+    var body: some View {
+        Form {
+            Section {
+                Text("Define the sections and article types available in the Editorial Desk metadata bar.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Sections") {
+                if settings.editorialDeskCatalog.sections.isEmpty {
+                    Text("No sections configured.")
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(settings.editorialDeskCatalog.sections) { section in
+                    HStack(spacing: 10) {
+                        Image(systemName: section.systemImage)
+                            .frame(width: 22)
+                            .foregroundStyle(.secondary)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField(
+                                "Section name",
+                                text: sectionNameBinding(section.id)
+                            )
+                            .textFieldStyle(.roundedBorder)
+
+                            TextField(
+                                "SF Symbol, e.g. building.columns",
+                                text: sectionSymbolBinding(section.id)
+                            )
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
+                        }
+
+                        Button(role: .destructive) {
+                            removeSection(section.id)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Remove section")
+                    }
+                }
+
+                Button {
+                    var catalog = settings.editorialDeskCatalog
+                    catalog.sections.append(
+                        EditorialDeskSection(
+                            name: "New section",
+                            systemImage: "square.grid.2x2"
+                        )
+                    )
+                    settings.editorialDeskCatalog = catalog
+                } label: {
+                    Label("Add Section", systemImage: "plus")
+                }
+            }
+
+            Section("Article Types") {
+                if settings.editorialDeskCatalog.types.isEmpty {
+                    Text("No article types configured.")
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(settings.editorialDeskCatalog.types) { type in
+                    HStack(spacing: 10) {
+                        Image(systemName: type.systemImage)
+                            .frame(width: 22)
+                            .foregroundStyle(Color(editorialHex: type.colorHex))
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField(
+                                "Type name",
+                                text: typeNameBinding(type.id)
+                            )
+                            .textFieldStyle(.roundedBorder)
+
+                            TextField(
+                                "SF Symbol, e.g. bolt.fill",
+                                text: typeSymbolBinding(type.id)
+                            )
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
+
+                            ColorPicker(
+                                "Color",
+                                selection: typeColorBinding(type.id),
+                                supportsOpacity: false
+                            )
+                        }
+
+                        Button(role: .destructive) {
+                            removeType(type.id)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Remove article type")
+                    }
+                }
+
+                Button {
+                    var catalog = settings.editorialDeskCatalog
+                    catalog.types.append(
+                        EditorialDeskType(
+                            name: "New type",
+                            systemImage: "doc.text",
+                            colorHex: "#007AFF"
+                        )
+                    )
+                    settings.editorialDeskCatalog = catalog
+                } label: {
+                    Label("Add Article Type", systemImage: "plus")
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+    }
+
+    private func sectionNameBinding(_ id: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                settings.editorialDeskCatalog.sections.first(where: { $0.id == id })?.name ?? ""
+            },
+            set: { updateSection(id, name: $0) }
+        )
+    }
+
+    private func sectionSymbolBinding(_ id: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                settings.editorialDeskCatalog.sections.first(where: { $0.id == id })?.systemImage ?? ""
+            },
+            set: { updateSection(id, systemImage: $0) }
+        )
+    }
+
+    private func typeNameBinding(_ id: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                settings.editorialDeskCatalog.types.first(where: { $0.id == id })?.name ?? ""
+            },
+            set: { updateType(id, name: $0) }
+        )
+    }
+
+    private func typeSymbolBinding(_ id: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                settings.editorialDeskCatalog.types.first(where: { $0.id == id })?.systemImage ?? ""
+            },
+            set: { updateType(id, systemImage: $0) }
+        )
+    }
+
+    private func typeColorBinding(_ id: UUID) -> Binding<Color> {
+        Binding(
+            get: {
+                Color(
+                    editorialHex: settings.editorialDeskCatalog.types
+                        .first(where: { $0.id == id })?.colorHex ?? "#007AFF"
+                )
+            },
+            set: { updateType(id, colorHex: $0.editorialHexValue) }
+        )
+    }
+
+    private func updateSection(
+        _ id: UUID,
+        name: String? = nil,
+        systemImage: String? = nil
+    ) {
+        var catalog = settings.editorialDeskCatalog
+        guard let index = catalog.sections.firstIndex(where: { $0.id == id }) else { return }
+        if let name { catalog.sections[index].name = name }
+        if let systemImage { catalog.sections[index].systemImage = systemImage }
+        settings.editorialDeskCatalog = catalog
+    }
+
+    private func updateType(
+        _ id: UUID,
+        name: String? = nil,
+        systemImage: String? = nil,
+        colorHex: String? = nil
+    ) {
+        var catalog = settings.editorialDeskCatalog
+        guard let index = catalog.types.firstIndex(where: { $0.id == id }) else { return }
+        if let name { catalog.types[index].name = name }
+        if let systemImage { catalog.types[index].systemImage = systemImage }
+        if let colorHex { catalog.types[index].colorHex = colorHex }
+        settings.editorialDeskCatalog = catalog
+    }
+
+    private func removeSection(_ id: UUID) {
+        var catalog = settings.editorialDeskCatalog
+        catalog.sections.removeAll { $0.id == id }
+        settings.editorialDeskCatalog = catalog
+    }
+
+    private func removeType(_ id: UUID) {
+        var catalog = settings.editorialDeskCatalog
+        catalog.types.removeAll { $0.id == id }
+        settings.editorialDeskCatalog = catalog
+    }
+}
+
+private extension Color {
+    init(editorialHex hex: String) {
+        let normalized = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard let value = UInt64(normalized, radix: 16) else {
+            self = .accentColor
+            return
+        }
+
+        let red = Double((value >> 16) & 0xFF) / 255
+        let green = Double((value >> 8) & 0xFF) / 255
+        let blue = Double(value & 0xFF) / 255
+        self.init(red: red, green: green, blue: blue)
+    }
+
+    var editorialHexValue: String {
+        let color = NSColor(self).usingColorSpace(.deviceRGB) ?? .controlAccentColor
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        return String(
+            format: "#%02lX%02lX%02lX",
+            lround(Double(red * 255)),
+            lround(Double(green * 255)),
+            lround(Double(blue * 255))
+        )
     }
 }
 
