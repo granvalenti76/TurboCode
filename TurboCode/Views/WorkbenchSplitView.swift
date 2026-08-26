@@ -6,6 +6,14 @@ struct WorkbenchSplitView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var editorialDeskPresented = false
+    @State private var hoveredToolbarButton: ToolbarButtonID?
+
+    private enum ToolbarButtonID: Hashable {
+        case editorialDesk
+        case delegatedTask
+        case terminal
+        case changes
+    }
 
     private let sidebarWidth: Double = 268
     private let mainMinWidth: Double = 520
@@ -104,6 +112,7 @@ struct WorkbenchSplitView: View {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 4) {
                     toolbarPillButton(
+                        id: .editorialDesk,
                         icon: "newspaper",
                         label: "Editorial desk",
                         help: chatStore.workspaceRoot.isEmpty
@@ -116,6 +125,7 @@ struct WorkbenchSplitView: View {
                     }
 
                     toolbarPillButton(
+                        id: .delegatedTask,
                         icon: "person.2",
                         label: "Delegated task activity",
                         help: chatStore.rightPanelMode == .activity
@@ -127,6 +137,7 @@ struct WorkbenchSplitView: View {
                     }
 
                     toolbarPillButton(
+                        id: .terminal,
                         icon: chatStore.terminalPresented ? "terminal.fill" : "terminal",
                         label: chatStore.terminalPresented
                             ? "Close project terminal"
@@ -149,17 +160,20 @@ struct WorkbenchSplitView: View {
                 .glassEffect(.regular, in: Capsule())
             }
 
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    chatStore.toggleRightPanel(.changes)
-                } label: {
-                    Image(systemName: "sidebar.right")
-                }
-                .help(
-                    chatStore.rightPanelMode == .changes
+            ToolbarItem(placement: .primaryAction) {
+                toolbarPillButton(
+                    id: .changes,
+                    icon: "sidebar.right",
+                    label: "Changes",
+                    help: chatStore.rightPanelMode == .changes
                         ? "Hide changes"
-                        : "Show changes"
-                )
+                        : "Show changes",
+                    isActive: chatStore.rightPanelMode == .changes
+                ) {
+                    chatStore.toggleRightPanel(.changes)
+                }
+                .padding(5)
+                .glassEffect(.regular, in: Circle())
             }
         }
         // The workbench is the reusable UI composition boundary used by the
@@ -205,6 +219,7 @@ struct WorkbenchSplitView: View {
     }
 
     private func toolbarPillButton(
+        id: ToolbarButtonID,
         icon: String,
         label: String,
         help: String,
@@ -212,7 +227,9 @@ struct WorkbenchSplitView: View {
         isDisabled: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        let isHovered = hoveredToolbarButton == id && !isDisabled
+
+        return Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 16, weight: .medium))
                 .frame(width: 34, height: 34)
@@ -220,10 +237,18 @@ struct WorkbenchSplitView: View {
         .buttonStyle(.plain)
         .foregroundStyle(isActive ? Color.primary : Color.secondary)
         .background(
-            isActive ? Color.accentColor.opacity(0.14) : .clear,
+            isActive
+                ? Color.accentColor.opacity(0.14)
+                : isHovered
+                    ? Color.primary.opacity(0.10)
+                    : .clear,
             in: RoundedRectangle(cornerRadius: 9, style: .continuous)
         )
+        .animation(.easeOut(duration: 0.12), value: isHovered)
         .disabled(isDisabled)
+        .onHover { hovering in
+            hoveredToolbarButton = hovering && !isDisabled ? id : nil
+        }
         .help(help)
         .accessibilityLabel(label)
         .accessibilityAddTraits(isActive ? .isSelected : [])
