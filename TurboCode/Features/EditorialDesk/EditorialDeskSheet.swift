@@ -17,6 +17,7 @@ struct EditorialDeskSheet: View {
     @State private var selectedDate: Date?
     @State private var datePickerDate = Date()
     @State private var datePickerPresented = false
+    @State private var hoveredAction: EditorialAction?
     @State private var actionMenuPresented = false
     @State private var selectedLine = 4
     @State private var sourceImporterPresented = false
@@ -678,19 +679,33 @@ struct EditorialDeskSheet: View {
     }
 
     private func actionButton(_ title: String, icon: String) -> some View {
-        Button {
-            guard let action = EditorialAction(rawValue: title) else { return }
+        let action = EditorialAction(rawValue: title)
+        return Button {
+            guard let action else { return }
             actionMenuPresented = false
+            hoveredAction = nil
             selectedInspectorTab = .notes
             viewModel.run(action: action, document: editorialDocument)
         } label: {
             Label(title, systemImage: icon)
                 .font(.system(size: 12))
+                .foregroundStyle(hoveredAction == action ? Color.accentColor : Color.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 7)
                 .frame(height: 28)
+                .background(
+                    hoveredAction == action
+                        ? Color.accentColor.opacity(0.12)
+                        : .clear,
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                )
         }
         .buttonStyle(.plain)
+        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .onHover { isHovering in
+            hoveredAction = isHovering ? action : nil
+        }
+        .animation(.easeOut(duration: 0.12), value: hoveredAction)
     }
 
     private var inspector: some View {
