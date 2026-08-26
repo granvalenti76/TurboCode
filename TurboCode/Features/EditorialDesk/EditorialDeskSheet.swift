@@ -430,15 +430,20 @@ struct EditorialDeskSheet: View {
     }
 
     private var articleCanvas: some View {
-        GeometryReader { _ in
-            VStack(alignment: .leading, spacing: 0) {
-                articleHeader
-                Divider()
+        VStack(alignment: .leading, spacing: 0) {
+            articleHeader
+            Divider()
 
+            // Give the editor a finite viewport. Without this boundary the
+            // line-number gutter can make the NSScrollView as tall as the
+            // entire document, leaving nothing for AppKit to scroll.
+            GeometryReader { viewport in
                 ZStack(alignment: .topLeading) {
                     HStack(alignment: .top, spacing: 0) {
                         if !viewModel.documentContent.isEmpty {
                             lineNumberGutter
+                                .frame(height: viewport.size.height, alignment: .top)
+                                .clipped()
                         }
 
                         ZStack(alignment: .topLeading) {
@@ -457,6 +462,12 @@ struct EditorialDeskSheet: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                     .padding(.vertical, 14)
+                    .frame(
+                        width: viewport.size.width,
+                        height: viewport.size.height,
+                        alignment: .top
+                    )
+                    .clipped()
 
                     if selectedTab != .write {
                         intakePanel
@@ -493,9 +504,13 @@ struct EditorialDeskSheet: View {
                         }
                     }
                 }
+                .frame(
+                    width: viewport.size.width,
+                    height: viewport.size.height,
+                    alignment: .topLeading
+                )
+                .clipped()
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .clipped()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
@@ -1120,13 +1135,36 @@ private struct EditorialCanvasTextView: NSViewRepresentable {
         )
 
         scrollView.documentView = textView
+        resizeDocumentView(scrollView, textView: textView)
         return scrollView
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        guard let textView = scrollView.documentView as? NSTextView,
-              textView.string != text else { return }
-        textView.string = text
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+        if textView.string != text {
+            textView.string = text
+        }
+        resizeDocumentView(scrollView, textView: textView)
+    }
+
+    /// AppKit does not always expand an NSTextView's document frame after a
+    /// large paste when SwiftUI owns the surrounding viewport. Keep the
+    /// document height explicit so NSScrollView can expose vertical scrolling.
+    private func resizeDocumentView(_ scrollView: NSScrollView, textView: NSTextView) {
+        guard let textContainer = textView.textContainer,
+              let layoutManager = textView.layoutManager else { return }
+
+        let width = max(scrollView.contentView.bounds.width, 1)
+        textContainer.containerSize = NSSize(
+            width: width,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        layoutManager.ensureLayout(for: textContainer)
+
+        let usedHeight = layoutManager.usedRect(for: textContainer).height
+        let insetHeight = textView.textContainerInset.height * 2
+        let height = max(usedHeight + insetHeight, scrollView.contentView.bounds.height)
+        textView.setFrameSize(NSSize(width: width, height: height))
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
