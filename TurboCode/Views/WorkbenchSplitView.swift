@@ -98,53 +98,58 @@ struct WorkbenchSplitView: View {
             }
         }
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    editorialDeskPresented = true
-                } label: {
-                    Image(systemName: "newspaper")
-                }
-                .disabled(chatStore.workspaceRoot.isEmpty)
-                .help(
-                    chatStore.workspaceRoot.isEmpty
-                        ? "Choose a workspace to open the editorial desk"
-                        : "Open editorial desk"
-                )
-                .accessibilityLabel("Open editorial desk")
-
-                Button {
-                    chatStore.toggleRightPanel(.activity)
-                } label: {
-                    Image(systemName: "person.2")
-                }
-                .help(
-                    chatStore.rightPanelMode == .activity
-                        ? "Hide delegated task activity"
-                        : "Show delegated task activity"
-                )
-                .accessibilityLabel("Delegated task activity")
-
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        chatStore.toggleTerminal()
+            // Keep the three workbench surfaces together like Notes' centered
+            // mode control. Native Liquid Glass owns the translucency and
+            // edge treatment; each action still delegates to existing state.
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 4) {
+                    toolbarPillButton(
+                        icon: "newspaper",
+                        label: "Editorial desk",
+                        help: chatStore.workspaceRoot.isEmpty
+                            ? "Choose a workspace to open the editorial desk"
+                            : "Open editorial desk",
+                        isActive: editorialDeskPresented,
+                        isDisabled: chatStore.workspaceRoot.isEmpty
+                    ) {
+                        editorialDeskPresented = true
                     }
-                } label: {
-                    Image(systemName: chatStore.terminalPresented ? "terminal.fill" : "terminal")
-                }
-                .disabled(chatStore.workspaceRoot.isEmpty || chatStore.route != .chat)
-                .help(
-                    chatStore.workspaceRoot.isEmpty
-                        ? "Choose a workspace to open its terminal"
-                        : chatStore.terminalPresented
-                            ? "Close project terminal"
-                            : "Open project terminal"
-                )
-                .accessibilityLabel(
-                    chatStore.terminalPresented
-                        ? "Close project terminal"
-                        : "Open project terminal"
-                )
 
+                    toolbarPillButton(
+                        icon: "person.2",
+                        label: "Delegated task activity",
+                        help: chatStore.rightPanelMode == .activity
+                            ? "Hide delegated task activity"
+                            : "Show delegated task activity",
+                        isActive: chatStore.rightPanelMode == .activity
+                    ) {
+                        chatStore.toggleRightPanel(.activity)
+                    }
+
+                    toolbarPillButton(
+                        icon: chatStore.terminalPresented ? "terminal.fill" : "terminal",
+                        label: chatStore.terminalPresented
+                            ? "Close project terminal"
+                            : "Open project terminal",
+                        help: chatStore.workspaceRoot.isEmpty
+                            ? "Choose a workspace to open its terminal"
+                            : chatStore.terminalPresented
+                                ? "Close project terminal"
+                                : "Open project terminal",
+                        isActive: chatStore.terminalPresented,
+                        isDisabled: chatStore.workspaceRoot.isEmpty || chatStore.route != .chat
+                    ) {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            chatStore.toggleTerminal()
+                        }
+                    }
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 5)
+                .glassEffect(.regular, in: Capsule())
+            }
+
+            ToolbarItemGroup(placement: .primaryAction) {
                 Button {
                     chatStore.toggleRightPanel(.changes)
                 } label: {
@@ -197,6 +202,31 @@ struct WorkbenchSplitView: View {
             get: { chatStore.isCustomProfilesPresented },
             set: { chatStore.isCustomProfilesPresented = $0 }
         )
+    }
+
+    private func toolbarPillButton(
+        icon: String,
+        label: String,
+        help: String,
+        isActive: Bool,
+        isDisabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .medium))
+                .frame(width: 34, height: 34)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isActive ? Color.primary : Color.secondary)
+        .background(
+            isActive ? Color.accentColor.opacity(0.14) : .clear,
+            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+        )
+        .disabled(isDisabled)
+        .help(help)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 
     private var diffPatchReviewBinding: Binding<DiffPatchReviewPresentation?> {
