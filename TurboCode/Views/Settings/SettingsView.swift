@@ -68,12 +68,10 @@ struct EditorialDeskSettingsView: View {
                             )
                             .textFieldStyle(.roundedBorder)
 
-                            TextField(
-                                "SF Symbol, e.g. building.columns",
-                                text: sectionSymbolBinding(section.id)
+                            EditorialDeskSymbolPicker(
+                                selection: sectionSymbolBinding(section.id),
+                                context: .section
                             )
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: .monospaced))
                         }
 
                         Button(role: .destructive) {
@@ -119,12 +117,10 @@ struct EditorialDeskSettingsView: View {
                             )
                             .textFieldStyle(.roundedBorder)
 
-                            TextField(
-                                "SF Symbol, e.g. bolt.fill",
-                                text: typeSymbolBinding(type.id)
+                            EditorialDeskSymbolPicker(
+                                selection: typeSymbolBinding(type.id),
+                                context: .articleType
                             )
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: .monospaced))
 
                             ColorPicker(
                                 "Color",
@@ -246,6 +242,72 @@ struct EditorialDeskSettingsView: View {
         var catalog = settings.editorialDeskCatalog
         catalog.types.removeAll { $0.id == id }
         settings.editorialDeskCatalog = catalog
+    }
+}
+
+private struct EditorialDeskSymbolPicker: View {
+    @Binding var selection: String
+    let context: EditorialDeskSymbolContext
+
+    private var options: [EditorialDeskSymbolOption] {
+        EditorialDeskSymbolCatalog.options(for: context)
+    }
+
+    private var groupedOptions: [(category: String, options: [EditorialDeskSymbolOption])] {
+        Dictionary(grouping: options, by: \.category)
+            .keys
+            .sorted()
+            .map { category in
+                (
+                    category: category,
+                    options: options.filter { $0.category == category }
+                )
+            }
+    }
+
+    private var displaySymbol: String {
+        guard !selection.isEmpty,
+              NSImage(systemSymbolName: selection, accessibilityDescription: nil) != nil else {
+            return "questionmark.square.dashed"
+        }
+        return selection
+    }
+
+    private var displayName: String {
+        selection.isEmpty ? "Choose SF Symbol" : selection
+    }
+
+    var body: some View {
+        Menu {
+            ForEach(groupedOptions, id: \.category) { group in
+                Section(group.category) {
+                    ForEach(group.options) { option in
+                        Button {
+                            selection = option.name
+                        } label: {
+                            Label(option.name, systemImage: option.name)
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: displaySymbol)
+                    .frame(width: 18)
+                Text(displayName)
+                    .font(.system(size: 12, design: .monospaced))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 9)
+            .frame(maxWidth: .infinity, minHeight: 30)
+            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 7))
+        }
+        .menuStyle(.borderlessButton)
+        .help("Choose a system SF Symbol")
     }
 }
 

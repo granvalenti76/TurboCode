@@ -10,6 +10,21 @@ struct EditorialDeskTests {
         #expect(EditorialDeskCatalog.default.types.isEmpty)
     }
 
+    @Test("symbol suggestions are broad and programming-oriented")
+    func symbolSuggestionsMatchEditorialContexts() {
+        let sectionSymbols = EditorialDeskSymbolCatalog.options(for: .section)
+        let typeSymbols = EditorialDeskSymbolCatalog.options(for: .articleType)
+
+        #expect(sectionSymbols.contains { $0.name == "terminal" })
+        #expect(sectionSymbols.contains { $0.name == "book.pages" })
+        #expect(sectionSymbols.contains { $0.name == "building.columns" })
+        #expect(typeSymbols.contains { $0.name == "chevron.left.forwardslash.chevron.right" })
+        #expect(typeSymbols.contains { $0.name == "bolt.fill" })
+        #expect(typeSymbols.contains { $0.name == "checkmark.seal.fill" })
+        #expect(Set(sectionSymbols.map(\.name)).count == sectionSymbols.count)
+        #expect(Set(typeSymbols.map(\.name)).count == typeSymbols.count)
+    }
+
     @Test("editorial catalog round-trips its configurable metadata")
     func editorialCatalogRoundTrips() throws {
         let catalog = EditorialDeskCatalog(

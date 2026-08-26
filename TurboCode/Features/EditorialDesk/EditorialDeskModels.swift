@@ -61,6 +61,118 @@ nonisolated public struct EditorialDeskType: Identifiable, Codable, Hashable, Se
     }
 }
 
+/// The two contexts intentionally expose different symbol suggestions. The
+/// catalog is curated for a developer-oriented editorial desk rather than
+/// asking users to memorize arbitrary SF Symbol identifiers.
+nonisolated enum EditorialDeskSymbolContext: CaseIterable, Sendable {
+    case section
+    case articleType
+}
+
+nonisolated struct EditorialDeskSymbolOption: Identifiable, Hashable, Sendable {
+    let name: String
+    let category: String
+
+    var id: String { name }
+
+    init(name: String, category: String) {
+        self.name = name
+        self.category = category
+    }
+}
+
+/// A broad, system-provided vocabulary for the settings picker. It covers
+/// programming, product work, documentation, data, and publishing without
+/// creating actual default newsroom sections or article types.
+nonisolated enum EditorialDeskSymbolCatalog {
+    static func options(for context: EditorialDeskSymbolContext) -> [EditorialDeskSymbolOption] {
+        switch context {
+        case .section:
+            [
+                option("curlybraces", "Code & Engineering"),
+                option("terminal", "Code & Engineering"),
+                option("laptopcomputer", "Code & Engineering"),
+                option("cpu", "Code & Engineering"),
+                option("gearshape.2", "Code & Engineering"),
+                option("wrench.and.screwdriver", "Code & Engineering"),
+                option("server.rack", "Code & Engineering"),
+                option("network", "Code & Engineering"),
+                option("arrow.triangle.branch", "Code & Engineering"),
+                option("macwindow", "Product & UX"),
+                option("rectangle.on.rectangle", "Product & UX"),
+                option("square.grid.2x2", "Product & UX"),
+                option("slider.horizontal.3", "Product & UX"),
+                option("paintbrush", "Product & UX"),
+                option("wand.and.stars", "Product & UX"),
+                option("book.pages", "Docs & Knowledge"),
+                option("text.book.closed", "Docs & Knowledge"),
+                option("doc.text", "Docs & Knowledge"),
+                option("graduationcap", "Docs & Knowledge"),
+                option("lightbulb", "Docs & Knowledge"),
+                option("questionmark.circle", "Docs & Knowledge"),
+                option("newspaper", "Docs & Knowledge"),
+                option("chart.bar.xaxis", "Data & Systems"),
+                option("chart.line.uptrend.xyaxis", "Data & Systems"),
+                option("externaldrive", "Data & Systems"),
+                option("cloud", "Data & Systems"),
+                option("lock.shield", "Data & Systems"),
+                option("arrow.triangle.2.circlepath", "Data & Systems"),
+                option("speedometer", "Data & Systems"),
+                option("building.columns", "Community & Business"),
+                option("building.2", "Community & Business"),
+                option("person.3", "Community & Business"),
+                option("person.2", "Community & Business"),
+                option("briefcase", "Community & Business"),
+                option("globe", "Community & Business"),
+                option("megaphone", "Community & Business")
+            ]
+        case .articleType:
+            [
+                option("doc.text", "Article Formats"),
+                option("newspaper", "Article Formats"),
+                option("text.quote", "Article Formats"),
+                option("text.alignleft", "Article Formats"),
+                option("list.bullet.rectangle", "Article Formats"),
+                option("book.pages", "Article Formats"),
+                option("quote.bubble", "Article Formats"),
+                option("person.2", "Article Formats"),
+                option("chevron.left.forwardslash.chevron.right", "Technical"),
+                option("curlybraces", "Technical"),
+                option("terminal", "Technical"),
+                option("function", "Technical"),
+                option("cpu", "Technical"),
+                option("network", "Technical"),
+                option("flowchart", "Technical"),
+                option("arrow.triangle.branch", "Technical"),
+                option("mic", "Coverage"),
+                option("camera", "Coverage"),
+                option("video", "Coverage"),
+                option("waveform", "Coverage"),
+                option("waveforms", "Coverage"),
+                option("magnifyingglass", "Coverage"),
+                option("chart.bar.xaxis", "Coverage"),
+                option("chart.line.uptrend.xyaxis", "Coverage"),
+                option("bolt.fill", "Editorial State"),
+                option("sparkles", "Editorial State"),
+                option("checkmark.seal.fill", "Editorial State"),
+                option("checkmark.circle.fill", "Editorial State"),
+                option("exclamationmark.triangle.fill", "Editorial State"),
+                option("info.circle.fill", "Editorial State"),
+                option("flag.fill", "Editorial State"),
+                option("bookmark.fill", "Editorial State"),
+                option("eye.fill", "Editorial State")
+            ]
+        }
+    }
+
+    private static func option(
+        _ name: String,
+        _ category: String
+    ) -> EditorialDeskSymbolOption {
+        EditorialDeskSymbolOption(name: name, category: category)
+    }
+}
+
 /// The complete user-owned editorial taxonomy persisted by Settings.
 nonisolated public struct EditorialDeskCatalog: Codable, Hashable, Sendable {
     public var sections: [EditorialDeskSection]
