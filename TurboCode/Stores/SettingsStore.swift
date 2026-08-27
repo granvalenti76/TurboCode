@@ -191,13 +191,34 @@ public final class SettingsStore {
             return
         }
         if isLegacyEditorialMockCatalog(catalog) {
-            // The first prototype shipped illustrative newsroom values. They
-            // must not become implicit harness configuration for real teams.
             editorialDeskCatalog = .default
             saveEditorialDeskCatalog()
         } else {
-            editorialDeskCatalog = catalog
+            let merged = catalogByAddingDefaults(to: catalog)
+            editorialDeskCatalog = merged
+            if merged != catalog {
+                saveEditorialDeskCatalog()
+            }
         }
+    }
+
+    /// Seeds newly shipped defaults without replacing or reordering entries
+    /// that the user already configured in Settings.
+    private func catalogByAddingDefaults(
+        to catalog: EditorialDeskCatalog
+    ) -> EditorialDeskCatalog {
+        var merged = catalog
+        for section in EditorialDeskCatalog.default.sections where !merged.sections.contains(where: {
+            $0.name.caseInsensitiveCompare(section.name) == .orderedSame
+        }) {
+            merged.sections.append(section)
+        }
+        for type in EditorialDeskCatalog.default.types where !merged.types.contains(where: {
+            $0.name.caseInsensitiveCompare(type.name) == .orderedSame
+        }) {
+            merged.types.append(type)
+        }
+        return merged
     }
 
     private func saveEditorialDeskCatalog() {

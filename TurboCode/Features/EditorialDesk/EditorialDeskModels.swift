@@ -81,9 +81,9 @@ nonisolated struct EditorialDeskSymbolOption: Identifiable, Hashable, Sendable {
     }
 }
 
-/// A broad, system-provided vocabulary for the settings picker. It covers
-/// programming, product work, documentation, data, and publishing without
-/// creating actual default newsroom sections or article types.
+/// A broad, system-provided vocabulary for the settings picker. The developer-
+/// oriented defaults use only a small subset, leaving teams free to extend or
+/// replace the taxonomy without changing the available symbol vocabulary.
 nonisolated enum EditorialDeskSymbolCatalog {
     static func options(for context: EditorialDeskSymbolContext) -> [EditorialDeskSymbolOption] {
         switch context {
@@ -186,9 +186,36 @@ nonisolated public struct EditorialDeskCatalog: Codable, Hashable, Sendable {
         self.types = types
     }
 
-    /// An empty catalog keeps the harness domain-neutral. Teams populate the
-    /// newsroom taxonomy from Settings instead of inheriting mockup values.
-    public static let `default` = EditorialDeskCatalog(sections: [], types: [])
+    /// A compact developer-oriented starting taxonomy. Settings persists a
+    /// user-owned copy, so later customizations are never replaced by defaults.
+    public static let `default` = EditorialDeskCatalog(
+        sections: [
+            EditorialDeskSection(name: "Engineering", systemImage: "curlybraces"),
+            EditorialDeskSection(name: "Product", systemImage: "macwindow"),
+            EditorialDeskSection(name: "Documentation", systemImage: "book.pages"),
+            EditorialDeskSection(name: "Planning", systemImage: "chart.line.uptrend.xyaxis"),
+            EditorialDeskSection(name: "Blog", systemImage: "newspaper")
+        ],
+        types: [
+            EditorialDeskType(name: "README", systemImage: "doc.text", colorHex: "#0A84FF"),
+            EditorialDeskType(
+                name: "Specification",
+                systemImage: "list.bullet.rectangle",
+                colorHex: "#BF5AF2"
+            ),
+            EditorialDeskType(
+                name: "Changelog",
+                systemImage: "arrow.triangle.branch",
+                colorHex: "#FF9F0A"
+            ),
+            EditorialDeskType(name: "Plan / RFC", systemImage: "flowchart", colorHex: "#30D158"),
+            EditorialDeskType(
+                name: "Article / Guide",
+                systemImage: "text.quote",
+                colorHex: "#FF375F"
+            )
+        ]
+    )
 }
 
 /// Metadata selected for one draft. The complete catalog entries are carried
@@ -275,7 +302,11 @@ nonisolated enum EditorialAction: String, CaseIterable, Codable, Hashable, Senda
     var instruction: String {
         switch self {
         case .verifyFacts:
-            "Check every material claim against the ground-truth sources and report discrepancies."
+            """
+            Check every material claim against the ground-truth sources and report
+            discrepancies only through findings and summary. This action is diagnostic:
+            set revisedDocument to null and do not rewrite the editorial document.
+            """
         case .makeNeutral:
             "Rewrite the document in a neutral editorial voice without changing supported facts."
         case .tightenLead:

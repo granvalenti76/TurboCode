@@ -4,12 +4,6 @@ import Testing
 
 @Suite("Editorial desk")
 struct EditorialDeskTests {
-    @Test("default editorial catalog is neutral and empty")
-    func defaultEditorialCatalogIsEmpty() {
-        #expect(EditorialDeskCatalog.default.sections.isEmpty)
-        #expect(EditorialDeskCatalog.default.types.isEmpty)
-    }
-
     @Test("symbol suggestions are broad and programming-oriented")
     func symbolSuggestionsMatchEditorialContexts() {
         let sectionSymbols = EditorialDeskSymbolCatalog.options(for: .section)
@@ -88,6 +82,8 @@ struct EditorialDeskTests {
         #expect(prompt.contains("name=\"Programme brief\""))
         #expect(prompt.contains("Authoritative claim"))
         #expect(prompt.contains("Treat every ground-truth source below as authoritative"))
+        #expect(prompt.contains("set revisedDocument to null"))
+        #expect(prompt.contains("do not rewrite the editorial document"))
     }
 
     @Test("canonical publish prompt carries the transcript and selected ground truth")
