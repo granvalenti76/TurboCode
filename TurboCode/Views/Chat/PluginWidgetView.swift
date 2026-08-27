@@ -1,13 +1,32 @@
 import SwiftUI
 import WebKit
 
-/// Hosts one plugin-owned HTML surface inside the response timeline. The view
-/// is created only for a pluginWidget block, so ordinary responses never pay
-/// for a WebKit process or a widget bridge.
+/// Hosts one plugin-owned HTML surface inside the response timeline or a
+/// detached window. Inline mode honors the plugin-reported height; detached
+/// mode expands the WebView to the available window content area.
 struct PluginWidgetView: View {
-    let widget: TypeScriptPluginWidgetReceipt
+    @Environment(ChatStore.self) private var chatStore
+    @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.openWindow) private var openWindow
 
-    @State private var height: CGFloat = 360
+    let blockID: String
+    let widget: TypeScriptPluginWidgetReceipt
+    let isDetachedWindow: Bool
+
+    @State private var height: CGFloat
+
+    init(
+        blockID: String,
+        widget: TypeScriptPluginWidgetReceipt,
+        isDetachedWindow: Bool = false
+    ) {
+        self.blockID = blockID
+        self.widget = widget
+        self.isDetachedWindow = isDetachedWindow
+        // The inline surface keeps its existing compact default; the detached
+        // window starts larger so a newly opened widget is immediately useful.
+        _height = State(initialValue: isDetachedWindow ? 560 : 360)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -24,15 +43,32 @@ struct PluginWidgetView: View {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
                     .help("This interactive surface is provided by the TypeScript plugin.")
+
+                Button {
+                    if isDetachedWindow {
+                        restoreToTimeline()
+                    } else {
+                        detachToWindow()
+                    }
+                } label: {
+                    Image(
+                        systemName: isDetachedWindow
+                            ? "arrow.down.right.and.arrow.up.left"
+                            : "arrow.up.left.and.arrow.down.right"
+                    )
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(isDetachedWindow ? "Rimetti nella chat" : "Apri in una finestra separata")
+                .accessibilityLabel(isDetachedWindow ? "Rimetti nella chat" : "Apri in una finestra separata")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
 
             Divider()
 
-            PluginWidgetWebView(widget: widget, height: $height)
-                .frame(height: height)
-                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            widgetSurface
         }
         .background(.background, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay {
@@ -40,6 +76,66 @@ struct PluginWidgetView: View {
                 .stroke(.separator.opacity(0.7), lineWidth: 1)
         }
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .animation(.easeInOut(duration: 0.22), value: chatStore.isPluginWidgetDetached(blockID: blockID))
+    }
+
+    @ViewBuilder
+    private var widgetSurface: some View {
+        if isDetachedWindow {
+            // A detached widget is a window-level surface, so its WebView
+            // must consume the remaining height instead of retaining the
+            // inline plugin resize value.
+            PluginWidgetWebView(widget: widget, height: $height)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        } else if !chatStore.isPluginWidgetDetached(blockID: blockID) {
+            PluginWidgetWebView(widget: widget, height: $height)
+                .frame(height: height)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        } else {
+            detachedPlaceholder
+                .frame(height: height)
+        }
+    }
+
+    private var detachedPlaceholder: some View {
+        ZStack {
+            Color.secondary.opacity(0.12)
+
+            VStack(spacing: 8) {
+                Image(systemName: "macwindow.on.rectangle")
+                    .font(.system(size: 19))
+                    .foregroundStyle(.secondary)
+
+                Text("Widget aperto in una finestra separata")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    restoreToTimeline()
+                } label: {
+                    Label("Rimetti nella chat", systemImage: "arrow.down.right.and.arrow.up.left")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    private func detachToWindow() {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            chatStore.detachPluginWidget(widget, blockID: blockID)
+        }
+        openWindow(value: blockID)
+    }
+
+    private func restoreToTimeline() {
+        withAnimation(.easeInOut(duration: 0.22)) {
+            chatStore.restorePluginWidget(blockID: blockID)
+        }
+        // The main placeholder can also restore the widget while its
+        // detached window is open; close that exact window as well.
+        dismissWindow(id: "plugin-widget", value: blockID)
     }
 }
 
@@ -205,7 +301,7 @@ private struct PluginWidgetWebView: NSViewRepresentable {
                 .replacingOccurrences(of: ">", with: "&gt;")
                 .replacingOccurrences(of: "\"", with: "&quot;")
             webView.loadHTMLString(
-                "<body style='font: -apple-system-body; padding: 16px'>Unable to load widget: (escapedMessage)</body>",
+                "<body style='font: -apple-system-body; padding: 16px'>Unable to load widget: \(escapedMessage)</body>",
                 baseURL: nil
             )
         }

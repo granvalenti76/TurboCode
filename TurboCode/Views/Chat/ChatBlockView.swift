@@ -51,7 +51,7 @@ struct ChatBlockView: View {
             }
         case .pluginWidget:
             if let widget = block.pluginWidget {
-                PluginWidgetView(widget: widget)
+                PluginWidgetView(blockID: block.id, widget: widget)
             }
         }
     }

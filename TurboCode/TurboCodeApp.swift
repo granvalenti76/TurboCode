@@ -146,6 +146,28 @@ struct TurboCodeApp: App {
         .defaultSize(width: 720, height: 520)
 #endif
 
+        WindowGroup("Plugin Widget", id: "plugin-widget", for: String.self) { $blockID in
+            if let blockID,
+               let widget = chatStore.detachedPluginWidget(for: blockID) {
+                PluginWidgetView(
+                    blockID: blockID,
+                    widget: widget,
+                    isDetachedWindow: true
+                )
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .environment(chatStore)
+            } else {
+                ContentUnavailableView(
+                    "Widget non disponibile",
+                    systemImage: "puzzlepiece.extension",
+                    description: Text("Il widget è stato chiuso o rimosso dalla conversazione.")
+                )
+            }
+        }
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 820, height: 680)
+
         // Native macOS Settings window
         Settings {
             SettingsTabView()

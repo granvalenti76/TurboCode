@@ -33,6 +33,30 @@ public final class ChatStore {
         agentRuntimeProjectionStore.hasActiveOperation
             || presentationViewModel.isProfileTransitioning
     }
+
+    /// Keeps detached plugin surfaces associated with their timeline block.
+    /// The receipt is intentionally in-memory only: closing a detached window
+    /// can restore the exact widget without adding window state to sessions.
+    public private(set) var detachedPluginWidgets: [String: TypeScriptPluginWidgetReceipt] = [:]
+
+    public func detachPluginWidget(
+        _ widget: TypeScriptPluginWidgetReceipt,
+        blockID: String
+    ) {
+        detachedPluginWidgets[blockID] = widget
+    }
+
+    public func restorePluginWidget(blockID: String) {
+        detachedPluginWidgets.removeValue(forKey: blockID)
+    }
+
+    public func isPluginWidgetDetached(blockID: String) -> Bool {
+        detachedPluginWidgets[blockID] != nil
+    }
+
+    public func detachedPluginWidget(for blockID: String) -> TypeScriptPluginWidgetReceipt? {
+        detachedPluginWidgets[blockID]
+    }
 #if DEBUG
     public var benchmarkRunning: Bool = false
     public var benchmarkStatus: String?
