@@ -319,14 +319,64 @@ nonisolated enum EditorialAction: String, CaseIterable, Codable, Hashable, Senda
     }
 }
 
+/// Immutable draft value captured before an asynchronous editorial operation.
+/// Its serialized document is derived only when a non-UI service consumes the
+/// snapshot; the MainActor owns the fields, never the encoding work.
+nonisolated struct EditorialDraftSnapshot: Sendable, Equatable {
+    let title: String
+    let deck: String
+    let body: String
+    let revision: UInt64
+
+    var document: String {
+        [title, deck, body]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+    }
+}
+
 /// Provider-neutral payload for one editorial operation. Sources are kept
 /// separate from the user request so an adapter cannot confuse ground truth
 /// with an instruction to the model.
 nonisolated struct EditorialRequest: Sendable {
     let userInstruction: String
-    let document: String
+    let draft: EditorialDraftSnapshot
     let sources: [EditorialSource]
     let action: EditorialAction
+
+    init(
+        userInstruction: String,
+        draft: EditorialDraftSnapshot,
+        sources: [EditorialSource],
+        action: EditorialAction
+    ) {
+        self.userInstruction = userInstruction
+        self.draft = draft
+        self.sources = sources
+        self.action = action
+    }
+
+    /// Keeps existing test and adapter callers source-compatible while the
+    /// structured draft boundary is adopted incrementally.
+    init(
+        userInstruction: String,
+        document: String,
+        sources: [EditorialSource],
+        action: EditorialAction
+    ) {
+        self.init(
+            userInstruction: userInstruction,
+            draft: EditorialDraftSnapshot(
+                title: "",
+                deck: "",
+                body: document,
+                revision: 0
+            ),
+            sources: sources,
+            action: action
+        )
+    }
 }
 
 /// A source-backed discrepancy returned by the future editorial model client.

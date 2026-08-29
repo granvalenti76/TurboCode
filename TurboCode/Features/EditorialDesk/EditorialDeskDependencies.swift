@@ -4,18 +4,18 @@ import Foundation
 /// feature snapshots this value before awaiting so the chat boundary never
 /// needs to inspect the live editor or its observable state.
 nonisolated struct EditorialCanonicalPublishRequest: Sendable, Equatable {
-    let document: String
+    let draft: EditorialDraftSnapshot
     let fileName: String
     let sources: [EditorialSource]
     let metadata: EditorialDeskMetadata
 
     init(
-        document: String,
+        draft: EditorialDraftSnapshot,
         fileName: String,
         sources: [EditorialSource],
         metadata: EditorialDeskMetadata = .empty
     ) {
-        self.document = document
+        self.draft = draft
         self.fileName = fileName
         self.sources = sources
         self.metadata = metadata
@@ -45,15 +45,18 @@ protocol EditorialCanonicalHandoff {
 @MainActor
 struct EditorialDeskDependencies {
     let modelClient: any EditorialModelClient
+    let sourceService: EditorialSourceService
     let publicationService: EditorialPublicationService
     let canonicalHandoff: any EditorialCanonicalHandoff
 
     init(
         modelClient: any EditorialModelClient,
+        sourceService: EditorialSourceService,
         publicationService: EditorialPublicationService,
         canonicalHandoff: any EditorialCanonicalHandoff
     ) {
         self.modelClient = modelClient
+        self.sourceService = sourceService
         self.publicationService = publicationService
         self.canonicalHandoff = canonicalHandoff
     }

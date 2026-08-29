@@ -29,6 +29,9 @@ final class EditorialDeskViewModel {
     var draftText = ""
     private var undoStack: [String] = []
     private var redoStack: [String] = []
+    /// Monotonic identity for immutable draft snapshots. It is not persisted;
+    /// it only lets an async operation describe exactly which UI state it used.
+    private var draftRevision: UInt64 = 0
     private var operationTask: Task<Void, Never>?
 
     init(
@@ -58,6 +61,17 @@ final class EditorialDeskViewModel {
     var canUndoDraft: Bool { !undoStack.isEmpty }
     var canRedoDraft: Bool { !redoStack.isEmpty }
 
+    /// Copies the visible editor fields without serializing them. Consumers
+    /// must perform document encoding after crossing the UI boundary.
+    func makeDraftSnapshot() -> EditorialDraftSnapshot {
+        EditorialDraftSnapshot(
+            title: documentTitle,
+            deck: documentDeck,
+            body: documentContent,
+            revision: draftRevision
+        )
+    }
+
     func loadDraft(_ text: String) {
         replaceDraftState(with: text)
         undoStack.removeAll()
@@ -65,9 +79,8 @@ final class EditorialDeskViewModel {
     }
 
     /// Keeps the visible title, deck and body fields synchronized with the
-    /// serialized request sent to the model. Direct typing updates the draft
-    /// without adding one undo entry per keystroke; the native text view still
-    /// provides its own immediate typing undo behavior.
+    /// local draft projection. External prompt or Markdown encoding happens
+    /// only after a Sendable snapshot crosses the UI boundary.
     func updateTitle(_ title: String) {
         documentTitle = title
         rebuildDraft()
@@ -151,20 +164,24 @@ final class EditorialDeskViewModel {
         selectedSourceIDs.insert(source.id)
     }
 
-    func importFiles(_ urls: [URL]) {
+    /// Imports selected files through an actor-owned service. Only the
+    /// Sendable batch result returns to this UI-owned model, preserving
+    /// successful imports when another selected file fails.
+    func importFiles(
+        _ urls: [URL],
+        using sourceService: EditorialSourceService
+    ) async {
         importError = nil
-
-        for url in urls {
-            do {
-                let source = try EditorialSourceLoader.load(
-                    from: url,
-                    workspaceRoot: workspaceRoot
-                )
-                sources.append(source)
-                selectedSourceIDs.insert(source.id)
-            } catch {
-                importError = error.localizedDescription
-            }
+        let result = await sourceService.load(
+            urls: urls,
+            workspaceRoot: workspaceRoot
+        )
+        sources.append(contentsOf: result.sources)
+        for source in result.sources {
+            selectedSourceIDs.insert(source.id)
+        }
+        if !result.errors.isEmpty {
+            importError = result.errors.joined(separator: "\n")
         }
     }
 
@@ -191,6 +208,7 @@ final class EditorialDeskViewModel {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: "\n\n")
+        draftRevision &+= 1
     }
 
     private func replaceDraftState(with text: String) {
@@ -209,14 +227,15 @@ final class EditorialDeskViewModel {
             documentDeck = ""
             documentContent = text
         }
+        draftRevision &+= 1
     }
 
-    /// Runs an operation against a snapshot of the visible draft. Capturing
+    /// Runs an operation against an immutable snapshot of the visible draft. Capturing
     /// selected sources before awaiting keeps the ground truth stable even if
     /// the user edits the inspector while the model is working.
     func run(
         action: EditorialAction,
-        document: String,
+        snapshot: EditorialDraftSnapshot,
         userInstruction: String = "Apply the selected editorial operation to this draft."
     ) {
         guard let modelClient else {
@@ -225,7 +244,7 @@ final class EditorialDeskViewModel {
         }
         let request = EditorialRequest(
             userInstruction: userInstruction,
-            document: document,
+            draft: snapshot,
             sources: selectedSources,
             action: action
         )

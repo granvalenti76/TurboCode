@@ -5,14 +5,13 @@ import Foundation
 /// callers must hop here before touching the workspace filesystem.
 actor EditorialPublicationService {
     func publish(
-        document: String,
-        title: String,
+        draft: EditorialDraftSnapshot,
         workspaceRoot: String,
         metadata: EditorialDeskMetadata = .empty
     ) throws -> EditorialPublication {
         try EditorialDraftPublisher.publish(
-            document: document,
-            title: title,
+            document: draft.document,
+            title: draft.title,
             workspaceRoot: workspaceRoot,
             metadata: metadata,
             fileManager: FileManager.default

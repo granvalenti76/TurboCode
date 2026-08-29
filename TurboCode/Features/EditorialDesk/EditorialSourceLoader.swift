@@ -46,3 +46,39 @@ nonisolated enum EditorialSourceLoadError: LocalizedError, Sendable {
         }
     }
 }
+
+/// Result of importing a batch. Successful sources remain available even when
+/// one selected file fails, so the UI can report partial import without
+/// mutating its state from inside the file service.
+nonisolated struct EditorialSourceImportResult: Sendable, Equatable {
+    let sources: [EditorialSource]
+    let errors: [String]
+}
+
+/// Owns source-file reads away from the MainActor. The loader remains a pure
+/// one-file implementation for focused tests; this actor defines the runtime
+/// boundary used by the editor.
+actor EditorialSourceService {
+    func load(
+        urls: [URL],
+        workspaceRoot: String
+    ) -> EditorialSourceImportResult {
+        var sources: [EditorialSource] = []
+        var errors: [String] = []
+
+        for url in urls {
+            do {
+                sources.append(
+                    try EditorialSourceLoader.load(
+                        from: url,
+                        workspaceRoot: workspaceRoot
+                    )
+                )
+            } catch {
+                errors.append("\(url.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+
+        return EditorialSourceImportResult(sources: sources, errors: errors)
+    }
+}

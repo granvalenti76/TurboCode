@@ -46,7 +46,7 @@ actor EditorialCanonicalPromptEncoder {
         for request: EditorialCanonicalPublishRequest
     ) -> String {
         EditorialPromptBuilder.makeCanonicalPublishPrompt(
-            document: request.document,
+            draft: request.draft,
             fileName: request.fileName,
             sources: request.sources,
             metadata: request.metadata
@@ -95,6 +95,7 @@ final class EditorialCanonicalHandoffAdapter: EditorialCanonicalHandoff {
 @MainActor
 final class EditorialDeskAssembly {
     private let modelClientFactory: EditorialDeskModelClientFactory
+    private let sourceService: EditorialSourceService
     private let publicationService: EditorialPublicationService
     private let canonicalHandoff: EditorialCanonicalHandoffAdapter
 
@@ -109,6 +110,7 @@ final class EditorialDeskAssembly {
             modelRuntime: modelRuntime,
             codexRuntime: codexRuntime
         )
+        self.sourceService = EditorialSourceService()
         self.publicationService = EditorialPublicationService()
         self.canonicalHandoff = EditorialCanonicalHandoffAdapter(
             messageSender: messageSender
@@ -118,6 +120,7 @@ final class EditorialDeskAssembly {
     func dependencies(for workspaceRoot: String) -> EditorialDeskDependencies {
         EditorialDeskDependencies(
             modelClient: modelClientFactory.makeClient(workspaceRoot: workspaceRoot),
+            sourceService: sourceService,
             publicationService: publicationService,
             canonicalHandoff: canonicalHandoff
         )

@@ -89,7 +89,12 @@ struct EditorialDeskTests {
     @Test("canonical publish prompt carries the transcript and selected ground truth")
     func canonicalPublishPromptCarriesEditorialContext() {
         let prompt = EditorialPromptBuilder.makeCanonicalPublishPrompt(
-            document: "Published article",
+            draft: EditorialDraftSnapshot(
+                title: "Published article",
+                deck: "",
+                body: "",
+                revision: 0
+            ),
             fileName: "Politics.md",
             sources: [
                 EditorialSource(
@@ -125,7 +130,12 @@ struct EditorialDeskTests {
         )
 
         let prompt = EditorialPromptBuilder.makeCanonicalPublishPrompt(
-            document: "Published article",
+            draft: EditorialDraftSnapshot(
+                title: "Published article",
+                deck: "",
+                body: "",
+                revision: 0
+            ),
             fileName: "Politics.md",
             sources: [],
             metadata: metadata
@@ -179,6 +189,29 @@ struct EditorialDeskTests {
         #expect(source.name == "release-notes")
         #expect(source.content == "Ground truth")
         #expect(source.origin == .importedFile(path: "release-notes.custom"))
+    }
+
+    @Test("source service keeps successful imports when one file fails")
+    func sourceServicePreservesPartialImportResults() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EditorialSourceServiceTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let validFile = root.appendingPathComponent("brief.txt")
+        let invalidFile = root.appendingPathComponent("binary.dat")
+        try Data("Ground truth".utf8).write(to: validFile)
+        try Data([0xFF, 0xFE]).write(to: invalidFile)
+
+        let result = await EditorialSourceService().load(
+            urls: [validFile, invalidFile],
+            workspaceRoot: root.path
+        )
+
+        #expect(result.sources.count == 1)
+        #expect(result.sources.first?.content == "Ground truth")
+        #expect(result.errors.count == 1)
+        #expect(result.errors[0].contains("binary.dat"))
     }
 
     @Test("applying a revision remains undoable")
@@ -308,7 +341,12 @@ struct EditorialDeskTests {
     func dependenciesKeepCanonicalHandoffBehindAFeaturePort() async {
         let handoff = RecordingEditorialCanonicalHandoff()
         let request = EditorialCanonicalPublishRequest(
-            document: "Published document",
+            draft: EditorialDraftSnapshot(
+                title: "Published document",
+                deck: "",
+                body: "",
+                revision: 1
+            ),
             fileName: "Published.md",
             sources: [
                 EditorialSource(
@@ -327,6 +365,7 @@ struct EditorialDeskTests {
         )
         let dependencies = EditorialDeskDependencies(
             modelClient: EditorialDeskTestModelClient(),
+            sourceService: EditorialSourceService(),
             publicationService: EditorialPublicationService(),
             canonicalHandoff: handoff
         )
@@ -335,6 +374,24 @@ struct EditorialDeskTests {
 
         #expect(outcome == .accepted)
         #expect(handoff.requests == [request])
+    }
+
+    @Test("a draft snapshot remains stable after the editor changes")
+    @MainActor
+    func draftSnapshotCapturesTheAdmittedValues() async {
+        let viewModel = EditorialDeskViewModel(workspaceRoot: "")
+        viewModel.updateTitle("Original title")
+        viewModel.updateBody("Original body")
+        let snapshot = viewModel.makeDraftSnapshot()
+
+        viewModel.updateTitle("Changed title")
+        viewModel.updateBody("Changed body")
+
+        let observed = await EditorialDraftSnapshotProbe().observe(snapshot)
+
+        #expect(observed.title == "Original title")
+        #expect(observed.body == "Original body")
+        #expect(observed.revision < viewModel.makeDraftSnapshot().revision)
     }
 
     @Test("publish creates a temporary name when the title is empty")
@@ -354,6 +411,12 @@ struct EditorialDeskTests {
         #expect(publication.fileName.hasPrefix("Untitled-Draft-1970-01-01-"))
         #expect(publication.fileName.hasSuffix(".md"))
         #expect(FileManager.default.fileExists(atPath: publication.url.path))
+    }
+}
+
+private actor EditorialDraftSnapshotProbe {
+    func observe(_ snapshot: EditorialDraftSnapshot) -> EditorialDraftSnapshot {
+        snapshot
     }
 }
 

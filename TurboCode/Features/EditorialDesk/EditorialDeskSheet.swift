@@ -76,8 +76,13 @@ struct EditorialDeskSheet: View {
         ) { result in
             switch result {
             case .success(let urls):
-                viewModel.importFiles(urls)
                 selectedInspectorTab = .sources
+                Task { @MainActor in
+                    await viewModel.importFiles(
+                        urls,
+                        using: dependencies.sourceService
+                    )
+                }
             case .failure(let error):
                 viewModel.importError = error.localizedDescription
             }
@@ -684,7 +689,10 @@ struct EditorialDeskSheet: View {
             actionMenuPresented = false
             hoveredAction = nil
             selectedInspectorTab = .notes
-            viewModel.run(action: action, document: editorialDocument)
+            viewModel.run(
+                action: action,
+                snapshot: viewModel.makeDraftSnapshot()
+            )
         } label: {
             Label(title, systemImage: icon)
                 .font(.system(size: 12))
@@ -1071,8 +1079,7 @@ struct EditorialDeskSheet: View {
         isPublishing = true
         publishError = nil
 
-        let document = viewModel.draftText
-        let title = viewModel.documentTitle
+        let draft = viewModel.makeDraftSnapshot()
         let sources = viewModel.selectedSources
         let metadata = EditorialDeskMetadata(
             section: selectedSection,
@@ -1082,14 +1089,13 @@ struct EditorialDeskSheet: View {
         Task { @MainActor in
             do {
                 let publication = try await dependencies.publicationService.publish(
-                    document: document,
-                    title: title,
+                    draft: draft,
                     workspaceRoot: workspaceRoot,
                     metadata: metadata
                 )
                 let handoff = await dependencies.canonicalHandoff.publish(
                     EditorialCanonicalPublishRequest(
-                        document: document,
+                        draft: draft,
                         fileName: publication.fileName,
                         sources: sources,
                         metadata: metadata
@@ -1110,9 +1116,6 @@ struct EditorialDeskSheet: View {
         }
     }
 
-    private var editorialDocument: String {
-        viewModel.draftText
-    }
 }
 
 /// AppKit supplies the editable text surface while the surrounding SwiftUI
