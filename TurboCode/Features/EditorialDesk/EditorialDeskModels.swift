@@ -5,8 +5,10 @@ import Foundation
 nonisolated enum EditorialDeskTab: String, CaseIterable, Identifiable, Sendable {
     case write = "Write"
     case paste = "Paste"
-    case notes = "From Notes"
-    case transcript = "From Transcript"
+    // These inputs are manual until real Notes/Transcript providers are
+    // introduced; the label must not promise an unavailable integration.
+    case notes = "Notes (manual)"
+    case transcript = "Transcript (manual)"
 
     var id: Self { self }
 
@@ -287,6 +289,34 @@ nonisolated struct EditorialSource: Identifiable, Hashable, Sendable {
         self.name = name
         self.origin = origin
         self.content = content
+    }
+
+    /// Stable identity used to reject duplicate ground truth without relying
+    /// on the transient UUID assigned when the source enters the desk.
+    var provenanceKey: String {
+        switch origin {
+        case .importedFile(let path):
+            "file:\(path)"
+        case .pasted:
+            "pasted:\(content)"
+        case .notes:
+            "notes:\(content)"
+        case .transcript:
+            "transcript:\(content)"
+        }
+    }
+
+    var byteCount: Int {
+        content.lengthOfBytes(using: .utf8)
+    }
+
+    var preview: String {
+        let normalized = content
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.count > 140
+            ? String(normalized.prefix(140)) + "…"
+            : normalized
     }
 }
 

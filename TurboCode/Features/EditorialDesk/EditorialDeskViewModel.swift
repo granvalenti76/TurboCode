@@ -264,8 +264,13 @@ final class EditorialDeskViewModel {
             origin: origin,
             content: intakeText
         )
+        guard !sources.contains(where: { $0.provenanceKey == source.provenanceKey }) else {
+            importError = EditorialSourceLoadError.duplicate(source.name).localizedDescription
+            return
+        }
         sources.append(source)
         selectedSourceIDs.insert(source.id)
+        importError = nil
     }
 
     /// Imports selected files through an actor-owned service. Only the
@@ -278,7 +283,8 @@ final class EditorialDeskViewModel {
         importError = nil
         let result = await sourceService.load(
             urls: urls,
-            workspaceRoot: workspaceRoot
+            workspaceRoot: workspaceRoot,
+            excluding: sources
         )
         sources.append(contentsOf: result.sources)
         for source in result.sources {

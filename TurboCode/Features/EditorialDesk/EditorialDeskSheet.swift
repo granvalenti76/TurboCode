@@ -311,7 +311,7 @@ struct EditorialDeskSheet: View {
                     metadataChip(
                         icon: "checkmark.shield",
                         title: "",
-                        value: "\(viewModel.sources.count) sources",
+                        value: "\(viewModel.selectedSources.count)/\(viewModel.sources.count) sources",
                         tint: .green
                     )
                 }
@@ -843,6 +843,8 @@ struct EditorialDeskSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Ground-truth sources")
                 .font(.headline)
+            Text("\(viewModel.selectedSources.count) of \(viewModel.sources.count) selected for the next operation.")
+                .font(.callout.weight(.semibold))
             Text("The editorial assistant will compare the draft against these sources and flag every discrepancy.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -1110,28 +1112,39 @@ struct EditorialDeskSheet: View {
         _ title: String,
         subtitle: String,
         mark: String,
-        color: Color
+        color: Color,
+        preview: String? = nil
     ) -> some View {
-        HStack(spacing: 9) {
-            Text(mark)
-                .font(.system(size: mark.count > 2 ? 8 : 14, weight: .bold, design: .serif))
-                .foregroundStyle(color == .black ? Color.primary : Color.white)
-                .frame(width: 27, height: 27)
-                .background(
-                    color == .black ? Color(nsColor: .textBackgroundColor) : color,
-                    in: RoundedRectangle(cornerRadius: 5)
-                )
-                .overlay { RoundedRectangle(cornerRadius: 5).strokeBorder(.separator, lineWidth: 0.5) }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 9) {
+                Text(mark)
+                    .font(.system(size: mark.count > 2 ? 8 : 14, weight: .bold, design: .serif))
+                    .foregroundStyle(color == .black ? Color.primary : Color.white)
+                    .frame(width: 27, height: 27)
+                    .background(
+                        color == .black ? Color(nsColor: .textBackgroundColor) : color,
+                        in: RoundedRectangle(cornerRadius: 5)
+                    )
+                    .overlay { RoundedRectangle(cornerRadius: 5).strokeBorder(.separator, lineWidth: 0.5) }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 12, weight: .semibold))
-                Text(subtitle)
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 12, weight: .semibold))
+                    Text(subtitle)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+                Circle().fill(.green).frame(width: 8, height: 8)
             }
 
-            Spacer()
-            Circle().fill(.green).frame(width: 8, height: 8)
+            if let preview, !preview.isEmpty {
+                Text(preview)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+            }
         }
         .padding(8)
         .background(.background, in: RoundedRectangle(cornerRadius: 8))
@@ -1142,9 +1155,10 @@ struct EditorialDeskSheet: View {
         let isSelected = viewModel.selectedSourceIDs.contains(source.id)
         return sourceCard(
             source.name,
-            subtitle: "\(source.origin.label) · verified",
+            subtitle: "\(source.origin.label) · \(byteCountDescription(source.byteCount)) · \(isSelected ? "selected" : "excluded")",
             mark: String(source.name.prefix(3)).uppercased(),
-            color: .green
+            color: .green,
+            preview: source.preview
         )
         .opacity(isSelected ? 1 : 0.55)
         .overlay(alignment: .trailing) {
@@ -1181,7 +1195,10 @@ struct EditorialDeskSheet: View {
             footerDivider
             footerStat("Reading", value: wordCount == 0 ? "—" : "\(max(1, wordCount / 210)) min")
             footerDivider
-            footerStat("Sources", value: "\(viewModel.sources.count)")
+            footerStat(
+                "Sources",
+                value: "\(viewModel.selectedSources.count)/\(viewModel.sources.count)"
+            )
             footerDivider
             Label(viewModel.hasDocument ? "Draft ready" : "Empty desk", systemImage: "checkmark")
             if let receipt = publicationReceipt,
@@ -1238,6 +1255,16 @@ struct EditorialDeskSheet: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(.bar)
+    }
+
+    private func byteCountDescription(_ byteCount: Int) -> String {
+        if byteCount < 1_024 {
+            return "\(byteCount) B"
+        }
+        if byteCount < 1_048_576 {
+            return "\(byteCount / 1_024) KB"
+        }
+        return String(format: "%.1f MB", Double(byteCount) / 1_048_576)
     }
 
     private func footerStat(_ label: String, value: String) -> some View {

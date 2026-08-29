@@ -221,6 +221,19 @@ struct EditorialDeskTests {
         #expect(source.name == "release-notes")
         #expect(source.content == "Ground truth")
         #expect(source.origin == .importedFile(path: "release-notes.custom"))
+
+        let outsideRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EditorialOutsideSourceTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: outsideRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outsideRoot) }
+        let outsideFile = outsideRoot.appendingPathComponent("outside.txt")
+        try Data("External ground truth".utf8).write(to: outsideFile)
+
+        let outsideSource = try EditorialSourceLoader.load(
+            from: outsideFile,
+            workspaceRoot: root.path
+        )
+        #expect(outsideSource.origin == .importedFile(path: outsideFile.path))
     }
 
     @Test("source service keeps successful imports when one file fails")
@@ -244,6 +257,92 @@ struct EditorialDeskTests {
         #expect(result.sources.first?.content == "Ground truth")
         #expect(result.errors.count == 1)
         #expect(result.errors[0].contains("binary.dat"))
+    }
+
+    @Test("manual Notes and Transcript labels do not promise unavailable providers")
+    func manualSourceTabsAreHonest() {
+        #expect(EditorialDeskTab.notes.rawValue == "Notes (manual)")
+        #expect(EditorialDeskTab.transcript.rawValue == "Transcript (manual)")
+    }
+
+    @Test("source service skips duplicate files and preserves provenance")
+    func sourceServiceSkipsDuplicateFiles() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EditorialDuplicateSourceTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let file = root.appendingPathComponent("brief.txt")
+        try Data("Ground truth".utf8).write(to: file)
+
+        let result = await EditorialSourceService().load(
+            urls: [file, file],
+            workspaceRoot: root.path
+        )
+
+        #expect(result.sources.count == 1)
+        #expect(result.sources[0].origin == .importedFile(path: "brief.txt"))
+        #expect(result.errors.count == 1)
+        #expect(result.errors[0].contains("already present"))
+
+        let existing = EditorialSource(
+            name: "Existing brief",
+            origin: .importedFile(path: "brief.txt"),
+            content: "Ground truth"
+        )
+        let excludedResult = await EditorialSourceService().load(
+            urls: [file],
+            workspaceRoot: root.path,
+            excluding: [existing]
+        )
+        #expect(excludedResult.sources.isEmpty)
+        #expect(excludedResult.errors.count == 1)
+    }
+
+    @Test("source service rejects files over the prompt size limit")
+    func sourceServiceRejectsOversizedFiles() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EditorialLargeSourceTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let file = root.appendingPathComponent("large.txt")
+        try Data(repeating: 0x61, count: EditorialSourceLoader.maxByteCount + 1).write(to: file)
+
+        let result = await EditorialSourceService().load(
+            urls: [file],
+            workspaceRoot: root.path
+        )
+
+        #expect(result.sources.isEmpty)
+        #expect(result.errors.count == 1)
+        #expect(result.errors[0].contains("source limit"))
+    }
+
+    @Test("manual sources reject duplicate content without losing the first source")
+    @MainActor
+    func manualSourcesRejectDuplicates() {
+        let viewModel = EditorialDeskViewModel(workspaceRoot: "")
+        viewModel.selectedTab = .notes
+        viewModel.intakeText = "Same note"
+        viewModel.addIntakeAsSource()
+        viewModel.addIntakeAsSource()
+
+        #expect(viewModel.sources.count == 1)
+        #expect(viewModel.importError?.contains("already present") == true)
+    }
+
+    @Test("source preview and byte metadata are derived from frozen content")
+    func sourcePresentationMetadataIsStable() {
+        let source = EditorialSource(
+            name: "Brief",
+            origin: .pasted,
+            content: "First line\nSecond line"
+        )
+
+        #expect(source.byteCount == source.content.lengthOfBytes(using: .utf8))
+        #expect(source.preview == "First line Second line")
+        #expect(source.provenanceKey == "pasted:\(source.content)")
     }
 
     @Test("structured revisions preserve every draft field and remain undoable")

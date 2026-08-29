@@ -4,16 +4,35 @@ import Foundation
 /// arbitrary user-selected files and records their provenance; it does not
 /// impose a README/PRODUCT-style filename allowlist.
 nonisolated enum EditorialSourceLoader {
+    /// Keep prompt payloads bounded before reading a user-selected file into
+    /// memory. The limit applies to UTF-8 bytes, not visible character count.
+    static let maxByteCount = 1_048_576
+
     static func load(
         from url: URL,
         workspaceRoot: String
     ) throws -> EditorialSource {
+        let resourceValues = try url.resourceValues(forKeys: [.fileSizeKey])
+        if let fileSize = resourceValues.fileSize,
+           fileSize > maxByteCount {
+            throw EditorialSourceLoadError.fileTooLarge(
+                url.lastPathComponent,
+                maxByteCount: maxByteCount
+            )
+        }
+
         let didAccess = url.startAccessingSecurityScopedResource()
         defer {
             if didAccess { url.stopAccessingSecurityScopedResource() }
         }
 
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        guard data.count <= maxByteCount else {
+            throw EditorialSourceLoadError.fileTooLarge(
+                url.lastPathComponent,
+                maxByteCount: maxByteCount
+            )
+        }
         guard let content = String(data: data, encoding: .utf8) else {
             throw EditorialSourceLoadError.invalidUTF8(url.lastPathComponent)
         }
@@ -38,11 +57,17 @@ nonisolated enum EditorialSourceLoader {
 
 nonisolated enum EditorialSourceLoadError: LocalizedError, Sendable {
     case invalidUTF8(String)
+    case fileTooLarge(String, maxByteCount: Int)
+    case duplicate(String)
 
     var errorDescription: String? {
         switch self {
         case .invalidUTF8(let fileName):
             "\(fileName) could not be read as UTF-8 text."
+        case .fileTooLarge(let fileName, let maxByteCount):
+            "\(fileName) exceeds the \(maxByteCount / 1_024) KB source limit."
+        case .duplicate(let sourceName):
+            "\(sourceName) is already present in the editorial sources."
         }
     }
 }
@@ -61,24 +86,53 @@ nonisolated struct EditorialSourceImportResult: Sendable, Equatable {
 actor EditorialSourceService {
     func load(
         urls: [URL],
-        workspaceRoot: String
+        workspaceRoot: String,
+        excluding existingSources: [EditorialSource] = []
     ) -> EditorialSourceImportResult {
         var sources: [EditorialSource] = []
         var errors: [String] = []
+        var seenKeys = Set(existingSources.map {
+            normalizedProvenanceKey(for: $0, workspaceRoot: workspaceRoot)
+        })
 
         for url in urls {
-            do {
-                sources.append(
-                    try EditorialSourceLoader.load(
-                        from: url,
-                        workspaceRoot: workspaceRoot
-                    )
+            let sourceKey = "file:\(url.standardizedFileURL.path)"
+            guard !seenKeys.contains(sourceKey) else {
+                errors.append(
+                    EditorialSourceLoadError.duplicate(url.lastPathComponent).localizedDescription
                 )
+                continue
+            }
+
+            do {
+                let source = try EditorialSourceLoader.load(
+                    from: url,
+                    workspaceRoot: workspaceRoot
+                )
+                sources.append(source)
+                seenKeys.insert(sourceKey)
             } catch {
                 errors.append("\(url.lastPathComponent): \(error.localizedDescription)")
             }
         }
 
         return EditorialSourceImportResult(sources: sources, errors: errors)
+    }
+
+    private func normalizedProvenanceKey(
+        for source: EditorialSource,
+        workspaceRoot: String
+    ) -> String {
+        guard case .importedFile(let path) = source.origin else {
+            return source.provenanceKey
+        }
+        let resolvedURL: URL
+        if path.hasPrefix("/") || workspaceRoot.isEmpty {
+            resolvedURL = URL(fileURLWithPath: path)
+        } else {
+            resolvedURL = URL(fileURLWithPath: workspaceRoot)
+                .appendingPathComponent(path)
+        }
+        return "file:\(resolvedURL.standardizedFileURL.path)"
     }
 }
