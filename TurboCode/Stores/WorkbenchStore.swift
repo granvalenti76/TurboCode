@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 import SwiftUI
 
@@ -7,6 +8,18 @@ import SwiftUI
 struct DiffPatchReviewPresentation: Identifiable {
     let id: String
     let patch: DiffPatchBlock
+}
+
+/// Stable shell-owned request for the removable Editorial Desk sheet. A nil
+/// path starts a new draft; a workspace-relative path opens an authentic one.
+struct EditorialDeskPresentation: Identifiable, Equatable {
+    let id: UUID
+    let draftRelativePath: String?
+
+    init(id: UUID = UUID(), draftRelativePath: String? = nil) {
+        self.id = id
+        self.draftRelativePath = draftRelativePath
+    }
 }
 
 /// Owns workbench navigation and panel presentation state.
@@ -28,6 +41,7 @@ final class WorkbenchStore {
     var inspectedGitCommit: GitCommitBlock?
     var inspectedWorkspaceListingID: String?
     var inspectedDiffPatchReview: DiffPatchReviewPresentation?
+    var editorialDeskPresentation: EditorialDeskPresentation?
 
     var rightPanelVisible: Bool { rightPanelMode != nil }
 
@@ -85,5 +99,15 @@ final class WorkbenchStore {
     /// The receipt itself remains persisted in the old conversation.
     func dismissDiffPatchReview() {
         inspectedDiffPatchReview = nil
+    }
+
+    func presentEditorialDesk(draftRelativePath: String? = nil) {
+        editorialDeskPresentation = EditorialDeskPresentation(
+            draftRelativePath: draftRelativePath
+        )
+    }
+
+    func dismissEditorialDesk() {
+        editorialDeskPresentation = nil
     }
 }

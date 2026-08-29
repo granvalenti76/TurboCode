@@ -729,11 +729,21 @@ struct EditorialDeskTests {
             workspaceRoot: root.path
         )
 
-        let descriptors = try await EditorialDraftLibraryService().list(
+        let library = EditorialDraftLibraryService()
+        let descriptors = try await library.list(workspaceRoot: root.path)
+        let authenticSummary = try await library.summary(
+            relativePath: authentic.relativePath,
+            workspaceRoot: root.path
+        )
+        let ordinarySummary = try await library.summary(
+            relativePath: "ordinary.md",
             workspaceRoot: root.path
         )
 
         #expect(descriptors.map(\.relativePath) == [authentic.relativePath])
+        #expect(authenticSummary?.draftID != nil)
+        #expect(authenticSummary?.relativePath == authentic.relativePath)
+        #expect(ordinarySummary == nil)
     }
 
     @Test("publication stores review and source snapshots as hashed Markdown sidecars")

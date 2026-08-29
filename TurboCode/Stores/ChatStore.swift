@@ -1043,6 +1043,21 @@ public final class ChatStore {
         reviewCoordinator.reviewWorkspaceListing(id)
     }
 
+    /// Recognizes a live workspace entry without changing the immutable tool
+    /// receipt or exposing Editorial Desk service internals to SwiftUI.
+    func editorialDraftSummary(relativePath: String) async -> EditorialDraftSummary? {
+        guard !workspaceRoot.isEmpty else { return nil }
+        return await editorialDeskAssembly.draftSummary(
+            relativePath: relativePath,
+            workspaceRoot: workspaceRoot
+        )
+    }
+
+    func presentEditorialDesk(draftRelativePath: String? = nil) {
+        guard !workspaceRoot.isEmpty else { return }
+        workbenchStore.presentEditorialDesk(draftRelativePath: draftRelativePath)
+    }
+
     /// Returns whether a structured result references a receipt that still
     /// exists in the current conversation timeline.
     func canOpenActivityReceipt(_ receiptID: String) -> Bool {
@@ -1144,6 +1159,15 @@ public final class ChatStore {
 
     func dismissDiffPatchReview() {
         workbenchStore.dismissDiffPatchReview()
+    }
+
+    var editorialDeskPresentation: EditorialDeskPresentation? {
+        get { workbenchStore.editorialDeskPresentation }
+        set { workbenchStore.editorialDeskPresentation = newValue }
+    }
+
+    func dismissEditorialDesk() {
+        workbenchStore.dismissEditorialDesk()
     }
 
     public func toggleLeftSidebar() {

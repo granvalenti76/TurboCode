@@ -154,27 +154,7 @@ struct WorkspaceListingWidget: View {
     }
 
     private func fileRow(_ entry: WorkspaceListingEntry) -> some View {
-        HStack(spacing: 9) {
-            Image(systemName: iconName(for: entry))
-                .foregroundStyle(iconColor(for: entry))
-                .frame(width: 20)
-
-            Text(entry.name)
-                .font(.system(size: 12.5))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .help(entry.relativePath)
-
-            Spacer(minLength: 8)
-
-            Text(detailLabel(for: entry))
-                .font(AppTypography.metadata)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 5)
-        .contentShape(Rectangle())
+        WorkspaceListingFileRow(entry: entry)
     }
 
     private var visibleEntries: [WorkspaceListingEntry] {
@@ -272,7 +252,175 @@ struct WorkspaceListingWidget: View {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
-    private func detailLabel(for entry: WorkspaceListingEntry) -> String {
+}
+
+/// One live workspace entry. Editorial recognition is presentation-only and
+/// bounded to front matter, preserving the immutable browse_files receipt.
+private struct WorkspaceListingFileRow: View {
+    let entry: WorkspaceListingEntry
+
+    @Environment(ChatStore.self) private var chatStore
+    @State private var editorialSummary: EditorialDraftSummary?
+    @State private var isHovered = false
+
+    var body: some View {
+        Group {
+            if editorialSummary != nil {
+                Button(action: openEditorialDraft) {
+                    rowContent
+                }
+                .buttonStyle(.plain)
+            } else {
+                rowContent
+            }
+        }
+        .task(id: recognitionKey) {
+            guard isEditorialCandidate else {
+                editorialSummary = nil
+                return
+            }
+            editorialSummary = await chatStore.editorialDraftSummary(
+                relativePath: entry.relativePath
+            )
+        }
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.16), value: showsEditorialHover)
+        .help(helpText)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(accessibilityHint)
+    }
+
+    private var rowContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 9) {
+                Image(systemName: iconName)
+                    .foregroundStyle(iconColor)
+                    .frame(width: 20)
+
+                Text(entry.name)
+                    .font(.system(size: 12.5))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: 8)
+
+                Text(detailLabel)
+                    .font(AppTypography.metadata)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+
+            if showsEditorialHover, let editorialSummary {
+                editorialHoverCard(editorialSummary)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 7)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .contentShape(Rectangle())
+        .background {
+            if showsEditorialHover {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.045))
+                    .padding(.horizontal, 5)
+            }
+        }
+    }
+
+    private func editorialHoverCard(_ summary: EditorialDraftSummary) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.green)
+                .symbolRenderingMode(.hierarchical)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Editorial Desk")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                Text(displayTitle(for: summary))
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                if let metadataLabel = metadataLabel(for: summary) {
+                    Text(metadataLabel)
+                        .font(AppTypography.metadata)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: 4) {
+                Text("Open")
+                Image(systemName: "chevron.forward")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(Color.accentColor)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+    }
+
+    private var recognitionKey: String {
+        "\(chatStore.workspaceRoot)|\(entry.relativePath)|\(entry.modifiedAt ?? "")"
+    }
+
+    private var isEditorialCandidate: Bool {
+        entry.kind == .file && entry.fileExtension == "md"
+    }
+
+    private var showsEditorialHover: Bool {
+        isHovered && editorialSummary != nil
+    }
+
+    private var helpText: String {
+        guard let editorialSummary else { return entry.relativePath }
+        return "Open \(displayTitle(for: editorialSummary)) in Editorial Desk"
+    }
+
+    private var accessibilityLabel: String {
+        guard let editorialSummary else { return entry.name }
+        return "\(displayTitle(for: editorialSummary)), Editorial Desk draft"
+    }
+
+    private var accessibilityHint: String {
+        editorialSummary == nil ? detailLabel : "Opens the article in Editorial Desk"
+    }
+
+    private func openEditorialDraft() {
+        guard editorialSummary != nil else { return }
+        chatStore.presentEditorialDesk(draftRelativePath: entry.relativePath)
+    }
+
+    private func displayTitle(for summary: EditorialDraftSummary) -> String {
+        let title = summary.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty
+            ? URL(fileURLWithPath: entry.name).deletingPathExtension().lastPathComponent
+            : title
+    }
+
+    private func metadataLabel(for summary: EditorialDraftSummary) -> String? {
+        let components = [summary.sectionName, summary.typeName].compactMap { value in
+            value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }
+        return components.isEmpty ? "Editorial Draft" : components.joined(separator: " · ")
+    }
+
+    private var detailLabel: String {
         switch entry.kind {
         case .directory:
             "Folder"
@@ -285,7 +433,7 @@ struct WorkspaceListingWidget: View {
         }
     }
 
-    private func iconName(for entry: WorkspaceListingEntry) -> String {
+    private var iconName: String {
         switch entry.kind {
         case .directory: "folder.fill"
         case .symbolicLink: "link"
@@ -301,7 +449,7 @@ struct WorkspaceListingWidget: View {
         }
     }
 
-    private func iconColor(for entry: WorkspaceListingEntry) -> Color {
+    private var iconColor: Color {
         switch entry.kind {
         case .directory: .blue
         case .symbolicLink: .purple

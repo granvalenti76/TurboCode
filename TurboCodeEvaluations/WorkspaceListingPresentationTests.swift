@@ -286,6 +286,18 @@ struct WorkspaceListingPresentationTests {
         #expect(store.inspectedWorkspaceListing == listing)
     }
 
+    @Test("Workspace draft action opens Editorial Desk at the selected article")
+    func workspaceDraftActionCarriesItsRelativePath() {
+        let store = ChatStore(conversationRepository: ListingConversationRepository())
+        store.workspaceStore.selectWorkspace("/tmp/editorial-workspace")
+
+        store.presentEditorialDesk(draftRelativePath: "articles/release.md")
+
+        #expect(store.editorialDeskPresentation?.draftRelativePath == "articles/release.md")
+        store.dismissEditorialDesk()
+        #expect(store.editorialDeskPresentation == nil)
+    }
+
     @Test("Activity receipt reuses the existing native inspector snapshot")
     func activityReceiptSelectsInspectorSnapshot() {
         let store = ChatStore(conversationRepository: ListingConversationRepository())

@@ -12,6 +12,17 @@ nonisolated struct EditorialDraftDescriptor: Identifiable, Sendable, Equatable {
     var id: String { relativePath }
 }
 
+/// Bounded projection used by workspace-file widgets. It deliberately omits
+/// article content and sidecars so recognizing a draft never turns a directory
+/// hover into a document load.
+nonisolated struct EditorialDraftSummary: Sendable, Equatable {
+    let draftID: UUID
+    let relativePath: String
+    let title: String
+    let sectionName: String?
+    let typeName: String?
+}
+
 /// Structured projection loaded from a protocol-valid Markdown article.
 nonisolated struct EditorialDraftFile: Sendable, Equatable {
     let descriptor: EditorialDraftDescriptor
@@ -525,6 +536,29 @@ nonisolated enum EditorialDeskSidecarStore {
 /// hidden/package descendants, which both keeps the picker responsive and
 /// guarantees `.editorial-desk` sidecars cannot masquerade as articles.
 actor EditorialDraftLibraryService {
+    /// Recognizes one article from the same bounded front-matter prefix used by
+    /// library enumeration. Ordinary Markdown returns nil without reading its
+    /// body or any hidden review package.
+    func summary(
+        relativePath: String,
+        workspaceRoot: String
+    ) throws -> EditorialDraftSummary? {
+        guard relativePath.lowercased().hasSuffix(".md") else { return nil }
+        let url = try WorkspacePathResolver.resolve(relativePath, within: workspaceRoot)
+        guard let prefix = readPrefix(from: url),
+              let draftID = EditorialMarkdownCodec.authenticDraftID(in: prefix) else {
+            return nil
+        }
+        let decoded = EditorialMarkdownCodec.decode(prefix)
+        return EditorialDraftSummary(
+            draftID: draftID,
+            relativePath: relativePath,
+            title: decoded.draft.title,
+            sectionName: decoded.metadata.section?.name,
+            typeName: decoded.metadata.type?.name
+        )
+    }
+
     func list(workspaceRoot: String, limit: Int = 200) throws -> [EditorialDraftDescriptor] {
         let root = try WorkspacePathResolver.resolve(".", within: workspaceRoot)
         let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]

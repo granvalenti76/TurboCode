@@ -94,4 +94,16 @@ final class EditorialDeskAssembly {
             receiptPresenter: receiptPresenter
         )
     }
+
+    /// Lets native workspace widgets recognize Desk articles through the same
+    /// bounded library service without exposing publication or model ports.
+    func draftSummary(
+        relativePath: String,
+        workspaceRoot: String
+    ) async -> EditorialDraftSummary? {
+        try? await draftLibrary.summary(
+            relativePath: relativePath,
+            workspaceRoot: workspaceRoot
+        )
+    }
 }

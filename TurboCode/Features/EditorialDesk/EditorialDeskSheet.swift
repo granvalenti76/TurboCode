@@ -34,8 +34,10 @@ struct EditorialDeskSheet: View {
     @State private var isLoadingDrafts = false
     @State private var draftLibraryError: String?
     @State private var pendingDraftSelection: PendingDraftSelection?
+    @State private var didOpenInitialDraft = false
 
     private let workspaceRoot: String
+    private let initialDraftRelativePath: String?
     private let dependencies: EditorialDeskDependencies
 
     private enum PendingDraftSelection {
@@ -50,9 +52,11 @@ struct EditorialDeskSheet: View {
 
     init(
         workspaceRoot: String,
+        initialDraftRelativePath: String? = nil,
         dependencies: EditorialDeskDependencies
     ) {
         self.workspaceRoot = workspaceRoot
+        self.initialDraftRelativePath = initialDraftRelativePath
         self.dependencies = dependencies
         let viewModel = EditorialDeskViewModel(
             workspaceRoot: workspaceRoot,
@@ -126,6 +130,10 @@ struct EditorialDeskSheet: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .task {
             await refreshDraftLibrary()
+            guard !didOpenInitialDraft,
+                  let initialDraftRelativePath else { return }
+            didOpenInitialDraft = true
+            await openDraft(relativePath: initialDraftRelativePath)
         }
         .fileImporter(
             isPresented: $sourceImporterPresented,

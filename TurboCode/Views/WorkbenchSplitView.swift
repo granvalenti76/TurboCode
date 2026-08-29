@@ -5,7 +5,6 @@ import SwiftUI
 struct WorkbenchSplitView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var editorialDeskPresented = false
     @State private var hoveredToolbarButton: ToolbarButtonID?
 
     private enum ToolbarButtonID: Hashable {
@@ -70,9 +69,10 @@ struct WorkbenchSplitView: View {
         }
         // Keep the editorial feature behind one reversible integration point:
         // removing the module only removes this toolbar action and its sheet.
-        .sheet(isPresented: $editorialDeskPresented) {
+        .sheet(item: editorialDeskPresentationBinding) { presentation in
             EditorialDeskSheet(
                 workspaceRoot: chatStore.workspaceRoot,
+                initialDraftRelativePath: presentation.draftRelativePath,
                 dependencies: chatStore.editorialDeskAssembly.dependencies(
                     for: chatStore.workspaceRoot
                 )
@@ -93,11 +93,16 @@ struct WorkbenchSplitView: View {
         .onChange(of: columnVisibility) { _, visibility in
             chatStore.leftSidebarCollapsed = visibility == .detailOnly
         }
-        .onChange(of: chatStore.workspaceRoot) { _, workspaceRoot in
+        .onChange(of: chatStore.workspaceRoot) { previousRoot, workspaceRoot in
             // A pseudo-terminal belongs to exactly one workspace. Closing the
             // project also tears down its utility area and child shell.
             if workspaceRoot.isEmpty {
                 chatStore.terminalPresented = false
+            }
+            // Draft paths are workspace-relative. A project switch invalidates
+            // the active presentation even when both roots are non-empty.
+            if previousRoot != workspaceRoot {
+                chatStore.dismissEditorialDesk()
             }
         }
         .toolbar {
@@ -113,10 +118,10 @@ struct WorkbenchSplitView: View {
                         help: chatStore.workspaceRoot.isEmpty
                             ? "Choose a workspace to open the editorial desk"
                             : "Open editorial desk",
-                        isActive: editorialDeskPresented,
+                        isActive: chatStore.editorialDeskPresentation != nil,
                         isDisabled: chatStore.workspaceRoot.isEmpty
                     ) {
-                        editorialDeskPresented = true
+                        chatStore.presentEditorialDesk()
                     }
 
                     toolbarPillButton(
@@ -255,6 +260,19 @@ struct WorkbenchSplitView: View {
                     chatStore.dismissDiffPatchReview()
                 } else {
                     chatStore.diffPatchReviewPresentation = newValue
+                }
+            }
+        )
+    }
+
+    private var editorialDeskPresentationBinding: Binding<EditorialDeskPresentation?> {
+        Binding(
+            get: { chatStore.editorialDeskPresentation },
+            set: { newValue in
+                if newValue == nil {
+                    chatStore.dismissEditorialDesk()
+                } else {
+                    chatStore.editorialDeskPresentation = newValue
                 }
             }
         )
