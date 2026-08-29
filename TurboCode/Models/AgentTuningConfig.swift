@@ -1,7 +1,11 @@
 import Foundation
 
 nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
+
+    /// The former one-shot PCC Shortcut was persisted as a delegated worker
+    /// even though it was never a remote model from `models.json`.
+    private static let retiredPCCShortcutModelID = "pcc-shortcuts"
 
     public var schemaVersion: Int
     public var agent: AgentPolicy
@@ -35,11 +39,17 @@ nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
 
     public func validated() throws -> AgentTuningConfig {
         var value = self
-        guard schemaVersion == Self.currentSchemaVersion || schemaVersion == 0 else {
+        guard (0...Self.currentSchemaVersion).contains(schemaVersion) else {
             throw AgentTuningError.unsupportedSchemaVersion(schemaVersion)
         }
-        // Schema 0 represents the 0.1.0 shape, which did not always persist a
-        // schema marker. Normalize it only after all values pass validation.
+        // Preserve unknown worker IDs so Settings can still surface genuine
+        // models.json mistakes; only the explicitly retired PCC Shortcut is
+        // migrated to the standard delegated-worker fallback.
+        if value.orchestrator.delegateModelID == Self.retiredPCCShortcutModelID {
+            value.orchestrator.delegateModelID = OrchestratorPolicy().delegateModelID
+        }
+        // Older schemas represent shapes that remain structurally compatible.
+        // Normalize their marker only after all values pass validation.
         value.schemaVersion = Self.currentSchemaVersion
         guard (5...600).contains(execution.defaultCommandTimeoutSeconds) else {
             throw AgentTuningError.invalidValue(

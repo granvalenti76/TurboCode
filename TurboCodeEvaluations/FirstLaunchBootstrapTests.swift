@@ -162,6 +162,42 @@ struct FirstLaunchBootstrapTests {
         #expect(migratedProfiles["version"] as? Int == DynamicProfileStore.currentSchemaVersion)
     }
 
+    @Test("Onboarding replaces only the retired PCC Shortcut worker")
+    func migratesRetiredPCCShortcutWorker() throws {
+        let home = try makeEmptyHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let root = home.appendingPathComponent(".turbocode", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let config = TurboCodeConfig(rootURL: root)
+        let retiredConfiguration = AgentTuningConfig(
+            schemaVersion: 1,
+            agent: AgentPolicy(responseStyle: .detailed),
+            orchestrator: OrchestratorPolicy(delegateModelID: "pcc-shortcuts")
+        )
+        try JSONEncoder().encode(retiredConfiguration).write(
+            to: config.agentTuningConfigurationURL,
+            options: .atomic
+        )
+
+        try config.performOnboarding()
+
+        let migrated = try config.loadAgentTuning()
+        #expect(migrated.orchestrator.delegateModelID == OrchestratorPolicy().delegateModelID)
+        #expect(migrated.agent.responseStyle == .detailed)
+        let persisted = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: config.agentTuningConfigurationURL)
+        ) as! [String: Any]
+        #expect(persisted["schemaVersion"] as? Int == AgentTuningConfig.currentSchemaVersion)
+
+        let unrelatedMissingWorker = AgentTuningConfig(
+            orchestrator: OrchestratorPolicy(delegateModelID: "missing-custom-worker")
+        )
+        #expect(
+            try unrelatedMissingWorker.validated().orchestrator.delegateModelID
+                == "missing-custom-worker"
+        )
+    }
+
     @Test("Invalid configuration remains untouched and identifies the problematic field")
     func preservesInvalidConfigurationAndReportsField() throws {
         let home = try makeEmptyHome()

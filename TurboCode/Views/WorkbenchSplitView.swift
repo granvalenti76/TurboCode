@@ -158,7 +158,6 @@ struct WorkbenchSplitView: View {
                 }
                 .padding(.horizontal, 6)
                 .padding(.vertical, 5)
-                .glassEffect(.regular, in: Capsule())
             }
 
             ToolbarItem(placement: .primaryAction) {
@@ -174,7 +173,6 @@ struct WorkbenchSplitView: View {
                     chatStore.toggleRightPanel(.changes)
                 }
                 .padding(5)
-                .glassEffect(.regular, in: Circle())
             }
         }
         // The workbench is the reusable UI composition boundary used by the
