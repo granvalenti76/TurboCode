@@ -35,18 +35,17 @@ struct EditorialDeskSheet: View {
     }
 
     private let workspaceRoot: String
-    private let publishToCanonicalSession: @MainActor (String, String, [EditorialSource], EditorialDeskMetadata) async -> Void
+    private let dependencies: EditorialDeskDependencies
 
     init(
         workspaceRoot: String,
-        modelClient: (any EditorialModelClient)? = nil,
-        publishToCanonicalSession: @escaping @MainActor (String, String, [EditorialSource], EditorialDeskMetadata) async -> Void = { _, _, _, _ in }
+        dependencies: EditorialDeskDependencies
     ) {
         self.workspaceRoot = workspaceRoot
-        self.publishToCanonicalSession = publishToCanonicalSession
+        self.dependencies = dependencies
         let viewModel = EditorialDeskViewModel(
             workspaceRoot: workspaceRoot,
-            modelClient: modelClient
+            modelClient: dependencies.modelClient
         )
         _viewModel = State(initialValue: viewModel)
     }
@@ -1082,20 +1081,28 @@ struct EditorialDeskSheet: View {
         )
         Task { @MainActor in
             do {
-                let publication = try EditorialDraftPublisher.publish(
+                let publication = try await dependencies.publicationService.publish(
                     document: document,
                     title: title,
                     workspaceRoot: workspaceRoot,
                     metadata: metadata
                 )
-                await publishToCanonicalSession(
-                    document,
-                    publication.fileName,
-                    sources,
-                    metadata
+                let handoff = await dependencies.canonicalHandoff.publish(
+                    EditorialCanonicalPublishRequest(
+                        document: document,
+                        fileName: publication.fileName,
+                        sources: sources,
+                        metadata: metadata
+                    )
                 )
-                isPublishing = false
-                dismiss()
+                switch handoff {
+                case .accepted:
+                    isPublishing = false
+                    dismiss()
+                case .unavailable(let message):
+                    isPublishing = false
+                    publishError = message
+                }
             } catch {
                 isPublishing = false
                 publishError = error.localizedDescription

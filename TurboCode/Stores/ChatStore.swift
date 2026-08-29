@@ -75,29 +75,6 @@ public final class ChatStore {
         modelRuntimeStore.orchestratorMode
     }
 
-    /// Creates the isolated client used by the editorial desk. The model
-    /// configuration is snapshotted when the modal opens; the client then
-    /// executes through the same runtime admission gate as chat.
-    func makeEditorialModelClient() -> any EditorialModelClient {
-        let configuration = modelRuntimeStore.makeSessionConfiguration(
-            workspaceRoot: workspaceRoot
-        )
-        return TurboCodeEditorialModelClient(
-            runtime: llmRuntime,
-            configuration: configuration,
-            modelName: modelRuntimeStore.composerModel,
-            codexConfiguration: configuration.backend == .codex
-                ? EditorialCodexConfiguration(
-                    turboThreadID: "editorial-desk-\(UUID().uuidString)",
-                    modelID: codexRuntimeStore.preferredExecutionModelID,
-                    reasoningEffort: codexRuntimeStore.reasoningEffort,
-                    agentTuning: configuration.agentTuning,
-                    availableSkills: configuration.availableSkills
-                )
-                : nil
-        )
-    }
-
     /// Changes the routing mode as one awaited runtime transition. Swift
     /// property setters cannot suspend, so keeping mutation in a method avoids
     /// an untracked Task racing the next profile or send action.
@@ -129,6 +106,9 @@ public final class ChatStore {
     private let workspaceLifecycleCoordinator: WorkspaceLifecycleCoordinator
     private let independentTaskCoordinator: IndependentTaskCoordinator
     private let messageSendCoordinator: MessageSendCoordinator
+    /// Composition-only bridge for the isolated Editorial Desk. The feature
+    /// receives its narrow ports rather than the ChatStore facade itself.
+    let editorialDeskAssembly: EditorialDeskAssembly
     private let reviewCoordinator: ReviewCoordinator
 
     /// Composition-only command router. Command parsing and dispatch live in
@@ -346,7 +326,7 @@ public final class ChatStore {
             profiles: profileSelectionCoordinator,
             lifecycle: conversationLifecycleCoordinator
         )
-        self.messageSendCoordinator = MessageSendCoordinator(
+        let messageSendCoordinator = MessageSendCoordinator(
             runtime: agentRuntime,
             llmRuntime: llmRuntime,
             titleGenerator: titleGenerator,
@@ -362,6 +342,13 @@ public final class ChatStore {
             sessions: sessionCoordinator,
             profiles: profileSelectionCoordinator,
             lifecycle: conversationLifecycleCoordinator
+        )
+        self.messageSendCoordinator = messageSendCoordinator
+        self.editorialDeskAssembly = EditorialDeskAssembly(
+            runtime: llmRuntime,
+            modelRuntime: modelRuntime,
+            codexRuntime: codexRuntime,
+            messageSender: messageSendCoordinator
         )
         self.reviewCoordinator = ReviewCoordinator(
             timeline: timeline,
@@ -659,31 +646,6 @@ public final class ChatStore {
         await sendMessage(text, promptText: promptText, visibleInTimeline: true)
     }
 
-    /// Publishes the editorial transcript as a normal visible turn in the
-    /// canonical session. The desk owns the file write; ChatStore only
-    /// rehydrates the document and its selected ground truth into chat.
-    func publishEditorialDraft(
-        document: String,
-        fileName: String,
-        sources: [EditorialSource],
-        metadata: EditorialDeskMetadata = .empty
-    ) async {
-        let prompt = EditorialPromptBuilder.makeCanonicalPublishPrompt(
-            document: document,
-            fileName: fileName,
-            sources: sources,
-            metadata: metadata
-        )
-        guard let promptText = await messageSendCoordinator.preparePrompt(for: prompt) else {
-            return
-        }
-        await sendMessage(
-            "Published editorial draft: \(fileName)",
-            promptText: promptText,
-            visibleInTimeline: true
-        )
-    }
-
     /// Sends all valid inline annotations as one explicit user request. The
     /// compact timeline text remains readable while the model receives stable
     /// reviewed excerpts and sides through the provider-neutral prompt path.
@@ -873,7 +835,7 @@ public final class ChatStore {
         promptText: String? = nil,
         visibleInTimeline: Bool
     ) async {
-        await messageSendCoordinator.send(
+        _ = await messageSendCoordinator.send(
             displayText: text,
             promptText: promptText ?? text,
             visibleInTimeline: visibleInTimeline

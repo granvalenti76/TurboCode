@@ -67,16 +67,19 @@ final class MessageSendCoordinator {
         return modelRuntime.resolvedPrompt(for: text)
     }
 
+    /// Returns whether the turn was admitted. Keeping admission explicit lets
+    /// feature adapters report a rejected handoff instead of treating a
+    /// silent guard return as a successful publish.
     func send(
         displayText: String,
         promptText: String,
         visibleInTimeline: Bool
-    ) async {
+    ) async -> Bool {
         guard !displayText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !runtimeProjection.hasActiveOperation,
               !presentation.isProfileTransitioning,
               modelRuntime.activeBackend != .codex || codexRuntime.canSend else {
-            return
+            return false
         }
 
         await compactOnDeviceContextIfNeeded()
@@ -116,6 +119,7 @@ final class MessageSendCoordinator {
                 await sessions.persistGeneratedTitle(id: titleThreadID)
             }
         )
+        return true
     }
 
     func generateTitle(from prompt: String, threadID: String? = nil) async {

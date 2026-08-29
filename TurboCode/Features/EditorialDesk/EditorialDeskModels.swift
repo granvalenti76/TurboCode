@@ -399,7 +399,9 @@ nonisolated enum EditorialResponseError: LocalizedError, Sendable {
     }
 }
 
-protocol EditorialModelClient: Sendable {
+/// Provider boundary is intentionally nonisolated so actor-owned model
+/// clients can execute away from the MainActor under Swift 6 defaults.
+nonisolated protocol EditorialModelClient: Sendable {
     func perform(_ request: EditorialRequest) async throws -> EditorialResult
     func cancel() async
 }

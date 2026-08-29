@@ -303,6 +303,40 @@ struct EditorialDeskTests {
         #expect(contents.hasSuffix("---\n\nPublished article"))
     }
 
+    @Test("desk dependencies expose only a narrow canonical handoff port")
+    @MainActor
+    func dependenciesKeepCanonicalHandoffBehindAFeaturePort() async {
+        let handoff = RecordingEditorialCanonicalHandoff()
+        let request = EditorialCanonicalPublishRequest(
+            document: "Published document",
+            fileName: "Published.md",
+            sources: [
+                EditorialSource(
+                    name: "Brief",
+                    origin: .pasted,
+                    content: "Ground truth"
+                )
+            ],
+            metadata: EditorialDeskMetadata(
+                section: EditorialDeskSection(
+                    name: "Documentation",
+                    systemImage: "book.pages"
+                ),
+                type: nil
+            )
+        )
+        let dependencies = EditorialDeskDependencies(
+            modelClient: EditorialDeskTestModelClient(),
+            publicationService: EditorialPublicationService(),
+            canonicalHandoff: handoff
+        )
+
+        let outcome = await dependencies.canonicalHandoff.publish(request)
+
+        #expect(outcome == .accepted)
+        #expect(handoff.requests == [request])
+    }
+
     @Test("publish creates a temporary name when the title is empty")
     func publisherFallsBackToTemporaryName() throws {
         let root = FileManager.default.temporaryDirectory
@@ -320,5 +354,25 @@ struct EditorialDeskTests {
         #expect(publication.fileName.hasPrefix("Untitled-Draft-1970-01-01-"))
         #expect(publication.fileName.hasSuffix(".md"))
         #expect(FileManager.default.fileExists(atPath: publication.url.path))
+    }
+}
+
+private actor EditorialDeskTestModelClient: EditorialModelClient {
+    func perform(_ request: EditorialRequest) async throws -> EditorialResult {
+        EditorialResult(revisedDocument: nil, findings: [], summary: request.action.rawValue)
+    }
+
+    func cancel() async {}
+}
+
+@MainActor
+private final class RecordingEditorialCanonicalHandoff: EditorialCanonicalHandoff {
+    private(set) var requests: [EditorialCanonicalPublishRequest] = []
+
+    func publish(
+        _ request: EditorialCanonicalPublishRequest
+    ) async -> EditorialCanonicalHandoffOutcome {
+        requests.append(request)
+        return .accepted
     }
 }

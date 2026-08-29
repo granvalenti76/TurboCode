@@ -73,15 +73,9 @@ struct WorkbenchSplitView: View {
         .sheet(isPresented: $editorialDeskPresented) {
             EditorialDeskSheet(
                 workspaceRoot: chatStore.workspaceRoot,
-                modelClient: chatStore.makeEditorialModelClient(),
-                publishToCanonicalSession: { document, fileName, sources, metadata in
-                    await chatStore.publishEditorialDraft(
-                        document: document,
-                        fileName: fileName,
-                        sources: sources,
-                        metadata: metadata
-                    )
-                }
+                dependencies: chatStore.editorialDeskAssembly.dependencies(
+                    for: chatStore.workspaceRoot
+                )
             )
         }
         // Keep this sheet on the stable workbench root. A receipt row lives in
