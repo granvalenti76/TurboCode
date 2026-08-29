@@ -53,6 +53,10 @@ struct ChatBlockView: View {
             if let widget = block.pluginWidget {
                 PluginWidgetView(blockID: block.id, widget: widget)
             }
+        case .editorialPublication:
+            if let publication = block.editorialPublication {
+                EditorialPublicationWidget(publication: publication)
+            }
         }
     }
 

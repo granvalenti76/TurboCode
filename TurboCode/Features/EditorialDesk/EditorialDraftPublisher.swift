@@ -3,8 +3,11 @@ import Foundation
 /// Result of publishing one editorial draft. The URL is returned so the host
 /// can show a receipt without making the editorial module own workspace state.
 nonisolated struct EditorialPublication: Sendable, Equatable {
+    let draftID: UUID
     let fileName: String
+    let relativePath: String
     let url: URL
+    let publishedAt: Date
 }
 
 nonisolated enum EditorialDraftPublisherError: LocalizedError, Sendable {
@@ -29,15 +32,15 @@ nonisolated enum EditorialDraftPublisherError: LocalizedError, Sendable {
 /// removed without changing the chat or workspace stores.
 nonisolated enum EditorialDraftPublisher {
     static func publish(
-        document: String,
-        title: String,
+        draft: EditorialDraftSnapshot,
+        draftID: UUID,
+        targetRelativePath: String?,
         workspaceRoot: String,
         metadata: EditorialDeskMetadata = .empty,
         fileManager: FileManager = .default,
         now: Date = Date()
     ) throws -> EditorialPublication {
-        let trimmedDocument = document.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedDocument.isEmpty else {
+        guard !draft.document.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw EditorialDraftPublisherError.emptyDocument
         }
         guard !workspaceRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -51,47 +54,31 @@ nonisolated enum EditorialDraftPublisher {
             throw EditorialDraftPublisherError.workspaceIsNotDirectory
         }
 
-        let baseName = safeBaseName(title)
-            ?? "Untitled-Draft-\(temporaryStamp(now))"
-        let fileName = uniqueFileName(baseName: baseName, in: workspaceURL, fileManager: fileManager)
-        let targetURL = try WorkspacePathResolver.resolve(fileName, within: workspaceRoot)
-        let serializedDocument = markdownDocument(trimmedDocument, metadata: metadata)
+        let targetURL: URL
+        let relativePath: String
+        if let targetRelativePath {
+            targetURL = try WorkspacePathResolver.resolve(targetRelativePath, within: workspaceRoot)
+            relativePath = targetRelativePath
+        } else {
+            let baseName = safeBaseName(draft.title)
+                ?? "Untitled-Draft-\(temporaryStamp(now))"
+            let fileName = uniqueFileName(baseName: baseName, in: workspaceURL, fileManager: fileManager)
+            targetURL = try WorkspacePathResolver.resolve(fileName, within: workspaceRoot)
+            relativePath = fileName
+        }
+        let serializedDocument = EditorialMarkdownCodec.encode(
+            draft: draft,
+            draftID: draftID,
+            metadata: metadata
+        )
         try Data(serializedDocument.utf8).write(to: targetURL, options: .atomic)
-        return EditorialPublication(fileName: fileName, url: targetURL)
-    }
-
-    /// Uses standard Markdown front matter so editors and scripts can inspect
-    /// newsroom metadata without requiring a TurboCode-specific file format.
-    private static func markdownDocument(
-        _ document: String,
-        metadata: EditorialDeskMetadata
-    ) -> String {
-        guard !metadata.isEmpty else { return document }
-
-        var lines = ["---"]
-        if let section = metadata.section {
-            lines.append("editorial_section: \(frontMatterValue(section.name))")
-            lines.append("editorial_section_symbol: \(frontMatterValue(section.systemImage))")
-        }
-        if let type = metadata.type {
-            lines.append("editorial_type: \(frontMatterValue(type.name))")
-            lines.append("editorial_type_symbol: \(frontMatterValue(type.systemImage))")
-            lines.append("editorial_type_color: \(frontMatterValue(type.colorHex))")
-        }
-        if let date = metadata.dateString {
-            lines.append("editorial_date: \(frontMatterValue(date))")
-        }
-        lines.append("---")
-        return lines.joined(separator: "\n") + "\n\n" + document
-    }
-
-    private static func frontMatterValue(_ value: String) -> String {
-        let escaped = value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
-        return "\"\(escaped)\""
+        return EditorialPublication(
+            draftID: draftID,
+            fileName: targetURL.lastPathComponent,
+            relativePath: relativePath,
+            url: targetURL,
+            publishedAt: now
+        )
     }
 
     private static func safeBaseName(_ title: String) -> String? {

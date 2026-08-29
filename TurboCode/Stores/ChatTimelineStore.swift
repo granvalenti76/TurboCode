@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 
 /// Owns the in-memory timeline aggregate shown by the chat canvas.
@@ -139,6 +140,21 @@ final class ChatTimelineStore {
             pluginWidget: widget
         )
         guard !blocks.contains(where: { $0.id == block.id }) else { return }
+        insertBeforeActivePlaceholderOrAppend(block)
+    }
+
+    /// Appends one application-owned publication receipt without creating a
+    /// user prompt or assistant placeholder. Repeated delivery of the same
+    /// immutable draft receipt is suppressed at the timeline boundary.
+    func presentEditorialPublication(_ publication: EditorialPublicationBlock) {
+        let block = ChatBlock(
+            id: "editorial-publication-\(publication.draftID.uuidString)-\(publication.publishedAt.timeIntervalSince1970)",
+            kind: .editorialPublication,
+            text: publication.fileName,
+            editorialPublication: publication
+        )
+        guard !blocks.contains(where: { $0.id == block.id }) else { return }
+        isFirstMessage = false
         insertBeforeActivePlaceholderOrAppend(block)
     }
 

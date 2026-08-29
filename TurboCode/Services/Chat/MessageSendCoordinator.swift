@@ -67,6 +67,17 @@ final class MessageSendCoordinator {
         return modelRuntime.resolvedPrompt(for: text)
     }
 
+    /// Records an application-owned file receipt without entering the model
+    /// runtime. Editorial publication is a filesystem event, not a user turn;
+    /// persisting it here keeps the widget available after session restore.
+    func presentEditorialPublication(_ publication: EditorialPublicationBlock) async {
+        await lifecycle.ensureActiveThread()
+        timeline.presentEditorialPublication(publication)
+        guard let threadID = conversations.activeThreadID else { return }
+        conversations.touchThread(id: threadID)
+        await sessions.persistActiveSession(id: threadID)
+    }
+
     /// Returns whether the turn was admitted. Keeping admission explicit lets
     /// feature adapters report a rejected handoff instead of treating a
     /// silent guard return as a successful publish.

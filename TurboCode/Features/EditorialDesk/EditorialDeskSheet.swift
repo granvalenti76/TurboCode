@@ -25,16 +25,22 @@ struct EditorialDeskSheet: View {
     @State private var renameSourceText = ""
     @State private var publicationCoordinator: EditorialPublicationCoordinator
     @State private var publishError: String?
+    @State private var draftDescriptors: [EditorialDraftDescriptor] = []
+    @State private var selectedDraftPath: String?
+    @State private var activeDraftID = UUID()
+    @State private var savedDraftRevision: UInt64 = 0
+    @State private var savedDraftMetadata: EditorialDeskMetadata = .empty
+    @State private var isLoadingDrafts = false
+    @State private var draftLibraryError: String?
+    @State private var pendingDraftSelection: PendingDraftSelection?
 
     private let workspaceRoot: String
     private let dependencies: EditorialDeskDependencies
 
-    private var publicationPhase: EditorialPublicationPhase {
-        publicationCoordinator.phase
-    }
-
-    private var publicationReceipt: EditorialPublication? {
-        publicationCoordinator.receipt
+    private enum PendingDraftSelection {
+        case newDraft
+        case existing(String)
+        case dismiss
     }
 
     private var isPublishing: Bool {
@@ -55,7 +61,7 @@ struct EditorialDeskSheet: View {
         _publicationCoordinator = State(
             initialValue: EditorialPublicationCoordinator(
                 publicationService: dependencies.publicationService,
-                canonicalHandoff: dependencies.canonicalHandoff
+                receiptPresenter: dependencies.receiptPresenter
             )
         )
     }
@@ -67,7 +73,14 @@ struct EditorialDeskSheet: View {
                 selectedTab: $selectedTab,
                 onSelectTab: { tab in viewModel.selectedTab = tab },
                 onUndo: { viewModel.undoDraft() },
-                onRedo: { viewModel.redoDraft() }
+                onRedo: { viewModel.redoDraft() },
+                draftName: selectedDraftName,
+                draftDescriptors: draftDescriptors,
+                selectedDraftPath: selectedDraftPath,
+                hasUnsavedChanges: hasUnsavedDraftChanges,
+                isLoadingDrafts: isLoadingDrafts,
+                onNewDraft: { requestDraftSelection(.newDraft) },
+                onSelectDraft: { requestDraftSelection(.existing($0)) }
             )
             EditorialDeskMetadataBar(
                 selectedSectionID: $selectedSectionID,
@@ -103,16 +116,16 @@ struct EditorialDeskSheet: View {
             Divider()
             EditorialDeskFooter(
                 viewModel: viewModel,
-                publicationPhase: publicationPhase,
-                publicationReceipt: publicationReceipt,
                 isPublishing: isPublishing,
-                onDismiss: { dismiss() },
-                onPublish: { publishDraft() },
-                onRetryHandoff: { retryCanonicalHandoff() }
+                onDismiss: { requestDraftSelection(.dismiss) },
+                onPublish: { publishDraft() }
             )
         }
         .frame(minWidth: 1120, idealWidth: 1240, minHeight: 700, idealHeight: 820)
         .background(Color(nsColor: .windowBackgroundColor))
+        .task {
+            await refreshDraftLibrary()
+        }
         .fileImporter(
             isPresented: $sourceImporterPresented,
             allowedContentTypes: [.item],
@@ -158,14 +171,36 @@ struct EditorialDeskSheet: View {
                 set: { if !$0 { publishError = nil } }
             )
         ) {
-            if publicationPhase == .handoffFailed {
-                Button("Retry handoff") {
-                    retryCanonicalHandoff()
-                }
-            }
             Button("OK", role: .cancel) { publishError = nil }
         } message: {
             Text(publishError ?? "The draft could not be published.")
+        }
+        .alert(
+            "Discard unsaved changes?",
+            isPresented: Binding(
+                get: { pendingDraftSelection != nil },
+                set: { if !$0 { pendingDraftSelection = nil } }
+            )
+        ) {
+            Button("Discard Changes", role: .destructive) {
+                applyPendingDraftSelection()
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDraftSelection = nil
+            }
+        } message: {
+            Text("The current draft has changes that have not been published to Markdown.")
+        }
+        .alert(
+            "Editorial Draft",
+            isPresented: Binding(
+                get: { draftLibraryError != nil },
+                set: { if !$0 { draftLibraryError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) { draftLibraryError = nil }
+        } message: {
+            Text(draftLibraryError ?? "The Markdown draft could not be opened.")
         }
     }
 
@@ -179,37 +214,39 @@ struct EditorialDeskSheet: View {
         return settings.editorialDeskCatalog.types.first { $0.id == selectedTypeID }
     }
 
-    /// Starts the write phase with immutable inputs. A failed handoff retains
-    /// the resulting receipt and canonical request so retry never writes twice.
+    private var currentDraftMetadata: EditorialDeskMetadata {
+        EditorialDeskMetadata(
+            section: selectedSection,
+            type: selectedType,
+            date: selectedDate
+        )
+    }
+
+    private var selectedDraftName: String {
+        selectedDraftPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "New Draft"
+    }
+
+    private var hasUnsavedDraftChanges: Bool {
+        viewModel.makeDraftSnapshot().revision != savedDraftRevision
+            || currentDraftMetadata != savedDraftMetadata
+    }
+
+    /// Publishes one immutable snapshot. Existing selected Markdown is updated
+    /// atomically; a new draft receives a collision-free workspace filename.
     private func publishDraft() {
-        guard viewModel.hasDocument,
-              !isPublishing,
-              publicationPhase != .handoffFailed else { return }
+        guard viewModel.hasDocument, !isPublishing else { return }
 
         publishError = nil
         let request = EditorialPublicationRequest(
             draft: viewModel.makeDraftSnapshot(),
+            draftID: activeDraftID,
+            targetRelativePath: selectedDraftPath,
             workspaceRoot: workspaceRoot,
-            sources: viewModel.selectedSources,
-            metadata: EditorialDeskMetadata(
-                section: selectedSection,
-                type: selectedType,
-                date: selectedDate
-            )
+            metadata: currentDraftMetadata
         )
 
         Task { @MainActor in
             applyPublicationAttempt(await publicationCoordinator.publish(request))
-        }
-    }
-
-    /// Retries only the second publication phase. The coordinator retains the
-    /// receipt and handoff request, so this path never writes another file.
-    private func retryCanonicalHandoff() {
-        guard publicationPhase == .handoffFailed else { return }
-        publishError = nil
-        Task { @MainActor in
-            applyPublicationAttempt(await publicationCoordinator.retryHandoff())
         }
     }
 
@@ -218,10 +255,88 @@ struct EditorialDeskSheet: View {
         case .completed:
             publishError = nil
             dismiss()
-        case .handoffFailed(_, _, let message), .failed(let message):
+        case .failed(let message):
             publishError = message
         case .ignored:
             break
+        }
+    }
+
+    /// A destructive switch remains explicit, matching document-based macOS
+    /// workflows while keeping routine selection to one menu action.
+    private func requestDraftSelection(_ selection: PendingDraftSelection) {
+        guard hasUnsavedDraftChanges, viewModel.hasDocument else {
+            performDraftSelection(selection)
+            return
+        }
+        pendingDraftSelection = selection
+    }
+
+    private func applyPendingDraftSelection() {
+        guard let pendingDraftSelection else { return }
+        self.pendingDraftSelection = nil
+        performDraftSelection(pendingDraftSelection)
+    }
+
+    private func performDraftSelection(_ selection: PendingDraftSelection) {
+        switch selection {
+        case .newDraft:
+            beginNewDraft()
+        case .existing(let relativePath):
+            Task { @MainActor in
+                await openDraft(relativePath: relativePath)
+            }
+        case .dismiss:
+            dismiss()
+        }
+    }
+
+    private func beginNewDraft() {
+        viewModel.loadDraft(EditorialDraft())
+        selectedDraftPath = nil
+        activeDraftID = UUID()
+        selectedSectionID = nil
+        selectedTypeID = nil
+        selectedDate = nil
+        savedDraftRevision = viewModel.makeDraftSnapshot().revision
+        savedDraftMetadata = .empty
+    }
+
+    private func openDraft(relativePath: String) async {
+        do {
+            let file = try await dependencies.draftLibrary.load(
+                relativePath: relativePath,
+                workspaceRoot: workspaceRoot
+            )
+            viewModel.loadDraft(file.draft)
+            selectedDraftPath = file.descriptor.relativePath
+            activeDraftID = file.draftID ?? UUID()
+            selectedSectionID = file.metadata.section.flatMap { loaded in
+                settings.editorialDeskCatalog.sections.first { $0.name == loaded.name }?.id
+            }
+            selectedTypeID = file.metadata.type.flatMap { loaded in
+                settings.editorialDeskCatalog.types.first { $0.name == loaded.name }?.id
+            }
+            selectedDate = file.metadata.date
+            if let selectedDate {
+                datePickerDate = selectedDate
+            }
+            savedDraftRevision = viewModel.makeDraftSnapshot().revision
+            savedDraftMetadata = currentDraftMetadata
+        } catch {
+            draftLibraryError = error.localizedDescription
+        }
+    }
+
+    private func refreshDraftLibrary() async {
+        isLoadingDrafts = true
+        defer { isLoadingDrafts = false }
+        do {
+            draftDescriptors = try await dependencies.draftLibrary.list(
+                workspaceRoot: workspaceRoot
+            )
+        } catch {
+            draftLibraryError = error.localizedDescription
         }
     }
 

@@ -132,7 +132,7 @@ nonisolated enum SessionRebuildHistory {
                 return .response(Transcript.Response(assetIDs: [], segments: [segment]))
             case .reasoning, .tool, .approval, .review, .compaction,
                     .diffPatch, .gitCommit, .gitStatus, .workspaceListing,
-                    .pluginWidget:
+                    .pluginWidget, .editorialPublication:
                 return nil
             }
         }

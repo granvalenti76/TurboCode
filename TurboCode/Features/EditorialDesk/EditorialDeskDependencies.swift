@@ -1,77 +1,43 @@
 import Foundation
 
-/// Immutable data passed from the desk to the canonical chat handoff. The
-/// feature snapshots this value before awaiting so the chat boundary never
-/// needs to inspect the live editor or its observable state.
-nonisolated struct EditorialCanonicalPublishRequest: Sendable, Equatable {
-    let draft: EditorialDraftSnapshot
-    let fileName: String
-    let sources: [EditorialSource]
-    let metadata: EditorialDeskMetadata
-
-    init(
-        draft: EditorialDraftSnapshot,
-        fileName: String,
-        sources: [EditorialSource],
-        metadata: EditorialDeskMetadata = .empty
-    ) {
-        self.draft = draft
-        self.fileName = fileName
-        self.sources = sources
-        self.metadata = metadata
-    }
-}
-
-/// Immutable inputs for the filesystem publication step. The handoff is kept
-/// separate because writing the file and admitting a canonical message are
-/// independent side effects.
+/// Immutable inputs for one filesystem publication. Existing selections carry
+/// a bounded relative path; new drafts leave it nil so the publisher can choose
+/// a collision-free Markdown filename.
 nonisolated struct EditorialPublicationRequest: Sendable, Equatable {
     let draft: EditorialDraftSnapshot
+    let draftID: UUID
+    let targetRelativePath: String?
     let workspaceRoot: String
-    let sources: [EditorialSource]
     let metadata: EditorialDeskMetadata
 
     init(
         draft: EditorialDraftSnapshot,
+        draftID: UUID = UUID(),
+        targetRelativePath: String? = nil,
         workspaceRoot: String,
-        sources: [EditorialSource] = [],
         metadata: EditorialDeskMetadata = .empty
     ) {
         self.draft = draft
+        self.draftID = draftID
+        self.targetRelativePath = targetRelativePath
         self.workspaceRoot = workspaceRoot
-        self.sources = sources
         self.metadata = metadata
     }
 }
 
-/// Outcome returned by the two-phase publication coordinator. A handoff
-/// failure retains both values needed to retry without writing another file.
+/// Outcome returned by the publication coordinator. A successful receipt has
+/// already been written and projected into the local conversation timeline.
 nonisolated enum EditorialPublicationAttempt: Sendable, Equatable {
     case completed(EditorialPublication)
-    case handoffFailed(
-        receipt: EditorialPublication,
-        request: EditorialCanonicalPublishRequest,
-        message: String
-    )
     case failed(String)
     case ignored
 }
 
-/// The handoff result is deliberately explicit: a written file can remain a
-/// recoverable receipt even when the canonical session is unavailable.
-nonisolated enum EditorialCanonicalHandoffOutcome: Sendable, Equatable {
-    case accepted
-    case unavailable(String)
-}
-
-/// Narrow application port used by the desk to publish into the canonical
-/// session. The implementation may currently bridge existing chat services,
-/// but the feature must not receive ChatStore or any observable store.
+/// Narrow application port for the native publication widget. The feature
+/// never receives the timeline store or an ordinary model-message sender.
 @MainActor
-protocol EditorialCanonicalHandoff {
-    func publish(
-        _ request: EditorialCanonicalPublishRequest
-    ) async -> EditorialCanonicalHandoffOutcome
+protocol EditorialPublicationReceiptPresenting {
+    func present(_ publication: EditorialPublicationBlock) async
 }
 
 /// Composition-time dependencies for one desk presentation. Mutable UI state
@@ -81,17 +47,20 @@ struct EditorialDeskDependencies {
     let modelClient: any EditorialModelClient
     let sourceService: EditorialSourceService
     let publicationService: EditorialPublicationService
-    let canonicalHandoff: any EditorialCanonicalHandoff
+    let draftLibrary: EditorialDraftLibraryService
+    let receiptPresenter: any EditorialPublicationReceiptPresenting
 
     init(
         modelClient: any EditorialModelClient,
         sourceService: EditorialSourceService,
         publicationService: EditorialPublicationService,
-        canonicalHandoff: any EditorialCanonicalHandoff
+        draftLibrary: EditorialDraftLibraryService,
+        receiptPresenter: any EditorialPublicationReceiptPresenting
     ) {
         self.modelClient = modelClient
         self.sourceService = sourceService
         self.publicationService = publicationService
-        self.canonicalHandoff = canonicalHandoff
+        self.draftLibrary = draftLibrary
+        self.receiptPresenter = receiptPresenter
     }
 }

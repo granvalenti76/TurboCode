@@ -19,6 +19,7 @@ nonisolated public struct ChatBlock: Identifiable, Sendable, Hashable {
     public var productGuide: ProductGuideBlock?
     public var workspaceListing: WorkspaceListingBlock?
     public var pluginWidget: TypeScriptPluginWidgetReceipt?
+    public var editorialPublication: EditorialPublicationBlock?
 
     public init(
         id: String = UUID().uuidString,
@@ -32,7 +33,8 @@ nonisolated public struct ChatBlock: Identifiable, Sendable, Hashable {
         gitStatus: GitStatusBlock? = nil,
         productGuide: ProductGuideBlock? = nil,
         workspaceListing: WorkspaceListingBlock? = nil,
-        pluginWidget: TypeScriptPluginWidgetReceipt? = nil
+        pluginWidget: TypeScriptPluginWidgetReceipt? = nil,
+        editorialPublication: EditorialPublicationBlock? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -46,6 +48,7 @@ nonisolated public struct ChatBlock: Identifiable, Sendable, Hashable {
         self.productGuide = productGuide
         self.workspaceListing = workspaceListing
         self.pluginWidget = pluginWidget
+        self.editorialPublication = editorialPublication
     }
 }
 
@@ -63,6 +66,37 @@ nonisolated public enum ChatBlockKind: String, Sendable, Hashable, CaseIterable 
     case productGuide = "product_guide"
     case workspaceListing = "workspace_listing"
     case pluginWidget = "plugin_widget"
+    case editorialPublication = "editorial_publication"
+}
+
+// MARK: - Editorial Publication Block
+
+/// Immutable receipt for a Markdown draft created by Editorial Desk. The
+/// timeline stores only the filesystem result; publishing never implies a
+/// follow-up model turn or copies live editor state into the conversation.
+nonisolated public struct EditorialPublicationBlock: Sendable, Hashable, Codable {
+    public let draftID: UUID
+    public let workspaceRoot: String
+    public let relativePath: String
+    public let fileName: String
+    public let wordCount: Int
+    public let publishedAt: Date
+
+    public init(
+        draftID: UUID,
+        workspaceRoot: String,
+        relativePath: String,
+        fileName: String,
+        wordCount: Int,
+        publishedAt: Date = .now
+    ) {
+        self.draftID = draftID
+        self.workspaceRoot = workspaceRoot
+        self.relativePath = relativePath
+        self.fileName = fileName
+        self.wordCount = wordCount
+        self.publishedAt = publishedAt
+    }
 }
 
 // MARK: - Git Status Block

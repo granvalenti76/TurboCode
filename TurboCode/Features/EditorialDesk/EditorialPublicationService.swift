@@ -9,8 +9,9 @@ actor EditorialPublicationService {
         _ request: EditorialPublicationRequest
     ) throws -> EditorialPublication {
         try EditorialDraftPublisher.publish(
-            document: request.draft.document,
-            title: request.draft.title,
+            draft: request.draft,
+            draftID: request.draftID,
+            targetRelativePath: request.targetRelativePath,
             workspaceRoot: request.workspaceRoot,
             metadata: request.metadata,
             fileManager: FileManager.default
@@ -18,99 +19,60 @@ actor EditorialPublicationService {
     }
 }
 
-/// Coordinates file writing and canonical handoff as two observable phases.
-/// It owns the receipt so retrying the second phase cannot allocate a new file.
+/// Coordinates the filesystem write and the native timeline receipt. The
+/// presenter cannot start a model turn, preserving Publish Draft as one clear
+/// application action.
 @MainActor
 @Observable
 final class EditorialPublicationCoordinator {
     private let publicationService: EditorialPublicationService
-    private let canonicalHandoff: any EditorialCanonicalHandoff
+    private let receiptPresenter: any EditorialPublicationReceiptPresenting
     private var generation: UInt64 = 0
-    private var handoffRequest: EditorialCanonicalPublishRequest?
 
     private(set) var phase: EditorialPublicationPhase = .idle
     private(set) var receipt: EditorialPublication?
 
     init(
         publicationService: EditorialPublicationService,
-        canonicalHandoff: any EditorialCanonicalHandoff
+        receiptPresenter: any EditorialPublicationReceiptPresenting
     ) {
         self.publicationService = publicationService
-        self.canonicalHandoff = canonicalHandoff
+        self.receiptPresenter = receiptPresenter
     }
 
     var isActive: Bool {
         phase.isActive
     }
 
-    /// Writes once, then records the exact canonical request before starting
-    /// the handoff. Stale completions cannot replace a newer generation.
+    /// Writes once and presents the immutable result. Stale completions cannot
+    /// replace a newer generation or append an unrelated timeline receipt.
     func publish(_ request: EditorialPublicationRequest) async -> EditorialPublicationAttempt {
-        guard !phase.isActive, handoffRequest == nil else { return .ignored }
+        guard !phase.isActive else { return .ignored }
         generation &+= 1
         let admittedGeneration = generation
         phase = .writing
         receipt = nil
-        handoffRequest = nil
 
         do {
             let publication = try await publicationService.publish(request)
             guard generation == admittedGeneration else { return .ignored }
-            let canonicalRequest = EditorialCanonicalPublishRequest(
-                draft: request.draft,
-                fileName: publication.fileName,
-                sources: request.sources,
-                metadata: request.metadata
-            )
             receipt = publication
-            handoffRequest = canonicalRequest
-            phase = .fileWritten
-            return await performHandoff(
-                canonicalRequest,
-                generation: admittedGeneration,
-                receipt: publication
+            let block = EditorialPublicationBlock(
+                draftID: publication.draftID,
+                workspaceRoot: request.workspaceRoot,
+                relativePath: publication.relativePath,
+                fileName: publication.fileName,
+                wordCount: request.draft.document.split(whereSeparator: { $0.isWhitespace }).count,
+                publishedAt: publication.publishedAt
             )
+            await receiptPresenter.present(block)
+            guard generation == admittedGeneration else { return .ignored }
+            phase = .completed
+            return .completed(publication)
         } catch {
             guard generation == admittedGeneration else { return .ignored }
             phase = .failed
             return .failed(error.localizedDescription)
-        }
-    }
-
-    /// Reuses the stored handoff request and receipt. No publication service
-    /// call is made on this path, which prevents duplicate files on retry.
-    func retryHandoff() async -> EditorialPublicationAttempt {
-        guard phase == .handoffFailed,
-              let handoffRequest,
-              let receipt else { return .ignored }
-        generation &+= 1
-        return await performHandoff(
-            handoffRequest,
-            generation: generation,
-            receipt: receipt
-        )
-    }
-
-    private func performHandoff(
-        _ request: EditorialCanonicalPublishRequest,
-        generation: UInt64,
-        receipt: EditorialPublication
-    ) async -> EditorialPublicationAttempt {
-        phase = .handoff
-        let outcome = await canonicalHandoff.publish(request)
-        guard self.generation == generation else { return .ignored }
-
-        switch outcome {
-        case .accepted:
-            phase = .completed
-            return .completed(receipt)
-        case .unavailable(let message):
-            phase = .handoffFailed
-            return .handoffFailed(
-                receipt: receipt,
-                request: request,
-                message: "File \(receipt.fileName) was saved, but the canonical handoff failed: \(message)"
-            )
         }
     }
 }

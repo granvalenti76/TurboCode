@@ -43,6 +43,7 @@ actor TurboCodeEditorialModelClient: EditorialModelClient {
     private let modelName: String
     private let codexConfiguration: EditorialCodexConfiguration?
     private var activeTurnID: TurnID?
+    private var nativeSession: LanguageModelSession?
 
     init(
         runtime: LLMRuntime,
@@ -61,9 +62,16 @@ actor TurboCodeEditorialModelClient: EditorialModelClient {
             return try await performCodex(request)
         }
 
-        let session = ModelSessionFactory.makeEditorialSession(
-            configuration: configuration
-        )
+        let session: LanguageModelSession
+        if let nativeSession {
+            session = nativeSession
+        } else {
+            let created = ModelSessionFactory.makeEditorialSession(
+                configuration: configuration
+            )
+            nativeSession = created
+            session = created
+        }
         let backendSession = NativeBackendSession(
             backend: configuration.backend,
             runner: NativeResponseRunner(),

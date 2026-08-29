@@ -82,71 +82,8 @@ struct EditorialDeskTests {
         #expect(prompt.contains("name=\"Programme brief\""))
         #expect(prompt.contains("Authoritative claim"))
         #expect(prompt.contains("Treat every ground-truth source below as authoritative"))
-        #expect(prompt.contains("set revisedDraft to null"))
         #expect(prompt.contains("do not rewrite the editorial document"))
-        #expect(prompt.contains("\"revisedDraft\""))
-    }
-
-    @Test("canonical publish prompt carries the transcript and selected ground truth")
-    func canonicalPublishPromptCarriesEditorialContext() {
-        let prompt = EditorialPromptBuilder.makeCanonicalPublishPrompt(
-            draft: EditorialDraftSnapshot(
-                title: "Published article",
-                deck: "",
-                body: "",
-                revision: 0
-            ),
-            fileName: "Politics.md",
-            sources: [
-                EditorialSource(
-                    name: "Programme brief",
-                    origin: .notes,
-                    content: "Authoritative programme claim"
-                )
-            ]
-        )
-
-        #expect(prompt.contains("Politics.md"))
-        #expect(prompt.contains("<published_editorial_document"))
-        #expect(prompt.contains("Published article"))
-        #expect(prompt.contains("Authoritative programme claim"))
-        #expect(prompt.contains("Treat the published document as the canonical editorial transcript"))
-    }
-
-    @Test("canonical publish prompt carries selected editorial metadata")
-    func canonicalPublishPromptCarriesEditorialMetadata() {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        let metadata = EditorialDeskMetadata(
-            section: EditorialDeskSection(
-                name: "Politics",
-                systemImage: "building.columns"
-            ),
-            type: EditorialDeskType(
-                name: "Breaking",
-                systemImage: "bolt.fill",
-                colorHex: "#FF3B30"
-            ),
-            date: calendar.date(from: DateComponents(year: 2026, month: 8, day: 26, hour: 12))
-        )
-
-        let prompt = EditorialPromptBuilder.makeCanonicalPublishPrompt(
-            draft: EditorialDraftSnapshot(
-                title: "Published article",
-                deck: "",
-                body: "",
-                revision: 0
-            ),
-            fileName: "Politics.md",
-            sources: [],
-            metadata: metadata
-        )
-
-        #expect(prompt.contains("<editorial_metadata>"))
-        #expect(prompt.contains("section=\"Politics\""))
-        #expect(prompt.contains("type=\"Breaking\""))
-        #expect(prompt.contains("color=\"#FF3B30\""))
-        #expect(prompt.contains("date=\"2026-08-26\""))
+        #expect(prompt.contains("Do not include revisedDraft"))
     }
 
     @Test("structured model response decodes from a JSON fence")
@@ -625,20 +562,32 @@ struct EditorialDeskTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let first = try EditorialDraftPublisher.publish(
-            document: "First draft",
-            title: "Politics / Lead",
+            draft: EditorialDraftSnapshot(
+                title: "Politics / Lead",
+                body: "First draft",
+                revision: 1
+            ),
+            draftID: UUID(),
+            targetRelativePath: nil,
             workspaceRoot: root.path
         )
         let second = try EditorialDraftPublisher.publish(
-            document: "Second draft",
-            title: "Politics / Lead",
+            draft: EditorialDraftSnapshot(
+                title: "Politics / Lead",
+                body: "Second draft",
+                revision: 1
+            ),
+            draftID: UUID(),
+            targetRelativePath: nil,
             workspaceRoot: root.path
         )
 
         #expect(first.fileName == "Politics---Lead.md")
         #expect(second.fileName == "Politics---Lead-2.md")
-        #expect(String(data: try Data(contentsOf: first.url), encoding: .utf8) == "First draft")
-        #expect(String(data: try Data(contentsOf: second.url), encoding: .utf8) == "Second draft")
+        let firstContents = try String(contentsOf: first.url, encoding: .utf8)
+        let secondContents = try String(contentsOf: second.url, encoding: .utf8)
+        #expect(EditorialMarkdownCodec.decode(firstContents).draft.body == "First draft")
+        #expect(EditorialMarkdownCodec.decode(secondContents).draft.body == "Second draft")
     }
 
     @Test("publish serializes editorial metadata as Markdown front matter")
@@ -663,14 +612,24 @@ struct EditorialDeskTests {
             date: calendar.date(from: DateComponents(year: 2026, month: 8, day: 26, hour: 12))
         )
         let publication = try EditorialDraftPublisher.publish(
-            document: "Published article",
-            title: "Politics",
+            draft: EditorialDraftSnapshot(
+                title: "Politics",
+                deck: "Daily update",
+                body: "Published article",
+                revision: 1
+            ),
+            draftID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            targetRelativePath: nil,
             workspaceRoot: root.path,
             metadata: metadata
         )
 
         let contents = try String(contentsOf: publication.url, encoding: .utf8)
         #expect(contents.hasPrefix("---\n"))
+        #expect(contents.contains("editorial_draft: true"))
+        #expect(contents.contains("editorial_draft_id: \"00000000-0000-0000-0000-000000000001\""))
+        #expect(contents.contains("title: \"Politics\""))
+        #expect(contents.contains("subtitle: \"Daily update\""))
         #expect(contents.contains("editorial_section: \"Politics\""))
         #expect(contents.contains("editorial_section_symbol: \"building.columns\""))
         #expect(contents.contains("editorial_type: \"Breaking\""))
@@ -680,44 +639,134 @@ struct EditorialDeskTests {
         #expect(contents.hasSuffix("---\n\nPublished article"))
     }
 
-    @Test("desk dependencies expose only a narrow canonical handoff port")
-    @MainActor
-    func dependenciesKeepCanonicalHandoffBehindAFeaturePort() async {
-        let handoff = RecordingEditorialCanonicalHandoff()
-        let request = EditorialCanonicalPublishRequest(
+    @Test("Markdown library lists, reloads, and updates an identified draft")
+    func markdownLibraryRoundTripsIdentifiedDraft() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EditorialDraftLibraryTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let draftID = UUID()
+        let first = try EditorialDraftPublisher.publish(
             draft: EditorialDraftSnapshot(
-                title: "Published document",
-                deck: "",
-                body: "",
+                title: "Library article",
+                deck: "A reusable deck",
+                body: "First Markdown body",
                 revision: 1
             ),
-            fileName: "Published.md",
-            sources: [
-                EditorialSource(
-                    name: "Brief",
-                    origin: .pasted,
-                    content: "Ground truth"
-                )
-            ],
+            draftID: draftID,
+            targetRelativePath: nil,
+            workspaceRoot: root.path,
             metadata: EditorialDeskMetadata(
-                section: EditorialDeskSection(
-                    name: "Documentation",
-                    systemImage: "book.pages"
-                ),
+                section: EditorialDeskSection(name: "Blog", systemImage: "newspaper"),
                 type: nil
             )
+        )
+        let library = EditorialDraftLibraryService()
+
+        let descriptors = try await library.list(workspaceRoot: root.path)
+        let loaded = try await library.load(
+            relativePath: first.relativePath,
+            workspaceRoot: root.path
+        )
+
+        #expect(descriptors.map(\.relativePath) == [first.relativePath])
+        #expect(descriptors.first?.isEditorialDraft == true)
+        #expect(loaded.draftID == draftID)
+        #expect(loaded.draft.title == "Library article")
+        #expect(loaded.draft.deck == "A reusable deck")
+        #expect(loaded.draft.body == "First Markdown body")
+        #expect(loaded.metadata.section?.name == "Blog")
+
+        let updated = try EditorialDraftPublisher.publish(
+            draft: EditorialDraftSnapshot(
+                title: "Library article",
+                deck: "A reusable deck",
+                body: "Updated Markdown body",
+                revision: 2
+            ),
+            draftID: draftID,
+            targetRelativePath: first.relativePath,
+            workspaceRoot: root.path
+        )
+        let reloaded = try await library.load(
+            relativePath: updated.relativePath,
+            workspaceRoot: root.path
+        )
+        let files = try FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil
+        )
+
+        #expect(files.count == 1)
+        #expect(reloaded.draftID == draftID)
+        #expect(reloaded.draft.body == "Updated Markdown body")
+    }
+
+    @Test("publication receipt is a native timeline block")
+    @MainActor
+    func publicationReceiptUsesNativeTimelineBlock() {
+        let timeline = ChatTimelineStore()
+        let publication = EditorialPublicationBlock(
+            draftID: UUID(),
+            workspaceRoot: "/tmp/workspace",
+            relativePath: "Article.md",
+            fileName: "Article.md",
+            wordCount: 42
+        )
+
+        timeline.presentEditorialPublication(publication)
+
+        #expect(timeline.blocks.count == 1)
+        #expect(timeline.blocks[0].kind == .editorialPublication)
+        #expect(timeline.blocks[0].editorialPublication == publication)
+        #expect(timeline.blocks.allSatisfy { $0.kind != .user && $0.kind != .assistant })
+    }
+
+    @Test("publication receipt survives stored block encoding")
+    func publicationReceiptPersistsAsStructuredData() throws {
+        let publication = EditorialPublicationBlock(
+            draftID: UUID(),
+            workspaceRoot: "/tmp/workspace",
+            relativePath: "Articles/Article.md",
+            fileName: "Article.md",
+            wordCount: 24
+        )
+        let stored = StoredBlock(
+            kind: ChatBlockKind.editorialPublication.rawValue,
+            text: publication.fileName,
+            editorialPublication: publication
+        )
+
+        let data = try JSONEncoder().encode(stored)
+        let decoded = try JSONDecoder().decode(StoredBlock.self, from: data)
+
+        #expect(decoded.kind == ChatBlockKind.editorialPublication.rawValue)
+        #expect(decoded.editorialPublication == publication)
+    }
+
+    @Test("desk dependencies expose only a native publication receipt port")
+    @MainActor
+    func dependenciesKeepPublicationReceiptBehindAFeaturePort() async {
+        let presenter = RecordingEditorialPublicationPresenter()
+        let receipt = EditorialPublicationBlock(
+            draftID: UUID(),
+            workspaceRoot: "/tmp/workspace",
+            relativePath: "Published.md",
+            fileName: "Published.md",
+            wordCount: 12
         )
         let dependencies = EditorialDeskDependencies(
             modelClient: EditorialDeskTestModelClient(),
             sourceService: EditorialSourceService(),
             publicationService: EditorialPublicationService(),
-            canonicalHandoff: handoff
+            draftLibrary: EditorialDraftLibraryService(),
+            receiptPresenter: presenter
         )
 
-        let outcome = await dependencies.canonicalHandoff.publish(request)
+        await dependencies.receiptPresenter.present(receipt)
 
-        #expect(outcome == .accepted)
-        #expect(handoff.requests == [request])
+        #expect(presenter.publications == [receipt])
     }
 
     @Test("cancellation waits for the backend and ignores a late completion")
@@ -775,46 +824,44 @@ struct EditorialDeskTests {
         #expect(observed.revision < viewModel.makeDraftSnapshot().revision)
     }
 
-    @Test("publication retry reuses the written file receipt")
+    @Test("publication writes once and presents one native receipt")
     @MainActor
-    func publicationRetryDoesNotWriteAnotherFile() async throws {
+    func publicationWritesAndPresentsOneReceipt() async throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("EditorialRetryPublicationTests-\(UUID().uuidString)")
+            .appendingPathComponent("EditorialPublicationReceiptTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let handoff = RetryingEditorialCanonicalHandoff()
+        let presenter = RecordingEditorialPublicationPresenter()
         let coordinator = EditorialPublicationCoordinator(
             publicationService: EditorialPublicationService(),
-            canonicalHandoff: handoff
+            receiptPresenter: presenter
         )
+        let draftID = UUID()
         let request = EditorialPublicationRequest(
             draft: EditorialDraftSnapshot(
-                title: "Retry article",
+                title: "Published article",
                 deck: "",
                 body: "Body",
                 revision: 1
             ),
+            draftID: draftID,
             workspaceRoot: root.path,
-            sources: [],
             metadata: .empty
         )
 
-        let firstAttempt = await coordinator.publish(request)
-        guard case .handoffFailed(let receipt, _, _) = firstAttempt else {
+        let attempt = await coordinator.publish(request)
+        guard case .completed(let receipt) = attempt else {
             #expect(Bool(false))
             return
         }
-        let filesAfterFirstAttempt = try FileManager.default
-            .contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
-        let retryAttempt = await coordinator.retryHandoff()
-        let filesAfterRetry = try FileManager.default
+        let files = try FileManager.default
             .contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
 
-        #expect(retryAttempt == .completed(receipt))
-        #expect(filesAfterRetry == filesAfterFirstAttempt)
-        #expect(handoff.requests.count == 2)
-        #expect(handoff.requests[0].fileName == handoff.requests[1].fileName)
+        #expect(files.count == 1)
+        #expect(receipt.draftID == draftID)
+        #expect(presenter.publications.count == 1)
+        #expect(presenter.publications.first?.fileName == receipt.fileName)
     }
 
     @Test("publish creates a temporary name when the title is empty")
@@ -825,8 +872,13 @@ struct EditorialDeskTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let publication = try EditorialDraftPublisher.publish(
-            document: "Untitled draft",
-            title: "   ",
+            draft: EditorialDraftSnapshot(
+                title: "   ",
+                body: "Untitled draft",
+                revision: 1
+            ),
+            draftID: UUID(),
+            targetRelativePath: nil,
             workspaceRoot: root.path,
             now: Date(timeIntervalSince1970: 0)
         )
@@ -889,27 +941,10 @@ private actor DiagnosticEditorialDeskModelClient: EditorialModelClient {
 }
 
 @MainActor
-private final class RecordingEditorialCanonicalHandoff: EditorialCanonicalHandoff {
-    private(set) var requests: [EditorialCanonicalPublishRequest] = []
+private final class RecordingEditorialPublicationPresenter: EditorialPublicationReceiptPresenting {
+    private(set) var publications: [EditorialPublicationBlock] = []
 
-    func publish(
-        _ request: EditorialCanonicalPublishRequest
-    ) async -> EditorialCanonicalHandoffOutcome {
-        requests.append(request)
-        return .accepted
-    }
-}
-
-@MainActor
-private final class RetryingEditorialCanonicalHandoff: EditorialCanonicalHandoff {
-    private(set) var requests: [EditorialCanonicalPublishRequest] = []
-    private var attempt = 0
-
-    func publish(
-        _ request: EditorialCanonicalPublishRequest
-    ) async -> EditorialCanonicalHandoffOutcome {
-        requests.append(request)
-        defer { attempt += 1 }
-        return attempt == 0 ? .unavailable("Session is busy") : .accepted
+    func present(_ publication: EditorialPublicationBlock) async {
+        publications.append(publication)
     }
 }

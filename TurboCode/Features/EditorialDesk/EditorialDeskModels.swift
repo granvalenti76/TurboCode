@@ -339,8 +339,8 @@ nonisolated enum EditorialAction: String, CaseIterable, Codable, Hashable, Senda
         case .verifyFacts:
             """
             Check every material claim against the ground-truth sources and report
-            discrepancies only through findings and summary. This action is diagnostic:
-            set revisedDraft to null and do not rewrite the editorial document.
+            discrepancies only through findings and summary. This action is diagnostic;
+            do not rewrite the editorial document.
             """
         case .makeNeutral:
             "Rewrite the document in a neutral editorial voice without changing supported facts."
@@ -373,22 +373,19 @@ nonisolated enum EditorialOperationPhase: Sendable, Equatable {
     }
 }
 
-/// Observable lifecycle of the two publication steps. `handoffFailed` means
-/// the file receipt is valid and can be retried without writing another file.
+/// Observable lifecycle of writing and presenting one publication receipt.
+/// Neither active phase enters the model runtime.
 nonisolated enum EditorialPublicationPhase: Sendable, Equatable {
     case idle
     case writing
-    case fileWritten
-    case handoff
     case completed
-    case handoffFailed
     case failed
 
     var isActive: Bool {
         switch self {
-        case .writing, .handoff:
+        case .writing:
             true
-        case .idle, .fileWritten, .completed, .handoffFailed, .failed:
+        case .idle, .completed, .failed:
             false
         }
     }

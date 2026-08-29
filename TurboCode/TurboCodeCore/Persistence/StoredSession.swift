@@ -93,6 +93,7 @@ nonisolated public struct StoredBlock: Codable, Hashable, Sendable, Identifiable
     public var productGuide: ProductGuideBlock?
     public var workspaceListing: WorkspaceListingBlock?
     public var pluginWidget: TypeScriptPluginWidgetReceipt?
+    public var editorialPublication: EditorialPublicationBlock?
 
     public init(id: String = UUID().uuidString, kind: String, text: String,
                 createdAt: Date = .now, model: String? = nil, providerId: String? = nil,
@@ -100,7 +101,8 @@ nonisolated public struct StoredBlock: Codable, Hashable, Sendable, Identifiable
                 gitStatus: GitStatusBlock? = nil,
                 productGuide: ProductGuideBlock? = nil,
                 workspaceListing: WorkspaceListingBlock? = nil,
-                pluginWidget: TypeScriptPluginWidgetReceipt? = nil) {
+                pluginWidget: TypeScriptPluginWidgetReceipt? = nil,
+                editorialPublication: EditorialPublicationBlock? = nil) {
         self.id = id; self.kind = kind; self.text = text
         self.createdAt = createdAt; self.model = model; self.providerId = providerId
         self.diffPatch = diffPatch
@@ -109,5 +111,6 @@ nonisolated public struct StoredBlock: Codable, Hashable, Sendable, Identifiable
         self.productGuide = productGuide
         self.workspaceListing = workspaceListing
         self.pluginWidget = pluginWidget
+        self.editorialPublication = editorialPublication
     }
 }

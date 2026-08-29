@@ -39,53 +39,19 @@ final class EditorialDeskModelClientFactory {
     }
 }
 
-/// Encodes canonical editorial context on its own actor. Sendable request
-/// values cross into this boundary; no ViewModel or observable store does.
-actor EditorialCanonicalPromptEncoder {
-    func makePrompt(
-        for request: EditorialCanonicalPublishRequest
-    ) -> String {
-        EditorialPromptBuilder.makeCanonicalPublishPrompt(
-            draft: request.draft,
-            fileName: request.fileName,
-            sources: request.sources,
-            metadata: request.metadata
-        )
-    }
-}
-
-/// Temporary bridge from the new feature port to the existing message sender.
-/// Keeping the bridge narrow lets the eventual chat extraction change its
-/// implementation without reintroducing ChatStore into the desk.
+/// Projects a successful write into the native conversation timeline. This
+/// adapter deliberately exposes no ordinary send API, so publication cannot
+/// accidentally create an LLM turn.
 @MainActor
-final class EditorialCanonicalHandoffAdapter: EditorialCanonicalHandoff {
+final class EditorialPublicationReceiptAdapter: EditorialPublicationReceiptPresenting {
     private let messageSender: MessageSendCoordinator
-    private let promptEncoder: EditorialCanonicalPromptEncoder
 
-    init(
-        messageSender: MessageSendCoordinator,
-        promptEncoder: EditorialCanonicalPromptEncoder = EditorialCanonicalPromptEncoder()
-    ) {
+    init(messageSender: MessageSendCoordinator) {
         self.messageSender = messageSender
-        self.promptEncoder = promptEncoder
     }
 
-    func publish(
-        _ request: EditorialCanonicalPublishRequest
-    ) async -> EditorialCanonicalHandoffOutcome {
-        let prompt = await promptEncoder.makePrompt(for: request)
-        guard let promptText = await messageSender.preparePrompt(for: prompt) else {
-            return .unavailable("The canonical session is not ready for this draft.")
-        }
-
-        let accepted = await messageSender.send(
-            displayText: "Published editorial draft: \(request.fileName)",
-            promptText: promptText,
-            visibleInTimeline: true
-        )
-        return accepted
-            ? .accepted
-            : .unavailable("The canonical session is currently busy.")
+    func present(_ publication: EditorialPublicationBlock) async {
+        await messageSender.presentEditorialPublication(publication)
     }
 }
 
@@ -97,7 +63,8 @@ final class EditorialDeskAssembly {
     private let modelClientFactory: EditorialDeskModelClientFactory
     private let sourceService: EditorialSourceService
     private let publicationService: EditorialPublicationService
-    private let canonicalHandoff: EditorialCanonicalHandoffAdapter
+    private let draftLibrary: EditorialDraftLibraryService
+    private let receiptPresenter: EditorialPublicationReceiptAdapter
 
     init(
         runtime: LLMRuntime,
@@ -112,7 +79,8 @@ final class EditorialDeskAssembly {
         )
         self.sourceService = EditorialSourceService()
         self.publicationService = EditorialPublicationService()
-        self.canonicalHandoff = EditorialCanonicalHandoffAdapter(
+        self.draftLibrary = EditorialDraftLibraryService()
+        self.receiptPresenter = EditorialPublicationReceiptAdapter(
             messageSender: messageSender
         )
     }
@@ -122,7 +90,8 @@ final class EditorialDeskAssembly {
             modelClient: modelClientFactory.makeClient(workspaceRoot: workspaceRoot),
             sourceService: sourceService,
             publicationService: publicationService,
-            canonicalHandoff: canonicalHandoff
+            draftLibrary: draftLibrary,
+            receiptPresenter: receiptPresenter
         )
     }
 }
