@@ -22,9 +22,43 @@ nonisolated struct EditorialCanonicalPublishRequest: Sendable, Equatable {
     }
 }
 
-/// The first boundary result distinguishes admission from silent failure. A
-/// later slice can refine this into a two-phase publication receipt without
-/// changing the sheet's dependency direction.
+/// Immutable inputs for the filesystem publication step. The handoff is kept
+/// separate because writing the file and admitting a canonical message are
+/// independent side effects.
+nonisolated struct EditorialPublicationRequest: Sendable, Equatable {
+    let draft: EditorialDraftSnapshot
+    let workspaceRoot: String
+    let sources: [EditorialSource]
+    let metadata: EditorialDeskMetadata
+
+    init(
+        draft: EditorialDraftSnapshot,
+        workspaceRoot: String,
+        sources: [EditorialSource] = [],
+        metadata: EditorialDeskMetadata = .empty
+    ) {
+        self.draft = draft
+        self.workspaceRoot = workspaceRoot
+        self.sources = sources
+        self.metadata = metadata
+    }
+}
+
+/// Outcome returned by the two-phase publication coordinator. A handoff
+/// failure retains both values needed to retry without writing another file.
+nonisolated enum EditorialPublicationAttempt: Sendable, Equatable {
+    case completed(EditorialPublication)
+    case handoffFailed(
+        receipt: EditorialPublication,
+        request: EditorialCanonicalPublishRequest,
+        message: String
+    )
+    case failed(String)
+    case ignored
+}
+
+/// The handoff result is deliberately explicit: a written file can remain a
+/// recoverable receipt even when the canonical session is unavailable.
 nonisolated enum EditorialCanonicalHandoffOutcome: Sendable, Equatable {
     case accepted
     case unavailable(String)

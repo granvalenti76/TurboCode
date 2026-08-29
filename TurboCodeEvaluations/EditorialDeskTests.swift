@@ -376,6 +376,43 @@ struct EditorialDeskTests {
         #expect(handoff.requests == [request])
     }
 
+    @Test("cancellation waits for the backend and ignores a late completion")
+    @MainActor
+    func cancellationWaitsForBackendUnwind() async {
+        let client = ControlledEditorialDeskModelClient()
+        let viewModel = EditorialDeskViewModel(
+            workspaceRoot: "",
+            modelClient: client
+        )
+        let snapshot = EditorialDraftSnapshot(
+            title: "Draft",
+            deck: "",
+            body: "Body",
+            revision: 1
+        )
+
+        viewModel.run(action: .verifyFacts, snapshot: snapshot)
+        var isWaiting = await client.isWaiting
+        for _ in 0..<20 where !isWaiting {
+            await Task.yield()
+            isWaiting = await client.isWaiting
+        }
+        #expect(isWaiting)
+
+        viewModel.cancelOperation()
+        #expect(viewModel.operationPhase == .cancelling)
+        await client.resolve(
+            EditorialResult(revisedDocument: "Late result", findings: [], summary: "late")
+        )
+        for _ in 0..<20 where viewModel.operationPhase == .cancelling {
+            await Task.yield()
+        }
+
+        #expect(viewModel.operationPhase == .idle)
+        #expect(viewModel.result == nil)
+        #expect(viewModel.modelError == EditorialModelError.cancelled.localizedDescription)
+    }
+
     @Test("a draft snapshot remains stable after the editor changes")
     @MainActor
     func draftSnapshotCapturesTheAdmittedValues() async {
@@ -392,6 +429,48 @@ struct EditorialDeskTests {
         #expect(observed.title == "Original title")
         #expect(observed.body == "Original body")
         #expect(observed.revision < viewModel.makeDraftSnapshot().revision)
+    }
+
+    @Test("publication retry reuses the written file receipt")
+    @MainActor
+    func publicationRetryDoesNotWriteAnotherFile() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EditorialRetryPublicationTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let handoff = RetryingEditorialCanonicalHandoff()
+        let coordinator = EditorialPublicationCoordinator(
+            publicationService: EditorialPublicationService(),
+            canonicalHandoff: handoff
+        )
+        let request = EditorialPublicationRequest(
+            draft: EditorialDraftSnapshot(
+                title: "Retry article",
+                deck: "",
+                body: "Body",
+                revision: 1
+            ),
+            workspaceRoot: root.path,
+            sources: [],
+            metadata: .empty
+        )
+
+        let firstAttempt = await coordinator.publish(request)
+        guard case .handoffFailed(let receipt, _, _) = firstAttempt else {
+            #expect(Bool(false))
+            return
+        }
+        let filesAfterFirstAttempt = try FileManager.default
+            .contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+        let retryAttempt = await coordinator.retryHandoff()
+        let filesAfterRetry = try FileManager.default
+            .contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+
+        #expect(retryAttempt == .completed(receipt))
+        #expect(filesAfterRetry == filesAfterFirstAttempt)
+        #expect(handoff.requests.count == 2)
+        #expect(handoff.requests[0].fileName == handoff.requests[1].fileName)
     }
 
     @Test("publish creates a temporary name when the title is empty")
@@ -420,6 +499,27 @@ private actor EditorialDraftSnapshotProbe {
     }
 }
 
+private actor ControlledEditorialDeskModelClient: EditorialModelClient {
+    private var continuation: CheckedContinuation<EditorialResult, Error>?
+
+    var isWaiting: Bool {
+        continuation != nil
+    }
+
+    func perform(_ request: EditorialRequest) async throws -> EditorialResult {
+        try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func resolve(_ result: EditorialResult) {
+        continuation?.resume(returning: result)
+        continuation = nil
+    }
+
+    func cancel() async {}
+}
+
 private actor EditorialDeskTestModelClient: EditorialModelClient {
     func perform(_ request: EditorialRequest) async throws -> EditorialResult {
         EditorialResult(revisedDocument: nil, findings: [], summary: request.action.rawValue)
@@ -437,5 +537,19 @@ private final class RecordingEditorialCanonicalHandoff: EditorialCanonicalHandof
     ) async -> EditorialCanonicalHandoffOutcome {
         requests.append(request)
         return .accepted
+    }
+}
+
+@MainActor
+private final class RetryingEditorialCanonicalHandoff: EditorialCanonicalHandoff {
+    private(set) var requests: [EditorialCanonicalPublishRequest] = []
+    private var attempt = 0
+
+    func publish(
+        _ request: EditorialCanonicalPublishRequest
+    ) async -> EditorialCanonicalHandoffOutcome {
+        requests.append(request)
+        defer { attempt += 1 }
+        return attempt == 0 ? .unavailable("Session is busy") : .accepted
     }
 }

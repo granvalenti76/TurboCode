@@ -20,10 +20,13 @@ final class EditorialDeskViewModel {
     var selectedSourceIDs: Set<UUID> = []
     var isSourceImporterPresented = false
     var importError: String?
-    var isRunning = false
+    var operationPhase: EditorialOperationPhase = .idle
     var result: EditorialResult?
     var modelError: String?
-    var isCancelling = false
+    private var operationGeneration: UInt64 = 0
+
+    var isRunning: Bool { operationPhase.isActive }
+    var isCancelling: Bool { operationPhase == .cancelling }
     /// The custom article canvas edits a single draft snapshot. Revision stacks
     /// stay local to the modal so applying model output is always reversible.
     var draftText = ""
@@ -248,38 +251,47 @@ final class EditorialDeskViewModel {
             sources: selectedSources,
             action: action
         )
-        isRunning = true
-        isCancelling = false
+        guard !isRunning else { return }
+        operationGeneration &+= 1
+        let generation = operationGeneration
+        operationPhase = .running
+        result = nil
         modelError = nil
 
-        operationTask?.cancel()
         operationTask = Task { [weak self] in
             do {
                 let result = try await modelClient.perform(request)
-                guard let self else { return }
+                guard let self,
+                      self.operationGeneration == generation,
+                      self.operationPhase == .running else { return }
                 self.result = result
-                self.isRunning = false
-                self.isCancelling = false
+                self.operationPhase = .completed
             } catch {
-                guard let self else { return }
+                guard let self,
+                      self.operationGeneration == generation,
+                      self.operationPhase == .running else { return }
                 self.modelError = error.localizedDescription
-                self.isRunning = false
-                self.isCancelling = false
+                self.operationPhase = .failed
             }
         }
     }
 
-    /// Cancels the admitted backend operation before clearing the modal state.
-    /// This preserves the runtime's ownership rule for provider sessions.
+    /// Cancels the admitted backend operation and waits for both the provider
+    /// interrupt and the original task to unwind. The generation guard makes
+    /// any late completion from that task unable to overwrite newer state.
     func cancelOperation() {
-        guard isRunning, let modelClient else { return }
-        isCancelling = true
-        operationTask?.cancel()
+        guard operationPhase == .running, let modelClient else { return }
+        operationPhase = .cancelling
+        let generation = operationGeneration
+        let task = operationTask
+        task?.cancel()
         Task { [weak self] in
             await modelClient.cancel()
-            guard let self else { return }
-            self.isRunning = false
-            self.isCancelling = false
+            await task?.value
+            guard let self,
+                  self.operationGeneration == generation,
+                  self.operationPhase == .cancelling else { return }
+            self.operationPhase = .idle
             self.modelError = EditorialModelError.cancelled.localizedDescription
         }
     }

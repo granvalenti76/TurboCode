@@ -319,6 +319,46 @@ nonisolated enum EditorialAction: String, CaseIterable, Codable, Hashable, Senda
     }
 }
 
+/// Observable lifecycle of one model-backed editorial operation. Error text is
+/// kept separately so the phase remains stable and easy to test.
+nonisolated enum EditorialOperationPhase: Sendable, Equatable {
+    case idle
+    case running
+    case cancelling
+    case completed
+    case failed
+
+    var isActive: Bool {
+        switch self {
+        case .running, .cancelling:
+            true
+        case .idle, .completed, .failed:
+            false
+        }
+    }
+}
+
+/// Observable lifecycle of the two publication steps. `handoffFailed` means
+/// the file receipt is valid and can be retried without writing another file.
+nonisolated enum EditorialPublicationPhase: Sendable, Equatable {
+    case idle
+    case writing
+    case fileWritten
+    case handoff
+    case completed
+    case handoffFailed
+    case failed
+
+    var isActive: Bool {
+        switch self {
+        case .writing, .handoff:
+            true
+        case .idle, .fileWritten, .completed, .handoffFailed, .failed:
+            false
+        }
+    }
+}
+
 /// Immutable draft value captured before an asynchronous editorial operation.
 /// Its serialized document is derived only when a non-UI service consumes the
 /// snapshot; the MainActor owns the fields, never the encoding work.

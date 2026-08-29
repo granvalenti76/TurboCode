@@ -23,7 +23,7 @@ struct EditorialDeskSheet: View {
     @State private var sourceImporterPresented = false
     @State private var renameSourceID: UUID?
     @State private var renameSourceText = ""
-    @State private var isPublishing = false
+    @State private var publicationCoordinator: EditorialPublicationCoordinator
     @State private var publishError: String?
 
     enum InspectorTab: String, CaseIterable, Identifiable {
@@ -37,6 +37,18 @@ struct EditorialDeskSheet: View {
     private let workspaceRoot: String
     private let dependencies: EditorialDeskDependencies
 
+    private var publicationPhase: EditorialPublicationPhase {
+        publicationCoordinator.phase
+    }
+
+    private var publicationReceipt: EditorialPublication? {
+        publicationCoordinator.receipt
+    }
+
+    private var isPublishing: Bool {
+        publicationCoordinator.isActive
+    }
+
     init(
         workspaceRoot: String,
         dependencies: EditorialDeskDependencies
@@ -48,6 +60,12 @@ struct EditorialDeskSheet: View {
             modelClient: dependencies.modelClient
         )
         _viewModel = State(initialValue: viewModel)
+        _publicationCoordinator = State(
+            initialValue: EditorialPublicationCoordinator(
+                publicationService: dependencies.publicationService,
+                canonicalHandoff: dependencies.canonicalHandoff
+            )
+        )
     }
 
     var body: some View {
@@ -114,6 +132,11 @@ struct EditorialDeskSheet: View {
                 set: { if !$0 { publishError = nil } }
             )
         ) {
+            if publicationPhase == .handoffFailed {
+                Button("Retry handoff") {
+                    retryCanonicalHandoff()
+                }
+            }
             Button("OK", role: .cancel) { publishError = nil }
         } message: {
             Text(publishError ?? "The draft could not be published.")
@@ -1026,30 +1049,48 @@ struct EditorialDeskSheet: View {
             footerStat("Sources", value: "\(viewModel.sources.count)")
             footerDivider
             Label(viewModel.hasDocument ? "Draft ready" : "Empty desk", systemImage: "checkmark")
+            if let receipt = publicationReceipt,
+               publicationPhase == .handoffFailed {
+                footerDivider
+                Label("File saved: \(receipt.fileName)", systemImage: "checkmark.circle")
+                    .foregroundStyle(.orange)
+                    .help(receipt.url.path)
+            }
 
             Spacer()
 
-            Button("Cancel") { dismiss() }
-                .buttonStyle(.bordered)
+            Button(viewModel.isRunning ? "Stop operation first" : "Cancel") {
+                dismiss()
+            }
+            .buttonStyle(.bordered)
+            .disabled(isPublishing || viewModel.isRunning)
 
             Menu {
-                Button {
-                    publishDraft()
-                } label: {
-                    if isPublishing {
-                        Label("Publishing…", systemImage: "arrow.up.circle")
-                    } else {
-                        Label("Publish now", systemImage: "arrow.up.circle")
+                if publicationPhase == .handoffFailed {
+                    Button {
+                        retryCanonicalHandoff()
+                    } label: {
+                        Label("Retry handoff", systemImage: "arrow.clockwise")
                     }
+                } else {
+                    Button {
+                        publishDraft()
+                    } label: {
+                        if isPublishing {
+                            Label("Publishing…", systemImage: "arrow.up.circle")
+                        } else {
+                            Label("Publish now", systemImage: "arrow.up.circle")
+                        }
+                    }
+                    .disabled(isPublishing)
                 }
-                .disabled(isPublishing)
             } label: {
                 HStack(spacing: 8) {
                     if isPublishing {
                         ProgressView()
                             .controlSize(.small)
                     }
-                    Text(isPublishing ? "Publishing…" : "Publish Draft")
+                    Text(isPublishing ? "Publishing…" : publicationPhase == .handoffFailed ? "Retry handoff" : "Publish Draft")
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .bold))
                 }
@@ -1074,45 +1115,49 @@ struct EditorialDeskSheet: View {
             .frame(width: 1, height: 14)
     }
 
+    /// Starts the write phase with immutable inputs. A failed handoff retains
+    /// the resulting receipt and canonical request so retry never writes twice.
     private func publishDraft() {
-        guard viewModel.hasDocument, !isPublishing else { return }
-        isPublishing = true
-        publishError = nil
+        guard viewModel.hasDocument,
+              !isPublishing,
+              publicationPhase != .handoffFailed else { return }
 
-        let draft = viewModel.makeDraftSnapshot()
-        let sources = viewModel.selectedSources
-        let metadata = EditorialDeskMetadata(
-            section: selectedSection,
-            type: selectedType,
-            date: selectedDate
+        publishError = nil
+        let request = EditorialPublicationRequest(
+            draft: viewModel.makeDraftSnapshot(),
+            workspaceRoot: workspaceRoot,
+            sources: viewModel.selectedSources,
+            metadata: EditorialDeskMetadata(
+                section: selectedSection,
+                type: selectedType,
+                date: selectedDate
+            )
         )
+
         Task { @MainActor in
-            do {
-                let publication = try await dependencies.publicationService.publish(
-                    draft: draft,
-                    workspaceRoot: workspaceRoot,
-                    metadata: metadata
-                )
-                let handoff = await dependencies.canonicalHandoff.publish(
-                    EditorialCanonicalPublishRequest(
-                        draft: draft,
-                        fileName: publication.fileName,
-                        sources: sources,
-                        metadata: metadata
-                    )
-                )
-                switch handoff {
-                case .accepted:
-                    isPublishing = false
-                    dismiss()
-                case .unavailable(let message):
-                    isPublishing = false
-                    publishError = message
-                }
-            } catch {
-                isPublishing = false
-                publishError = error.localizedDescription
-            }
+            applyPublicationAttempt(await publicationCoordinator.publish(request))
+        }
+    }
+
+    /// Retries only the second publication phase. The coordinator retains the
+    /// receipt and handoff request, so this path never writes another file.
+    private func retryCanonicalHandoff() {
+        guard publicationPhase == .handoffFailed else { return }
+        publishError = nil
+        Task { @MainActor in
+            applyPublicationAttempt(await publicationCoordinator.retryHandoff())
+        }
+    }
+
+    private func applyPublicationAttempt(_ attempt: EditorialPublicationAttempt) {
+        switch attempt {
+        case .completed:
+            publishError = nil
+            dismiss()
+        case .handoffFailed(_, _, let message), .failed(let message):
+            publishError = message
+        case .ignored:
+            break
         }
     }
 
