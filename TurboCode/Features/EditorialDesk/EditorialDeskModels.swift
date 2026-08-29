@@ -299,6 +299,15 @@ nonisolated enum EditorialAction: String, CaseIterable, Codable, Hashable, Senda
     case checkCitations = "Check citations"
     case deskSummary = "Desk summary"
 
+    var isDiagnostic: Bool {
+        switch self {
+        case .verifyFacts, .checkCitations, .deskSummary:
+            true
+        case .makeNeutral, .tightenLead:
+            false
+        }
+    }
+
     var instruction: String {
         switch self {
         case .verifyFacts:
@@ -387,7 +396,7 @@ nonisolated struct EditorialDraft: Codable, Hashable, Sendable, Equatable {
 /// Immutable draft value captured before an asynchronous editorial operation.
 /// Its serialized document is derived only when a non-UI service consumes the
 /// snapshot; the MainActor owns the fields, never the encoding work.
-nonisolated struct EditorialDraftSnapshot: Sendable, Equatable {
+nonisolated struct EditorialDraftSnapshot: Sendable, Equatable, Hashable {
     let title: String
     let deck: String
     let body: String
@@ -417,6 +426,92 @@ nonisolated struct EditorialDraftSnapshot: Sendable, Equatable {
     var document: String {
         EditorialDraft(title: title, deck: deck, body: body).document
     }
+
+    var draft: EditorialDraft {
+        EditorialDraft(title: title, deck: deck, body: body)
+    }
+}
+
+/// The semantic field changed by a model proposal. Keeping this enum separate
+/// from the serialized document makes review independent from delimiters.
+nonisolated enum EditorialDraftField: String, CaseIterable, Hashable, Sendable, Identifiable {
+    case title
+    case deck
+    case body
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .title: "Title"
+        case .deck: "Deck"
+        case .body: "Body"
+        }
+    }
+}
+
+/// One field-level before/after value shown by the local review surface.
+nonisolated struct EditorialRevisionChange: Identifiable, Hashable, Sendable {
+    let field: EditorialDraftField
+    let before: String
+    let after: String
+
+    var id: EditorialDraftField { field }
+}
+
+/// Pure, local proposal produced by comparing the request snapshot with the
+/// model response. It contains no workspace mutation or DiffPatch behavior.
+nonisolated struct EditorialRevision: Hashable, Sendable {
+    let base: EditorialDraftSnapshot
+    let proposed: EditorialDraft
+    let changes: [EditorialRevisionChange]
+
+    init(base: EditorialDraftSnapshot, proposed: EditorialDraft) {
+        self.base = base
+        self.proposed = proposed
+        self.changes = EditorialDraftField.allCases.compactMap { field in
+            let before: String
+            let after: String
+            switch field {
+            case .title:
+                before = base.title
+                after = proposed.title
+            case .deck:
+                before = base.deck
+                after = proposed.deck
+            case .body:
+                before = base.body
+                after = proposed.body
+            }
+            guard before != after else { return nil }
+            return EditorialRevisionChange(field: field, before: before, after: after)
+        }
+    }
+
+    var isEmpty: Bool { changes.isEmpty }
+}
+
+/// Review decision for one proposed field change.
+nonisolated enum EditorialRevisionChangeStatus: String, Hashable, Sendable {
+    case pending
+    case applied
+    case rejected
+}
+
+/// Aggregate review state used by the inspector's proposal controls.
+nonisolated enum EditorialRevisionStatus: String, Hashable, Sendable {
+    case pending
+    case partial
+    case applied
+    case rejected
+}
+
+/// Finding status is intentionally separate from the model response: it is a
+/// local acknowledgement and must not alter the source-backed finding itself.
+nonisolated enum EditorialFindingStatus: String, Hashable, Sendable {
+    case open
+    case acknowledged
+    case dismissed
 }
 
 /// Provider-neutral payload for one editorial operation. Sources are kept

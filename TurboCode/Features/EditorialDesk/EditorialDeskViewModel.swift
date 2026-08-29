@@ -22,8 +22,24 @@ final class EditorialDeskViewModel {
     var isSourceImporterPresented = false
     var importError: String?
     var operationPhase: EditorialOperationPhase = .idle
-    var result: EditorialResult?
+    var result: EditorialResult? {
+        didSet {
+            var statuses: [UUID: EditorialFindingStatus] = [:]
+            for finding in result?.findings ?? [] {
+                statuses[finding.id] = .open
+            }
+            findingStatuses = statuses
+            revisionDecisions.removeAll()
+            revision = result.flatMap {
+                makeRevision(for: $0, base: makeDraftSnapshot())
+            }
+        }
+    }
+    private(set) var revision: EditorialRevision?
+    private(set) var lastAction: EditorialAction?
     var modelError: String?
+    private var revisionDecisions: [EditorialDraftField: EditorialRevisionChangeStatus] = [:]
+    private var findingStatuses: [UUID: EditorialFindingStatus] = [:]
     private var operationGeneration: UInt64 = 0
 
     var isRunning: Bool { operationPhase.isActive }
@@ -71,6 +87,40 @@ final class EditorialDeskViewModel {
     var canUndoDraft: Bool { !undoStack.isEmpty }
     var canRedoDraft: Bool { !redoStack.isEmpty }
 
+    var revisionStatus: EditorialRevisionStatus? {
+        guard let revision, !revision.isEmpty else { return nil }
+        let statuses = revision.changes.map { revisionDecisions[$0.field] ?? .pending }
+        if statuses.allSatisfy({ $0 == .applied }) { return .applied }
+        if statuses.allSatisfy({ $0 == .rejected }) { return .rejected }
+        if statuses.allSatisfy({ $0 == .pending }) { return .pending }
+        return .partial
+    }
+
+    var canApplyRevision: Bool {
+        guard let revision else { return false }
+        return revision.changes.contains {
+            (revisionDecisions[$0.field] ?? .pending) == .pending
+        }
+    }
+
+    func revisionStatus(for field: EditorialDraftField) -> EditorialRevisionChangeStatus {
+        revisionDecisions[field] ?? .pending
+    }
+
+    func findingStatus(for id: UUID) -> EditorialFindingStatus {
+        findingStatuses[id] ?? .open
+    }
+
+    func acknowledgeFinding(_ id: UUID) {
+        guard findingStatuses[id] != nil else { return }
+        findingStatuses[id] = .acknowledged
+    }
+
+    func dismissFinding(_ id: UUID) {
+        guard findingStatuses[id] != nil else { return }
+        findingStatuses[id] = .dismissed
+    }
+
     /// Copies the visible editor fields without serializing them. Consumers
     /// must perform document encoding after crossing the UI boundary.
     func makeDraftSnapshot() -> EditorialDraftSnapshot {
@@ -82,6 +132,8 @@ final class EditorialDeskViewModel {
         undoStack.removeAll()
         redoStack.removeAll()
         activeEditField = nil
+        result = nil
+        lastAction = nil
         draftRevision &+= 1
     }
 
@@ -106,29 +158,51 @@ final class EditorialDeskViewModel {
         updateField(.body, value: body)
     }
 
-    /// Applies only the model's proposed draft. Legacy document responses are
-    /// treated as a body while preserving the existing semantic fields.
+    /// Applies every still-pending field in the model proposal. The proposal
+    /// remains visible after applying so the editor can inspect its evidence.
     func applyRevision() {
-        guard let result else { return }
-        let proposedDraft: EditorialDraft?
-        if let revisedDraft = result.revisedDraft {
-            proposedDraft = revisedDraft
-        } else if let revisedDocument = result.revisedDocument,
-                  !revisedDocument.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            proposedDraft = EditorialDraft(
-                title: draft.title,
-                deck: draft.deck,
-                body: revisedDocument
-            )
-        } else {
-            proposedDraft = nil
-        }
-        guard let proposedDraft, proposedDraft != draft else { return }
+        applyAllRevision()
+    }
+
+    func applyRevision(for field: EditorialDraftField) {
+        guard let revision,
+              let change = revision.changes.first(where: { $0.field == field }),
+              revisionStatus(for: field) == .pending else { return }
         undoStack.append(draft)
-        draft = proposedDraft
+        setDraftField(field, value: change.after)
+        revisionDecisions[field] = .applied
         activeEditField = nil
         redoStack.removeAll()
         draftRevision &+= 1
+    }
+
+    func applyAllRevision() {
+        guard let revision else { return }
+        let pendingChanges = revision.changes.filter {
+            (revisionDecisions[$0.field] ?? .pending) == .pending
+        }
+        guard !pendingChanges.isEmpty else { return }
+        undoStack.append(draft)
+        for change in pendingChanges {
+            setDraftField(change.field, value: change.after)
+            revisionDecisions[change.field] = .applied
+        }
+        activeEditField = nil
+        redoStack.removeAll()
+        draftRevision &+= 1
+    }
+
+    func rejectRevision(for field: EditorialDraftField) {
+        guard revision?.changes.contains(where: { $0.field == field }) == true,
+              revisionStatus(for: field) == .pending else { return }
+        revisionDecisions[field] = .rejected
+    }
+
+    func rejectRevision() {
+        guard let revision else { return }
+        for change in revision.changes where revisionStatus(for: change.field) == .pending {
+            revisionDecisions[change.field] = .rejected
+        }
     }
 
     func undoDraft() {
@@ -136,6 +210,7 @@ final class EditorialDeskViewModel {
         redoStack.append(draft)
         draft = previous
         activeEditField = nil
+        synchronizeRevisionDecisions()
         draftRevision &+= 1
     }
 
@@ -144,6 +219,7 @@ final class EditorialDeskViewModel {
         undoStack.append(draft)
         draft = next
         activeEditField = nil
+        synchronizeRevisionDecisions()
         draftRevision &+= 1
     }
 
@@ -231,6 +307,48 @@ final class EditorialDeskViewModel {
         sources[index].name = name
     }
 
+    private func setDraftField(_ field: EditorialDraftField, value: String) {
+        switch field {
+        case .title: draft.title = value
+        case .deck: draft.deck = value
+        case .body: draft.body = value
+        }
+    }
+
+    private func synchronizeRevisionDecisions() {
+        guard let revision else { return }
+        for change in revision.changes {
+            let currentValue: String = switch change.field {
+            case .title: draft.title
+            case .deck: draft.deck
+            case .body: draft.body
+            }
+            revisionDecisions[change.field] = currentValue == change.after ? .applied : .pending
+        }
+    }
+
+    private func makeRevision(
+        for result: EditorialResult,
+        base: EditorialDraftSnapshot
+    ) -> EditorialRevision? {
+        let proposedDraft: EditorialDraft?
+        if let revisedDraft = result.revisedDraft {
+            proposedDraft = revisedDraft
+        } else if let revisedDocument = result.revisedDocument,
+                  !revisedDocument.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            proposedDraft = EditorialDraft(
+                title: base.title,
+                deck: base.deck,
+                body: revisedDocument
+            )
+        } else {
+            proposedDraft = nil
+        }
+        guard let proposedDraft else { return nil }
+        let revision = EditorialRevision(base: base, proposed: proposedDraft)
+        return revision.isEmpty ? nil : revision
+    }
+
     /// Starts one undo group per field-edit session. SwiftUI sends one update
     /// per keystroke; coalescing consecutive updates keeps one logical undo.
     private func updateField(_ field: DraftField, value: String) {
@@ -274,6 +392,7 @@ final class EditorialDeskViewModel {
         guard !isRunning else { return }
         operationGeneration &+= 1
         let generation = operationGeneration
+        lastAction = action
         operationPhase = .running
         result = nil
         modelError = nil
@@ -285,6 +404,11 @@ final class EditorialDeskViewModel {
                       self.operationGeneration == generation,
                       self.operationPhase == .running else { return }
                 self.result = result
+                if action.isDiagnostic {
+                    self.revision = nil
+                } else {
+                    self.revision = self.makeRevision(for: result, base: snapshot)
+                }
                 self.operationPhase = .completed
             } catch {
                 guard let self,

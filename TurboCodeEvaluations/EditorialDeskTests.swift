@@ -176,6 +176,13 @@ struct EditorialDeskTests {
         #expect(result.summary == "Reviewed against sources")
     }
 
+    @Test("invalid model response stays an explicit decoder error")
+    func rejectsInvalidResponse() {
+        #expect(throws: DecodingError.self) {
+            try EditorialResult.decode(from: "not valid JSON")
+        }
+    }
+
     @Test("legacy model response remains decodable")
     func decodesLegacyResponse() throws {
         let response = """
@@ -273,6 +280,140 @@ struct EditorialDeskTests {
         #expect(viewModel.documentTitle == "Revised title")
         #expect(viewModel.documentDeck == "Revised deck")
         #expect(viewModel.documentContent == "Revised body")
+    }
+
+    @Test("revision diff contains only changed semantic fields")
+    func revisionDiffIsFieldScoped() {
+        let base = EditorialDraftSnapshot(
+            title: "Original title",
+            deck: "Original deck",
+            body: "Original body",
+            revision: 7
+        )
+        let revision = EditorialRevision(
+            base: base,
+            proposed: EditorialDraft(
+                title: "Revised title",
+                deck: "Original deck",
+                body: "Revised body"
+            )
+        )
+
+        #expect(revision.changes.map(\.field) == [.title, .body])
+        #expect(revision.changes[0].before == "Original title")
+        #expect(revision.changes[0].after == "Revised title")
+        #expect(revision.changes[1].before == "Original body")
+        #expect(revision.changes[1].after == "Revised body")
+
+        let emptyRevision = EditorialRevision(base: base, proposed: base.draft)
+        #expect(emptyRevision.isEmpty)
+    }
+
+    @Test("individual review decisions preserve rejected fields and keep undo")
+    @MainActor
+    func individualReviewDecisionsAreReversible() {
+        let viewModel = EditorialDeskViewModel(workspaceRoot: "")
+        viewModel.loadDraft(
+            EditorialDraft(title: "Title", deck: "Deck", body: "Body")
+        )
+        viewModel.result = EditorialResult(
+            revisedDraft: EditorialDraft(
+                title: "New title",
+                deck: "New deck",
+                body: "New body"
+            ),
+            findings: [],
+            summary: "Updated"
+        )
+
+        viewModel.rejectRevision(for: .title)
+        viewModel.applyRevision(for: .deck)
+        viewModel.applyAllRevision()
+
+        #expect(viewModel.documentTitle == "Title")
+        #expect(viewModel.documentDeck == "New deck")
+        #expect(viewModel.documentContent == "New body")
+        #expect(viewModel.revisionStatus(for: .title) == .rejected)
+        #expect(viewModel.revisionStatus == .partial)
+        #expect(viewModel.canUndoDraft)
+
+        viewModel.undoDraft()
+        #expect(viewModel.documentContent == "Body")
+        viewModel.undoDraft()
+        #expect(viewModel.documentDeck == "Deck")
+    }
+
+    @Test("rejecting a proposal leaves the current draft untouched")
+    @MainActor
+    func rejectingProposalDoesNotMutateDraft() {
+        let viewModel = EditorialDeskViewModel(workspaceRoot: "")
+        viewModel.loadDraft(EditorialDraft(title: "Title", deck: "Deck", body: "Body"))
+        viewModel.result = EditorialResult(
+            revisedDraft: EditorialDraft(title: "New title", deck: "Deck", body: "Body"),
+            findings: [],
+            summary: "Updated"
+        )
+
+        viewModel.rejectRevision()
+
+        #expect(viewModel.draftText == "Title\n\nDeck\n\nBody")
+        #expect(viewModel.revisionStatus == .rejected)
+        #expect(!viewModel.canApplyRevision)
+        #expect(!viewModel.canUndoDraft)
+    }
+
+    @Test("all findings remain reviewable with independent local status")
+    @MainActor
+    func allFindingsRemainReviewable() {
+        let findings = (0..<6).map { index in
+            EditorialFinding(
+                id: UUID(),
+                sourceName: "Source \(index)",
+                documentExcerpt: "Draft \(index)",
+                sourceExcerpt: "Evidence \(index)",
+                explanation: "Finding \(index)",
+                severity: index.isMultiple(of: 2) ? .warning : .note
+            )
+        }
+        let viewModel = EditorialDeskViewModel(workspaceRoot: "")
+        viewModel.result = EditorialResult(
+            revisedDraft: nil,
+            findings: findings,
+            summary: "Six findings"
+        )
+
+        #expect(findings.allSatisfy { viewModel.findingStatus(for: $0.id) == .open })
+        viewModel.acknowledgeFinding(findings[0].id)
+        viewModel.dismissFinding(findings[1].id)
+
+        #expect(viewModel.findingStatus(for: findings[0].id) == .acknowledged)
+        #expect(viewModel.findingStatus(for: findings[1].id) == .dismissed)
+        #expect(viewModel.findingStatus(for: findings[5].id) == .open)
+    }
+
+    @Test("diagnostic actions never admit a draft revision")
+    @MainActor
+    func diagnosticActionsCannotRewriteDraft() async {
+        let viewModel = EditorialDeskViewModel(
+            workspaceRoot: "",
+            modelClient: DiagnosticEditorialDeskModelClient()
+        )
+        let snapshot = EditorialDraftSnapshot(
+            title: "Original title",
+            deck: "Original deck",
+            body: "Original body",
+            revision: 1
+        )
+
+        viewModel.run(action: .verifyFacts, snapshot: snapshot)
+        for _ in 0..<20 where viewModel.operationPhase == .running {
+            await Task.yield()
+        }
+
+        #expect(viewModel.operationPhase == .completed)
+        #expect(viewModel.revision == nil)
+        #expect(viewModel.draftText == "")
+        #expect(viewModel.result?.revisedDraft != nil)
     }
 
     @Test("manual field edits coalesce and undo as complete draft snapshots")
@@ -619,6 +760,22 @@ private actor ControlledEditorialDeskModelClient: EditorialModelClient {
 private actor EditorialDeskTestModelClient: EditorialModelClient {
     func perform(_ request: EditorialRequest) async throws -> EditorialResult {
         EditorialResult(revisedDocument: nil, findings: [], summary: request.action.rawValue)
+    }
+
+    func cancel() async {}
+}
+
+private actor DiagnosticEditorialDeskModelClient: EditorialModelClient {
+    func perform(_ request: EditorialRequest) async throws -> EditorialResult {
+        EditorialResult(
+            revisedDraft: EditorialDraft(
+                title: "Should not be applied",
+                deck: request.draft.deck,
+                body: request.draft.body
+            ),
+            findings: [],
+            summary: "Diagnostic result"
+        )
     }
 
     func cancel() async {}

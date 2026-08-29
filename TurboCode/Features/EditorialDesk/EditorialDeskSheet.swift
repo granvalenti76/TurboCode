@@ -862,7 +862,7 @@ struct EditorialDeskSheet: View {
 
     private var notesInspector: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Editorial notes")
+            Text("Editorial review")
                 .font(.headline)
             if viewModel.isRunning {
                 ProgressView("Running editorial check…")
@@ -885,46 +885,22 @@ struct EditorialDeskSheet: View {
                 } else {
                     Text("\(result.findings.count) finding(s) to review")
                         .font(.callout.weight(.semibold))
-                    ForEach(result.findings.prefix(4)) { finding in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(finding.sourceName)
-                                    .font(.caption.weight(.semibold))
-                                Spacer()
-                                Text(finding.severity.rawValue.capitalized)
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(findingColor(finding.severity))
-                            }
-                            Text(finding.explanation)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            if !finding.documentExcerpt.isEmpty {
-                                Text("Draft: \"\(finding.documentExcerpt)\"")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if !finding.sourceExcerpt.isEmpty {
-                                Text("Source: \"\(finding.sourceExcerpt)\"")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(8)
-                        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                    ForEach(result.findings) { finding in
+                        findingReviewCard(finding)
                     }
                 }
-                if result.revisedDraft != nil || result.revisedDocument != nil {
-                    Button("Apply revised draft") {
-                        viewModel.applyRevision()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(viewModel.isRunning)
 
-                    Button("Undo last revision") {
-                        viewModel.undoDraft()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!viewModel.canUndoDraft)
+                if let revision = viewModel.revision {
+                    revisionReview(revision)
+                } else if viewModel.lastAction?.isDiagnostic == true
+                    || (result.revisedDraft == nil && result.revisedDocument == nil) {
+                    Label("No draft revision proposed", systemImage: "lock.doc")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Label("The proposed draft matches the current draft", systemImage: "equal.circle")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
             } else {
                 Text(viewModel.hasDocument
@@ -937,11 +913,167 @@ struct EditorialDeskSheet: View {
         .padding(16)
     }
 
+    private func findingReviewCard(_ finding: EditorialFinding) -> some View {
+        let status = viewModel.findingStatus(for: finding.id)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(finding.sourceName)
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(finding.severity.rawValue.capitalized)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(findingColor(finding.severity))
+                Text(status.rawValue.capitalized)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(findingStatusColor(status))
+            }
+            Text(finding.explanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if !finding.documentExcerpt.isEmpty {
+                Text("Draft: \"\(finding.documentExcerpt)\"")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if !finding.sourceExcerpt.isEmpty {
+                Text("Source: \"\(finding.sourceExcerpt)\"")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                Button("Acknowledge") {
+                    viewModel.acknowledgeFinding(finding.id)
+                }
+                .buttonStyle(.bordered)
+                .disabled(status != .open)
+                Button("Dismiss") {
+                    viewModel.dismissFinding(finding.id)
+                }
+                .buttonStyle(.bordered)
+                .disabled(status != .open)
+            }
+        }
+        .padding(8)
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func revisionReview(_ revision: EditorialRevision) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            HStack {
+                Text("Proposed changes")
+                    .font(.callout.weight(.semibold))
+                Spacer()
+                if let status = viewModel.revisionStatus {
+                    Text(status.rawValue.capitalized)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(revisionStatusColor(status))
+                }
+            }
+
+            ForEach(revision.changes) { change in
+                revisionChangeCard(change)
+            }
+
+            HStack(spacing: 8) {
+                Button("Apply all") {
+                    viewModel.applyAllRevision()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!viewModel.canApplyRevision)
+                Button("Reject all") {
+                    viewModel.rejectRevision()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!viewModel.canApplyRevision)
+                Button("Undo") {
+                    viewModel.undoDraft()
+                }
+                .buttonStyle(.bordered)
+                .disabled(!viewModel.canUndoDraft)
+            }
+        }
+    }
+
+    private func revisionChangeCard(_ change: EditorialRevisionChange) -> some View {
+        let status = viewModel.revisionStatus(for: change.field)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(change.field.label)
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(status.rawValue.capitalized)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(revisionChangeStatusColor(status))
+            }
+            diffValue(label: "Before", value: change.before)
+            diffValue(label: "After", value: change.after)
+            HStack(spacing: 8) {
+                Button("Apply") {
+                    viewModel.applyRevision(for: change.field)
+                }
+                .buttonStyle(.bordered)
+                .disabled(status != .pending)
+                Button("Reject") {
+                    viewModel.rejectRevision(for: change.field)
+                }
+                .buttonStyle(.bordered)
+                .disabled(status != .pending)
+            }
+        }
+        .padding(8)
+        .background(.background, in: RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(.separator, lineWidth: 0.5)
+        }
+    }
+
+    private func diffValue(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(value.isEmpty ? "Empty" : value)
+                .font(.caption)
+                .foregroundStyle(value.isEmpty ? .tertiary : .primary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 5))
+        }
+    }
+
     private func findingColor(_ severity: EditorialFinding.Severity) -> Color {
         switch severity {
         case .note: .secondary
         case .warning: .orange
         case .critical: .red
+        }
+    }
+
+    private func findingStatusColor(_ status: EditorialFindingStatus) -> Color {
+        switch status {
+        case .open: .orange
+        case .acknowledged: .green
+        case .dismissed: .secondary
+        }
+    }
+
+    private func revisionChangeStatusColor(_ status: EditorialRevisionChangeStatus) -> Color {
+        switch status {
+        case .pending: .orange
+        case .applied: .green
+        case .rejected: .secondary
+        }
+    }
+
+    private func revisionStatusColor(_ status: EditorialRevisionStatus) -> Color {
+        switch status {
+        case .pending, .partial: .orange
+        case .applied: .green
+        case .rejected: .secondary
         }
     }
 
