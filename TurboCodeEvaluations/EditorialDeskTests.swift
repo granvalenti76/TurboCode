@@ -627,6 +627,7 @@ struct EditorialDeskTests {
         let contents = try String(contentsOf: publication.url, encoding: .utf8)
         #expect(contents.hasPrefix("---\n"))
         #expect(contents.contains("editorial_draft: true"))
+        #expect(contents.contains("protocol_version: 1"))
         #expect(contents.contains("editorial_draft_id: \"00000000-0000-0000-0000-000000000001\""))
         #expect(contents.contains("title: \"Politics\""))
         #expect(contents.contains("subtitle: \"Daily update\""))
@@ -701,6 +702,139 @@ struct EditorialDeskTests {
         #expect(files.count == 1)
         #expect(reloaded.draftID == draftID)
         #expect(reloaded.draft.body == "Updated Markdown body")
+    }
+
+    @Test("draft picker excludes ordinary and malformed Markdown")
+    func draftLibraryListsOnlyAuthenticEditorialDrafts() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EditorialAuthenticDraftTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try Data("# Ordinary Markdown".utf8).write(
+            to: root.appendingPathComponent("ordinary.md")
+        )
+        try Data("""
+        ---
+        editorial_draft: true
+        editorial_draft_id: "\(UUID().uuidString)"
+        ---
+
+        Missing protocol version
+        """.utf8).write(to: root.appendingPathComponent("malformed.md"))
+        let authentic = try EditorialDraftPublisher.publish(
+            draft: EditorialDraftSnapshot(body: "Authentic", revision: 1),
+            draftID: UUID(),
+            targetRelativePath: "authentic.md",
+            workspaceRoot: root.path
+        )
+
+        let descriptors = try await EditorialDraftLibraryService().list(
+            workspaceRoot: root.path
+        )
+
+        #expect(descriptors.map(\.relativePath) == [authentic.relativePath])
+    }
+
+    @Test("publication stores review and source snapshots as hashed Markdown sidecars")
+    func publicationRoundTripsEditorialSidecars() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EditorialSidecarTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let draftID = UUID()
+        let source = EditorialSource(
+            name: "Release brief",
+            origin: .importedFile(path: "references/release.md"),
+            content: "The release date is 29 August.\n"
+        )
+        let baseDraft = EditorialDraftSnapshot(
+            title: "Release",
+            deck: "Initial deck",
+            body: "The release is soon.",
+            revision: 4
+        )
+        let revisedDraft = EditorialDraft(
+            title: "Release",
+            deck: "Initial deck",
+            body: "The release is on 29 August."
+        )
+        let finding = EditorialFinding(
+            id: UUID(),
+            sourceName: source.name,
+            documentExcerpt: "soon",
+            sourceExcerpt: "29 August",
+            explanation: "Use the precise date from the source.",
+            severity: .warning
+        )
+        let review = EditorialReviewContext(
+            action: .verifyFacts,
+            performedAt: Date(timeIntervalSince1970: 1_777_777_777),
+            baseDraft: baseDraft,
+            sources: [source],
+            result: EditorialResult(
+                revisedDraft: revisedDraft,
+                findings: [finding],
+                summary: "One date was clarified."
+            )
+        )
+        let publication = try EditorialDraftPublisher.publish(
+            draft: EditorialDraftSnapshot(draft: revisedDraft, revision: 5),
+            draftID: draftID,
+            targetRelativePath: "release.md",
+            workspaceRoot: root.path,
+            reviewContext: review
+        )
+
+        let article = try String(contentsOf: publication.url, encoding: .utf8)
+        let decodedArticle = EditorialMarkdownCodec.decode(article)
+        let reviewPath = try #require(decodedArticle.reviewRelativePath)
+        let reviewName = URL(fileURLWithPath: reviewPath).deletingPathExtension().lastPathComponent
+        #expect(reviewName.count == 64)
+        #expect(reviewName.allSatisfy { $0.isHexDigit })
+
+        let reviewURL = root.appendingPathComponent(reviewPath)
+        let reviewMarkdown = try String(contentsOf: reviewURL, encoding: .utf8)
+        #expect(reviewMarkdown.contains("stale: false"))
+        #expect(reviewMarkdown.contains("## Findings"))
+        #expect(reviewMarkdown.contains("Use the precise date from the source."))
+
+        let sourcesURL = root.appendingPathComponent(".editorial-desk/sources")
+        let sourceFiles = try FileManager.default.contentsOfDirectory(
+            at: sourcesURL,
+            includingPropertiesForKeys: nil
+        )
+        #expect(sourceFiles.count == 1)
+        #expect(sourceFiles[0].deletingPathExtension().lastPathComponent.count == 64)
+
+        let loaded = try await EditorialDraftLibraryService().load(
+            relativePath: publication.relativePath,
+            workspaceRoot: root.path
+        )
+        let loadedReview = try #require(loaded.reviewContext)
+        #expect(loadedReview.action == .verifyFacts)
+        #expect(loadedReview.result.findings == [finding])
+        #expect(loadedReview.sources.count == 1)
+        #expect(loadedReview.sources[0].name == source.name)
+        #expect(loadedReview.sources[0].content == source.content)
+        #expect(loadedReview.sources[0].origin == source.origin)
+
+        let republished = try EditorialDraftPublisher.publish(
+            draft: EditorialDraftSnapshot(draft: revisedDraft, revision: 5),
+            draftID: draftID,
+            targetRelativePath: publication.relativePath,
+            workspaceRoot: root.path,
+            reviewContext: loadedReview
+        )
+        let republishedArticle = try String(contentsOf: republished.url, encoding: .utf8)
+        let reviewsURL = reviewURL.deletingLastPathComponent()
+        let reviewFiles = try FileManager.default.contentsOfDirectory(
+            at: reviewsURL,
+            includingPropertiesForKeys: nil
+        )
+        #expect(EditorialMarkdownCodec.decode(republishedArticle).reviewRelativePath == reviewPath)
+        #expect(reviewFiles.count == 1)
     }
 
     @Test("publication receipt is a native timeline block")

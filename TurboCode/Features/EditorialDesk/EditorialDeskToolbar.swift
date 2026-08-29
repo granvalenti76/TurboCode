@@ -63,9 +63,9 @@ struct EditorialDeskToolbar: View {
                 Divider()
 
                 if draftDescriptors.isEmpty {
-                    Text(isLoadingDrafts ? "Loading Markdown drafts…" : "No Markdown drafts found")
+                    Text(isLoadingDrafts ? "Loading Editorial Desk drafts…" : "No Editorial Desk drafts found")
                 } else {
-                    Section("Workspace Markdown") {
+                    Section("Editorial Desk Drafts") {
                         ForEach(draftDescriptors) { descriptor in
                             Button {
                                 onSelectDraft(descriptor.relativePath)
@@ -98,7 +98,7 @@ struct EditorialDeskToolbar: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize(horizontal: true, vertical: false)
-            .help("Select a Markdown draft from the active workspace")
+            .help("Select an Editorial Desk draft from the active workspace")
             .accessibilityLabel("Current draft: \(draftName)")
             .accessibilityValue(hasUnsavedChanges ? "Unsaved changes" : "Saved")
 

@@ -419,7 +419,7 @@ nonisolated struct EditorialDraft: Codable, Hashable, Sendable, Equatable {
 /// Immutable draft value captured before an asynchronous editorial operation.
 /// Its serialized document is derived only when a non-UI service consumes the
 /// snapshot; the MainActor owns the fields, never the encoding work.
-nonisolated struct EditorialDraftSnapshot: Sendable, Equatable, Hashable {
+nonisolated struct EditorialDraftSnapshot: Codable, Sendable, Equatable, Hashable {
     let title: String
     let deck: String
     let body: String
@@ -642,6 +642,41 @@ nonisolated struct EditorialResult: Codable, Hashable, Sendable {
             throw EditorialResponseError.invalidUTF8
         }
         return try JSONDecoder().decode(Self.self, from: data)
+    }
+}
+
+/// Immutable provenance for the latest completed model operation. The draft
+/// publisher turns this value into content-addressed Markdown sidecars; keeping
+/// it provider-neutral prevents filesystem protocol details entering adapters.
+nonisolated struct EditorialReviewContext: Sendable, Equatable {
+    let action: EditorialAction
+    let performedAt: Date
+    let baseDraft: EditorialDraftSnapshot
+    let sources: [EditorialSource]
+    let result: EditorialResult
+
+    /// A review still describes either the exact input inspected by the model
+    /// or its complete proposed rewrite. Partial/manual edits make the immutable
+    /// review historical and are recorded as stale at publication time.
+    func isStale(comparedTo draft: EditorialDraftSnapshot) -> Bool {
+        if draft.draft == baseDraft.draft {
+            return false
+        }
+        if let revisedDraft = result.revisedDraft,
+           draft.draft == revisedDraft {
+            return false
+        }
+        if let revisedDocument = result.revisedDocument {
+            let legacyRevision = EditorialDraft(
+                title: baseDraft.title,
+                deck: baseDraft.deck,
+                body: revisedDocument
+            )
+            if draft.draft == legacyRevision {
+                return false
+            }
+        }
+        return true
     }
 }
 

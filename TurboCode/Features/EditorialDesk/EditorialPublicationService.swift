@@ -14,6 +14,7 @@ actor EditorialPublicationService {
             targetRelativePath: request.targetRelativePath,
             workspaceRoot: request.workspaceRoot,
             metadata: request.metadata,
+            reviewContext: request.reviewContext,
             fileManager: FileManager.default
         )
     }

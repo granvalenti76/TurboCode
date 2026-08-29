@@ -37,6 +37,8 @@ final class EditorialDeskViewModel {
     }
     private(set) var revision: EditorialRevision?
     private(set) var lastAction: EditorialAction?
+    private(set) var publicationReviewContext: EditorialReviewContext?
+    var publicationReviewID: UUID? { publicationReviewContext?.result.id }
     var modelError: String?
     private var revisionDecisions: [EditorialDraftField: EditorialRevisionChangeStatus] = [:]
     private var findingStatuses: [UUID: EditorialFindingStatus] = [:]
@@ -134,7 +136,23 @@ final class EditorialDeskViewModel {
         activeEditField = nil
         result = nil
         lastAction = nil
+        publicationReviewContext = nil
         draftRevision &+= 1
+    }
+
+    /// Switches the complete document package. Sources and review state belong
+    /// to the selected draft protocol, so they must never leak across articles.
+    func loadEditorialDraft(
+        _ draft: EditorialDraft,
+        reviewContext: EditorialReviewContext?
+    ) {
+        loadDraft(draft)
+        sources = reviewContext?.sources ?? []
+        selectedSourceIDs = Set(sources.map(\.id))
+        result = reviewContext?.result
+        lastAction = reviewContext?.action
+        publicationReviewContext = reviewContext
+        operationPhase = reviewContext == nil ? .idle : .completed
     }
 
     /// The string overload is retained for intake compatibility. Imported or
@@ -391,6 +409,7 @@ final class EditorialDeskViewModel {
         lastAction = action
         operationPhase = .running
         result = nil
+        publicationReviewContext = nil
         modelError = nil
 
         operationTask = Task { [weak self] in
@@ -400,6 +419,13 @@ final class EditorialDeskViewModel {
                       self.operationGeneration == generation,
                       self.operationPhase == .running else { return }
                 self.result = result
+                self.publicationReviewContext = EditorialReviewContext(
+                    action: action,
+                    performedAt: Date(),
+                    baseDraft: snapshot,
+                    sources: request.sources,
+                    result: result
+                )
                 if action.isDiagnostic {
                     self.revision = nil
                 } else {

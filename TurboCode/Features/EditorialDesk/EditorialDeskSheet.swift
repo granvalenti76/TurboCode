@@ -30,6 +30,7 @@ struct EditorialDeskSheet: View {
     @State private var activeDraftID = UUID()
     @State private var savedDraftRevision: UInt64 = 0
     @State private var savedDraftMetadata: EditorialDeskMetadata = .empty
+    @State private var savedReviewID: UUID?
     @State private var isLoadingDrafts = false
     @State private var draftLibraryError: String?
     @State private var pendingDraftSelection: PendingDraftSelection?
@@ -229,6 +230,7 @@ struct EditorialDeskSheet: View {
     private var hasUnsavedDraftChanges: Bool {
         viewModel.makeDraftSnapshot().revision != savedDraftRevision
             || currentDraftMetadata != savedDraftMetadata
+            || viewModel.publicationReviewID != savedReviewID
     }
 
     /// Publishes one immutable snapshot. Existing selected Markdown is updated
@@ -242,7 +244,8 @@ struct EditorialDeskSheet: View {
             draftID: activeDraftID,
             targetRelativePath: selectedDraftPath,
             workspaceRoot: workspaceRoot,
-            metadata: currentDraftMetadata
+            metadata: currentDraftMetadata,
+            reviewContext: viewModel.publicationReviewContext
         )
 
         Task { @MainActor in
@@ -292,7 +295,7 @@ struct EditorialDeskSheet: View {
     }
 
     private func beginNewDraft() {
-        viewModel.loadDraft(EditorialDraft())
+        viewModel.loadEditorialDraft(EditorialDraft(), reviewContext: nil)
         selectedDraftPath = nil
         activeDraftID = UUID()
         selectedSectionID = nil
@@ -300,6 +303,7 @@ struct EditorialDeskSheet: View {
         selectedDate = nil
         savedDraftRevision = viewModel.makeDraftSnapshot().revision
         savedDraftMetadata = .empty
+        savedReviewID = nil
     }
 
     private func openDraft(relativePath: String) async {
@@ -308,9 +312,12 @@ struct EditorialDeskSheet: View {
                 relativePath: relativePath,
                 workspaceRoot: workspaceRoot
             )
-            viewModel.loadDraft(file.draft)
+            viewModel.loadEditorialDraft(
+                file.draft,
+                reviewContext: file.reviewContext
+            )
             selectedDraftPath = file.descriptor.relativePath
-            activeDraftID = file.draftID ?? UUID()
+            activeDraftID = file.draftID
             selectedSectionID = file.metadata.section.flatMap { loaded in
                 settings.editorialDeskCatalog.sections.first { $0.name == loaded.name }?.id
             }
@@ -323,6 +330,7 @@ struct EditorialDeskSheet: View {
             }
             savedDraftRevision = viewModel.makeDraftSnapshot().revision
             savedDraftMetadata = currentDraftMetadata
+            savedReviewID = viewModel.publicationReviewID
         } catch {
             draftLibraryError = error.localizedDescription
         }

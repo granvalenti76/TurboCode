@@ -37,6 +37,7 @@ nonisolated enum EditorialDraftPublisher {
         targetRelativePath: String?,
         workspaceRoot: String,
         metadata: EditorialDeskMetadata = .empty,
+        reviewContext: EditorialReviewContext? = nil,
         fileManager: FileManager = .default,
         now: Date = Date()
     ) throws -> EditorialPublication {
@@ -66,10 +67,20 @@ nonisolated enum EditorialDraftPublisher {
             targetURL = try WorkspacePathResolver.resolve(fileName, within: workspaceRoot)
             relativePath = fileName
         }
+        let previousReview = existingReviewReference(at: targetURL)
+        let reviewRelativePath = try EditorialDeskSidecarStore.writeReview(
+            context: reviewContext,
+            draftID: draftID,
+            currentDraft: draft,
+            previousReview: previousReview,
+            workspaceRoot: workspaceRoot,
+            fileManager: fileManager
+        )
         let serializedDocument = EditorialMarkdownCodec.encode(
             draft: draft,
             draftID: draftID,
-            metadata: metadata
+            metadata: metadata,
+            reviewRelativePath: reviewRelativePath
         )
         try Data(serializedDocument.utf8).write(to: targetURL, options: .atomic)
         return EditorialPublication(
@@ -79,6 +90,15 @@ nonisolated enum EditorialDraftPublisher {
             url: targetURL,
             publishedAt: now
         )
+    }
+
+    /// Existing review pointers survive ordinary saves. A newly completed
+    /// operation creates another immutable sidecar linked to this predecessor.
+    private static func existingReviewReference(at url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url),
+              data.count <= EditorialMarkdownCodec.maximumByteCount,
+              let markdown = String(data: data, encoding: .utf8) else { return nil }
+        return EditorialMarkdownCodec.decode(markdown).reviewRelativePath
     }
 
     private static func safeBaseName(_ title: String) -> String? {

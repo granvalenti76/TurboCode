@@ -9,19 +9,22 @@ nonisolated struct EditorialPublicationRequest: Sendable, Equatable {
     let targetRelativePath: String?
     let workspaceRoot: String
     let metadata: EditorialDeskMetadata
+    let reviewContext: EditorialReviewContext?
 
     init(
         draft: EditorialDraftSnapshot,
         draftID: UUID = UUID(),
         targetRelativePath: String? = nil,
         workspaceRoot: String,
-        metadata: EditorialDeskMetadata = .empty
+        metadata: EditorialDeskMetadata = .empty,
+        reviewContext: EditorialReviewContext? = nil
     ) {
         self.draft = draft
         self.draftID = draftID
         self.targetRelativePath = targetRelativePath
         self.workspaceRoot = workspaceRoot
         self.metadata = metadata
+        self.reviewContext = reviewContext
     }
 }
 
