@@ -259,10 +259,10 @@ struct EditorialDeskTests {
         #expect(result.errors[0].contains("binary.dat"))
     }
 
-    @Test("manual Notes and Transcript labels do not promise unavailable providers")
+    @Test("manual Notes is the only intake tab besides Write")
     func manualSourceTabsAreHonest() {
+        #expect(EditorialDeskTab.allCases == [.write, .notes])
         #expect(EditorialDeskTab.notes.rawValue == "Notes (manual)")
-        #expect(EditorialDeskTab.transcript.rawValue == "Transcript (manual)")
     }
 
     @Test("source service skips duplicate files and preserves provenance")
@@ -570,20 +570,28 @@ struct EditorialDeskTests {
         #expect(viewModel.canRedoDraft)
     }
 
-    @Test("intake tabs preserve source provenance")
+    @Test("manual Notes can become either the article or ground truth")
     @MainActor
-    func intakeTabCreatesTranscriptSource() {
-        let viewModel = EditorialDeskViewModel(workspaceRoot: "")
-        viewModel.selectedTab = .transcript
-        viewModel.intakeName = "Interview transcript"
-        viewModel.intakeText = "Speaker statement"
+    func manualNotesCanCreateDocumentOrSource() {
+        let documentViewModel = EditorialDeskViewModel(workspaceRoot: "")
+        documentViewModel.selectedTab = .notes
+        documentViewModel.intakeText = "Article copy"
+        documentViewModel.useIntakeAsDocument()
 
-        viewModel.addIntakeAsSource()
+        #expect(documentViewModel.draftText == "Article copy")
+        #expect(documentViewModel.selectedTab == .write)
 
-        #expect(viewModel.sources.count == 1)
-        #expect(viewModel.sources[0].name == "Interview transcript")
-        #expect(viewModel.sources[0].origin == .transcript)
-        #expect(viewModel.selectedSourceIDs.contains(viewModel.sources[0].id))
+        let sourceViewModel = EditorialDeskViewModel(workspaceRoot: "")
+        sourceViewModel.selectedTab = .notes
+        sourceViewModel.intakeName = "Editorial brief"
+        sourceViewModel.intakeText = "Authoritative material"
+        sourceViewModel.addIntakeAsSource()
+
+        #expect(sourceViewModel.sources.count == 1)
+        #expect(sourceViewModel.sources[0].name == "Editorial brief")
+        #expect(sourceViewModel.sources[0].origin == .notes)
+        #expect(sourceViewModel.sources[0].origin.label == "Notes (manual)")
+        #expect(sourceViewModel.selectedSourceIDs.contains(sourceViewModel.sources[0].id))
     }
 
     @Test("ground truth source selection is reversible")

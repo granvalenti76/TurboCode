@@ -231,7 +231,7 @@ final class EditorialDeskViewModel {
         addIntakeAsSource()
     }
 
-    /// Promotes material from any intake tab to the working draft. The source
+    /// Promotes manually pasted material to the working draft. The intake
     /// tab remains a reversible input mode; only this action changes the draft.
     func useIntakeAsDocument() {
         let content = intakeText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -240,23 +240,13 @@ final class EditorialDeskViewModel {
         selectedTab = .write
     }
 
-    /// Adds intake material as ground truth without forcing it into the draft.
-    /// Notes and transcripts retain their provenance for later review.
+    /// Adds manually pasted material as ground truth without forcing it into
+    /// the draft. Its manual Notes provenance remains visible during review.
     func addIntakeAsSource() {
         let content = intakeText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else { return }
-        let origin: EditorialSourceOrigin = switch selectedTab {
-        case .paste: .pasted
-        case .notes: .notes
-        case .transcript: .transcript
-        case .write: .pasted
-        }
-        let fallbackName = switch selectedTab {
-        case .paste: "Pasted source"
-        case .notes: "Notes source"
-        case .transcript: "Transcript source"
-        case .write: "Editorial source"
-        }
+        let origin: EditorialSourceOrigin = .notes
+        let fallbackName = "Notes source"
         let source = EditorialSource(
             name: intakeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? fallbackName

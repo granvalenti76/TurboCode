@@ -122,7 +122,7 @@ struct EditorialDeskArticleCanvas: View {
                 .accessibilityLabel("Close intake panel")
             }
 
-            Text("Add material to the desk as a draft or as a ground-truth source.")
+            Text("Paste notes, a brief, or article copy, then choose whether to use it as the document or as ground truth.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
 
@@ -159,12 +159,14 @@ struct EditorialDeskArticleCanvas: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!viewModel.canCommitIntake)
+                .accessibilityHint("Replace the current article document with the pasted text.")
 
                 Button("Add as source") {
                     viewModel.addIntakeAsSource()
                 }
                 .buttonStyle(.bordered)
                 .disabled(!viewModel.canCommitIntake)
+                .accessibilityHint("Add the pasted text to the selected ground-truth sources.")
             }
         }
         .padding(16)
@@ -233,7 +235,7 @@ struct EditorialDeskArticleCanvas: View {
                 .foregroundStyle(.tertiary)
             Text("Start writing")
                 .font(.system(size: 18, weight: .medium, design: .serif))
-            Text("Write directly here, or choose Paste, Notes (manual), or Transcript (manual) above.")
+            Text("Write directly here, or choose Notes (manual) above to paste an article or ground-truth material.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }

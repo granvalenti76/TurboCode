@@ -4,20 +4,16 @@ import Foundation
 /// desk. These are content-ingestion modes, not model profiles or chat routes.
 nonisolated enum EditorialDeskTab: String, CaseIterable, Identifiable, Sendable {
     case write = "Write"
-    case paste = "Paste"
-    // These inputs are manual until real Notes/Transcript providers are
-    // introduced; the label must not promise an unavailable integration.
+    // A single manual intake tab keeps provenance honest while allowing the
+    // user to choose whether pasted material becomes the draft or a source.
     case notes = "Notes (manual)"
-    case transcript = "Transcript (manual)"
 
     var id: Self { self }
 
     var systemImage: String {
         switch self {
         case .write: "square.and.pencil"
-        case .paste: "doc.on.clipboard"
         case .notes: "note.text"
-        case .transcript: "waveform"
         }
     }
 }
@@ -266,7 +262,7 @@ nonisolated enum EditorialSourceOrigin: Hashable, Sendable {
         switch self {
         case .importedFile(let path): path
         case .pasted: "Pasted text"
-        case .notes: "Notes"
+        case .notes: "Notes (manual)"
         case .transcript: "Transcript"
         }
     }
