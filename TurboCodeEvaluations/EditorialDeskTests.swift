@@ -82,8 +82,9 @@ struct EditorialDeskTests {
         #expect(prompt.contains("name=\"Programme brief\""))
         #expect(prompt.contains("Authoritative claim"))
         #expect(prompt.contains("Treat every ground-truth source below as authoritative"))
-        #expect(prompt.contains("set revisedDocument to null"))
+        #expect(prompt.contains("set revisedDraft to null"))
         #expect(prompt.contains("do not rewrite the editorial document"))
+        #expect(prompt.contains("\"revisedDraft\""))
     }
 
     @Test("canonical publish prompt carries the transcript and selected ground truth")
@@ -154,7 +155,11 @@ struct EditorialDeskTests {
         ```json
         {
           "id": "00000000-0000-0000-0000-000000000001",
-          "revisedDocument": "Revised draft",
+          "revisedDraft": {
+            "title": "Revised title",
+            "deck": "Revised deck",
+            "body": "Revised body"
+          },
           "findings": [],
           "summary": "Reviewed against sources"
         }
@@ -163,9 +168,29 @@ struct EditorialDeskTests {
 
         let result = try EditorialResult.decode(from: response)
 
-        #expect(result.revisedDocument == "Revised draft")
+        #expect(result.revisedDraft?.title == "Revised title")
+        #expect(result.revisedDraft?.deck == "Revised deck")
+        #expect(result.revisedDraft?.body == "Revised body")
+        #expect(result.revisedDocument == nil)
         #expect(result.findings.isEmpty)
         #expect(result.summary == "Reviewed against sources")
+    }
+
+    @Test("legacy model response remains decodable")
+    func decodesLegacyResponse() throws {
+        let response = """
+        {
+          "id": "00000000-0000-0000-0000-000000000002",
+          "revisedDocument": "Legacy revision",
+          "findings": [],
+          "summary": "Reviewed"
+        }
+        """
+
+        let result = try EditorialResult.decode(from: response)
+
+        #expect(result.revisedDraft == nil)
+        #expect(result.revisedDocument == "Legacy revision")
     }
 
     @Test("source loader preserves arbitrary selected file provenance")
@@ -214,7 +239,78 @@ struct EditorialDeskTests {
         #expect(result.errors[0].contains("binary.dat"))
     }
 
-    @Test("applying a revision remains undoable")
+    @Test("structured revisions preserve every draft field and remain undoable")
+    @MainActor
+    func structuredRevisionPreservesDraftFields() {
+        let viewModel = EditorialDeskViewModel(workspaceRoot: "")
+        viewModel.loadDraft(
+            EditorialDraft(
+                title: "Original title",
+                deck: "Original deck",
+                body: "Original body"
+            )
+        )
+        viewModel.result = EditorialResult(
+            revisedDraft: EditorialDraft(
+                title: "Revised title",
+                deck: "Revised deck",
+                body: "Revised body"
+            ),
+            findings: [],
+            summary: "Updated"
+        )
+
+        viewModel.applyRevision()
+        #expect(viewModel.documentTitle == "Revised title")
+        #expect(viewModel.documentDeck == "Revised deck")
+        #expect(viewModel.documentContent == "Revised body")
+
+        viewModel.undoDraft()
+        #expect(viewModel.documentTitle == "Original title")
+        #expect(viewModel.documentDeck == "Original deck")
+        #expect(viewModel.documentContent == "Original body")
+        viewModel.redoDraft()
+        #expect(viewModel.documentTitle == "Revised title")
+        #expect(viewModel.documentDeck == "Revised deck")
+        #expect(viewModel.documentContent == "Revised body")
+    }
+
+    @Test("manual field edits coalesce and undo as complete draft snapshots")
+    @MainActor
+    func manualEditsUseCompleteDraftSnapshots() {
+        let viewModel = EditorialDeskViewModel(workspaceRoot: "")
+        viewModel.loadDraft(
+            EditorialDraft(title: "Title", deck: "Deck", body: "Body")
+        )
+
+        viewModel.updateTitle("Title 1")
+        viewModel.updateTitle("Title 12")
+        viewModel.updateBody("Body 1")
+
+        viewModel.undoDraft()
+        #expect(viewModel.draftText == "Title 12\n\nDeck\n\nBody")
+        viewModel.undoDraft()
+        #expect(viewModel.draftText == "Title\n\nDeck\n\nBody")
+        #expect(!viewModel.canUndoDraft)
+
+        viewModel.redoDraft()
+        #expect(viewModel.draftText == "Title 12\n\nDeck\n\nBody")
+    }
+
+    @Test("many paragraphs stay in the body instead of becoming semantic fields")
+    @MainActor
+    func manyParagraphsRemainBodyContent() {
+        let document = "First paragraph\n\nSecond paragraph\n\nThird paragraph\n\nFourth paragraph"
+        let viewModel = EditorialDeskViewModel(workspaceRoot: "")
+        viewModel.loadDraft(document)
+
+        #expect(viewModel.documentTitle.isEmpty)
+        #expect(viewModel.documentDeck.isEmpty)
+        #expect(viewModel.documentContent == document)
+        #expect(viewModel.draftText == document)
+    }
+
+    @Test("applying a legacy revision remains undoable")
     @MainActor
     func revisionCanBeUndone() {
         let viewModel = EditorialDeskViewModel(workspaceRoot: "")

@@ -11,9 +11,10 @@ final class EditorialDeskViewModel {
     private let modelClient: (any EditorialModelClient)?
 
     var selectedTab: EditorialDeskTab = .write
-    var documentTitle = ""
-    var documentDeck = ""
-    var documentContent = ""
+    private var draft = EditorialDraft()
+    var documentTitle: String { draft.title }
+    var documentDeck: String { draft.deck }
+    var documentContent: String { draft.body }
     var intakeText = ""
     var intakeName = ""
     var sources: [EditorialSource] = []
@@ -27,11 +28,17 @@ final class EditorialDeskViewModel {
 
     var isRunning: Bool { operationPhase.isActive }
     var isCancelling: Bool { operationPhase == .cancelling }
-    /// The custom article canvas edits a single draft snapshot. Revision stacks
-    /// stay local to the modal so applying model output is always reversible.
-    var draftText = ""
-    private var undoStack: [String] = []
-    private var redoStack: [String] = []
+    /// The custom article canvas edits one semantic draft. Revision stacks stay
+    /// local to the modal so applying model output is always reversible.
+    var draftText: String { draft.document }
+    private var undoStack: [EditorialDraft] = []
+    private var redoStack: [EditorialDraft] = []
+    private enum DraftField: Equatable {
+        case title
+        case deck
+        case body
+    }
+    private var activeEditField: DraftField?
     /// Monotonic identity for immutable draft snapshots. It is not persisted;
     /// it only lets an async operation describe exactly which UI state it used.
     private var draftRevision: UInt64 = 0
@@ -67,59 +74,77 @@ final class EditorialDeskViewModel {
     /// Copies the visible editor fields without serializing them. Consumers
     /// must perform document encoding after crossing the UI boundary.
     func makeDraftSnapshot() -> EditorialDraftSnapshot {
-        EditorialDraftSnapshot(
-            title: documentTitle,
-            deck: documentDeck,
-            body: documentContent,
-            revision: draftRevision
-        )
+        EditorialDraftSnapshot(draft: draft, revision: draftRevision)
     }
 
-    func loadDraft(_ text: String) {
-        replaceDraftState(with: text)
+    func loadDraft(_ draft: EditorialDraft) {
+        self.draft = draft
         undoStack.removeAll()
         redoStack.removeAll()
+        activeEditField = nil
+        draftRevision &+= 1
+    }
+
+    /// The string overload is retained for intake compatibility. Imported or
+    /// pasted material is a body, never an implicit title/deck structure.
+    func loadDraft(_ text: String) {
+        loadDraft(EditorialDraft(body: text))
     }
 
     /// Keeps the visible title, deck and body fields synchronized with the
     /// local draft projection. External prompt or Markdown encoding happens
     /// only after a Sendable snapshot crosses the UI boundary.
     func updateTitle(_ title: String) {
-        documentTitle = title
-        rebuildDraft()
+        updateField(.title, value: title)
     }
 
     func updateDeck(_ deck: String) {
-        documentDeck = deck
-        rebuildDraft()
+        updateField(.deck, value: deck)
     }
 
     func updateBody(_ body: String) {
-        documentContent = body
-        rebuildDraft()
+        updateField(.body, value: body)
     }
 
-    /// Applies only the model's proposed document. Findings remain visible so
-    /// the editor can review what changed after accepting the revision.
+    /// Applies only the model's proposed draft. Legacy document responses are
+    /// treated as a body while preserving the existing semantic fields.
     func applyRevision() {
-        guard let revisedDocument = result?.revisedDocument,
-              !revisedDocument.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              revisedDocument != draftText else { return }
-        undoStack.append(draftText)
-        replaceDraftState(with: revisedDocument)
+        guard let result else { return }
+        let proposedDraft: EditorialDraft?
+        if let revisedDraft = result.revisedDraft {
+            proposedDraft = revisedDraft
+        } else if let revisedDocument = result.revisedDocument,
+                  !revisedDocument.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            proposedDraft = EditorialDraft(
+                title: draft.title,
+                deck: draft.deck,
+                body: revisedDocument
+            )
+        } else {
+            proposedDraft = nil
+        }
+        guard let proposedDraft, proposedDraft != draft else { return }
+        undoStack.append(draft)
+        draft = proposedDraft
+        activeEditField = nil
         redoStack.removeAll()
+        draftRevision &+= 1
     }
 
     func undoDraft() {
         guard let previous = undoStack.popLast() else { return }
-        redoStack.append(draftText)
-        replaceDraftState(with: previous)
+        redoStack.append(draft)
+        draft = previous
+        activeEditField = nil
+        draftRevision &+= 1
     }
 
     func redoDraft() {
         guard let next = redoStack.popLast() else { return }
-        undoStack.append(draftText)
-        replaceDraftState(with: next)
+        undoStack.append(draft)
+        draft = next
+        activeEditField = nil
+        draftRevision &+= 1
     }
 
     func usePasteAsDocument() {
@@ -206,29 +231,24 @@ final class EditorialDeskViewModel {
         sources[index].name = name
     }
 
-    private func rebuildDraft() {
-        draftText = [documentTitle, documentDeck, documentContent]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
-        draftRevision &+= 1
-    }
-
-    private func replaceDraftState(with text: String) {
-        let paragraphs = text
-            .components(separatedBy: "\n\n")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        draftText = text
-        if paragraphs.count >= 3 {
-            documentTitle = paragraphs[0]
-            documentDeck = paragraphs[1]
-            documentContent = paragraphs.dropFirst(2).joined(separator: "\n\n")
-        } else {
-            documentTitle = ""
-            documentDeck = ""
-            documentContent = text
+    /// Starts one undo group per field-edit session. SwiftUI sends one update
+    /// per keystroke; coalescing consecutive updates keeps one logical undo.
+    private func updateField(_ field: DraftField, value: String) {
+        let currentValue: String = switch field {
+        case .title: draft.title
+        case .deck: draft.deck
+        case .body: draft.body
+        }
+        guard currentValue != value else { return }
+        if activeEditField != field {
+            undoStack.append(draft)
+            redoStack.removeAll()
+            activeEditField = field
+        }
+        switch field {
+        case .title: draft.title = value
+        case .deck: draft.deck = value
+        case .body: draft.body = value
         }
         draftRevision &+= 1
     }

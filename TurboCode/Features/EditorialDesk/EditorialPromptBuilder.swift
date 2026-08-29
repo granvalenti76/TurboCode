@@ -39,7 +39,11 @@ nonisolated enum EditorialPromptBuilder {
         Return JSON only, with this exact shape:
         {
           "id": "UUID",
-          "revisedDocument": "string or null",
+          "revisedDraft": {
+            "title": "string",
+            "deck": "string",
+            "body": "string"
+          } or null,
           "findings": [
             {
               "id": "UUID",
@@ -53,8 +57,9 @@ nonisolated enum EditorialPromptBuilder {
           "summary": "string"
         }
         Every contradiction, unsupported material claim, omission, or source
-        conflict must be represented in findings. Never claim verification
-        without identifying the supporting source passage.
+        conflict must be represented in findings. For diagnostic actions,
+        revisedDraft must be null. Never claim verification without identifying
+        the supporting source passage.
         """
     }
 

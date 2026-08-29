@@ -20,6 +20,7 @@ struct EditorialDeskSheet: View {
     @State private var hoveredAction: EditorialAction?
     @State private var actionMenuPresented = false
     @State private var selectedLine = 4
+    @State private var editorScrollOffset: CGFloat = 0
     @State private var sourceImporterPresented = false
     @State private var renameSourceID: UUID?
     @State private var renameSourceText = ""
@@ -471,6 +472,7 @@ struct EditorialDeskSheet: View {
                         if !viewModel.documentContent.isEmpty {
                             lineNumberGutter
                                 .frame(height: viewport.size.height, alignment: .top)
+                                .offset(y: -editorScrollOffset)
                                 .clipped()
                         }
 
@@ -479,7 +481,8 @@ struct EditorialDeskSheet: View {
                                 text: Binding(
                                     get: { viewModel.documentContent },
                                     set: { viewModel.updateBody($0) }
-                                )
+                                ),
+                                verticalScrollOffset: $editorScrollOffset
                             )
 
                             if viewModel.documentContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -910,7 +913,7 @@ struct EditorialDeskSheet: View {
                         .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
                     }
                 }
-                if result.revisedDocument != nil {
+                if result.revisedDraft != nil || result.revisedDocument != nil {
                     Button("Apply revised draft") {
                         viewModel.applyRevision()
                     }
@@ -1167,9 +1170,10 @@ struct EditorialDeskSheet: View {
 /// canvas owns the editorial chrome, gutter, empty state, and inspector.
 private struct EditorialCanvasTextView: NSViewRepresentable {
     @Binding var text: String
+    @Binding var verticalScrollOffset: CGFloat
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
+        Coordinator(text: $text, verticalScrollOffset: $verticalScrollOffset)
     }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -1205,16 +1209,29 @@ private struct EditorialCanvasTextView: NSViewRepresentable {
         )
 
         scrollView.documentView = textView
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        context.coordinator.observeScrollView(scrollView)
         resizeDocumentView(scrollView, textView: textView)
         return scrollView
     }
 
+    static func dismantleNSView(_ scrollView: NSScrollView, coordinator: Coordinator) {
+        coordinator.stopObserving()
+    }
+
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? NSTextView else { return }
+        let selection = textView.selectedRanges
+        let scrollOrigin = scrollView.contentView.bounds.origin
         if textView.string != text {
             textView.string = text
+            textView.selectedRanges = context.coordinator.clampedSelections(
+                selection,
+                for: textView.string.utf16.count
+            )
         }
         resizeDocumentView(scrollView, textView: textView)
+        context.coordinator.restoreScrollOrigin(scrollOrigin, in: scrollView)
     }
 
     /// AppKit does not always expand an NSTextView's document frame after a
@@ -1237,11 +1254,63 @@ private struct EditorialCanvasTextView: NSViewRepresentable {
         textView.setFrameSize(NSSize(width: width, height: height))
     }
 
+    @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         private var text: Binding<String>
+        private var verticalScrollOffset: Binding<CGFloat>
+        private weak var observedClipView: NSClipView?
 
-        init(text: Binding<String>) {
+        init(text: Binding<String>, verticalScrollOffset: Binding<CGFloat>) {
             self.text = text
+            self.verticalScrollOffset = verticalScrollOffset
+        }
+
+        func observeScrollView(_ scrollView: NSScrollView) {
+            guard observedClipView == nil else { return }
+            let clipView = scrollView.contentView
+            observedClipView = clipView
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(scrollViewBoundsDidChange(_:)),
+                name: NSView.boundsDidChangeNotification,
+                object: clipView
+            )
+        }
+
+        func stopObserving() {
+            guard let observedClipView else { return }
+            NotificationCenter.default.removeObserver(
+                self,
+                name: NSView.boundsDidChangeNotification,
+                object: observedClipView
+            )
+            self.observedClipView = nil
+        }
+
+        @objc
+        private func scrollViewBoundsDidChange(_ notification: Notification) {
+            guard let clipView = notification.object as? NSClipView else { return }
+            verticalScrollOffset.wrappedValue = clipView.bounds.origin.y
+        }
+
+        func clampedSelections(_ selections: [NSValue], for length: Int) -> [NSValue] {
+            selections.map { value in
+                let range = value.rangeValue
+                let location = min(max(range.location, 0), length)
+                let availableLength = max(0, length - location)
+                let selectionLength = min(max(range.length, 0), availableLength)
+                return NSValue(range: NSRange(location: location, length: selectionLength))
+            }
+        }
+
+        func restoreScrollOrigin(_ origin: NSPoint, in scrollView: NSScrollView) {
+            let maxY = max(
+                0,
+                scrollView.documentView!.frame.height - scrollView.contentView.bounds.height
+            )
+            let restoredOrigin = NSPoint(x: origin.x, y: min(max(origin.y, 0), maxY))
+            scrollView.contentView.scroll(to: restoredOrigin)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
         }
 
         func textDidChange(_ notification: Notification) {

@@ -305,7 +305,7 @@ nonisolated enum EditorialAction: String, CaseIterable, Codable, Hashable, Senda
             """
             Check every material claim against the ground-truth sources and report
             discrepancies only through findings and summary. This action is diagnostic:
-            set revisedDocument to null and do not rewrite the editorial document.
+            set revisedDraft to null and do not rewrite the editorial document.
             """
         case .makeNeutral:
             "Rewrite the document in a neutral editorial voice without changing supported facts."
@@ -359,6 +359,31 @@ nonisolated enum EditorialPublicationPhase: Sendable, Equatable {
     }
 }
 
+/// Canonical semantic representation of the document. Its fields are kept
+/// separate so title/deck/body never need to be inferred from delimiters.
+nonisolated struct EditorialDraft: Codable, Hashable, Sendable, Equatable {
+    var title: String
+    var deck: String
+    var body: String
+
+    init(title: String = "", deck: String = "", body: String = "") {
+        self.title = title
+        self.deck = deck
+        self.body = body
+    }
+
+    var document: String {
+        [title, deck, body]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+    }
+
+    var hasContent: Bool {
+        !document.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
 /// Immutable draft value captured before an asynchronous editorial operation.
 /// Its serialized document is derived only when a non-UI service consumes the
 /// snapshot; the MainActor owns the fields, never the encoding work.
@@ -368,11 +393,29 @@ nonisolated struct EditorialDraftSnapshot: Sendable, Equatable {
     let body: String
     let revision: UInt64
 
+    init(
+        title: String = "",
+        deck: String = "",
+        body: String = "",
+        revision: UInt64
+    ) {
+        self.title = title
+        self.deck = deck
+        self.body = body
+        self.revision = revision
+    }
+
+    init(draft: EditorialDraft, revision: UInt64) {
+        self.init(
+            title: draft.title,
+            deck: draft.deck,
+            body: draft.body,
+            revision: revision
+        )
+    }
+
     var document: String {
-        [title, deck, body]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
+        EditorialDraft(title: title, deck: deck, body: body).document
     }
 }
 
@@ -440,17 +483,22 @@ nonisolated struct EditorialFinding: Codable, Identifiable, Hashable, Sendable {
 /// timeline.
 nonisolated struct EditorialResult: Codable, Hashable, Sendable {
     let id: UUID
+    /// New responses use semantic fields; this legacy value remains readable
+    /// while older providers transition to `revisedDraft`.
+    let revisedDraft: EditorialDraft?
     let revisedDocument: String?
     let findings: [EditorialFinding]
     let summary: String
 
     init(
         id: UUID = UUID(),
-        revisedDocument: String?,
+        revisedDraft: EditorialDraft? = nil,
+        revisedDocument: String? = nil,
         findings: [EditorialFinding],
         summary: String
     ) {
         self.id = id
+        self.revisedDraft = revisedDraft
         self.revisedDocument = revisedDocument
         self.findings = findings
         self.summary = summary
