@@ -6,6 +6,7 @@ struct SidebarView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var isSessionSearchPresented = false
     @State private var workspacePendingRemoval: String?
+    @State private var workspacePathsBeingRemoved: Set<String> = []
     @State private var visibleChatLimit = SidebarConversationDisclosure.batchSize
     @State private var expandedWorkspacePath: String?
 
@@ -214,7 +215,10 @@ struct SidebarView: View {
             // The selected workspace is the only expanded group, so All Chats can
             // remain a separate global collection without duplicating rows.
             ForEach(chatStore.recentWorkspaces, id: \.self) { path in
-                workspaceRow(path: path)
+                if !workspacePathsBeingRemoved.contains(path) {
+                    workspaceRow(path: path)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
 
             // Add workspace
@@ -292,7 +296,7 @@ struct SidebarView: View {
         .listRowSeparator(.hidden)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
-                workspacePendingRemoval = path
+                removeWorkspaceImmediately(path)
             } label: {
                 Label("Remove", systemImage: "trash")
             }
@@ -313,6 +317,20 @@ struct SidebarView: View {
         Task { await chatStore.switchToWorkspace(path) }
         expandedWorkspacePath = path
         visibleChatLimit = SidebarConversationDisclosure.batchSize
+    }
+
+    /// Swipe removal hides the row immediately, while the lifecycle coordinator
+    /// persists the sidebar change and associated chat cleanup. The coordinator
+    /// never deletes the workspace directory itself.
+    private func removeWorkspaceImmediately(_ path: String) {
+        guard !workspacePathsBeingRemoved.contains(path) else { return }
+        _ = withAnimation(.easeInOut(duration: 0.2)) {
+            workspacePathsBeingRemoved.insert(path)
+        }
+        Task { @MainActor in
+            await chatStore.removeWorkspace(path)
+            workspacePathsBeingRemoved.remove(path)
+        }
     }
 
     private func workspaceExpansionBinding(for path: String) -> Binding<Bool> {
