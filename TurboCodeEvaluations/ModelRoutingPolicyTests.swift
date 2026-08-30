@@ -104,22 +104,23 @@ struct ModelRoutingPolicyTests {
             ]
         )
 
-        #expect(defaultPlan.registeredIDs == [.turboCodeGuide, .listWorkspace, .readFile, .searchWorkspace, .writeOnDevice, .createSkill])
+        #expect(defaultPlan.registeredIDs == [.listWorkspace, .readFile, .writeOnDevice, .createSkill])
         #expect(explicitExpansion.registeredIDs == [.writeOnDevice, .readFile, .git, .bash, .delegateTask, .createSkill])
         #expect(defaultPlan.contains(.readFile))
+        #expect(!defaultPlan.contains(.turboCodeGuide))
         #expect(!defaultPlan.contains(.git))
         #expect(!defaultPlan.contains(.editFile))
         #expect(!defaultPlan.contains(.delegateTask))
         #expect(!defaultPlan.contains(.callPowerfulModel))
     }
 
-    @Test("Every default runtime profile receives Ripgrep")
-    func defaultProfilesIncludeRipgrep() {
+    @Test("Optional tools are default-off and available through explicit overrides")
+    func optionalToolsRequireExplicitOverride() {
         let context = ToolAccessContext(
             hasWorkspace: true,
-            hasSkills: false,
+            hasSkills: true,
             hasDelegateModel: true,
-            repositoryMapDetail: .compact
+            repositoryMapDetail: .enhanced
         )
 
         for profile in [
@@ -128,12 +129,24 @@ struct ModelRoutingPolicyTests {
             .orchestrator,
             .delegate
         ] {
-            let plan = ModelToolCatalog.plan(
+            let defaultPlan = ModelToolCatalog.plan(
                 profile: profile,
                 tier: profile == .microtask ? .onDevice : .standard,
                 context: context
             )
-            #expect(plan.contains(.searchWorkspace))
+            #expect(!defaultPlan.contains(.turboCodeGuide))
+            #expect(!defaultPlan.contains(.searchWorkspace))
+            #expect(!defaultPlan.contains(.removeFile))
+
+            let overridePlan = ModelToolCatalog.plan(
+                profile: profile,
+                tier: profile == .microtask ? .onDevice : .standard,
+                context: context,
+                selectedIDs: [.turboCodeGuide, .searchWorkspace, .removeFile]
+            )
+            #expect(overridePlan.contains(.turboCodeGuide))
+            #expect(overridePlan.contains(.searchWorkspace))
+            #expect(overridePlan.contains(.removeFile))
         }
     }
 

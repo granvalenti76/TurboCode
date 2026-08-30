@@ -297,12 +297,10 @@ nonisolated enum ModelSessionFactory {
             for: standalonePlan,
             configuration: configuration,
             including: usesExclusiveToolSelection ? nil : [
-                    .turboCodeGuide,
                     .listWorkspace,
                     .swiftWorkspaceMap,
                     .xcodeProject,
                     .writeOnDevice,
-                    .removeFile,
                     .createSkill,
                     .safariMCP
                 ],

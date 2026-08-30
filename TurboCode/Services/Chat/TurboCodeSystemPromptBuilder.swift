@@ -188,10 +188,10 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         Orchestrator mode:
         You coordinate the task and delegate file reading, code changes, commands,
         Git work, and multi-step analysis to call_powerful_model. Use list_workspace
-        directly only for directory listings, file_system for metadata or discovery,
-        and turbocode_guide for explicit TurboCode product questions. Give the
-        delegate a complete task with relevant paths and requirements for the
-        workspace at \(workspaceRoot), then synthesize its result for the user.
+        directly only for directory listings and file_system for metadata or
+        discovery. Give the delegate a complete task with relevant paths and
+        requirements for the workspace at \(workspaceRoot), then synthesize its
+        result for the user.
         """
     }
 
