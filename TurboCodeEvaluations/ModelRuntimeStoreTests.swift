@@ -20,4 +20,11 @@ struct ModelRuntimeStoreTests {
 
         #expect(selected.url == configuredLlama.url)
     }
+
+    @Test("Reasoning effort keeps persisted composer values stable")
+    func reasoningEffortPersistenceContractIsStable() {
+        #expect(ReasoningEffort.low.rawValue == "Low")
+        #expect(ReasoningEffort.medium.rawValue == "Medium")
+        #expect(ReasoningEffort.high.rawValue == "High")
+    }
 }

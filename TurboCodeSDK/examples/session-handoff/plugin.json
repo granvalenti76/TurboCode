@@ -1,0 +1,57 @@
+{
+  "manifestVersion": 1,
+  "id": "session-handoff",
+  "name": "Session Handoff",
+  "version": "0.1.0",
+  "entrypoint": "dist/index.js",
+  "runtime": { "kind": "node", "node": ">=24.0.0" },
+  "tools": [
+    {
+      "name": "saveHandoff",
+      "description": "Save the current work state so another turn or model can resume it.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "status": { "type": "string", "enum": ["in-progress", "blocked", "ready"] },
+          "summary": { "type": "string" },
+          "completed": { "type": "array", "items": { "type": "string" } },
+          "current": { "type": "string" },
+          "next": { "type": "string" },
+          "files": { "type": "array", "items": { "type": "string" } },
+          "risks": { "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["title", "status", "summary", "completed", "current", "next", "files", "risks"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "listHandoffs",
+      "description": "List saved handoffs available for resuming previous work.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "loadHandoff",
+      "description": "Load one saved handoff by id and show its continuation card.",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "id": { "type": "string" } },
+        "required": ["id"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "widgets": [
+    {
+      "id": "session-handoff-card",
+      "title": "Session Handoff",
+      "entrypoint": "dist/widget.html",
+      "description": "A compact Continuity Card for resuming work."
+    }
+  ]
+}

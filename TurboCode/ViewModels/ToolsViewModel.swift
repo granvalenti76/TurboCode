@@ -1,5 +1,4 @@
 import Foundation
-import FoundationModels
 import Observation
 
 nonisolated struct ToolModelProfileViewState: Identifiable, Sendable, Hashable {
@@ -51,7 +50,7 @@ final class ToolsViewModel {
         installedSkillCount = chatStore.availableSkills.count
         configurationPath = abbreviatedPath(TurboCodeConfig.shared.modelsConfigurationURL.path)
 
-        let onDeviceSupportsTools = SystemLanguageModel.default.capabilities.contains(.toolCalling)
+        let onDeviceSupportsTools = chatStore.onDeviceSupportsToolCalling
         let onDeviceTier: ModelToolTier = onDeviceSupportsTools ? .onDevice : .none
         let onDeviceContext = context(repositoryMap: nil)
         let isOrchestrating = chatStore.orchestratorMode == .orchestrator
@@ -62,7 +61,7 @@ final class ToolsViewModel {
                 id: "apple-on-device-standalone",
                 name: "Apple On-Device",
                 subtitle: "Standalone · Private and immediate",
-                modelIdentifier: "SystemLanguageModel.default",
+                modelIdentifier: "Apple on-device",
                 systemImage: "apple.logo",
                 tierLabel: "On-device",
                 statusLabel: onDeviceSupportsTools ? "Available" : "Tool calling unavailable",
@@ -127,6 +126,7 @@ final class ToolsViewModel {
     private func roleLabel(_ role: RemoteModelRole) -> String {
         switch role {
         case .local: "Local"
+        // PCC-RETIREMENT: remove the legacy model case with the role enum.
         case .pcc: "Private Cloud Compute"
         case .premium: "Premium"
         }
@@ -142,6 +142,7 @@ final class ToolsViewModel {
     private func modelIcon(_ model: RemoteModelConfig) -> String {
         switch model.role {
         case .local: "desktopcomputer"
+        // PCC-RETIREMENT: remove the legacy model case with the role enum.
         case .pcc: "cloud"
         case .premium: "sparkles"
         }

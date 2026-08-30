@@ -4,13 +4,15 @@ import SwiftUI
 
 struct ChatContentView: View {
     @Environment(ChatStore.self) private var chatStore
+    @Environment(ChatPresentationViewModel.self) private var presentation
     @Environment(SettingsStore.self) private var settings
+    @Environment(ApprovalStore.self) private var approvalStore
 
     var body: some View {
         VStack(spacing: 0) {
             RuntimeBannerView()
 
-            if let error = chatStore.error {
+            if let error = presentation.errorMessage {
                 errorBanner(error)
             }
 
@@ -35,7 +37,7 @@ struct ChatContentView: View {
                 .textSelection(.enabled)
             Spacer(minLength: 0)
             Button {
-                chatStore.error = nil
+                presentation.errorMessage = nil
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .semibold))
@@ -79,17 +81,28 @@ struct ChatContentView: View {
             MessageTimelineView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .overlay(alignment: .topTrailing) {
-                    if let notice = chatStore.localCompactionNotice {
+                    if let notice = presentation.localCompactionNotice {
                         LocalCompactionNoticeView(notice: notice) {
-                            chatStore.clearLocalCompactionNotice()
+                            presentation.clearCompactionNotice()
                         }
                         .padding(.top, 10)
                         .padding(.trailing, 14)
                     }
                 }
 
-            if let approval = chatStore.pendingApproval {
-                approvalBanner(approval)
+            if let approval = approvalStore.pendingApproval {
+                approvalBanner(
+                    approval,
+                    approve: approvalStore.approve,
+                    reject: approvalStore.reject
+                )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let approval = chatStore.pendingApproval {
+                approvalBanner(
+                    approval,
+                    approve: chatStore.approveAction,
+                    reject: chatStore.rejectAction
+                )
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
@@ -102,41 +115,95 @@ struct ChatContentView: View {
     // MARK: - Approval Banner
 
     @ViewBuilder
-    private func approvalBanner(_ approval: ApprovalRequest) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "hand.raised")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
+    private func approvalBanner(
+        _ approval: ApprovalRequest,
+        approve: @escaping () -> Void,
+        reject: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "hand.raised")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
 
-            Text(approval.displaySummary)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+                Text(approval.displaySummary)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
 
-            Spacer()
-
-            Button(role: approval.operation == "removeFile" ? .destructive : nil) {
-                chatStore.approveAction()
-            } label: {
-                Text(approval.operation == "removeFile" ? "Delete" : "Allow")
-                    .font(.system(size: 11, weight: .medium))
+                Spacer(minLength: 12)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
 
-            Button {
-                chatStore.rejectAction()
-            } label: {
-                Text(approval.operation == "removeFile" ? "Cancel" : "Deny")
-                    .font(.system(size: 11, weight: .medium))
+            if let command = approval.command {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Bash command")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text(commandPreview(command))
+                        .font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(.separator.opacity(0.55), lineWidth: 0.5)
+                        }
+                        .accessibilityLabel("Bash command")
+                }
+            } else if let targets = approval.externalTargetDetails {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("External path")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text(targets)
+                        .font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(.separator.opacity(0.55), lineWidth: 0.5)
+                        }
+                        .accessibilityLabel("External path")
+                }
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+
+            HStack(spacing: 8) {
+                Spacer()
+
+                Button(role: approval.operation == "removeFile" ? .destructive : nil) {
+                    approve()
+                } label: {
+                    Text(approval.operation == "removeFile" ? "Delete" : "Allow")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+
+                Button {
+                    reject()
+                } label: {
+                    Text(approval.operation == "removeFile" ? "Cancel" : "Deny")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .background(.bar)
         .overlay(alignment: .top) { Divider() }
+    }
+
+    private func commandPreview(_ command: String) -> String {
+        command.count > 100 ? String(command.prefix(100)) + "…" : command
     }
 }
 

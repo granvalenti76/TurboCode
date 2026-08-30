@@ -49,6 +49,92 @@ struct AgentDiagnosticsTests {
         #expect(AgentDiagnosticsRecorder.classifyFailure(detail) == expected)
     }
 
+    @Test("Runtime boundary metrics clamp baseline values")
+    func runtimeBoundaryMetricsClampBaselineValues() {
+        let metric = RuntimeBoundaryMetric(
+            boundary: .restore,
+            backend: "foundationApple",
+            durationMilliseconds: -10,
+            eventCount: -2
+        )
+
+        #expect(metric.durationMilliseconds == 0)
+        #expect(metric.eventCount == 0)
+    }
+
+    @Test("Runtime baseline aggregates runs and boundary samples")
+    func runtimeBaselineAggregatesSamples() {
+        let startedAt = Date(timeIntervalSince1970: 100)
+        let run = AgentRunMetric(
+            id: "run",
+            startedAt: startedAt,
+            backend: "Foundation Apple",
+            mode: "Standalone",
+            profileVersion: "test",
+            workspaceKind: "git",
+            promptCharacters: 10,
+            source: "test",
+            firstTokenMilliseconds: 120,
+            totalMilliseconds: 900,
+            generatedCharacters: 20,
+            outcome: .success,
+            failureCategory: nil,
+            failureFingerprint: nil,
+            suspectedTool: nil,
+            tools: [
+                ToolRunMetric(
+                    id: "tool",
+                    toolName: "read_file",
+                    backend: "Foundation Apple",
+                    startedAt: startedAt,
+                    inputContentCharacters: nil,
+                    inputLineCount: nil,
+                    inputParagraphCount: nil,
+                    durationMilliseconds: 40,
+                    outputCharacters: nil,
+                    outcome: .success,
+                    failureCategory: nil,
+                    failureFingerprint: nil
+                )
+            ],
+            inputTokenCount: 80,
+            cachedInputTokenCount: 20,
+            outputTokenCount: 30,
+            contextTokenCount: 50,
+            contextSize: 100
+        )
+        let boundaries = [
+            RuntimeBoundaryMetric(
+                boundary: .settlement,
+                durationMilliseconds: 12
+            ),
+            RuntimeBoundaryMetric(
+                boundary: .persistence,
+                durationMilliseconds: 8
+            ),
+            RuntimeBoundaryMetric(
+                boundary: .restore,
+                durationMilliseconds: 16
+            ),
+            RuntimeBoundaryMetric(
+                boundary: .mainActorPublication,
+                eventCount: 5
+            )
+        ]
+
+        let summary = RuntimeBaselineSummary(runs: [run], boundaries: boundaries)
+
+        #expect(summary.runCount == 1)
+        #expect(summary.averageFirstTokenMilliseconds == 120)
+        #expect(summary.averageProviderMilliseconds == 900)
+        #expect(summary.averageContextOccupancyPercent == 50)
+        #expect(summary.averageToolMilliseconds == 40)
+        #expect(summary.averageSettlementMilliseconds == 12)
+        #expect(summary.averagePersistenceMilliseconds == 8)
+        #expect(summary.averageRestoreMilliseconds == 16)
+        #expect(summary.averagePublicationCount == 5)
+    }
+
     private func metric(startedAt: Date) -> AgentRunMetric {
         AgentRunMetric(
             id: "run",

@@ -154,6 +154,15 @@ struct DeepSeekRequestAdapterTests {
         #expect(messages.compactMap { $0["content"] as? String } == ["First", "Second"])
     }
 
+    @Test("Plugin tool names are valid for DeepSeek's OpenAI-compatible payload")
+    func pluginToolNamesUseProviderSafeAliases() {
+        let id = TypeScriptPluginToolID(pluginID: "hello-turbo", toolName: "hello")
+
+        #expect(id.rawValue == "hello-turbo/hello")
+        #expect(id.codexName == "plugin_hello-turbo_hello")
+        #expect(id.codexName.range(of: "^[a-zA-Z0-9_-]+$", options: .regularExpression) != nil)
+    }
+
     private static func toolCall(id: String, name: String) -> [String: Any] {
         [
             "id": id,

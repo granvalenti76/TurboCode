@@ -5,7 +5,112 @@ All notable changes to TurboCode are documented in this file.
 The project follows Semantic Versioning while its public API and persisted
 formats continue to evolve before 1.0.
 
-## [Unreleased]
+## [0.4.0] - 2026-08-30
+
+TurboCode 0.4 turns the application into a broader native agent harness. The
+release combines a shared runtime for native and Codex sessions, a controlled
+TypeScript extension system, a more direct workspace and Git workflow, and a
+larger set of native macOS surfaces for inspecting and managing work.
+
+### Runtime and model workflows
+
+- Added `TurboCodeCore`, the provider- and UI-neutral runtime boundary behind
+  the application. Turns, tool results, structured widgets, cancellation, and
+  session persistence now share one ownership model while existing JSON
+  sessions remain compatible.
+- Native and Codex sessions now share the same lifecycle for turns, tools,
+  approvals, cancellation, and completion. Late results from an old request
+  cannot be projected into a newer conversation state.
+- Moved provider session ownership and lifecycle coordination behind runtime
+  actors and backend adapters without changing the visible conversation flow.
+- Added runtime diagnostics and baseline measurements for turn admission,
+  provider execution, tool work, settlement, persistence, restore, and UI
+  publication.
+- Kept the model-facing workflow compact: profiles expose only the tools they
+  need, while users can explicitly override those selections when a broader
+  harness is required.
+
+### Tools, workspaces, and safety
+
+- Bash can run the command required by the task. When a command or file
+  operation leaves the active workspace, TurboCode shows the exact operation
+  and waits for explicit approval before continuing.
+- The same host-owned boundary now covers reading, editing, copying, moving,
+  and other file operations outside the workspace. Targets are validated again
+  before execution.
+- Removed unnecessary model-facing gates and coordinator-authored path scopes
+  that could trap models in loops or produce false `path_outside_scope`
+  failures. Safety remains enforced by the host approval, review, revision,
+  timeout, and destructive-operation flows.
+- Reduced the default profile tool surface, including optional guide and file
+  search/removal capabilities. Explicit profile overrides can still enable the
+  capabilities a user needs.
+- Structured tool activity now appears in the conversation even when a tool
+  has no dedicated native presentation. Tool results can render diffs, Git
+  status, diagnostics, file listings, and custom widgets.
+
+### TypeScript plugins
+
+- Added the `@granvalenti/turbocode-sdk` with session access, cancellation,
+  typed tool definitions, and custom response widgets.
+- The SDK is bundled with the application and installed during onboarding at
+  `~/.turbocode/sdk/@granvalenti/turbocode-sdk/`, together with complete
+  examples for session search, local planning, HTTP lookup, echo tools, and
+  widgets.
+- Added automatic plugin discovery, profile activation, build validation,
+  atomic installation, `/reload`, process timeouts, cancellation, and crash
+  recovery. A failed build leaves the previous working plugin untouched.
+- Plugin processes remain separate Node.js processes. TurboCode retains
+  ownership of registration, workspace access, approvals, lifecycle, and
+  presentation; plugins receive value-based session snapshots rather than
+  access to application internals or provider credentials.
+- Aligned the SDK documentation, TypeScript signatures, generated runtime
+  package, examples, and Swift host contract.
+
+### Editorial Desk
+
+- Added an isolated Editorial Desk for writing and reviewing Markdown drafts.
+- Drafts support titles, subtitles, sections, types, publication dates, and
+  workspace-backed persistence.
+- Added ground-truth source import, source selection, provenance tracking,
+  editorial findings, proposed revisions, and review sidecars.
+- Added controlled publication of validated drafts into the active workspace,
+  with collision-safe filenames and recoverable metadata.
+- Added draft discovery from workspace listings and a native editor/inspector
+  workflow for writing, source management, review, and publication.
+
+### Session and sidebar experience
+
+- Added immediate animated deletion for workspace rows. Removing a workspace
+  from TurboCode removes its metadata and associated sessions from the app but
+  does not delete the underlying workspace directory.
+- Kept workspace-bound sessions inside their workspace and reserved the global
+  **Chats** section for sessions without a workspace.
+- Added compact circular swipe actions for deleting and sharing workspaces and
+  individual chats.
+- Added native transcript sharing: a single transcript can be sent to Notes or
+  saved as a JSON file, while multiple transcripts can be exported as a ZIP.
+- Chat deletion removes the corresponding session from disk as well as from the
+  sidebar.
+- Refined the native macOS toolbar, action icons, hover behavior, and compact
+  workspace/session presentation.
+
+### Provider and compatibility changes
+
+- Retired Apple Private Cloud Compute as a selectable default route. Legacy PCC
+  records remain readable only through the migration compatibility path.
+- Preserved support for Apple on-device models, local OpenAI-compatible Llama
+  servers, OpenAI Codex through the official CLI App Server, and DeepSeek API.
+- The 0.4 development line requires the latest macOS 27 beta, Xcode 27 beta,
+  Swift 6, and Node.js 24 or later when TypeScript plugins are used.
+
+### Experimental capabilities
+
+- Safari MCP remains an optional, coordinator-only integration. It is disabled
+  by default and can be enabled from **Settings > Agents > Experimental**.
+- On-device orchestration can delegate complex work to a configured worker
+  model while keeping the local model as the user-facing coordinator.
+- Automatic conversation titles make restored sessions easier to scan.
 
 ## [0.3.3] - 2026-08-21
 

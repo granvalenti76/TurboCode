@@ -128,6 +128,38 @@ struct ToolInteractionStoreTests {
         #expect(completeFile == "Reading Package.swift")
     }
 
+    @Test("Activity icons reuse the catalog and cover native edit tools")
+    func activityIconsUseCatalogAndNativeEditFallbacks() {
+        #expect(
+            ToolActivity(
+                id: "read",
+                toolName: "read_file",
+                summary: "Reading file"
+            ).systemImageName == "doc.text.magnifyingglass"
+        )
+        #expect(
+            ToolActivity(
+                id: "edit",
+                toolName: "edit_file",
+                summary: "Preparing file changes"
+            ).systemImageName == "pencil.and.outline"
+        )
+        #expect(
+            ToolActivity(
+                id: "patch",
+                toolName: "diff_patch",
+                summary: "Preparing file changes"
+            ).systemImageName == "doc.badge.gearshape"
+        )
+        #expect(
+            ToolActivity(
+                id: "plugin",
+                toolName: "plugin_tool",
+                summary: "Using plugin tool"
+            ).systemImageName == "wrench.and.screwdriver"
+        )
+    }
+
     @Test("ChatStore approval forwarding remains observable")
     func chatStoreApprovalForwardingRemainsObservable() async {
         let store = ChatStore(

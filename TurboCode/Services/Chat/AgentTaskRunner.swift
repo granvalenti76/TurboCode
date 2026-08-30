@@ -32,6 +32,20 @@ nonisolated struct AgentTaskToolCallEvent: Sendable {
     let taskID: String
     let attemptID: String
     let call: Transcript.ToolCall
+    /// The owning application turn, when this worker was launched from one.
+    let turnID: TurnID?
+
+    init(
+        taskID: String,
+        attemptID: String,
+        call: Transcript.ToolCall,
+        turnID: TurnID? = nil
+    ) {
+        self.taskID = taskID
+        self.attemptID = attemptID
+        self.call = call
+        self.turnID = turnID
+    }
 }
 
 /// Correlates a worker tool result without requiring transcript inspection.
@@ -40,6 +54,22 @@ nonisolated struct AgentTaskToolOutputEvent: Sendable {
     let attemptID: String
     let call: Transcript.ToolCall
     let output: Transcript.ToolOutput
+    /// The owning application turn, when this worker was launched from one.
+    let turnID: TurnID?
+
+    init(
+        taskID: String,
+        attemptID: String,
+        call: Transcript.ToolCall,
+        output: Transcript.ToolOutput,
+        turnID: TurnID? = nil
+    ) {
+        self.taskID = taskID
+        self.attemptID = attemptID
+        self.call = call
+        self.output = output
+        self.turnID = turnID
+    }
 }
 
 /// Typed lifecycle callbacks consumed by diagnostics now and Activity in M2.
@@ -404,7 +434,8 @@ nonisolated struct FoundationModelsTaskWorker: AgentTaskWorkerExecuting {
                         AgentTaskToolCallEvent(
                             taskID: envelope.taskID,
                             attemptID: envelope.attemptID,
-                            call: call
+                            call: call,
+                            turnID: envelope.parentTurnID
                         )
                     )
                 },
@@ -414,7 +445,8 @@ nonisolated struct FoundationModelsTaskWorker: AgentTaskWorkerExecuting {
                             taskID: envelope.taskID,
                             attemptID: envelope.attemptID,
                             call: call,
-                            output: output
+                            output: output,
+                            turnID: envelope.parentTurnID
                         )
                     )
                 }

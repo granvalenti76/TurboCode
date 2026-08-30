@@ -1,12 +1,11 @@
 import Foundation
 import Observation
 
-/// Owns the conversation catalog and its persistence boundary.
+/// Owns the observable conversation catalog.
 ///
-/// ChatStore remains responsible for coordinating a selected conversation with
-/// the model session and visible timeline. Keeping those runtime transitions
-/// outside this store prevents catalog mutations from implicitly rebuilding a
-/// model or discarding in-flight output.
+/// Persistence and runtime transitions are deliberately external: this store
+/// performs synchronous MVVM mutations only, so observing the sidebar can never
+/// trigger disk I/O or model-session work.
 @MainActor
 @Observable
 final class ConversationStore {
@@ -14,12 +13,6 @@ final class ConversationStore {
     var activeThreadID: String?
     var search: String = ""
     var showsArchivedThreads = false
-
-    private let repository: any ConversationRepository
-
-    init(repository: any ConversationRepository) {
-        self.repository = repository
-    }
 
     /// Inserts a new active catalog entry. ChatStore initializes the matching
     /// empty timeline and model session as one separate coordinated transition.
@@ -60,40 +53,19 @@ final class ConversationStore {
         threads[index].updatedAt = .now
     }
 
-    func persist(_ snapshot: ConversationSnapshot) throws {
-        try repository.save(snapshot)
-    }
-
-    /// Updates durable catalog metadata without loading the thread's timeline
-    /// into the active UI. This keeps rename, pin, and archive actions safe for
-    /// inactive conversations while preserving their original runtime state.
-    func persistMetadata(id: String) throws {
-        guard let conversation = threads.first(where: { $0.id == id }) else { return }
-        let existing = try repository.load(id: id)
-        let snapshot = ConversationSnapshot(
-            conversation: conversation,
-            modelBackend: existing?.modelBackend ?? ModelBackend.foundationApple.rawValue,
-            blocks: existing?.blocks ?? [],
-            transcript: existing?.transcript
-        )
-        try repository.save(snapshot)
-    }
-
     /// Merges durable sessions without duplicating drafts already present in
     /// memory, such as a thread created during application startup.
-    func restoreCatalog() throws {
-        let snapshots = try repository.list()
-        guard !snapshots.isEmpty else { return }
+    func restoreCatalog(_ conversations: [Conversation]) {
+        guard !conversations.isEmpty else { return }
         let existingIDs = Set(threads.map(\.id))
         threads.append(
-            contentsOf: snapshots
-                .map(\.conversation)
+            contentsOf: conversations
                 .filter { !existingIDs.contains($0.id) }
         )
     }
 
-    func snapshot(id: String) throws -> ConversationSnapshot? {
-        try repository.load(id: id)
+    func conversation(id: String) -> Conversation? {
+        threads.first { $0.id == id }
     }
 
     func renameThread(id: String, title: String) {
@@ -123,11 +95,8 @@ final class ConversationStore {
         threads[index].updatedAt = .now
     }
 
-    /// Deletes durable data before mutating the observable catalog. This
-    /// ordering ensures a failed filesystem operation cannot appear successful
-    /// until the next application launch.
-    func deleteThread(id: String) throws -> String? {
-        try repository.delete(id: id)
+    /// Applies a deletion only after the persistence use case succeeds.
+    func removeThread(id: String) -> String? {
         threads.removeAll { $0.id == id }
         if activeThreadID == id {
             activeThreadID = nil
@@ -135,40 +104,15 @@ final class ConversationStore {
         return threads.first?.id
     }
 
-    /// Deletes every persisted conversation associated with a workspace while
-    /// leaving the workspace directory itself untouched.
-    func removeWorkspace(_ path: String) -> WorkspaceConversationRemoval {
-        var sessionIDs = Set(
-            threads
-                .filter { $0.workspace == path }
-                .map(\.id)
-        )
-        if let storedSessions = try? repository.list() {
-            sessionIDs.formUnion(
-                storedSessions
-                    .filter { $0.conversation.workspace == path }
-                    .map(\.conversation.id)
-            )
-        }
-
-        var deletionErrors: [String] = []
-        for id in sessionIDs {
-            do {
-                try repository.delete(id: id)
-            } catch {
-                deletionErrors.append(error.localizedDescription)
-            }
-        }
-
-        let removedActiveThread = activeThreadID.map(sessionIDs.contains) ?? false
-        threads.removeAll { $0.workspace == path }
+    /// Applies only repository-confirmed removals. A failed durable deletion
+    /// remains visible rather than disappearing until the next app launch.
+    func removeThreads(ids: Set<String>) -> Bool {
+        let removedActiveThread = activeThreadID.map(ids.contains) ?? false
+        threads.removeAll { ids.contains($0.id) }
         if removedActiveThread {
             activeThreadID = nil
         }
-        return WorkspaceConversationRemoval(
-            removedActiveThread: removedActiveThread,
-            deletionErrors: deletionErrors
-        )
+        return removedActiveThread
     }
 
     func sortedThreads(selectedProject: String?) -> [Conversation] {
@@ -176,7 +120,12 @@ final class ConversationStore {
         return threads
             .filter { showsArchivedThreads || !$0.isArchived }
             .filter { thread in
-                guard let selectedProject else { return true }
+                guard let selectedProject else {
+                    // The global Chats section is reserved for conversations
+                    // with no workspace; project-bound sessions are rendered
+                    // only inside their workspace disclosure group.
+                    return thread.workspace == nil
+                }
                 return thread.workspace.flatMap {
                     URL(fileURLWithPath: $0).lastPathComponent
                 } == selectedProject
@@ -193,11 +142,4 @@ final class ConversationStore {
         threads[index].isArchived = isArchived
         threads[index].updatedAt = .now
     }
-}
-
-/// Workspace cleanup outcome consumed by ChatStore to reset runtime state and
-/// report partial persistence failures.
-struct WorkspaceConversationRemoval {
-    let removedActiveThread: Bool
-    let deletionErrors: [String]
 }

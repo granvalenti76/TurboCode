@@ -1,5 +1,4 @@
 import Foundation
-import FoundationModels
 
 // MARK: - TurboCode Configuration
 
@@ -23,6 +22,16 @@ public final class TurboCodeConfig {
     private var modelsURL: URL { rootURL.appendingPathComponent("models.json") }
     public var modelsConfigurationURL: URL { modelsURL }
     public var dynamicProfilesURL: URL { rootURL.appendingPathComponent("profiles.json") }
+    /// The single canonical installation root for TypeScript plugins.
+    public var pluginsDirectoryURL: URL {
+        rootURL.appendingPathComponent("plugins", isDirectory: true)
+    }
+    /// Local SDK packages are kept outside installed plugins so ordinary
+    /// TypeScript projects can import the stable package name without a
+    /// relative path into TurboCode's source tree.
+    public var sdkDirectoryURL: URL {
+        rootURL.appendingPathComponent("sdk", isDirectory: true)
+    }
     public var agentTuningConfigurationURL: URL { agentTuningURL }
     private var agentTuningURL: URL { rootURL.appendingPathComponent("config.json") }
     private var sessionsDir: URL { rootURL.appendingPathComponent("sessions") }
@@ -56,6 +65,7 @@ public final class TurboCodeConfig {
             && FileManager.default.fileExists(atPath: modelsURL.path)
             && FileManager.default.fileExists(atPath: agentTuningURL.path)
             && FileManager.default.fileExists(atPath: dynamicProfilesURL.path)
+            && FileManager.default.fileExists(atPath: sdkDirectoryURL.path)
             && FileManager.default.fileExists(atPath: diagnosticsDirectoryURL.path)
             && FileManager.default.fileExists(atPath: repositoryMapCacheDirectoryURL.path)
             && FileManager.default.fileExists(atPath: officialDocumentationDirectoryURL.path)
@@ -66,6 +76,14 @@ public final class TurboCodeConfig {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: skillsDirectoryURL, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: pluginsDirectoryURL,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: sdkDirectoryURL,
+            withIntermediateDirectories: true
+        )
         try FileManager.default.createDirectory(
             at: diagnosticsDirectoryURL,
             withIntermediateDirectories: true
@@ -204,7 +222,20 @@ public final class TurboCodeConfig {
             contents += "\n\n" + Self.xcodeProjectSkillSection + "\n"
             changed = true
         }
-        if !contents.contains(Self.pccSetupSkillMarker) {
+        if let markerRange = contents.range(of: Self.pccSetupSkillMarker) {
+            let sectionEnd = contents.range(
+                of: "\n\n<!-- turbocode-managed:",
+                range: markerRange.upperBound..<contents.endIndex
+            )?.lowerBound ?? contents.endIndex
+            let currentSection = contents[markerRange.lowerBound..<sectionEnd]
+            if String(currentSection) != Self.pccSetupSkillSection {
+                contents.replaceSubrange(
+                    markerRange.lowerBound..<sectionEnd,
+                    with: Self.pccSetupSkillSection
+                )
+                changed = true
+            }
+        } else {
             contents += "\n\n" + Self.pccSetupSkillSection + "\n"
             changed = true
         }
@@ -214,7 +245,7 @@ public final class TurboCodeConfig {
     }
 
     private static let turboCodeSkillDescription =
-        "description: Explain TurboCode, model and provider setup, credentials, workspace tools, approvals, skills, and interface behavior"
+        "description: Explain TurboCode, providers, workspace tools, approvals, skills, TypeScript plugins, and interface behavior"
 
     private static let providerCredentialsSkillMarker =
         "<!-- turbocode-managed:provider-credentials-v1 -->"
@@ -243,7 +274,7 @@ public final class TurboCodeConfig {
     ## Tool context policy
 
     Preserving the useful context window is a core TurboCode product principle.
-    Foundation Apple, Apple PCC, Llama, and the orchestrator discard completed
+    Foundation Apple, Llama, and the orchestrator discard completed
     tool-call exchanges before later generations. Keep this behavior when adding
     profiles or providers: tool results should accomplish the operation without
     permanently consuming the prompt budget.
@@ -261,20 +292,14 @@ public final class TurboCodeConfig {
     <!-- turbocode-managed:product-scope-v1 -->
     ## Product scope
 
-    TurboCode is a native macOS agentic development environment dedicated to
-    Swift and SwiftUI. Its supported workflow is to inspect, modify, build, test,
-    run, and manage Git-backed Xcode projects and Swift packages inside the active
-    workspace.
+    TurboCode is a native macOS agentic environment. The active workspace is its
+    default working directory, not a limitation on the kind of project or task.
+    Tools may access external filesystem paths after TurboCode obtains host-owned
+    user approval for the exact operation.
 
-    TurboCode is not a general desktop agent, broad multi-language IDE, terminal
-    replacement, or generic web assistant. It may edit documentation, resources,
-    and configuration when they directly belong to a Swift project task. For a
-    request outside this boundary, explain the limitation concisely and state what
-    related Swift-project work TurboCode can perform.
-
-    The underlying model changes capacity, not the product contract. Prefer flat
-    tools for small models and advanced atomic tools for capable models while
-    preserving the same workspace, review, Git, and recovery guarantees.
+    Let the model choose the available tool and workflow that best fit the task.
+    Structured tools add native review and presentation but do not prohibit Bash
+    or impose a language, framework, or application category.
     """
 
     private static let agentTuningSkillMarker =
@@ -308,9 +333,8 @@ public final class TurboCodeConfig {
 
     Capable standalone and delegated models receive `swift_workspace_map` for
     existing Swift, SwiftUI, Xcode, and Swift Package workspaces. Use its compact
-    overview, symbol search, and related-declaration queries before reading large
-    files. Then use `read_file` only for the focused line ranges needed by the
-    task. Apple on-device does not receive this tool; in the experimental
+    overview, symbol search, and related-declaration queries. Apple on-device does
+    not receive this tool; in the experimental
     delegation mode the configured worker maps the project.
     """
 
@@ -319,8 +343,8 @@ public final class TurboCodeConfig {
     ## Xcode project validation
 
     Capable standalone and delegated models receive `xcode_project` with flat
-    `inspect`, `build`, and `test` actions. Prefer it over `bash` for Xcode work:
-    it discovers schemes, reuses Xcode's incremental build state, parses
+    `inspect`, `build`, and `test` actions. It discovers schemes, reuses Xcode's
+    incremental build state, parses
     `.xcresult`, and
     returns bounded source diagnostics instead of raw compiler logs. Apple
     on-device does not receive this tool and delegates Xcode work in Orchestrator
@@ -329,22 +353,13 @@ public final class TurboCodeConfig {
 
     private static let pccSetupSkillSection = """
     <!-- turbocode-managed:pcc-setup-v1 -->
-    ## Apple PCC setup
+    ## Apple PCC status
 
-    Apple on-device is loaded directly by the Foundation Models framework and
-    needs no local server. Apple PCC uses the framework's local Chat Completions
-    bridge. When the user asks how to configure or start PCC, tell them to open
-    Terminal and run:
-
-    ```shell
-    fm serve --port 1976
-    ```
-
-    The process must remain running while PCC is in use. TurboCode already
-    configures `http://127.0.0.1:1976/v1` with model `pcc`, so no API key or manual
-    endpoint change is required. The local health endpoint is
-    `http://127.0.0.1:1976/health`. Then the user can select Apple PCC in Standalone
-    mode or as the delegate in **TurboCode > Settings > Agents > Orchestrator**.
+    Apple PCC through `fm serve` is retired and is not a selectable TurboCode
+    profile, override, composer model, or delegated worker. Do not recommend
+    starting `fm serve` or configuring the old PCC endpoint.
+    PCC-RETIREMENT: remove this managed compatibility section with the legacy
+    provider code.
     """
 
     private static let turboCodeSkill = """
@@ -362,7 +377,7 @@ public final class TurboCodeConfig {
     - Standalone gives the selected model direct access to workspace tools.
     - Orchestrator uses the Apple on-device model to coordinate work and delegates
       complex coding tasks to the configured powerful model.
-    - Available backends can include Foundation Apple, Apple PCC, and Llama-server.
+    - Available backends can include Foundation Apple and Llama-server.
 
     \(providerCredentialsSkillSection)
 
@@ -378,19 +393,21 @@ public final class TurboCodeConfig {
 
     - `read_file` reads numbered line ranges and reports an exact continuation when output reaches its configured ceiling.
     - `ripgrep` discovers workspace files or searches their text with optional filters.
-    - `file_system` lists and manages files inside the workspace.
+    - `file_system` lists and manages files; external paths pause for approval.
     - `git` initializes repositories and provides complete structured local and
-      remote Git workflows. Git writes are independent from the read-only bash
-      sandbox. Destructive operations are presented for approval before execution.
-    - `bash` runs bounded commands with read-only workspace access in a macOS process sandbox.
+      remote Git workflows. Destructive operations are presented for approval
+      before execution.
+    - `bash` runs bounded commands from the active workspace and may write inside
+      it. Access outside the workspace is denied first and can continue only after
+      TurboCode presents the exact command for host-owned user approval. Every call
+      starts again from the reported working directory; `cd` never changes the
+      workspace used by later calls.
     - `swift_package_manager` provides structured SwiftPM initialization, dependency
       editing, resolution, builds, tests, runs, cleanup, and package inspection.
-      Prefer it over `bash` whenever it supports the requested SwiftPM action.
     - `xcode_project` inspects, builds, and tests Xcode containers with compact
       structured diagnostics for capable models.
-    - Every model uses the flat single-change `edit_file` schema. TurboCode handles
-      transaction assembly internally and presents the review widget with additions,
-      deletions, Review, and Undo.
+    - `edit_file` supports atomic changes inside or outside the workspace and presents
+      the review widget with additions, deletions, Review, and Undo.
     - Text creation and editing run automatically. File or directory deletion and
       destructive Git operations ask for approval.
 
@@ -409,6 +426,7 @@ public final class TurboCodeConfig {
     Their names and descriptions stay in the session instructions; their full body
     is loaded on demand when relevant. Users can type `/skills`, `/skill <name>`, or
     `/<skill-name>` in the composer.
+
     """
 
     private static let skillCreatorSkill = """
@@ -421,8 +439,8 @@ public final class TurboCodeConfig {
     Help the user design and install a reusable TurboCode skill. When a workspace
     is selected, create the skill at
     `.agents/skills/<skill-name>/SKILL.md` using `create_skill` when available;
-    otherwise use the available workspace write tool (`edit_file`, `apply_edits`,
-    or `file_system`). The write must go through TurboCode's normal Review/Undo
+    otherwise use `edit_file` to create the same workspace-relative path. The
+    write must go through TurboCode's normal Review/Undo
     transaction; never claim the skill was saved until the tool succeeds. Without
     a workspace, return the complete file and explain that the user must choose a
     workspace before installation.
@@ -444,9 +462,11 @@ public final class TurboCodeConfig {
     procedural and focused; avoid repeating general TurboCode behavior. When asked
     to create a skill, validate the name and description, create the directory and
     file when workspace tools are available, then report the exact path. TurboCode
-    discovers valid files automatically before the next submitted prompt. Keep the
-    full file in the response only when the user asks for a draft or when the write
-    cannot be performed.
+    discovers valid files automatically before the next submitted prompt. The
+    skill body should be self-contained; references to supporting workspace files
+    must use paths that are clear from the active project. Keep the full file in
+    the response only when the user asks for a draft or when the write cannot be
+    performed.
     """
 
     // MARK: - Agent Tuning
@@ -525,7 +545,11 @@ public final class TurboCodeConfig {
 
     public func loadRemoteModels() throws -> [RemoteModelConfig] {
         guard FileManager.default.fileExists(atPath: modelsURL.path) else { return [] }
+        // PCC remains decodable so old configuration files stay readable, but
+        // Apple's retired `fm serve` route must not re-enter the app through
+        // persisted model metadata.
         return try JSONDecoder().decode([RemoteModelConfig].self, from: Data(contentsOf: modelsURL))
+            .filter { !$0.isRetiredPCC }
     }
 
     private func migrateRemoteModels() throws {
@@ -547,57 +571,6 @@ public final class TurboCodeConfig {
         try encoder.encode(models).write(to: modelsURL, options: .atomic)
     }
 
-    // MARK: - Per-Session Persistence
-
-    /// Saves one session to `~/.turbocode/sessions/<id>.json`.
-    /// Creates the sessions directory if needed.
-    public func saveSession(_ session: StoredSession) throws {
-        let dir = sessionsDir
-        if !FileManager.default.fileExists(atPath: dir.path) {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        }
-        let url = sessionURL(for: session.id)
-        try encoder.encode(session).write(to: url, options: .atomic)
-        print("[TurboCode] Saved session \(session.id) → \(url.path)")
-    }
-
-    /// Loads one session by id.
-    public func loadSession(id: String) throws -> StoredSession? {
-        let url = sessionURL(for: id)
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return try JSONDecoder().decode(StoredSession.self, from: Data(contentsOf: url))
-    }
-
-    /// Lists all session files, optionally filtered by project name.
-    public func listSessions(project: String? = nil) throws -> [StoredSession] {
-        guard FileManager.default.fileExists(atPath: sessionsDir.path) else {
-            try FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
-            return []
-        }
-        let files = try FileManager.default.contentsOfDirectory(at: sessionsDir,
-            includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "json" }
-
-        let all: [StoredSession] = try files.compactMap { url in
-            try JSONDecoder().decode(StoredSession.self, from: Data(contentsOf: url))
-        }
-        if let project {
-            return all.filter { $0.projectName == project }
-        }
-        return all
-    }
-
-    /// Deletes a session file.
-    public func deleteSession(id: String) throws {
-        let url = sessionURL(for: id)
-        if FileManager.default.fileExists(atPath: url.path) {
-            try FileManager.default.removeItem(at: url)
-        }
-    }
-
-    private func sessionURL(for id: String) -> URL {
-        sessionsDir.appendingPathComponent("\(id).json")
-    }
 }
 
 // MARK: - Remote Model Configuration
@@ -609,6 +582,7 @@ nonisolated public enum RemoteModelProvider: String, Codable, Hashable, Sendable
 
 nonisolated public enum RemoteModelRole: String, Codable, Hashable, Sendable {
     case local
+    // PCC-RETIREMENT: remove after old models.json records no longer need decoding.
     case pcc
     case premium
 }
@@ -650,6 +624,13 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
     public var repositoryMap: RemoteRepositoryMapCapability
     public var credential: String?
     public var enabled: Bool
+
+    /// Temporary compatibility gate for model records written before Apple
+    /// disabled the PCC model behind `fm serve`.
+    // PCC-RETIREMENT: remove this property together with `RemoteModelRole.pcc`.
+    public var isRetiredPCC: Bool {
+        role == .pcc || id == "apple-pcc"
+    }
 
     public init(
         id: String,
@@ -721,16 +702,6 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
             temperature: 0.6
         ),
         RemoteModelConfig(
-            id: "apple-pcc",
-            name: "Apple PCC",
-            url: "http://127.0.0.1:1976/v1",
-            modelName: "pcc",
-            temperature: 0.6,
-            role: .pcc,
-            reasoningTransport: .none,
-            supportsReasoning: false
-        ),
-        RemoteModelConfig(
             id: "deepseek",
             name: "DeepSeek V4 Flash",
             url: "https://api.deepseek.com",
@@ -748,108 +719,5 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
 
     public static var fallbackLlama: RemoteModelConfig {
         defaults.first(where: { $0.id == "llama" })!
-    }
-}
-
-// MARK: - Stored Session
-
-/// A full persisted session: metadata + conversation blocks.
-public struct StoredSession: Codable, Hashable, Sendable, Identifiable {
-    public static let currentSchemaVersion = 1
-
-    /// Versioning lets new catalog metadata be added without making older
-    /// session files unreadable during app upgrades.
-    public var schemaVersion: Int
-    public let id: String
-    public var title: String
-    public var projectName: String
-    public var workspacePath: String?
-    public var createdAt: Date
-    public var updatedAt: Date
-    public var isPinned: Bool
-    public var isArchived: Bool
-    public var mode: ConversationMode
-    public var modelBackend: String
-    public var blocks: [StoredBlock]
-    /// The semantic model history. Optional so sessions written by older
-    /// TurboCode versions remain decodable.
-    public var transcript: Transcript?
-
-    public init(id: String = UUID().uuidString, title: String,
-                projectName: String, workspacePath: String? = nil,
-                createdAt: Date = .now, updatedAt: Date = .now,
-                isPinned: Bool = false, isArchived: Bool = false,
-                mode: ConversationMode = .agent,
-                modelBackend: String = "Llama-server",
-                blocks: [StoredBlock] = [], transcript: Transcript? = nil) {
-        self.schemaVersion = Self.currentSchemaVersion
-        self.id = id; self.title = title; self.projectName = projectName
-        self.workspacePath = workspacePath; self.createdAt = createdAt
-        self.updatedAt = updatedAt; self.modelBackend = modelBackend
-        self.isPinned = isPinned; self.isArchived = isArchived; self.mode = mode
-        self.blocks = blocks
-        self.transcript = transcript
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case schemaVersion, id, title, projectName, workspacePath
-        case createdAt, updatedAt, isPinned, isArchived, mode
-        case modelBackend, blocks, transcript
-    }
-
-    public init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try values.decodeIfPresent(Int.self, forKey: .schemaVersion)
-            ?? Self.currentSchemaVersion
-        id = try values.decode(String.self, forKey: .id)
-        title = try values.decode(String.self, forKey: .title)
-        projectName = try values.decode(String.self, forKey: .projectName)
-        workspacePath = try values.decodeIfPresent(String.self, forKey: .workspacePath)
-        createdAt = try values.decode(Date.self, forKey: .createdAt)
-        updatedAt = try values.decode(Date.self, forKey: .updatedAt)
-        isPinned = try values.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
-        isArchived = try values.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
-        mode = try values.decodeIfPresent(ConversationMode.self, forKey: .mode) ?? .agent
-        modelBackend = try values.decode(String.self, forKey: .modelBackend)
-        blocks = try values.decodeIfPresent([StoredBlock].self, forKey: .blocks) ?? []
-        transcript = try values.decodeIfPresent(Transcript.self, forKey: .transcript)
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        // The stable session identity is sufficient for collection hashing;
-        // Transcript is Equatable and Codable but intentionally not Hashable.
-        hasher.combine(id)
-    }
-}
-
-// MARK: - Stored Block
-
-/// Codable snapshot of a ChatBlock.
-public struct StoredBlock: Codable, Hashable, Sendable, Identifiable {
-    public let id: String
-    public let kind: String     // ChatBlockKind rawValue
-    public let text: String
-    public let createdAt: Date
-    public var model: String?
-    public var providerId: String?
-    public var diffPatch: DiffPatchBlock?
-    public var gitCommit: GitCommitBlock?
-    public var gitStatus: GitStatusBlock?
-    public var productGuide: ProductGuideBlock?
-    public var workspaceListing: WorkspaceListingBlock?
-
-    public init(id: String = UUID().uuidString, kind: String, text: String,
-                createdAt: Date = .now, model: String? = nil, providerId: String? = nil,
-                diffPatch: DiffPatchBlock? = nil, gitCommit: GitCommitBlock? = nil,
-                gitStatus: GitStatusBlock? = nil,
-                productGuide: ProductGuideBlock? = nil,
-                workspaceListing: WorkspaceListingBlock? = nil) {
-        self.id = id; self.kind = kind; self.text = text
-        self.createdAt = createdAt; self.model = model; self.providerId = providerId
-        self.diffPatch = diffPatch
-        self.gitCommit = gitCommit
-        self.gitStatus = gitStatus
-        self.productGuide = productGuide
-        self.workspaceListing = workspaceListing
     }
 }

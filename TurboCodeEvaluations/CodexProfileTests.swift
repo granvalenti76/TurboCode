@@ -406,6 +406,15 @@ struct CodexProfileTests {
         )
     }
 
+    @Test("Codex plugin tool names are valid for the Responses API")
+    func codexPluginToolNamesUseResponsesCharacters() {
+        let id = TypeScriptPluginToolID(pluginID: "hello-turbo", toolName: "hello")
+
+        #expect(id.rawValue == "hello-turbo/hello")
+        #expect(id.codexName == "plugin_hello-turbo_hello")
+        #expect(id.codexName.range(of: "^[a-zA-Z0-9_-]+$", options: .regularExpression) != nil)
+    }
+
     @Test("Codex list workspace calls the native listing pipeline")
     func codexListWorkspaceCallsNativeListingPipeline() async throws {
         let root = FileManager.default.temporaryDirectory
@@ -433,7 +442,7 @@ struct CodexProfileTests {
         )
 
         #expect(execution.result.succeeded)
-        guard case .workspaceListing(let listing) = execution.presentation else {
+        guard case .workspaceListing(let listing) = execution.receipt else {
             Issue.record("Expected a workspace listing presentation")
             return
         }

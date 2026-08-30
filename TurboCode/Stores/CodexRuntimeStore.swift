@@ -1,54 +1,15 @@
 import AppKit
 import Foundation
 import Observation
-import FoundationModels
 
-/// Owns the complete Codex App Server lifecycle.
+/// Observable Codex configuration and connection-state facade.
 ///
-/// Authentication, model discovery, server thread identity, token accounting,
-/// context handoff, approvals, and dynamic-tool execution all belong to this
-/// bounded runtime. The store emits presentation events but never mutates chat
-/// blocks, conversations, workspace selection, or navigation.
+/// The facade opens authentication UI and persists user preferences. Concrete
+/// client, thread, approval, handoff, and turn state belong exclusively to
+/// `CodexExecutionEngine`, so SwiftUI lifetime cannot own provider execution.
 @MainActor
 @Observable
 final class CodexRuntimeStore {
-    struct TurnRequest {
-        let turboThreadID: String
-        let prompt: String
-        let workspaceRoot: String
-        let workspaceName: String?
-        let agentTuning: AgentTuningConfig
-        /// Skills are captured per turn so profile-scoped catalogs and their
-        /// load_skill tool remain aligned with the active runtime session.
-        let availableSkills: [TurboCodeSkillDefinition]
-        /// A profile-owned selection overrides the composer preference for this
-        /// route without replacing that global direct-Codex preference.
-        let modelID: String?
-        let reasoningEffort: CodexReasoningEffort?
-        /// Present only for an explicit coordinator profile. Direct Codex
-        /// threads therefore never advertise a delegation tool they cannot use.
-        let delegationInvoker: (any AgentTaskInvoking)?
-    }
-
-    struct TurnResult {
-        let assistantText: String
-        let reasoningText: String
-    }
-
-    struct TurnEvents {
-        let liveAssistantChanged: (String) -> Void
-        let liveReasoningChanged: (String) -> Void
-        let activityStarted: (CodexDynamicToolCall, String) -> Void
-        let activityEnded: (String) -> Void
-        let presentationRequested: (CodexToolPresentation) -> Void
-        let approvalRequested: (ApprovalRequest) -> Void
-    }
-
-    struct Handoff {
-        let history: [Transcript.Entry]
-        let didSummarize: Bool
-    }
-
     var connectionState: CodexConnectionState = .idle
     var model: CodexModelDescriptor?
     var models: [CodexModelDescriptor] = []
@@ -71,6 +32,10 @@ final class CodexRuntimeStore {
         models.first { $0.id == preferredModelID }
     }
 
+    /// Immutable preference snapshot captured when a backend adapter is built.
+    /// Execution code never reaches back into this observable facade mid-turn.
+    var preferredExecutionModelID: String { preferredModelID }
+
     var displayName: String {
         model?.displayName
             ?? UserDefaults.standard.string(forKey: "codexModelDisplayName")
@@ -82,26 +47,12 @@ final class CodexRuntimeStore {
         return false
     }
 
-    private let client: CodexAppServerClient
+    let executionEngine: CodexExecutionEngine
     private var preferredModelID: String =
         UserDefaults.standard.string(forKey: "codexModelID")
             ?? CodexAppServerClient.lunaModelID
-    private var threadIDs: [String: String] = [:]
-    private struct ThreadConfiguration: Equatable {
-        let includesDelegation: Bool
-        let safariMCPEnabled: Bool
-        let modelID: String
-        let skillNames: [String]
-    }
-
-    private var threadConfigurations: [String: ThreadConfiguration] = [:]
-    private var tokenUsageByThread: [String: CodexTokenUsage] = [:]
-    private var importedContexts: [String: String] = [:]
-    private var handoffBoundaryBlockIDs: [String: String] = [:]
-    private var approvals: [String: CodexApprovalRequest] = [:]
-
-    init(client: CodexAppServerClient = CodexAppServerClient()) {
-        self.client = client
+    init(executionEngine: CodexExecutionEngine = CodexExecutionEngine()) {
+        self.executionEngine = executionEngine
     }
 
     func select(modelID: String? = nil) async throws {
@@ -110,10 +61,10 @@ final class CodexRuntimeStore {
             UserDefaults.standard.set(modelID, forKey: "codexModelID")
         }
         connectionState = .connecting
-        let snapshot = try await client.prepareCodex(
+        let snapshot = try await executionEngine.prepareCodex(
             selectedModelID: preferredModelID
         )
-        apply(snapshot, persistsPreference: true)
+        applyExecutionSnapshot(snapshot, persistsPreference: true)
     }
 
     func markSignedOut() {
@@ -126,19 +77,19 @@ final class CodexRuntimeStore {
 
     func signIn() async throws {
         connectionState = .authenticating
-        let login = try await client.startChatGPTLogin()
+        let login = try await executionEngine.startChatGPTLogin()
         loginURL = login.authorizationURL
         guard NSWorkspace.shared.open(login.authorizationURL) else {
             throw CodexAppServerError.loginFailed(
                 "The authorization page could not be opened."
             )
         }
-        try await client.waitForChatGPTLogin(id: login.id)
+        try await executionEngine.waitForChatGPTLogin(id: login.id)
         connectionState = .connecting
-        let snapshot = try await client.prepareCodex(
+        let snapshot = try await executionEngine.prepareCodex(
             selectedModelID: preferredModelID
         )
-        apply(snapshot, persistsPreference: true)
+        applyExecutionSnapshot(snapshot, persistsPreference: true)
         loginURL = nil
     }
 
@@ -163,14 +114,11 @@ final class CodexRuntimeStore {
     func captureImportedContext(
         turboThreadID: String,
         blocks: [ChatBlock]
-    ) {
-        let context = RuntimeContextHandoff.render(
-            blocks: blocks,
-            after: handoffBoundaryBlockIDs[turboThreadID]
+    ) async {
+        await executionEngine.captureImportedContext(
+            turboThreadID: turboThreadID,
+            blocks: blocks
         )
-        if !context.isEmpty {
-            importedContexts[turboThreadID] = context
-        }
     }
 
     /// Restored Codex identifiers are process-local, so the visible persisted
@@ -178,218 +126,52 @@ final class CodexRuntimeStore {
     func restoreImportedContext(
         turboThreadID: String,
         blocks: [ChatBlock]
-    ) {
-        let context = RuntimeContextHandoff.render(blocks: blocks)
-        if !context.isEmpty {
-            importedContexts[turboThreadID] = context
-        }
+    ) async {
+        await executionEngine.restoreImportedContext(
+            turboThreadID: turboThreadID,
+            blocks: blocks
+        )
     }
 
     func prepareHandoff(
         turboThreadID: String,
         blocks: [ChatBlock],
         workspaceRoot: String
-    ) async -> Handoff {
-        let usage = tokenUsageByThread[turboThreadID]
-        let requiresSummary = RuntimeContextHandoff.shouldSummarizeCodexContext(
-            lastTotalTokens: usage?.lastTotalTokens
-        )
-        if requiresSummary,
-           let summary = try? await requestHandoffSummary(
-                turboThreadID: turboThreadID,
-                workspaceRoot: workspaceRoot
-           ),
-           !summary.isEmpty {
-            return Handoff(
-                history: RuntimeContextHandoff.transcript(fromSummary: summary),
-                didSummarize: true
-            )
-        }
-        if requiresSummary {
-            let fallback = RuntimeContextHandoff.render(
-                blocks: blocks,
-                maximumCharacters: 24_000
-            )
-            return Handoff(
-                history: RuntimeContextHandoff.transcript(
-                    fromSummary: fallback
-                ),
-                didSummarize: false
-            )
-        }
-        return Handoff(
-            history: RuntimeContextHandoff.transcript(from: blocks),
-            didSummarize: false
+    ) async -> CodexHandoff {
+        await executionEngine.prepareHandoff(
+            turboThreadID: turboThreadID,
+            blocks: blocks,
+            workspaceRoot: workspaceRoot,
+            modelID: model?.model ?? preferredModelID
         )
     }
 
     func completeHandoff(
         turboThreadID: String,
         boundaryBlockID: String?
-    ) {
-        handoffBoundaryBlockIDs[turboThreadID] = boundaryBlockID
-        importedContexts.removeValue(forKey: turboThreadID)
+    ) async {
+        await executionEngine.completeHandoff(
+            turboThreadID: turboThreadID,
+            boundaryBlockID: boundaryBlockID
+        )
     }
 
     /// App Server tool declarations are immutable for a thread. Changing from
     /// direct Codex to a coordinator route (or back) must therefore start a new
     /// server thread while the caller preserves the visible conversation.
-    func resetThread(turboThreadID: String) {
-        threadIDs.removeValue(forKey: turboThreadID)
-        threadConfigurations.removeValue(forKey: turboThreadID)
-        tokenUsageByThread.removeValue(forKey: turboThreadID)
-    }
-
-    func runTurn(
-        request: TurnRequest,
-        events: TurnEvents
-    ) async throws -> TurnResult {
-        let requestedModelID = request.modelID ?? preferredModelID
-        let snapshot = try await client.prepareCodex(
-            selectedModelID: requestedModelID
-        )
-        apply(
-            snapshot,
-            persistsPreference: request.modelID == nil
-        )
-
-        let includesDelegation = request.delegationInvoker != nil
-        let configuration = ThreadConfiguration(
-            includesDelegation: includesDelegation,
-            safariMCPEnabled: request.agentTuning.experimental.safariMCPEnabled,
-            modelID: snapshot.selectedModel.id,
-            skillNames: request.availableSkills.map(\.name)
-        )
-        let threadID: String
-        if let existing = threadIDs[request.turboThreadID],
-           threadConfigurations[request.turboThreadID] == configuration {
-            threadID = existing
-        } else {
-            let dynamicTools = CodexTurboCodeToolBridge.specifications(
-                workspaceRoot: request.workspaceRoot,
-                agentTuning: request.agentTuning,
-                includesDelegation: includesDelegation,
-                availableSkills: request.availableSkills,
-                safariMCPEnabled: request.agentTuning.experimental.safariMCPEnabled
-            )
-            let workspaceInstructions = WorkspaceInstructionsLoader.load(
-                from: request.workspaceRoot
-            )
-            let developerInstructions = CodexTurboCodeToolBridge.developerInstructions(
-                workspaceRoot: request.workspaceRoot,
-                agentTuning: request.agentTuning,
-                dynamicTools: dynamicTools,
-                availableSkills: request.availableSkills,
-                workspaceInstructions: workspaceInstructions
-            )
-            // App Server instructions are sticky for the thread. Keeping them
-            // fixed preserves Codex context and cache reuse across later turns.
-            threadID = try await client.startThread(
-                workspaceRoot: request.workspaceRoot,
-                modelID: snapshot.selectedModel.model,
-                dynamicTools: dynamicTools,
-                developerInstructions: developerInstructions
-            )
-            threadIDs[request.turboThreadID] = threadID
-            threadConfigurations[request.turboThreadID] = configuration
-        }
-
-        let requestedEffort = request.reasoningEffort
-            ?? reasoningEffort
-        let effectiveEffort = snapshot.selectedModel.supportedReasoningEfforts
-            .contains(where: { $0.reasoningEffort == requestedEffort })
-            ? requestedEffort
-            : snapshot.selectedModel.defaultReasoningEffort
-        let stream = try await client.startTurn(
-            threadID: threadID,
-            text: request.prompt,
-            workspaceRoot: request.workspaceRoot,
-            modelID: snapshot.selectedModel.model,
-            effort: effectiveEffort,
-            additionalApplicationContext:
-                importedContexts[request.turboThreadID]
-        )
-        var assistantText = ""
-        var reasoningText = ""
-        for try await event in stream {
-            try Task.checkCancellation()
-            switch event {
-            case .agentDelta(let delta):
-                assistantText += delta
-                events.liveAssistantChanged(assistantText)
-            case .reasoningDelta(let delta):
-                reasoningText += delta
-                events.liveReasoningChanged(reasoningText)
-            case .diffUpdated:
-                // Supported edits use apply_edits, whose review transaction is
-                // authoritative in TurboCode.
-                break
-            case .toolCallRequested(let call):
-                events.activityStarted(
-                    call,
-                    CodexTurboCodeToolBridge.activitySummary(for: call)
-                )
-                let result: CodexDynamicToolResult
-                do {
-                    let execution = try await CodexTurboCodeToolBridge.execute(
-                        call,
-                        workspaceRoot: request.workspaceRoot,
-                        workspaceName: request.workspaceName,
-                        agentTuning: request.agentTuning,
-                        availableSkills: request.availableSkills,
-                        delegationInvoker: request.delegationInvoker
-                    )
-                    if let presentation = execution.presentation {
-                        events.presentationRequested(presentation)
-                    }
-                    result = execution.result
-                } catch {
-                    result = .failure(error.localizedDescription)
-                }
-                events.activityEnded(call.callID)
-                try await client.resolveToolCall(call, result: result)
-            case .approvalRequested(let approval):
-                approvals[approval.presentationID] = approval
-                events.approvalRequested(
-                    ApprovalRequest(
-                        id: approval.presentationID,
-                        operation: approval.operation,
-                        path: approval.path,
-                        summary: approval.summary
-                    )
-                )
-            case .tokenUsageUpdated(let usage):
-                tokenUsageByThread[request.turboThreadID] = usage
-            case .completed(let status, let errorMessage):
-                if status == "failed" {
-                    // A failed turn is a valid App Server response and may be
-                    // transient (such as model capacity), not malformed JSON.
-                    throw CodexAppServerError.turnFailed(
-                        errorMessage ?? "Codex turn failed."
-                    )
-                }
-            }
-        }
-        try Task.checkCancellation()
-        return TurnResult(
-            assistantText: assistantText,
-            reasoningText: reasoningText
-        )
+    func resetThread(turboThreadID: String) async {
+        await executionEngine.resetThread(turboThreadID: turboThreadID)
     }
 
     func resolveApproval(id: String, approved: Bool) async throws -> Bool {
-        guard let request = approvals.removeValue(forKey: id) else {
-            return false
-        }
-        try await client.resolveApproval(request, approved: approved)
-        return true
+        try await executionEngine.resolveApproval(id: id, approved: approved)
     }
 
     func interrupt() async {
-        await client.interruptActiveTurn()
+        await executionEngine.interrupt()
     }
 
-    private func apply(
+    func applyExecutionSnapshot(
         _ snapshot: CodexRuntimeSnapshot,
         persistsPreference: Bool
     ) {
@@ -419,57 +201,4 @@ final class CodexRuntimeStore {
         connectionState = .ready(planType: snapshot.planType)
     }
 
-    /// Hidden compaction turns cannot execute tools or approve mutations.
-    private func requestHandoffSummary(
-        turboThreadID: String,
-        workspaceRoot: String
-    ) async throws -> String {
-        guard let threadID = threadIDs[turboThreadID] else {
-            throw CodexAppServerError.invalidResponse(
-                "missing Codex thread for context handoff"
-            )
-        }
-        let prompt = """
-        Prepare a compact technical handoff for another coding model. Do not \
-        call tools and do not continue the task. Include: the user's objective, \
-        decisions and constraints, files changed or inspected, completed \
-        validations, current repository/runtime state, unresolved issues, and \
-        the exact next useful action. Preserve concrete paths, identifiers, and \
-        errors. Omit private reasoning and conversational filler.
-        """
-        let stream = try await client.startTurn(
-            threadID: threadID,
-            text: prompt,
-            workspaceRoot: workspaceRoot,
-            modelID: model?.model ?? preferredModelID,
-            effort: .low
-        )
-        var summary = ""
-        for try await event in stream {
-            switch event {
-            case .agentDelta(let delta):
-                summary += delta
-            case .toolCallRequested(let call):
-                try await client.resolveToolCall(
-                    call,
-                    result: .failure(
-                        "Tools are disabled while preparing a runtime handoff."
-                    )
-                )
-            case .approvalRequested(let request):
-                try await client.resolveApproval(request, approved: false)
-            case .tokenUsageUpdated(let usage):
-                tokenUsageByThread[turboThreadID] = usage
-            case .completed(let status, let errorMessage):
-                if status == "failed" {
-                    throw CodexAppServerError.turnFailed(
-                        errorMessage ?? "Codex context summary failed."
-                    )
-                }
-            case .reasoningDelta, .diffUpdated:
-                break
-            }
-        }
-        return summary.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
 }

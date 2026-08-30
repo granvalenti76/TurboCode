@@ -6,6 +6,20 @@ import Testing
 @MainActor
 @Suite("ChatStore characterization")
 struct ChatStoreCharacterizationTests {
+    @Test("External approvals identify the tool and exact targets")
+    func externalApprovalPresentationIsSpecific() {
+        let request = ApprovalRequest(
+            id: "external",
+            operation: "workspace.external.file_system.write",
+            path: "/tmp/source.txt",
+            destination: "/tmp/destination.txt",
+            summary: "External write"
+        )
+
+        #expect(request.displaySummary == "Allow file system to write outside the active workspace?")
+        #expect(request.externalTargetDetails == "/tmp/source.txt\n/tmp/destination.txt")
+    }
+
     @Test("Approval requests are presented once in FIFO order")
     func approvalQueueIsFIFOAndDeduplicated() {
         let store = ChatStore(
@@ -35,36 +49,6 @@ struct ChatStoreCharacterizationTests {
 
         store.dismissApproval(id: second.id)
         #expect(store.pendingApproval == nil)
-    }
-
-    @Test("Compatibility approval envelopes retain typed review data")
-    func approvalEnvelopeDecodesReviewData() throws {
-        let request = try #require(ApprovalRequest(toolOutput: """
-        TURBOCODE_APPROVAL_REQUIRED
-        approval_id: approval-1
-        operation: move
-        path: /tmp/source.txt
-        destination: /tmp/destination.txt
-        summary: Move source.txt
-        """))
-
-        #expect(request.id == "approval-1")
-        #expect(request.operation == "move")
-        #expect(request.path == "/tmp/source.txt")
-        #expect(request.destination == "/tmp/destination.txt")
-        #expect(request.summary == "Move source.txt")
-    }
-
-    @Test("Incomplete approval envelopes are rejected")
-    func incompleteApprovalEnvelopeIsRejected() {
-        let request = ApprovalRequest(toolOutput: """
-        TURBOCODE_APPROVAL_REQUIRED
-        approval_id: approval-1
-        operation: delete
-        path: /tmp/file.txt
-        """)
-
-        #expect(request == nil)
     }
 
     @Test("Git refresh publishes repository and branch state")

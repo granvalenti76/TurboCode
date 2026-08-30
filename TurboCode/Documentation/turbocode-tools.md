@@ -106,6 +106,18 @@ approval.
 Removes one workspace file through an explicit approval request. It is separate
 from general editing so destructive intent stays visible and reviewable.
 
+### `safari_mcp`
+
+Controls Safari through TurboCode's experimental Safari MCP integration. It is
+available only after enabling Safari MCP in **Agents > Experimental** and while
+the current Safari browsing context remains valid. TurboCode keeps the
+capability disabled by default, does not register it when the opt-in is off,
+and reports lost or unavailable browsing contexts as bounded tool failures.
+
+Safari MCP is a coordinator-only capability. It is never passed to delegated
+workers, whose tool surface remains restricted to the configured workspace and
+worker profile boundaries.
+
 ## Build, test, packages, and Git
 
 ### `xcode_project`
@@ -141,10 +153,20 @@ and file tools whenever they apply.
 
 ## Skills and orchestration
 
+TurboCode's product-level skills are provider-neutral `SKILL.md` instruction
+files. Their name and description form the session catalog; their body is loaded
+only when relevant. Foundation Models may use an internal dynamic-instructions
+adapter, but that implementation detail does not define another installation
+format. A user-created skill belongs at `.agents/skills/<name>/SKILL.md` in the
+active workspace. Keep its instructions self-contained and use clear
+workspace-relative paths for any supporting project files.
+
 ### `load_skill`
 
 Loads the instructions of one installed skill on demand. The tool is registered
-only when the active profile has access to at least one skill.
+only when the active profile has access to at least one skill. `/skill <name>` and
+`/<name>` are explicit host-side selections and do not depend on the model first
+choosing the tool itself.
 
 ### `create_skill`
 

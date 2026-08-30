@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - SettingsTabView — native macOS settings with a sidebar-style TabView
 
@@ -11,6 +12,10 @@ struct SettingsTabView: View {
             GeneralSettingsView()
                 .tabItem { Label("General", systemImage: "slider.horizontal.3") }
                 .tag(SettingsSection.general)
+
+            EditorialDeskSettingsView()
+                .tabItem { Label("Editorial Desk", systemImage: "newspaper") }
+                .tag(SettingsSection.editorialDesk)
 
             ProviderSettingsView()
                 .tabItem { Label("Providers", systemImage: "network") }
@@ -28,6 +33,311 @@ struct SettingsTabView: View {
         .tabViewStyle(.sidebarAdaptable)
         .frame(minWidth: 600, minHeight: 400)
         .environment(settings)
+    }
+}
+
+// MARK: - Editorial Desk Settings
+
+struct EditorialDeskSettingsView: View {
+    @Environment(SettingsStore.self) private var settings
+
+    var body: some View {
+        Form {
+            Section {
+                Text("Define the sections and article types available in the Editorial Desk metadata bar.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Sections") {
+                if settings.editorialDeskCatalog.sections.isEmpty {
+                    Text("No sections configured.")
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(settings.editorialDeskCatalog.sections) { section in
+                    HStack(spacing: 10) {
+                        Image(systemName: section.systemImage)
+                            .frame(width: 22)
+                            .foregroundStyle(.secondary)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField(
+                                "Section name",
+                                text: sectionNameBinding(section.id)
+                            )
+                            .textFieldStyle(.roundedBorder)
+
+                            EditorialDeskSymbolPicker(
+                                selection: sectionSymbolBinding(section.id),
+                                context: .section
+                            )
+                        }
+
+                        Button(role: .destructive) {
+                            removeSection(section.id)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Remove section")
+                    }
+                }
+
+                Button {
+                    var catalog = settings.editorialDeskCatalog
+                    catalog.sections.append(
+                        EditorialDeskSection(
+                            name: "New section",
+                            systemImage: "square.grid.2x2"
+                        )
+                    )
+                    settings.editorialDeskCatalog = catalog
+                } label: {
+                    Label("Add Section", systemImage: "plus")
+                }
+            }
+
+            Section("Article Types") {
+                if settings.editorialDeskCatalog.types.isEmpty {
+                    Text("No article types configured.")
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(settings.editorialDeskCatalog.types) { type in
+                    HStack(spacing: 10) {
+                        Image(systemName: type.systemImage)
+                            .frame(width: 22)
+                            .foregroundStyle(Color(editorialHex: type.colorHex))
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField(
+                                "Type name",
+                                text: typeNameBinding(type.id)
+                            )
+                            .textFieldStyle(.roundedBorder)
+
+                            EditorialDeskSymbolPicker(
+                                selection: typeSymbolBinding(type.id),
+                                context: .articleType
+                            )
+
+                            ColorPicker(
+                                "Color",
+                                selection: typeColorBinding(type.id),
+                                supportsOpacity: false
+                            )
+                        }
+
+                        Button(role: .destructive) {
+                            removeType(type.id)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Remove article type")
+                    }
+                }
+
+                Button {
+                    var catalog = settings.editorialDeskCatalog
+                    catalog.types.append(
+                        EditorialDeskType(
+                            name: "New type",
+                            systemImage: "doc.text",
+                            colorHex: "#007AFF"
+                        )
+                    )
+                    settings.editorialDeskCatalog = catalog
+                } label: {
+                    Label("Add Article Type", systemImage: "plus")
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+    }
+
+    private func sectionNameBinding(_ id: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                settings.editorialDeskCatalog.sections.first(where: { $0.id == id })?.name ?? ""
+            },
+            set: { updateSection(id, name: $0) }
+        )
+    }
+
+    private func sectionSymbolBinding(_ id: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                settings.editorialDeskCatalog.sections.first(where: { $0.id == id })?.systemImage ?? ""
+            },
+            set: { updateSection(id, systemImage: $0) }
+        )
+    }
+
+    private func typeNameBinding(_ id: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                settings.editorialDeskCatalog.types.first(where: { $0.id == id })?.name ?? ""
+            },
+            set: { updateType(id, name: $0) }
+        )
+    }
+
+    private func typeSymbolBinding(_ id: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                settings.editorialDeskCatalog.types.first(where: { $0.id == id })?.systemImage ?? ""
+            },
+            set: { updateType(id, systemImage: $0) }
+        )
+    }
+
+    private func typeColorBinding(_ id: UUID) -> Binding<Color> {
+        Binding(
+            get: {
+                Color(
+                    editorialHex: settings.editorialDeskCatalog.types
+                        .first(where: { $0.id == id })?.colorHex ?? "#007AFF"
+                )
+            },
+            set: { updateType(id, colorHex: $0.editorialHexValue) }
+        )
+    }
+
+    private func updateSection(
+        _ id: UUID,
+        name: String? = nil,
+        systemImage: String? = nil
+    ) {
+        var catalog = settings.editorialDeskCatalog
+        guard let index = catalog.sections.firstIndex(where: { $0.id == id }) else { return }
+        if let name { catalog.sections[index].name = name }
+        if let systemImage { catalog.sections[index].systemImage = systemImage }
+        settings.editorialDeskCatalog = catalog
+    }
+
+    private func updateType(
+        _ id: UUID,
+        name: String? = nil,
+        systemImage: String? = nil,
+        colorHex: String? = nil
+    ) {
+        var catalog = settings.editorialDeskCatalog
+        guard let index = catalog.types.firstIndex(where: { $0.id == id }) else { return }
+        if let name { catalog.types[index].name = name }
+        if let systemImage { catalog.types[index].systemImage = systemImage }
+        if let colorHex { catalog.types[index].colorHex = colorHex }
+        settings.editorialDeskCatalog = catalog
+    }
+
+    private func removeSection(_ id: UUID) {
+        var catalog = settings.editorialDeskCatalog
+        catalog.sections.removeAll { $0.id == id }
+        settings.editorialDeskCatalog = catalog
+    }
+
+    private func removeType(_ id: UUID) {
+        var catalog = settings.editorialDeskCatalog
+        catalog.types.removeAll { $0.id == id }
+        settings.editorialDeskCatalog = catalog
+    }
+}
+
+private struct EditorialDeskSymbolPicker: View {
+    @Binding var selection: String
+    let context: EditorialDeskSymbolContext
+
+    private var options: [EditorialDeskSymbolOption] {
+        EditorialDeskSymbolCatalog.options(for: context)
+    }
+
+    private var groupedOptions: [(category: String, options: [EditorialDeskSymbolOption])] {
+        Dictionary(grouping: options, by: \.category)
+            .keys
+            .sorted()
+            .map { category in
+                (
+                    category: category,
+                    options: options.filter { $0.category == category }
+                )
+            }
+    }
+
+    private var displaySymbol: String {
+        guard !selection.isEmpty,
+              NSImage(systemSymbolName: selection, accessibilityDescription: nil) != nil else {
+            return "questionmark.square.dashed"
+        }
+        return selection
+    }
+
+    private var displayName: String {
+        selection.isEmpty ? "Choose SF Symbol" : selection
+    }
+
+    var body: some View {
+        Menu {
+            ForEach(groupedOptions, id: \.category) { group in
+                Section(group.category) {
+                    ForEach(group.options) { option in
+                        Button {
+                            selection = option.name
+                        } label: {
+                            Label(option.name, systemImage: option.name)
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: displaySymbol)
+                    .frame(width: 18)
+                Text(displayName)
+                    .font(.system(size: 12, design: .monospaced))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 9)
+            .frame(maxWidth: .infinity, minHeight: 30)
+            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 7))
+        }
+        .menuStyle(.borderlessButton)
+        .help("Choose a system SF Symbol")
+    }
+}
+
+private extension Color {
+    init(editorialHex hex: String) {
+        let normalized = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard let value = UInt64(normalized, radix: 16) else {
+            self = .accentColor
+            return
+        }
+
+        let red = Double((value >> 16) & 0xFF) / 255
+        let green = Double((value >> 8) & 0xFF) / 255
+        let blue = Double(value & 0xFF) / 255
+        self.init(red: red, green: green, blue: blue)
+    }
+
+    var editorialHexValue: String {
+        let color = NSColor(self).usingColorSpace(.deviceRGB) ?? .controlAccentColor
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        return String(
+            format: "#%02lX%02lX%02lX",
+            lround(Double(red * 255)),
+            lround(Double(green * 255)),
+            lround(Double(blue * 255))
+        )
     }
 }
 
@@ -74,6 +384,7 @@ struct GeneralSettingsView: View {
 
 struct ProviderSettingsView: View {
     @Environment(SettingsStore.self) private var settings
+    @Environment(ChatStore.self) private var chatStore
 
     var body: some View {
         let s = Bindable(settings)
@@ -108,6 +419,14 @@ struct ProviderSettingsView: View {
         .task {
             settings.loadDeepSeekCredentialForSettings()
         }
+        .task(id: settings.deepseekAPIKey) {
+            // Key entry mutates on every keystroke. Debouncing keeps provider
+            // catalog refresh explicit and prevents rebuilding a model session
+            // for intermediate credential values SwiftUI immediately replaces.
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            await chatStore.reloadRemoteModels()
+        }
     }
 }
 
@@ -115,6 +434,7 @@ struct ProviderSettingsView: View {
 
 struct AgentSettingsView: View {
     @Environment(SettingsStore.self) private var settings
+    @Environment(ChatStore.self) private var chatStore
 
     var body: some View {
         let s = Bindable(settings)
@@ -200,6 +520,15 @@ struct AgentSettingsView: View {
                 Text("Allows an explicitly activated skill to control Safari through safaridriver MCP. Disabled by default.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Toggle(
+                    "Allow third-party plugins",
+                    isOn: s.agentTuning.experimental.thirdPartyPluginsEnabled
+                )
+
+                Text("Allows installed Node.js plugins to start and expose tools to selected profiles. Plugins run as normal local processes with filesystem, network, and subprocess access.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -217,6 +546,13 @@ struct AgentSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+        .task(id: settings.agentTuning) {
+            // Slider and stepper edits can arrive in bursts. The cancellable
+            // view task publishes only the settled configuration to runtime.
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            await chatStore.applyAgentTuning(settings.agentTuning)
+        }
     }
 }
 

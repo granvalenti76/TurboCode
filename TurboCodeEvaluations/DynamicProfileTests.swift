@@ -14,7 +14,7 @@ struct DynamicProfileTests {
         let profile = UserDynamicProfile(
             name: "GitHub PR Assistant",
             summary: "Handles pull requests",
-            baseModelID: .pcc,
+            baseModelID: .llama,
             greedyMode: true,
             toolIDs: ["git", "read_file", "git"],
             skillIDs: ["pull-request-review"]
@@ -118,9 +118,10 @@ struct DynamicProfileTests {
 
         #expect(options.map(\.id) == ProfileBaseModelID.profileCases)
         #expect(options.contains(where: { $0.id == .codex && $0.isAvailable }))
+        #expect(!options.contains(where: { $0.id == .pcc }))
     }
 
-    @Test("Coordinator workers are persisted and legacy routes keep their fallback")
+    @Test("Coordinator workers reject retired PCC and keep their fallback")
     func coordinatorWorkerSelectionMigrates() throws {
         let route = UserDynamicProfile(
             name: "Codex plus PCC",
@@ -133,8 +134,7 @@ struct DynamicProfileTests {
             from: JSONEncoder().encode(route)
         )
         #expect(
-            decoded.resolvedWorkerModelID(fallback: "llama")
-                == ProfileBaseModelID.pcc.rawValue
+            decoded.resolvedWorkerModelID(fallback: "llama") == "llama"
         )
 
         var object = try #require(
@@ -419,10 +419,23 @@ struct DynamicProfileTests {
 
     @Test("Profile option families enforce supported coordinator routes")
     func profileOptionFamiliesAreScoped() {
-        #expect(ProfileBaseModelID.builtInCases == [.onDevice, .llama, .pcc, .deepseek])
+        #expect(ProfileBaseModelID.builtInCases == [.onDevice, .llama, .deepseek])
         #expect(ProfileBaseModelID.coordinatorCases == [.onDevice, .llama, .deepseek, .codex])
-        #expect(ProfileBaseModelID.workerCases == [.pcc, .llama, .deepseek])
+        #expect(ProfileBaseModelID.workerCases == [.llama, .deepseek])
         #expect(!ProfileBaseModelID.workerCases.contains(.codex))
+    }
+
+    @Test("Retired PCC overrides are hidden from the profile store")
+    func retiredPCCOverridesAreNotLoaded() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = DynamicProfileStore(fileURL: root.appendingPathComponent("profiles.json"))
+        let pcc = UserDynamicProfile(name: "Old PCC", baseModelID: .pcc)
+        let llama = UserDynamicProfile(name: "Local", baseModelID: .llama)
+
+        try store.save([pcc, llama])
+
+        #expect(try store.load() == [llama])
     }
 
     @Test("Selected skills implicitly expose only the skill loader")
@@ -435,6 +448,52 @@ struct DynamicProfileTests {
         )
 
         #expect(profile.resolvedToolIDs == [.git, .loadSkill])
+    }
+
+    @Test("Built-in profiles suppress only the TurboCode skill")
+    func builtInProfilesSuppressOnlyTurboCodeSkill() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let skillURL = root.appendingPathComponent("SKILL.md")
+        try Data(
+            """
+            ---
+            name: turbocode
+            description: TurboCode guidance
+            ---
+            Follow TurboCode guidance.
+            """.utf8
+        ).write(to: skillURL)
+        let skill = try TurboCodeSkillDefinition(contentsOf: skillURL)
+        let userSkillURL = root.appendingPathComponent("user-skill.md")
+        try Data(
+            """
+            ---
+            name: user-skill
+            description: User guidance
+            ---
+            Follow user guidance.
+            """.utf8
+        ).write(to: userSkillURL)
+        let userSkill = try TurboCodeSkillDefinition(contentsOf: userSkillURL)
+
+        let builtInSkills = DynamicProfileRuntimeSelection.skills(
+            from: [skill, userSkill],
+            profile: nil
+        )
+        #expect(builtInSkills.map(\.name) == ["user-skill"])
+
+        let override = UserDynamicProfile(
+            name: "TurboCode override",
+            baseModelID: .llama,
+            skillIDs: [skill.name]
+        )
+        #expect(
+            DynamicProfileRuntimeSelection.skills(
+                from: [skill, userSkill],
+                profile: override
+            ).map(\.name) == ["turbocode"]
+        )
     }
 
     @Test("A custom plan registers only explicitly selected compatible tools")
@@ -527,15 +586,15 @@ struct DynamicProfileTests {
                 workspaceRoot: "/tmp/workspace",
                 agentTuning: .default,
                 availableSkills: [],
+                documentationStore: .live,
                 activeDynamicProfile: nil,
-                reasoningLevel: .deep,
-                delegateReasoningLevel: nil,
+                reasoningEffort: .high,
+                delegateReasoningEffort: nil,
                 activeTemperature: nil,
                 delegateTemperature: nil,
                 delegateToolIDs: nil,
                 dropsCompletedToolCalls: false,
-                workspaceInstructions: nil,
-                reasoningStreamRelay: nil
+                workspaceInstructions: nil
             ),
             history: [],
             events: ModelSessionEvents(
@@ -724,15 +783,15 @@ struct DynamicProfileTests {
                 workspaceRoot: "/tmp/workspace",
                 agentTuning: .default,
                 availableSkills: [],
+                documentationStore: .live,
                 activeDynamicProfile: profile,
-                reasoningLevel: nil,
-                delegateReasoningLevel: nil,
+                reasoningEffort: nil,
+                delegateReasoningEffort: nil,
                 activeTemperature: nil,
                 delegateTemperature: nil,
                 delegateToolIDs: nil,
                 dropsCompletedToolCalls: false,
-                workspaceInstructions: nil,
-                reasoningStreamRelay: nil
+                workspaceInstructions: nil
             ),
             history: [],
             events: ModelSessionEvents(
@@ -758,15 +817,15 @@ struct DynamicProfileTests {
             workspaceRoot: "/tmp/workspace",
             agentTuning: .default,
             availableSkills: [],
+            documentationStore: .live,
             activeDynamicProfile: profile,
-            reasoningLevel: nil,
-            delegateReasoningLevel: nil,
+            reasoningEffort: nil,
+            delegateReasoningEffort: nil,
             activeTemperature: nil,
             delegateTemperature: nil,
             delegateToolIDs: profile.resolvedWorkerToolIDs,
             dropsCompletedToolCalls: true,
-            workspaceInstructions: nil,
-            reasoningStreamRelay: nil
+            workspaceInstructions: nil
         )
     }
 }

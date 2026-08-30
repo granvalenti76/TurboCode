@@ -21,6 +21,9 @@ final class SkillsViewModel {
     private let store: DynamicProfileStore
     private(set) var profiles: [UserDynamicProfile] = []
     private(set) var installedSkills: [TurboCodeSkillDefinition] = []
+    /// Profile editing only needs validated metadata; process activation stays
+    /// owned by the runtime and is intentionally not mirrored in ChatStore.
+    private(set) var discoveredTypeScriptPlugins: [TypeScriptPluginDescriptor] = []
     private(set) var baseline: UserDynamicProfile?
     var draft: UserDynamicProfile?
     var selection: ProfileLibrarySelection = .builtIn(.onDevice)
@@ -38,6 +41,9 @@ final class SkillsViewModel {
         do {
             profiles = try store.load()
             installedSkills = TurboCodeConfig.shared.loadSkills()
+            let pluginDiscovery = TypeScriptPluginRegistry.live().discover()
+            TypeScriptPluginRuntimeStore.shared.recordDiscovery(pluginDiscovery)
+            discoveredTypeScriptPlugins = pluginDiscovery.plugins
             errorMessage = nil
             if case .custom(let id) = selection {
                 selectCustom(id)
@@ -97,7 +103,6 @@ final class SkillsViewModel {
             profiles.append(profile)
             try persist()
             select(.custom(profile.id))
-            ChatStore.shared?.reloadDynamicProfiles(selecting: profile.id)
             return true
         } catch {
             errorMessage = error.localizedDescription
@@ -120,7 +125,6 @@ final class SkillsViewModel {
             draft = value
             baseline = value
             errorMessage = nil
-            ChatStore.shared?.reloadDynamicProfiles()
             return true
         } catch {
             errorMessage = error.localizedDescription
@@ -134,7 +138,6 @@ final class SkillsViewModel {
         do {
             try persist()
             select(.builtIn(draft.baseModelID))
-            ChatStore.shared?.reloadDynamicProfiles()
         } catch {
             errorMessage = error.localizedDescription
             reload()
@@ -298,6 +301,7 @@ final class SkillsViewModel {
         switch id {
         case .onDevice: subtitle = "Private and optimized for compact tool schemas"
         case .llama: subtitle = "Local OpenAI-compatible model"
+        // PCC-RETIREMENT: remove the legacy model case with the profile enum.
         case .pcc: subtitle = "Private Cloud Compute"
         case .deepseek: subtitle = "Enhanced coding model"
         case .codex: subtitle = "Codex App Server with ChatGPT"

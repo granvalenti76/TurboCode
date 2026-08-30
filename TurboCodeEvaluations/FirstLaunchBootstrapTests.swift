@@ -85,6 +85,39 @@ struct FirstLaunchBootstrapTests {
         #expect(try DynamicProfileStore(fileURL: config.dynamicProfilesURL).load() == [profile])
     }
 
+    @Test("Onboarding preserves user model endpoints and identifiers")
+    func preservesConfiguredModelGroundTruth() throws {
+        let home = try makeEmptyHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let root = home.appendingPathComponent(".turbocode", isDirectory: true)
+        let config = TurboCodeConfig(rootURL: root)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        let configuredLlama = RemoteModelConfig(
+            id: "llama",
+            name: "Office Llama",
+            url: "http://192.168.1.120:8080/v1",
+            modelName: "office-model",
+            temperature: 0.2
+        )
+        try JSONEncoder().encode([configuredLlama]).write(
+            to: config.modelsConfigurationURL,
+            options: .atomic
+        )
+
+        try config.performOnboarding()
+
+        let llama = try #require(
+            config.loadRemoteModels().first(where: { $0.id == "llama" })
+        )
+        let modelIDs = Set(try config.loadRemoteModels().map(\.id))
+        #expect(llama.name == configuredLlama.name)
+        #expect(llama.url == configuredLlama.url)
+        #expect(llama.modelName == configuredLlama.modelName)
+        #expect(modelIDs.isSuperset(of: ["llama", "deepseek"]))
+        #expect(!modelIDs.contains("apple-pcc"))
+    }
+
     @Test("Onboarding migrates 0.1 configuration and profiles without changing their intent")
     func migratesLegacyConfigurationAndProfiles() throws {
         let home = try makeEmptyHome()
@@ -127,6 +160,42 @@ struct FirstLaunchBootstrapTests {
             with: Data(contentsOf: config.dynamicProfilesURL)
         ) as! [String: Any]
         #expect(migratedProfiles["version"] as? Int == DynamicProfileStore.currentSchemaVersion)
+    }
+
+    @Test("Onboarding replaces only the retired PCC Shortcut worker")
+    func migratesRetiredPCCShortcutWorker() throws {
+        let home = try makeEmptyHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let root = home.appendingPathComponent(".turbocode", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let config = TurboCodeConfig(rootURL: root)
+        let retiredConfiguration = AgentTuningConfig(
+            schemaVersion: 1,
+            agent: AgentPolicy(responseStyle: .detailed),
+            orchestrator: OrchestratorPolicy(delegateModelID: "pcc-shortcuts")
+        )
+        try JSONEncoder().encode(retiredConfiguration).write(
+            to: config.agentTuningConfigurationURL,
+            options: .atomic
+        )
+
+        try config.performOnboarding()
+
+        let migrated = try config.loadAgentTuning()
+        #expect(migrated.orchestrator.delegateModelID == OrchestratorPolicy().delegateModelID)
+        #expect(migrated.agent.responseStyle == .detailed)
+        let persisted = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: config.agentTuningConfigurationURL)
+        ) as! [String: Any]
+        #expect(persisted["schemaVersion"] as? Int == AgentTuningConfig.currentSchemaVersion)
+
+        let unrelatedMissingWorker = AgentTuningConfig(
+            orchestrator: OrchestratorPolicy(delegateModelID: "missing-custom-worker")
+        )
+        #expect(
+            try unrelatedMissingWorker.validated().orchestrator.delegateModelID
+                == "missing-custom-worker"
+        )
     }
 
     @Test("Invalid configuration remains untouched and identifies the problematic field")
@@ -196,7 +265,7 @@ struct FirstLaunchBootstrapTests {
 
         let ids = viewModel.modelOptions(settings: SettingsStore()).map(\.id)
 
-        #expect(ids == [.onDevice, .llama, .pcc, .deepseek])
+        #expect(ids == [.onDevice, .llama, .deepseek])
     }
 
     private func makeEmptyHome() throws -> URL {

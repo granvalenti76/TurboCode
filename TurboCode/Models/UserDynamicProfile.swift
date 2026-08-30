@@ -10,7 +10,9 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
     /// Only provider-backed defaults belong in the profile library. Codex is
     /// configured contextually for delegated profiles; direct Codex selection
     /// remains owned by the composer.
-    static let builtInCases: [Self] = [.onDevice, .llama, .pcc, .deepseek]
+    // PCC-RETIREMENT: remove the legacy enum case after persisted profiles
+    // have been migrated away from Apple's retired `fm serve` model.
+    static let builtInCases: [Self] = [.onDevice, .llama, .deepseek]
     /// These models expose the structured `delegate_task` route when selected
     /// in a custom profile. The built-in on-device profile remains direct;
     /// opting into this capability is an explicit override choice.
@@ -18,11 +20,11 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
     /// Models available when creating or editing a custom profile. Codex is
     /// intentionally not a built-in standalone profile, but it is a valid
     /// override model with its own App Server and reasoning configuration.
-    static let profileCases: [Self] = [.onDevice, .llama, .pcc, .deepseek, .codex]
+    static let profileCases: [Self] = [.onDevice, .llama, .deepseek, .codex]
     /// Compatibility alias for integrations that still describe the route as
     /// coordinator/worker. New UI and runtime code should use `delegationCases`.
     static let coordinatorCases: [Self] = delegationCases
-    static let workerCases: [Self] = [.pcc, .llama, .deepseek]
+    static let workerCases: [Self] = [.llama, .deepseek]
 
     var id: String { rawValue }
 
@@ -99,6 +101,9 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     var workerToolIDs: [String]?
     var greedyMode: Bool
     var toolIDs: [String]
+    /// External tool selections are persisted separately from the closed
+    /// built-in `ToolCapabilityID` catalog. Values use `pluginID/toolName`.
+    var pluginToolIDs: [String]
     var skillIDs: [String]
     let createdAt: Date
     var updatedAt: Date
@@ -114,6 +119,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         workerToolIDs: [String]? = nil,
         greedyMode: Bool = false,
         toolIDs: [String] = [],
+        pluginToolIDs: [String] = [],
         skillIDs: [String] = [],
         createdAt: Date = .now,
         updatedAt: Date = .now
@@ -128,6 +134,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         self.workerToolIDs = workerToolIDs?.uniqued()
         self.greedyMode = greedyMode
         self.toolIDs = toolIDs.uniqued()
+        self.pluginToolIDs = pluginToolIDs.uniqued()
         self.skillIDs = skillIDs.uniqued()
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -137,7 +144,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         case id, name, summary, baseModelID, workerModelID
         case codexModelID, codexReasoningEffort
         case workerToolIDs
-        case greedyMode, toolIDs, skillIDs
+        case greedyMode, toolIDs, pluginToolIDs, skillIDs
         case createdAt, updatedAt
     }
 
@@ -159,6 +166,10 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         )?.uniqued()
         greedyMode = try values.decodeIfPresent(Bool.self, forKey: .greedyMode) ?? false
         toolIDs = try values.decodeIfPresent([String].self, forKey: .toolIDs) ?? []
+        pluginToolIDs = try values.decodeIfPresent(
+            [String].self,
+            forKey: .pluginToolIDs
+        )?.uniqued() ?? []
         skillIDs = try values.decodeIfPresent([String].self, forKey: .skillIDs) ?? []
         createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
         updatedAt = try values.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
@@ -181,6 +192,12 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
             result.remove(.delegateTask)
         }
         return result
+    }
+
+    /// Resolves only well-formed external capability IDs. Built-in IDs never
+    /// enter this set, so provider adapters can apply separate policies.
+    var resolvedPluginToolIDs: Set<TypeScriptPluginToolID> {
+        Set(pluginToolIDs.compactMap(TypeScriptPluginToolID.init(rawValue:)))
     }
 
     /// The single source of truth for profile orchestration.

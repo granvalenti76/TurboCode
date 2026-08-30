@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Session Handoff</title>
+    <style>
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      body {
+        width: 420px;
+        margin: 0;
+        padding: 12px;
+        background: transparent;
+        color: #1d1d1f;
+        font: 13px -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+      }
+      @media (prefers-color-scheme: dark) {
+        body { color: #f5f5f7; }
+        .card { background: rgba(44, 44, 46, .96); border-color: #48484a; }
+        .muted, .meta { color: #a1a1a6; }
+        .section { border-color: #48484a; }
+      }
+      .card {
+        overflow: hidden;
+        border: 1px solid #d2d2d7;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, .96);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, .10);
+      }
+      .header { display: flex; align-items: center; gap: 10px; padding: 15px 16px 12px; }
+      .mark { width: 10px; height: 10px; border-radius: 50%; background: #0a84ff; box-shadow: 0 0 0 4px rgba(10, 132, 255, .14); }
+      .title { flex: 1; min-width: 0; font-weight: 650; font-size: 14px; }
+      .eyebrow { color: #86868b; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+      .status { border-radius: 999px; padding: 4px 8px; color: #075e54; background: #d1fae5; font-size: 10px; font-weight: 650; text-transform: uppercase; }
+      .status[data-status="blocked"] { color: #9a3412; background: #ffedd5; }
+      .status[data-status="ready"] { color: #166534; background: #dcfce7; }
+      .body { padding: 0 16px 15px; }
+      .summary { margin: 0 0 13px; line-height: 1.45; }
+      .muted, .meta { color: #6e6e73; }
+      .section { border-top: 1px solid #e5e5ea; padding: 10px 0 0; margin-top: 10px; }
+      .label { margin-bottom: 5px; color: #86868b; font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+      .value { line-height: 1.4; }
+      ul { margin: 0; padding: 0; list-style: none; }
+      li { position: relative; margin: 4px 0; padding-left: 16px; line-height: 1.35; }
+      li::before { position: absolute; left: 1px; top: .45em; width: 6px; height: 6px; border-radius: 50%; background: #34c759; content: ""; }
+      .next li::before { background: #0a84ff; }
+      .risk li::before { background: #ff9f0a; }
+      .meta { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 14px; font-size: 11px; }
+      .chip { border-radius: 6px; padding: 3px 6px; background: rgba(118, 118, 128, .12); }
+    </style>
+  </head>
+  <body>
+    <article class="card">
+      <header class="header">
+        <span class="mark" aria-hidden="true"></span>
+        <div class="title"><div class="eyebrow">Session Handoff</div><div id="title">Untitled handoff</div></div>
+        <span class="status" id="status">IN PROGRESS</span>
+      </header>
+      <div class="body">
+        <p class="summary" id="summary">No summary.</p>
+        <section class="section"><div class="label">Completed</div><ul id="completed"></ul></section>
+        <section class="section"><div class="label">Current step</div><div class="value" id="current">No current step.</div></section>
+        <section class="section next"><div class="label">Next step</div><div class="value" id="next">No next step.</div></section>
+        <section class="section risk" id="risksSection"><div class="label">Risks</div><ul id="risks"></ul></section>
+        <div class="meta"><span class="chip" id="files">0 files</span><span class="chip" id="entries">0 transcript entries</span><span class="chip" id="updated">just now</span></div>
+      </div>
+    </article>
+    <script>
+      const text = (id, value) => { document.getElementById(id).textContent = String(value || ""); };
+      const list = (id, values) => {
+        const target = document.getElementById(id);
+        target.replaceChildren(...(Array.isArray(values) ? values : []).map((value) => {
+          const item = document.createElement("li");
+          item.textContent = String(value);
+          return item;
+        }));
+      };
+      const render = (props = {}) => {
+        const status = ["in-progress", "blocked", "ready"].includes(props.status) ? props.status : "in-progress";
+        text("title", props.title || "Untitled handoff");
+        text("summary", props.summary || "No summary.");
+        text("current", props.current || "No current step.");
+        text("next", props.next || "No next step.");
+        text("status", status.replace("-", " ").toUpperCase());
+        document.getElementById("status").dataset.status = status;
+        list("completed", props.completed);
+        list("risks", props.risks);
+        document.getElementById("risksSection").hidden = !(props.risks && props.risks.length);
+        text("files", `${Array.isArray(props.files) ? props.files.length : 0} files`);
+        text("entries", `${props.transcriptEntries || 0} transcript entries`);
+        text("updated", props.updatedAt ? new Date(props.updatedAt).toLocaleString() : "just now");
+        requestAnimationFrame(() => window.turbocode?.resize({ width: 420, height: document.body.scrollHeight }));
+      };
+      window.addEventListener("turbocode-props", (event) => render(event.detail));
+      window.turbocode?.emit({ type: "ready" });
+    </script>
+  </body>
+</html>

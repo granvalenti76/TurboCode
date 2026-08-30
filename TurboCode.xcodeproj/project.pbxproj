@@ -13,6 +13,7 @@
 		5E77E3E630075DF800C3E506 /* turbocode-logo-provisional.png in Resources */ = {isa = PBXBuildFile; fileRef = 5E77E3E530075DF800C3E506 /* turbocode-logo-provisional.png */; };
 		5E77E52930081E4000C3E506 /* Media.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5E77E52830081E4000C3E506 /* Media.xcassets */; };
 		5E9A1003300A000100C554D4 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 5E9A1002300A000100C554D4 /* SwiftTerm */; };
+		5E77E54130081E4000C3E506 /* TurboCodeSDK in Resources */ = {isa = PBXBuildFile; fileRef = 5E77E54030081E4000C3E506 /* TurboCodeSDK */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -30,6 +31,7 @@
 		000000000000000000000220 /* TurboCodeEvaluations.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TurboCodeEvaluations.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		5E77E3E530075DF800C3E506 /* turbocode-logo-provisional.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "turbocode-logo-provisional.png"; sourceTree = "<group>"; };
 		5E77E52830081E4000C3E506 /* Media.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Media.xcassets; sourceTree = "<group>"; };
+		5E77E54030081E4000C3E506 /* TurboCodeSDK */ = {isa = PBXFileReference; lastKnownFileType = folder; path = TurboCodeSDK; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -67,6 +69,7 @@
 			isa = PBXGroup;
 			children = (
 				5E77E52830081E4000C3E506 /* Media.xcassets */,
+				5E77E54030081E4000C3E506 /* TurboCodeSDK */,
 				000000000000000000000010 /* TurboCode */,
 				000000000000000000000210 /* TurboCodeEvaluations */,
 				5E77E3E530075DF800C3E506 /* turbocode-logo-provisional.png */,
@@ -183,6 +186,7 @@
 			files = (
 				5E77E52930081E4000C3E506 /* Media.xcassets in Resources */,
 				5E77E3E630075DF800C3E506 /* turbocode-logo-provisional.png in Resources */,
+				5E77E54130081E4000C3E506 /* TurboCodeSDK in Resources */,
 			);
 		};
 		000000000000000240000000 /* Resources */ = {
@@ -380,7 +384,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.3.3;
+				MARKETING_VERSION = 0.4;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -437,7 +441,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.3.3;
+				MARKETING_VERSION = 0.4;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";

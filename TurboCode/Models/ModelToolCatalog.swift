@@ -334,6 +334,9 @@ nonisolated enum ModelToolCatalog {
         }
     }
 
+    /// Built-in profiles keep the product guide, Ripgrep, and file removal
+    /// opt-in. Explicit `selectedIDs` remain authoritative for custom
+    /// overrides, so users can add any of these capabilities when needed.
     private static func membership(
         for profile: ModelRuntimeProfile
     ) -> [(ToolCapabilityID, ToolAvailabilityRequirement)] {
@@ -341,12 +344,12 @@ nonisolated enum ModelToolCatalog {
         case .microtask:
             // This is the default native on-device surface, not a competence
             // judgment. Explicit profile selections may widen it as supported
-            // by the resolved tool tier and workspace context.
+            // by the resolved tool tier and workspace context. The product
+            // guide remains an explicit override capability rather than a
+            // default tool on any runtime profile.
             return [
-                .turboCodeGuide,
                 .listWorkspace,
                 .readFile,
-                .searchWorkspace,
                 .writeOnDevice,
                 .createSkill
             ]
@@ -354,26 +357,21 @@ nonisolated enum ModelToolCatalog {
                 .map { ($0, requirement(for: $0)) }
         case .standalone:
             return [
-                (.turboCodeGuide, .always),
                 (.listWorkspace, .workspace),
                 (.swiftWorkspaceMap, .repositoryMap),
                 (.readFile, .workspace),
-                (.searchWorkspace, .workspace),
                 (.fileSystem, .workspace),
                 (.git, .workspace),
                 (.bash, .workspace),
                 (.swiftPackageManager, .workspace),
                 (.xcodeProject, .capableWorkspace),
                 (.editFile, .workspace),
-                (.removeFile, .workspace),
                 (.loadSkill, .skills),
                 (.createSkill, .workspace)
             ]
         case .orchestrator:
             return [
-                (.turboCodeGuide, .always),
                 (.listWorkspace, .workspace),
-                (.searchWorkspace, .workspace),
                 (.fileSystem, .workspace),
                 (.loadSkill, .skills),
                 (.createSkill, .workspace),
@@ -381,18 +379,15 @@ nonisolated enum ModelToolCatalog {
             ]
         case .delegate:
             return [
-                (.turboCodeGuide, .always),
                 (.listWorkspace, .workspace),
                 (.swiftWorkspaceMap, .repositoryMap),
                 (.readFile, .workspace),
-                (.searchWorkspace, .workspace),
                 (.fileSystem, .workspace),
                 (.git, .workspace),
                 (.bash, .workspace),
                 (.swiftPackageManager, .workspace),
                 (.xcodeProject, .capableWorkspace),
                 (.editFile, .workspace),
-                (.removeFile, .workspace),
                 (.loadSkill, .skills),
                 (.createSkill, .workspace)
             ]

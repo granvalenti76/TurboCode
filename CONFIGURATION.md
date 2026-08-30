@@ -11,7 +11,7 @@ options are also available in **TurboCode > Settings > Agents**.
 - `config.json` controls agent, orchestrator, execution, skill, and Git policies.
 - `models.json` defines model endpoints and capabilities.
 - API keys and other secrets belong in the macOS Keychain.
-- `SKILLS/**/SKILL.md` contains reusable on-demand instructions.
+- `SKILLS/**/SKILL.md` contains legacy user-level reusable instructions.
 
 Never place credentials in a TurboCode JSON file.
 
@@ -143,6 +143,21 @@ runner. It does not affect model-provider connections made by TurboCode itself.
 `discoversUserSkills` controls automatic discovery of user-created skills. The
 built-in `turbocode` and `skill-creator` skills remain available when this option
 is disabled.
+
+TurboCode discovers valid `SKILL.md` files from these scopes:
+
+- `~/.turbocode/SKILLS/**/SKILL.md` for legacy user-level skills;
+- `~/.agents/skills/**/SKILL.md` for Codex-compatible user skills;
+- `.agents/skills/**/SKILL.md` in the active workspace and its parent directories.
+
+Every file starts with YAML front matter containing a lowercase kebab-case
+`name` and a non-empty `description`, followed by a non-empty Markdown instruction
+body. The model sees the catalog and loads a matching body on demand.
+`/skill <name>` and `/<name>` explicitly select one skill for the current request.
+
+The `Skill` type supplied by `foundation-models-utilities` is an internal adapter
+for Foundation Models dynamic instructions. It does not discover or parse
+`SKILL.md`; disk-backed skills remain TurboCode's provider-neutral product format.
 
 ## Git
 

@@ -1,0 +1,698 @@
+import Foundation
+
+/// The entry point used to create the working document inside the editorial
+/// desk. These are content-ingestion modes, not model profiles or chat routes.
+nonisolated enum EditorialDeskTab: String, CaseIterable, Identifiable, Sendable {
+    case write = "Write"
+    // A single manual intake tab keeps provenance honest while allowing the
+    // user to choose whether pasted material becomes the draft or a source.
+    case notes = "Notes (manual)"
+
+    var id: Self { self }
+
+    var systemImage: String {
+        switch self {
+        case .write: "square.and.pencil"
+        case .notes: "note.text"
+        }
+    }
+}
+
+/// User-configurable editorial grouping shown by the desk metadata bar.
+/// Sections intentionally store only presentation data so a newsroom can
+/// define its own taxonomy without changing the editorial workflow.
+nonisolated public struct EditorialDeskSection: Identifiable, Codable, Hashable, Sendable {
+    public let id: UUID
+    public var name: String
+    public var systemImage: String
+
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        systemImage: String
+    ) {
+        self.id = id
+        self.name = name
+        self.systemImage = systemImage
+    }
+}
+
+/// User-configurable article type. The color is stored as a hex string so the
+/// catalog stays platform-neutral and can be persisted without archiving
+/// SwiftUI or AppKit color objects.
+nonisolated public struct EditorialDeskType: Identifiable, Codable, Hashable, Sendable {
+    public let id: UUID
+    public var name: String
+    public var systemImage: String
+    public var colorHex: String
+
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        systemImage: String,
+        colorHex: String
+    ) {
+        self.id = id
+        self.name = name
+        self.systemImage = systemImage
+        self.colorHex = colorHex
+    }
+}
+
+/// The two contexts intentionally expose different symbol suggestions. The
+/// catalog is curated for a developer-oriented editorial desk rather than
+/// asking users to memorize arbitrary SF Symbol identifiers.
+nonisolated enum EditorialDeskSymbolContext: CaseIterable, Sendable {
+    case section
+    case articleType
+}
+
+nonisolated struct EditorialDeskSymbolOption: Identifiable, Hashable, Sendable {
+    let name: String
+    let category: String
+
+    var id: String { name }
+
+    init(name: String, category: String) {
+        self.name = name
+        self.category = category
+    }
+}
+
+/// A broad, system-provided vocabulary for the settings picker. The developer-
+/// oriented defaults use only a small subset, leaving teams free to extend or
+/// replace the taxonomy without changing the available symbol vocabulary.
+nonisolated enum EditorialDeskSymbolCatalog {
+    static func options(for context: EditorialDeskSymbolContext) -> [EditorialDeskSymbolOption] {
+        switch context {
+        case .section:
+            [
+                option("curlybraces", "Code & Engineering"),
+                option("terminal", "Code & Engineering"),
+                option("laptopcomputer", "Code & Engineering"),
+                option("cpu", "Code & Engineering"),
+                option("gearshape.2", "Code & Engineering"),
+                option("wrench.and.screwdriver", "Code & Engineering"),
+                option("server.rack", "Code & Engineering"),
+                option("network", "Code & Engineering"),
+                option("arrow.triangle.branch", "Code & Engineering"),
+                option("macwindow", "Product & UX"),
+                option("rectangle.on.rectangle", "Product & UX"),
+                option("square.grid.2x2", "Product & UX"),
+                option("slider.horizontal.3", "Product & UX"),
+                option("paintbrush", "Product & UX"),
+                option("wand.and.stars", "Product & UX"),
+                option("book.pages", "Docs & Knowledge"),
+                option("text.book.closed", "Docs & Knowledge"),
+                option("doc.text", "Docs & Knowledge"),
+                option("graduationcap", "Docs & Knowledge"),
+                option("lightbulb", "Docs & Knowledge"),
+                option("questionmark.circle", "Docs & Knowledge"),
+                option("newspaper", "Docs & Knowledge"),
+                option("chart.bar.xaxis", "Data & Systems"),
+                option("chart.line.uptrend.xyaxis", "Data & Systems"),
+                option("externaldrive", "Data & Systems"),
+                option("cloud", "Data & Systems"),
+                option("lock.shield", "Data & Systems"),
+                option("arrow.triangle.2.circlepath", "Data & Systems"),
+                option("speedometer", "Data & Systems"),
+                option("building.columns", "Community & Business"),
+                option("building.2", "Community & Business"),
+                option("person.3", "Community & Business"),
+                option("person.2", "Community & Business"),
+                option("briefcase", "Community & Business"),
+                option("globe", "Community & Business"),
+                option("megaphone", "Community & Business")
+            ]
+        case .articleType:
+            [
+                option("doc.text", "Article Formats"),
+                option("newspaper", "Article Formats"),
+                option("text.quote", "Article Formats"),
+                option("text.alignleft", "Article Formats"),
+                option("list.bullet.rectangle", "Article Formats"),
+                option("book.pages", "Article Formats"),
+                option("quote.bubble", "Article Formats"),
+                option("person.2", "Article Formats"),
+                option("chevron.left.forwardslash.chevron.right", "Technical"),
+                option("curlybraces", "Technical"),
+                option("terminal", "Technical"),
+                option("function", "Technical"),
+                option("cpu", "Technical"),
+                option("network", "Technical"),
+                option("flowchart", "Technical"),
+                option("arrow.triangle.branch", "Technical"),
+                option("mic", "Coverage"),
+                option("camera", "Coverage"),
+                option("video", "Coverage"),
+                option("waveform", "Coverage"),
+                option("waveforms", "Coverage"),
+                option("magnifyingglass", "Coverage"),
+                option("chart.bar.xaxis", "Coverage"),
+                option("chart.line.uptrend.xyaxis", "Coverage"),
+                option("bolt.fill", "Editorial State"),
+                option("sparkles", "Editorial State"),
+                option("checkmark.seal.fill", "Editorial State"),
+                option("checkmark.circle.fill", "Editorial State"),
+                option("exclamationmark.triangle.fill", "Editorial State"),
+                option("info.circle.fill", "Editorial State"),
+                option("flag.fill", "Editorial State"),
+                option("bookmark.fill", "Editorial State"),
+                option("eye.fill", "Editorial State")
+            ]
+        }
+    }
+
+    private static func option(
+        _ name: String,
+        _ category: String
+    ) -> EditorialDeskSymbolOption {
+        EditorialDeskSymbolOption(name: name, category: category)
+    }
+}
+
+/// The complete user-owned editorial taxonomy persisted by Settings.
+nonisolated public struct EditorialDeskCatalog: Codable, Hashable, Sendable {
+    public var sections: [EditorialDeskSection]
+    public var types: [EditorialDeskType]
+
+    public init(
+        sections: [EditorialDeskSection],
+        types: [EditorialDeskType]
+    ) {
+        self.sections = sections
+        self.types = types
+    }
+
+    /// A compact developer-oriented starting taxonomy. Settings persists a
+    /// user-owned copy, so later customizations are never replaced by defaults.
+    public static let `default` = EditorialDeskCatalog(
+        sections: [
+            EditorialDeskSection(name: "Engineering", systemImage: "curlybraces"),
+            EditorialDeskSection(name: "Product", systemImage: "macwindow"),
+            EditorialDeskSection(name: "Documentation", systemImage: "book.pages"),
+            EditorialDeskSection(name: "Planning", systemImage: "chart.line.uptrend.xyaxis"),
+            EditorialDeskSection(name: "Blog", systemImage: "newspaper")
+        ],
+        types: [
+            EditorialDeskType(name: "README", systemImage: "doc.text", colorHex: "#0A84FF"),
+            EditorialDeskType(
+                name: "Specification",
+                systemImage: "list.bullet.rectangle",
+                colorHex: "#BF5AF2"
+            ),
+            EditorialDeskType(
+                name: "Changelog",
+                systemImage: "arrow.triangle.branch",
+                colorHex: "#FF9F0A"
+            ),
+            EditorialDeskType(name: "Plan / RFC", systemImage: "flowchart", colorHex: "#30D158"),
+            EditorialDeskType(
+                name: "Article / Guide",
+                systemImage: "text.quote",
+                colorHex: "#FF375F"
+            )
+        ]
+    )
+}
+
+/// Metadata selected for one draft. The complete catalog entries are carried
+/// through publishing so the Markdown front matter preserves their symbols
+/// and type color alongside the human-readable labels. The date is optional so
+/// a draft can remain date-free until the editor explicitly adds one.
+nonisolated public struct EditorialDeskMetadata: Codable, Hashable, Sendable {
+    public var section: EditorialDeskSection?
+    public var type: EditorialDeskType?
+    public var date: Date?
+
+    public init(
+        section: EditorialDeskSection?,
+        type: EditorialDeskType?,
+        date: Date? = nil
+    ) {
+        self.section = section
+        self.type = type
+        self.date = date
+    }
+
+    public static let empty = EditorialDeskMetadata(section: nil, type: nil, date: nil)
+
+    public var isEmpty: Bool { section == nil && type == nil && date == nil }
+
+    public var dateString: String? {
+        guard let date else { return nil }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .iso8601)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+}
+
+/// Describes where an editorial ground-truth source came from without
+/// restricting the material to a fixed file-name or document-type catalog.
+nonisolated enum EditorialSourceOrigin: Hashable, Sendable {
+    case importedFile(path: String)
+    case pasted
+    case notes
+    case transcript
+
+    var label: String {
+        switch self {
+        case .importedFile(let path): path
+        case .pasted: "Pasted text"
+        case .notes: "Notes (manual)"
+        case .transcript: "Transcript"
+        }
+    }
+}
+
+/// User-named material that the editorial model must treat as authoritative.
+nonisolated struct EditorialSource: Identifiable, Hashable, Sendable {
+    let id: UUID
+    var name: String
+    let origin: EditorialSourceOrigin
+    let content: String
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        origin: EditorialSourceOrigin,
+        content: String
+    ) {
+        self.id = id
+        self.name = name
+        self.origin = origin
+        self.content = content
+    }
+
+    /// Stable identity used to reject duplicate ground truth without relying
+    /// on the transient UUID assigned when the source enters the desk.
+    var provenanceKey: String {
+        switch origin {
+        case .importedFile(let path):
+            "file:\(path)"
+        case .pasted:
+            "pasted:\(content)"
+        case .notes:
+            "notes:\(content)"
+        case .transcript:
+            "transcript:\(content)"
+        }
+    }
+
+    var byteCount: Int {
+        content.lengthOfBytes(using: .utf8)
+    }
+
+    var preview: String {
+        let normalized = content
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.count > 140
+            ? String(normalized.prefix(140)) + "…"
+            : normalized
+    }
+}
+
+/// Operations exposed by the editorial action menu. The raw value is the
+/// stable model-facing action label; UI may localize its presentation later.
+nonisolated enum EditorialAction: String, CaseIterable, Codable, Hashable, Sendable {
+    case verifyFacts = "Verify facts"
+    case makeNeutral = "Make neutral"
+    case tightenLead = "Tighten the lead"
+    case checkCitations = "Check citations"
+    case deskSummary = "Desk summary"
+
+    var isDiagnostic: Bool {
+        switch self {
+        case .verifyFacts, .checkCitations, .deskSummary:
+            true
+        case .makeNeutral, .tightenLead:
+            false
+        }
+    }
+
+    var instruction: String {
+        switch self {
+        case .verifyFacts:
+            """
+            Check every material claim against the ground-truth sources and report
+            discrepancies only through findings and summary. This action is diagnostic;
+            do not rewrite the editorial document.
+            """
+        case .makeNeutral:
+            "Rewrite the document in a neutral editorial voice without changing supported facts."
+        case .tightenLead:
+            "Rewrite the title, deck, and opening so the lead is concise and supported by the sources."
+        case .checkCitations:
+            "Check whether material claims have support in the sources and identify missing or weak citations."
+        case .deskSummary:
+            "Prepare a concise desk summary while preserving source-supported facts and flagging uncertainty."
+        }
+    }
+}
+
+/// Observable lifecycle of one model-backed editorial operation. Error text is
+/// kept separately so the phase remains stable and easy to test.
+nonisolated enum EditorialOperationPhase: Sendable, Equatable {
+    case idle
+    case running
+    case cancelling
+    case completed
+    case failed
+
+    var isActive: Bool {
+        switch self {
+        case .running, .cancelling:
+            true
+        case .idle, .completed, .failed:
+            false
+        }
+    }
+}
+
+/// Observable lifecycle of writing and presenting one publication receipt.
+/// Neither active phase enters the model runtime.
+nonisolated enum EditorialPublicationPhase: Sendable, Equatable {
+    case idle
+    case writing
+    case completed
+    case failed
+
+    var isActive: Bool {
+        switch self {
+        case .writing:
+            true
+        case .idle, .completed, .failed:
+            false
+        }
+    }
+}
+
+/// Canonical semantic representation of the document. Its fields are kept
+/// separate so title/deck/body never need to be inferred from delimiters.
+nonisolated struct EditorialDraft: Codable, Hashable, Sendable, Equatable {
+    var title: String
+    var deck: String
+    var body: String
+
+    init(title: String = "", deck: String = "", body: String = "") {
+        self.title = title
+        self.deck = deck
+        self.body = body
+    }
+
+    var document: String {
+        [title, deck, body]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+    }
+
+    var hasContent: Bool {
+        !document.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+/// Immutable draft value captured before an asynchronous editorial operation.
+/// Its serialized document is derived only when a non-UI service consumes the
+/// snapshot; the MainActor owns the fields, never the encoding work.
+nonisolated struct EditorialDraftSnapshot: Codable, Sendable, Equatable, Hashable {
+    let title: String
+    let deck: String
+    let body: String
+    let revision: UInt64
+
+    init(
+        title: String = "",
+        deck: String = "",
+        body: String = "",
+        revision: UInt64
+    ) {
+        self.title = title
+        self.deck = deck
+        self.body = body
+        self.revision = revision
+    }
+
+    init(draft: EditorialDraft, revision: UInt64) {
+        self.init(
+            title: draft.title,
+            deck: draft.deck,
+            body: draft.body,
+            revision: revision
+        )
+    }
+
+    var document: String {
+        EditorialDraft(title: title, deck: deck, body: body).document
+    }
+
+    var draft: EditorialDraft {
+        EditorialDraft(title: title, deck: deck, body: body)
+    }
+}
+
+/// The semantic field changed by a model proposal. Keeping this enum separate
+/// from the serialized document makes review independent from delimiters.
+nonisolated enum EditorialDraftField: String, CaseIterable, Hashable, Sendable, Identifiable {
+    case title
+    case deck
+    case body
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .title: "Title"
+        case .deck: "Deck"
+        case .body: "Body"
+        }
+    }
+}
+
+/// One field-level before/after value shown by the local review surface.
+nonisolated struct EditorialRevisionChange: Identifiable, Hashable, Sendable {
+    let field: EditorialDraftField
+    let before: String
+    let after: String
+
+    var id: EditorialDraftField { field }
+}
+
+/// Pure, local proposal produced by comparing the request snapshot with the
+/// model response. It contains no workspace mutation or DiffPatch behavior.
+nonisolated struct EditorialRevision: Hashable, Sendable {
+    let base: EditorialDraftSnapshot
+    let proposed: EditorialDraft
+    let changes: [EditorialRevisionChange]
+
+    init(base: EditorialDraftSnapshot, proposed: EditorialDraft) {
+        self.base = base
+        self.proposed = proposed
+        self.changes = EditorialDraftField.allCases.compactMap { field in
+            let before: String
+            let after: String
+            switch field {
+            case .title:
+                before = base.title
+                after = proposed.title
+            case .deck:
+                before = base.deck
+                after = proposed.deck
+            case .body:
+                before = base.body
+                after = proposed.body
+            }
+            guard before != after else { return nil }
+            return EditorialRevisionChange(field: field, before: before, after: after)
+        }
+    }
+
+    var isEmpty: Bool { changes.isEmpty }
+}
+
+/// Review decision for one proposed field change.
+nonisolated enum EditorialRevisionChangeStatus: String, Hashable, Sendable {
+    case pending
+    case applied
+    case rejected
+}
+
+/// Aggregate review state used by the inspector's proposal controls.
+nonisolated enum EditorialRevisionStatus: String, Hashable, Sendable {
+    case pending
+    case partial
+    case applied
+    case rejected
+}
+
+/// Finding status is intentionally separate from the model response: it is a
+/// local acknowledgement and must not alter the source-backed finding itself.
+nonisolated enum EditorialFindingStatus: String, Hashable, Sendable {
+    case open
+    case acknowledged
+    case dismissed
+}
+
+/// Provider-neutral payload for one editorial operation. Sources are kept
+/// separate from the user request so an adapter cannot confuse ground truth
+/// with an instruction to the model.
+nonisolated struct EditorialRequest: Sendable {
+    let userInstruction: String
+    let draft: EditorialDraftSnapshot
+    let sources: [EditorialSource]
+    let action: EditorialAction
+
+    init(
+        userInstruction: String,
+        draft: EditorialDraftSnapshot,
+        sources: [EditorialSource],
+        action: EditorialAction
+    ) {
+        self.userInstruction = userInstruction
+        self.draft = draft
+        self.sources = sources
+        self.action = action
+    }
+
+    /// Keeps existing test and adapter callers source-compatible while the
+    /// structured draft boundary is adopted incrementally.
+    init(
+        userInstruction: String,
+        document: String,
+        sources: [EditorialSource],
+        action: EditorialAction
+    ) {
+        self.init(
+            userInstruction: userInstruction,
+            draft: EditorialDraftSnapshot(
+                title: "",
+                deck: "",
+                body: document,
+                revision: 0
+            ),
+            sources: sources,
+            action: action
+        )
+    }
+}
+
+/// A source-backed discrepancy returned by the future editorial model client.
+nonisolated struct EditorialFinding: Codable, Identifiable, Hashable, Sendable {
+    let id: UUID
+    let sourceName: String
+    let documentExcerpt: String
+    let sourceExcerpt: String
+    let explanation: String
+    let severity: Severity
+
+    enum Severity: String, Codable, Hashable, Sendable {
+        case note
+        case warning
+        case critical
+    }
+}
+
+/// Structured result boundary for the isolated feature. Keeping this contract
+/// here prevents provider details from leaking into the modal or the main chat
+/// timeline.
+nonisolated struct EditorialResult: Codable, Hashable, Sendable {
+    let id: UUID
+    /// New responses use semantic fields; this legacy value remains readable
+    /// while older providers transition to `revisedDraft`.
+    let revisedDraft: EditorialDraft?
+    let revisedDocument: String?
+    let findings: [EditorialFinding]
+    let summary: String
+
+    init(
+        id: UUID = UUID(),
+        revisedDraft: EditorialDraft? = nil,
+        revisedDocument: String? = nil,
+        findings: [EditorialFinding],
+        summary: String
+    ) {
+        self.id = id
+        self.revisedDraft = revisedDraft
+        self.revisedDocument = revisedDocument
+        self.findings = findings
+        self.summary = summary
+    }
+
+    /// Models may wrap JSON in a Markdown fence despite the response contract.
+    /// Strip only that transport decoration; malformed structured output stays
+    /// an error instead of being silently treated as an editorial success.
+    static func decode(from response: String) throws -> Self {
+        let trimmed = response.trimmingCharacters(in: .whitespacesAndNewlines)
+        let json: String
+        if trimmed.hasPrefix("```"), let firstNewline = trimmed.firstIndex(of: "\n") {
+            let bodyStart = trimmed.index(after: firstNewline)
+            let body = String(trimmed[bodyStart...])
+            json = body.hasSuffix("```")
+                ? String(body.dropLast(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+                : body
+        } else {
+            json = trimmed
+        }
+
+        guard let data = json.data(using: .utf8) else {
+            throw EditorialResponseError.invalidUTF8
+        }
+        return try JSONDecoder().decode(Self.self, from: data)
+    }
+}
+
+/// Immutable provenance for the latest completed model operation. The draft
+/// publisher turns this value into content-addressed Markdown sidecars; keeping
+/// it provider-neutral prevents filesystem protocol details entering adapters.
+nonisolated struct EditorialReviewContext: Sendable, Equatable {
+    let action: EditorialAction
+    let performedAt: Date
+    let baseDraft: EditorialDraftSnapshot
+    let sources: [EditorialSource]
+    let result: EditorialResult
+
+    /// A review still describes either the exact input inspected by the model
+    /// or its complete proposed rewrite. Partial/manual edits make the immutable
+    /// review historical and are recorded as stale at publication time.
+    func isStale(comparedTo draft: EditorialDraftSnapshot) -> Bool {
+        if draft.draft == baseDraft.draft {
+            return false
+        }
+        if let revisedDraft = result.revisedDraft,
+           draft.draft == revisedDraft {
+            return false
+        }
+        if let revisedDocument = result.revisedDocument {
+            let legacyRevision = EditorialDraft(
+                title: baseDraft.title,
+                deck: baseDraft.deck,
+                body: revisedDocument
+            )
+            if draft.draft == legacyRevision {
+                return false
+            }
+        }
+        return true
+    }
+}
+
+nonisolated enum EditorialResponseError: LocalizedError, Sendable {
+    case invalidUTF8
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidUTF8: "The editorial model returned invalid UTF-8 output."
+        }
+    }
+}
+
+/// Provider boundary is intentionally nonisolated so actor-owned model
+/// clients can execute away from the MainActor under Swift 6 defaults.
+nonisolated protocol EditorialModelClient: Sendable {
+    func perform(_ request: EditorialRequest) async throws -> EditorialResult
+    func cancel() async
+}

@@ -40,16 +40,11 @@ nonisolated struct CodexDynamicToolResult: Sendable, Equatable {
     }
 }
 
-/// Optional presentation returned alongside model-facing text. Edit and Git
-/// tools already publish their own receipts through ChatStore, while directory
-/// listings need this structured payload to drive WorkspaceListingWidget.
-nonisolated enum CodexToolPresentation: Sendable, Equatable {
-    case workspaceListing(WorkspaceListingBlock)
-}
-
+/// Returns model-facing text and an optional typed Core receipt as one atomic
+/// tool completion. The receipt is forwarded with the runtime ToolResult.
 nonisolated struct CodexToolExecution: Sendable, Equatable {
     let result: CodexDynamicToolResult
-    let presentation: CodexToolPresentation?
+    let receipt: ToolReceipt?
 }
 
 nonisolated enum CodexToolBridgeError: LocalizedError, Sendable, Equatable {
@@ -94,7 +89,8 @@ nonisolated enum CodexTurboCodeToolBridge {
                     .editFile,
                     .swiftPackageManager,
                     .xcodeProject,
-                    .git
+                    .git,
+                    .bash
                 ] + (availableSkills.isEmpty ? [] : [.loadSkill])
                 + (dynamicTools.contains(where: {
                     $0.name == ToolCapabilityID.createSkill.rawValue
@@ -119,7 +115,8 @@ nonisolated enum CodexTurboCodeToolBridge {
         agentTuning: AgentTuningConfig,
         includesDelegation: Bool = false,
         availableSkills: [TurboCodeSkillDefinition] = [],
-        safariMCPEnabled: Bool = false
+        safariMCPEnabled: Bool = false,
+        pluginTools: [TypeScriptPluginToolBinding] = []
     ) -> [CodexDynamicToolSpec] {
         let listTool = ListWorkspaceTool(workspaceRoot: workspaceRoot)
         let mapTool = SwiftWorkspaceMapTool(
@@ -132,6 +129,10 @@ nonisolated enum CodexTurboCodeToolBridge {
             executionPolicy: agentTuning.execution
         )
         let ripgrepTool = RipgrepTool(
+            workspaceRoot: workspaceRoot,
+            executionPolicy: agentTuning.execution
+        )
+        let bashTool = BashTool(
             workspaceRoot: workspaceRoot,
             executionPolicy: agentTuning.execution
         )
@@ -210,6 +211,18 @@ nonisolated enum CodexTurboCodeToolBridge {
                 )
             ),
             .init(
+                name: bashTool.name,
+                description: bashTool.description,
+                inputSchema: objectSchema(
+                    properties: [
+                        "command": stringSchema("zsh command to run from the active workspace."),
+                        "timeoutSeconds": nullableIntegerSchema(),
+                        "maxOutputCharacters": nullableIntegerSchema()
+                    ],
+                    required: ["command"]
+                )
+            ),
+            .init(
                 name: editTool.name,
                 description: editTool.description,
                 inputSchema: applyEditsSchema
@@ -254,6 +267,13 @@ nonisolated enum CodexTurboCodeToolBridge {
         if safariMCPEnabled {
             specifications.append(safariMCPSpecification)
         }
+        specifications.append(contentsOf: pluginTools.map { binding in
+            CodexDynamicToolSpec(
+                name: binding.snapshot.id.codexName,
+                description: binding.snapshot.description,
+                inputSchema: codexJSONValue(from: binding.snapshot.inputSchema)
+            )
+        })
         return specifications
     }
 
@@ -276,6 +296,7 @@ nonisolated enum CodexTurboCodeToolBridge {
                 filePattern: optionalString("filePattern", in: call),
                 filesOnly: optionalBoolean("filesOnly", in: call)
             )
+        case "bash": "Running shell command"
         case "apply_edits": "Editing files"
         case "swift_package_manager": "Working with Swift package"
         case "xcode_project": "Working with Xcode project"
@@ -293,8 +314,23 @@ nonisolated enum CodexTurboCodeToolBridge {
         workspaceName: String?,
         agentTuning: AgentTuningConfig,
         availableSkills: [TurboCodeSkillDefinition] = [],
-        delegationInvoker: (any AgentTaskInvoking)? = nil
+        pluginTools: [TypeScriptPluginToolBinding] = [],
+        delegationInvoker: (any AgentTaskInvoking)? = nil,
+        parentTurnID: TurnID? = nil
     ) async throws -> CodexToolExecution {
+        if let plugin = pluginTools.first(where: {
+            $0.snapshot.id.codexName == call.tool
+        }) {
+            let pluginResult = try await plugin.call(
+                arguments: pluginJSONValue(from: call.arguments)
+            )
+            return .init(
+                result: pluginResult.isError
+                    ? .failure(pluginResult.text)
+                    : .success(pluginResult.text),
+                receipt: pluginResult.widget.map(ToolReceipt.pluginWidget)
+            )
+        }
         switch call.tool {
         case "list_workspace":
             let output = try await ListWorkspaceTool(
@@ -309,7 +345,7 @@ nonisolated enum CodexTurboCodeToolBridge {
             )
             return CodexToolExecution(
                 result: .success(listingResultText(output)),
-                presentation: .workspaceListing(listing)
+                receipt: .workspaceListing(listing)
             )
         case "swift_workspace_map":
             let text = try await SwiftWorkspaceMapTool(
@@ -321,7 +357,7 @@ nonisolated enum CodexTurboCodeToolBridge {
                 query: optionalString("query", in: call),
                 path: optionalString("path", in: call)
             ))
-            return .init(result: .success(text), presentation: nil)
+            return .init(result: .success(text), receipt: nil)
         case "read_file":
             let text = try await ReadFileTool(
                 workspaceRoot: workspaceRoot,
@@ -333,7 +369,7 @@ nonisolated enum CodexTurboCodeToolBridge {
                     endLine: optionalInteger("endLine", in: call),
                     limit: optionalInteger("limit", in: call)
                 ))
-            return .init(result: .success(text), presentation: nil)
+            return .init(result: .success(text), receipt: nil)
         case "ripgrep":
             let text = try await RipgrepTool(
                 workspaceRoot: workspaceRoot,
@@ -351,11 +387,21 @@ nonisolated enum CodexTurboCodeToolBridge {
                     hidden: optionalBoolean("hidden", in: call),
                     maxResults: optionalInteger("maxResults", in: call)
                 ))
-            return .init(result: .success(text), presentation: nil)
+            return .init(result: .success(text), receipt: nil)
+        case "bash":
+            let text = try await BashTool(
+                workspaceRoot: workspaceRoot,
+                executionPolicy: agentTuning.execution
+            ).call(arguments: BashArguments(
+                command: try requiredString("command", in: call),
+                timeoutSeconds: optionalInteger("timeoutSeconds", in: call),
+                maxOutputCharacters: optionalInteger("maxOutputCharacters", in: call)
+            ))
+            return .init(result: .success(text), receipt: nil)
         case "apply_edits":
             let text = try await ApplyEditsTool(workspaceRoot: workspaceRoot)
                 .call(arguments: try applyEditsArguments(call))
-            return .init(result: .success(text), presentation: nil)
+            return .init(result: .success(text), receipt: nil)
         case "swift_package_manager":
             let text = try await SwiftPackageManagerTool(
                 workspaceRoot: workspaceRoot,
@@ -376,7 +422,7 @@ nonisolated enum CodexTurboCodeToolBridge {
                 filter: optionalString("filter", in: call),
                 timeoutSeconds: optionalInteger("timeoutSeconds", in: call)
             ))
-            return .init(result: .success(text), presentation: nil)
+            return .init(result: .success(text), receipt: nil)
         case "xcode_project":
             let text = try await XcodeProjectTool(
                 workspaceRoot: workspaceRoot,
@@ -390,7 +436,7 @@ nonisolated enum CodexTurboCodeToolBridge {
                 destination: optionalString("destination", in: call),
                 timeoutSeconds: optionalInteger("timeoutSeconds", in: call)
             ))
-            return .init(result: .success(text), presentation: nil)
+            return .init(result: .success(text), receipt: nil)
         case "git":
             let text = try await GitTool(
                 workspaceRoot: workspaceRoot,
@@ -404,25 +450,29 @@ nonisolated enum CodexTurboCodeToolBridge {
                 remote: optionalString("remote", in: call),
                 limit: optionalInteger("limit", in: call)
             ))
-            return .init(result: .success(text), presentation: nil)
+            return .init(result: .success(text), receipt: nil)
         case "delegate_task":
             guard let delegationInvoker else {
                 throw CodexToolBridgeError.unsupportedTool(call.tool)
             }
             let arguments = try delegateTaskArguments(call)
-            let result = await delegationInvoker.invoke(try arguments.envelope())
+            let result = await AgentTaskInvocation.invoke(
+                delegationInvoker,
+                envelope: try arguments.envelope(),
+                parentTurnID: parentTurnID
+            )
             let data = try JSONEncoder().encode(result)
             guard let json = String(data: data, encoding: .utf8) else {
                 throw AgentTaskWorkerError.invalidEnvelopeEncoding
             }
-            return .init(result: .success(json), presentation: nil)
+            return .init(result: .success(json), receipt: nil)
         case "load_skill":
             let text = try await LoadSkillTool(skills: availableSkills).call(
                 arguments: LoadSkillArguments(
                     name: try requiredString("name", in: call)
                 )
             )
-            return .init(result: .success(text), presentation: nil)
+            return .init(result: .success(text), receipt: nil)
         case "create_skill":
             let text = try await CreateSkillTool(workspaceRoot: workspaceRoot).call(
                 arguments: CreateSkillArguments(
@@ -431,14 +481,14 @@ nonisolated enum CodexTurboCodeToolBridge {
                     instructions: try requiredString("instructions", in: call)
                 )
             )
-            return .init(result: .success(text), presentation: nil)
+            return .init(result: .success(text), receipt: nil)
         case "safari_mcp":
             guard agentTuning.experimental.safariMCPEnabled else {
                 return .init(
                     result: .failure(
                         "Safari MCP is disabled in Settings > Agents > Experimental."
                     ),
-                    presentation: nil
+                    receipt: nil
                 )
             }
             return try await executeSafariMCP(call)
@@ -461,7 +511,7 @@ nonisolated enum CodexTurboCodeToolBridge {
             }.joined(separator: "\n")
             return .init(
                 result: .success(text.isEmpty ? "Safari MCP advertised no tools." : text),
-                presentation: nil
+                receipt: nil
             )
         case "call":
             let name = try requiredString("toolName", in: call)
@@ -478,7 +528,7 @@ nonisolated enum CodexTurboCodeToolBridge {
                 )
             }
             let text = try await SafariMCPClient.shared.call(tool: name, arguments: value)
-            return .init(result: .success(text), presentation: nil)
+            return .init(result: .success(text), receipt: nil)
         default:
             throw CodexToolBridgeError.invalidArguments(
                 tool: call.tool,
@@ -764,6 +814,32 @@ nonisolated enum CodexTurboCodeToolBridge {
         "type": .string("array"),
         "items": .object(["type": .string("string")])
     ])
+
+    private static func codexJSONValue(from value: PluginJSONValue) -> CodexJSONValue {
+        switch value {
+        case .null: .null
+        case .bool(let value): .bool(value)
+        case .integer(let value): .integer(value)
+        case .number(let value): .number(value)
+        case .string(let value): .string(value)
+        case .array(let values): .array(values.map(codexJSONValue(from:)))
+        case .object(let values):
+            .object(values.mapValues(codexJSONValue(from:)))
+        }
+    }
+
+    private static func pluginJSONValue(from value: CodexJSONValue) -> PluginJSONValue {
+        switch value {
+        case .null: .null
+        case .bool(let value): .bool(value)
+        case .integer(let value): .integer(value)
+        case .number(let value): .number(value)
+        case .string(let value): .string(value)
+        case .array(let values): .array(values.map(pluginJSONValue(from:)))
+        case .object(let values):
+            .object(values.mapValues(pluginJSONValue(from:)))
+        }
+    }
 
     private static func objectSchema(
         properties: [String: CodexJSONValue],

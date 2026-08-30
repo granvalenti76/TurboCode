@@ -12,6 +12,21 @@ public struct ToolActivity: Identifiable, Sendable, Hashable {
         self.toolName = toolName
         self.summary = summary
     }
+
+    /// Resolves the live affordance from the same catalog used by tool
+    /// selection and the Tools view. Unknown plugin tools keep a neutral
+    /// fallback instead of exposing a raw function name as visual chrome.
+    public var systemImageName: String {
+        switch toolName {
+        case "apply_edits", "diff_patch":
+            return "doc.badge.gearshape"
+        default:
+            return ModelToolCatalog.descriptors.first { descriptor in
+                descriptor.id.rawValue == toolName
+                    || descriptor.id.runtimeName == toolName
+            }?.systemImage ?? "wrench.and.screwdriver"
+        }
+    }
 }
 
 /// Summarizes a bounded read using the filename and requested line interval so

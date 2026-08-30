@@ -74,7 +74,11 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             sections.append("""
                 Workspace:
                 \(context.workspaceRoot)
-                All file operations must remain inside this workspace.
+                This workspace is the default working directory.
+                You can create and maintain TurboCode TypeScript plugins autonomously.
+                The SDK, documentation, and examples are installed in ~/.turbocode/sdk;
+                inspect them to learn the current plugin contract.
+                TypeScript plugins are installed in ~/.turbocode/plugins.
                 """)
         }
 
@@ -134,28 +138,28 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             lines.append("- Use turbocode_guide only for explicit questions about TurboCode itself, and answer from its official documentation.")
         }
         if tools.contains(.listWorkspace) {
-            lines.append("- Use list_workspace for directory listings; pass a workspace-relative path and use . for the root.")
+            lines.append("- Prefer list_workspace when its native Browse Directory widget is useful; pass a workspace-relative path and use . for the root. Bash remains available for directory listings.")
         }
         if tools.contains(.readFile) {
-            lines.append("- Use read_file for focused numbered source ranges.")
+            lines.append("- read_file returns numbered UTF-8 ranges with revisions and can request approval for external paths.")
         }
         if tools.contains(.searchWorkspace) {
             lines.append("- Use ripgrep flexibly to discover files or search workspace content; narrow its optional filters only when useful.")
         }
         if tools.contains(.editFile) {
-            lines.append("- Use the structured editor for source and text changes. Before editing an existing file, read the relevant range and pass its revision. Never generate unified diff hunks.")
+            lines.append("- Prefer edit_file when its native Review and Undo widget is useful; existing files require the revision returned by read_file. Bash remains available for file changes.")
         }
         if tools.contains(.git) {
-            lines.append("- Use git for every Git operation.")
+            lines.append("- Prefer git when its native status, diff, commit, or branch widgets are useful; Bash remains available for Git commands.")
         }
         if tools.contains(.xcodeProject) {
-            lines.append("- Use xcode_project for Xcode discovery, builds, and tests.")
+            lines.append("- xcode_project provides Xcode discovery, builds, tests, and compact diagnostics.")
         }
         if tools.contains(.bash) {
-            lines.append("- Use bash only for bounded non-Git commands that have no dedicated structured tool; it cannot write workspace files.")
+            lines.append("- bash runs arbitrary zsh commands. It discovers the supported Node runtime. Relative paths start at the reported Working directory and cd does not persist between calls; external filesystem access pauses for host approval.")
         }
         if tools.contains(.swiftPackageManager) {
-            lines.append("- Use swift_package_manager, not bash, for supported Swift Package Manager initialization, dependency, build, test, run, resolution, cleanup, and inspection actions.")
+            lines.append("- swift_package_manager provides structured Swift package initialization, dependency, build, test, run, cleanup, and inspection actions.")
         }
         if tools.contains(.writeOnDevice) {
             lines.append("- Use write_ondevice once with complete content for a requested root-level text file.")
@@ -171,9 +175,6 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             || tools.contains(.fileSystem) {
             lines.append("- Preserve real newline characters and blank paragraph breaks in long-form content.")
         }
-        if tools.contains(.fileSystem) || tools.contains(.git) {
-            lines.append("- If a tool returns TURBOCODE_APPROVAL_REQUIRED, stop and wait for the user's decision without exposing the technical block.")
-        }
         if tools.contains(.listWorkspace)
             || tools.contains(.editFile)
             || tools.contains(.git) {
@@ -187,10 +188,10 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         Orchestrator mode:
         You coordinate the task and delegate file reading, code changes, commands,
         Git work, and multi-step analysis to call_powerful_model. Use list_workspace
-        directly only for directory listings, file_system for metadata or discovery,
-        and turbocode_guide for explicit TurboCode product questions. Give the
-        delegate a complete task with relevant paths and requirements for the
-        workspace at \(workspaceRoot), then synthesize its result for the user.
+        directly only for directory listings and file_system for metadata or
+        discovery. Give the delegate a complete task with relevant paths and
+        requirements for the workspace at \(workspaceRoot), then synthesize its
+        result for the user.
         """
     }
 

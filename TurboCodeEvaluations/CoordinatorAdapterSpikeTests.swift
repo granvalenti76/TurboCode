@@ -6,7 +6,7 @@ import Testing
 @MainActor
 @Suite("Coordinator adapter spikes")
 struct CoordinatorAdapterSpikeTests {
-    @Test("DeepSeek dynamic profiles can select only structured delegation")
+    @Test("DeepSeek custom profiles expose only explicitly selected delegation")
     func deepSeekProfileSelectsStructuredDelegation() {
         let profile = UserDynamicProfile(
             name: "DeepSeek Coordinator",
@@ -25,7 +25,10 @@ struct CoordinatorAdapterSpikeTests {
             selectedIDs: profile.resolvedToolIDs
         )
 
-        #expect(plan.registeredIDs == [.delegateTask, .createSkill])
+        // Custom profiles are explicit capability boundaries. Built-in
+        // profiles may receive create_skill automatically, but this profile
+        // selected only the structured delegation capability.
+        #expect(plan.registeredIDs == [.delegateTask])
         #expect(ModelToolCatalog.descriptor(for: .delegateTask).name == "Delegate Task")
     }
 

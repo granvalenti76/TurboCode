@@ -6,6 +6,7 @@ struct SkillsView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var viewModel = SkillsViewModel()
+    @State private var pluginRuntime = TypeScriptPluginRuntimeStore.shared
     @State private var newProfilePresented = false
     @State private var suggestedBaseModel: ProfileBaseModelID = .onDevice
     @State private var suggestedDelegationEnabled = false
@@ -71,7 +72,7 @@ struct SkillsView: View {
                 codexReasoning,
                 delegationEnabled,
                 copyDefaults in
-                viewModel.create(
+                let created = viewModel.create(
                     name: name,
                     summary: summary,
                     baseModelID: model,
@@ -82,11 +83,21 @@ struct SkillsView: View {
                     copyDefaults: copyDefaults,
                     settings: settings
                 )
+                if created,
+                   case .custom(let profileID) = viewModel.selection {
+                    Task {
+                        await chatStore.reloadDynamicProfiles(selecting: profileID)
+                    }
+                }
+                return created
             }
         }
         .alert("Delete Profile?", isPresented: $deleteConfirmationPresented) {
             Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) { viewModel.deleteSelected() }
+            Button("Delete", role: .destructive) {
+                viewModel.deleteSelected()
+                Task { await chatStore.reloadDynamicProfiles() }
+            }
                 .disabled(chatStore.busy)
         } message: {
             Text("This removes the custom profile. Models, tools, and installed skills are not deleted.")
@@ -149,7 +160,9 @@ struct SkillsView: View {
                         )
                         .tag(ProfileLibrarySelection.custom(profile.id))
                         .contextMenu {
-                            Button("Use Profile") { chatStore.selectDynamicProfile(profile.id) }
+                            Button("Use Profile") {
+                                Task { await chatStore.selectDynamicProfile(profile.id) }
+                            }
                                 .disabled(chatStore.busy)
                             Divider()
                             Button("Delete", role: .destructive) {
@@ -183,8 +196,10 @@ struct SkillsView: View {
                 .help("Reveal Skills in Finder")
                 Button {
                     viewModel.reload()
-                    chatStore.reloadSkills()
-                    chatStore.reloadDynamicProfiles()
+                    Task {
+                        await chatStore.reloadSkills()
+                        await chatStore.reloadDynamicProfiles()
+                    }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -258,7 +273,7 @@ struct SkillsView: View {
                         newProfilePresented = true
                     }
                     Button("Use Default") {
-                        chatStore.selectBuiltInProfile(modelID)
+                        Task { await chatStore.selectBuiltInProfile(modelID) }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(!option.isAvailable || chatStore.busy)
@@ -290,6 +305,10 @@ struct SkillsView: View {
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
+                }
+
+                if !viewModel.discoveredTypeScriptPlugins.isEmpty || !pluginRuntime.orderedSnapshots.isEmpty {
+                    typeScriptPluginSection()
                 }
             }
             .padding(28)
@@ -330,12 +349,19 @@ struct SkillsView: View {
                     .disabled(chatStore.busy)
                     Button("Revert") { viewModel.discardChanges() }
                         .disabled(!viewModel.isDirty)
-                    Button("Save") { viewModel.save() }
+                    Button("Save") {
+                        if viewModel.save() {
+                            Task { await chatStore.reloadDynamicProfiles() }
+                        }
+                    }
                         .keyboardShortcut("s", modifiers: .command)
                         .disabled(!viewModel.canSave || chatStore.busy)
                     Button("Use Profile") {
                         if !viewModel.isDirty || viewModel.save() {
-                            chatStore.selectDynamicProfile(draft.id)
+                            Task {
+                                await chatStore.reloadDynamicProfiles()
+                                await chatStore.selectDynamicProfile(draft.id)
+                            }
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -477,6 +503,10 @@ struct SkillsView: View {
                     }
                 }
 
+                if !viewModel.discoveredTypeScriptPlugins.isEmpty || !pluginRuntime.orderedSnapshots.isEmpty {
+                    typeScriptPluginSection(draft: draft)
+                }
+
                 sectionCard(
                     title: "Included Capabilities",
                     subtitle: "The saved list is explicit: everything outside Included is excluded."
@@ -495,6 +525,176 @@ struct SkillsView: View {
             .frame(maxWidth: 1120, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .top)
         }
+    }
+
+    private func typeScriptPluginSection(draft: UserDynamicProfile? = nil) -> some View {
+        sectionCard(
+            title: "TypeScript plugins",
+            subtitle: "Installed extensions are discovered automatically and shown separately from TurboCode tools."
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                if !settings.agentTuning.experimental.thirdPartyPluginsEnabled {
+                    Label(
+                        "Enable third-party plugins in Settings > Agents to load these tools.",
+                        systemImage: "info.circle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                ForEach(viewModel.discoveredTypeScriptPlugins, id: \.manifest.id) { plugin in
+                    DisclosureGroup {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(plugin.manifest.tools, id: \.name) { tool in
+                                let toolID = TypeScriptPluginToolID(
+                                    pluginID: plugin.manifest.id,
+                                    toolName: tool.name
+                                )
+                                HStack(alignment: .top, spacing: 10) {
+                                    Image(systemName: "wrench.and.screwdriver")
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 18)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(tool.name)
+                                            .font(.callout.weight(.medium))
+                                        Text(tool.description)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                    Spacer(minLength: 8)
+                                    Image(systemName: "info.circle")
+                                        .foregroundStyle(.secondary)
+                                        .help(
+                                            "\(tool.name)\n"
+                                                + "\(tool.description)\n"
+                                                + "ID: \(toolID.rawValue)"
+                                        )
+                                    Text(pluginToolStatus(toolID, draft: draft))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 7)
+                                .contentShape(Rectangle())
+                                .help("\(tool.name): \(tool.description)")
+                            }
+                        }
+                        .padding(.top, 6)
+                    } label: {
+                        HStack(spacing: 8) {
+                            Label(plugin.manifest.name, systemImage: "puzzlepiece.extension")
+                                .font(.callout.weight(.semibold))
+                            Text("v\(plugin.manifest.version)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "info.circle")
+                                .foregroundStyle(.secondary)
+                                .help(
+                                    "\(plugin.manifest.name)\n"
+                                        + "ID: \(plugin.manifest.id)\n"
+                                        + "Version: \(plugin.manifest.version)"
+                                )
+                            Spacer()
+                            if let lifecycle = pluginRuntime.snapshots[plugin.manifest.id] {
+                                Label(
+                                    lifecycleLabel(lifecycle.stage),
+                                    systemImage: lifecycleIcon(lifecycle.stage)
+                                )
+                                .font(.caption)
+                                .foregroundStyle(lifecycleColor(lifecycle.stage))
+                                .help(
+                                    "\(lifecycle.detail)\n"
+                                        + "Path: \(lifecycle.rootURL.path)"
+                                )
+                            }
+                            Text("\(plugin.manifest.tools.count) \(plugin.manifest.tools.count == 1 ? "tool" : "tools")")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .help("\(plugin.manifest.name) (\(plugin.manifest.id))\n\(plugin.manifest.tools.count) available tools")
+                }
+
+                ForEach(failedPluginSnapshots) { plugin in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(plugin.name)
+                                .font(.callout.weight(.semibold))
+                            Text(plugin.detail)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                            Text(plugin.rootURL.path)
+                                .font(.caption2.monospaced())
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        Spacer(minLength: 8)
+                        Text("Failed")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+        }
+    }
+
+    private var failedPluginSnapshots: [TypeScriptPluginLifecycleSnapshot] {
+        let discoveredIDs = Set(viewModel.discoveredTypeScriptPlugins.map(\.manifest.id))
+        return pluginRuntime.orderedSnapshots.filter {
+            $0.stage == .failed && !discoveredIDs.contains($0.id)
+        }
+    }
+
+    private func lifecycleLabel(_ stage: TypeScriptPluginLifecycleStage) -> String {
+        switch stage {
+        case .discovered: "Discovered"
+        case .validating: "Validating"
+        case .building: "Building"
+        case .awaitingAuthorization: "Authorization"
+        case .installed: "Installed"
+        case .activating: "Loading"
+        case .ready: "Ready"
+        case .denied: "Denied"
+        case .failed: "Failed"
+        }
+    }
+
+    private func lifecycleIcon(_ stage: TypeScriptPluginLifecycleStage) -> String {
+        switch stage {
+        case .ready: "checkmark.circle.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        case .denied: "hand.raised.fill"
+        case .building, .validating, .activating, .awaitingAuthorization: "clock"
+        case .discovered, .installed: "circle"
+        }
+    }
+
+    private func lifecycleColor(_ stage: TypeScriptPluginLifecycleStage) -> Color {
+        switch stage {
+        case .ready: .green
+        case .failed: .red
+        case .denied: .orange
+        default: .secondary
+        }
+    }
+
+    private func pluginToolStatus(
+        _ id: TypeScriptPluginToolID,
+        draft: UserDynamicProfile?
+    ) -> String {
+        if !settings.agentTuning.experimental.thirdPartyPluginsEnabled {
+            return "Off"
+        }
+        guard let draft else { return "Available" }
+        if draft.pluginToolIDs.isEmpty || draft.resolvedPluginToolIDs.contains(id) {
+            return "Available"
+        }
+        return "Excluded"
     }
 
     /// Progressive disclosure keeps the common "all worker tools" path quiet,

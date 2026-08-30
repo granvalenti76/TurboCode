@@ -24,7 +24,7 @@ struct WorkspaceToolbarMenu: View {
                     ForEach(chatStore.recentWorkspaces, id: \.self) { path in
                         let name = URL(fileURLWithPath: path).lastPathComponent
                         Button {
-                            chatStore.switchToWorkspace(path)
+                            Task { await chatStore.switchToWorkspace(path) }
                         } label: {
                             HStack {
                                 Text(name)

@@ -7,6 +7,39 @@ import Testing
 @MainActor
 @Suite("Chat architecture boundaries")
 struct ChatArchitectureTests {
+    @Test("Composer view model owns and resets transient input")
+    func composerProjectionOwnsDraftState() {
+        let composer = ComposerViewModel()
+        composer.messageText = "Inspect the runtime boundary"
+        composer.mode = .plan
+
+        #expect(composer.canSend)
+        composer.reset()
+        #expect(composer.messageText.isEmpty)
+        #expect(!composer.canSend)
+        #expect(composer.mode == .plan)
+    }
+
+    @Test("Presentation view model replaces and clears compaction notices")
+    func presentationProjectionOwnsTransientNotice() {
+        let presentation = ChatPresentationViewModel()
+        let first = LocalCompactionNotice(
+            sourceCharacters: 12_000,
+            retainedCharacters: 3_000
+        )
+        let replacement = LocalCompactionNotice(
+            sourceCharacters: 20_000,
+            retainedCharacters: 4_000
+        )
+
+        presentation.presentCompactionNotice(first)
+        presentation.presentCompactionNotice(replacement)
+        #expect(presentation.localCompactionNotice == replacement)
+
+        presentation.clearCompactionNotice()
+        #expect(presentation.localCompactionNotice == nil)
+    }
+
     @Test("Workbench profile presentation preserves the underlying route")
     func workbenchProfilePresentationIsModal() {
         let workbench = WorkbenchStore()
@@ -74,8 +107,28 @@ struct ChatArchitectureTests {
         #expect(store.isDelegating)
     }
 
+    @Test("Profile handoff busy state remains an observable UI projection")
+    func profileHandoffBusyStateRemainsObservable() async {
+        let store = ChatStore(
+            conversationRepository: ArchitectureConversationRepository()
+        )
+
+        await confirmation("Busy projection change is observed") { observed in
+            withObservationTracking {
+                _ = store.busy
+            } onChange: {
+                observed()
+            }
+            store.presentationViewModel.setProfileTransitioning(true)
+        }
+
+        #expect(store.busy)
+        store.presentationViewModel.setProfileTransitioning(false)
+        #expect(!store.busy)
+    }
+
     @Test("A delegation opens Activity once and closing preserves its summary")
-    func activityInspectorFollowsUserControl() throws {
+    func activityInspectorFollowsUserControl() async throws {
         let store = ChatStore(
             conversationRepository: ArchitectureConversationRepository()
         )
@@ -94,6 +147,13 @@ struct ChatArchitectureTests {
             modelName: "On-device worker",
             role: .codingWorker
         )
+        let callbackEnvelope = try AgentTaskEnvelope(
+            taskID: "task-inspector-callback",
+            attemptID: "attempt-inspector-callback",
+            goal: "Open the Activity projection from a runtime callback.",
+            acceptanceCriteria: ["The Activity projection is visible."],
+            verificationRequest: .none
+        )
 
         store.handleAgentActivityEvent(
             .started(
@@ -106,6 +166,19 @@ struct ChatArchitectureTests {
 
         #expect(store.rightPanelMode == .activity)
         #expect(store.currentAgentActivity?.goal == envelope.goal)
+
+        let callbackStore = ChatStore(
+            conversationRepository: ArchitectureConversationRepository()
+        )
+        await callbackStore.responseCoordinator.modelSessionEvents.agentActivityChanged(
+            .started(
+                envelope: callbackEnvelope,
+                coordinator: coordinator,
+                worker: worker,
+                startedAt: .now
+            )
+        )
+        #expect(callbackStore.rightPanelMode == .activity)
 
         store.closeRightPanel()
         store.handleAgentActivityEvent(

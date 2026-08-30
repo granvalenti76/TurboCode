@@ -138,21 +138,74 @@ Follow this sequence for any refactor, new feature, or non-trivial change:
 4. **Implement in small, reviewable increments**; after each, summarize what changed.
 5. **Ask before any Git mutation** or any command with side effects (builds that fail, deletions, etc.).
 
+## Resuming Work in a New Session
+
+When continuing an in-progress release or refactor, begin with a targeted
+handoff check before editing:
+
+1. Read `git status --short`, the current branch, the latest commits, and the
+   unstaged diff. Treat existing changes as intentional until their ownership
+   is clear; do not discard or reset them.
+2. Read the relevant milestone sections in `TODO.md` and `FUTURE.md`, then
+   inspect only the declarations and tests touched by the next slice. Keep
+   `TODO.md` updates limited to the active release scope.
+3. Treat the 0.3.7 runtime/UI execution boundary at commit `a99e3e5` as the
+   completed code checkpoint. The remaining release gate is the fresh PCC
+   measurement recorded in `TODO.md`; do not invent another runtime refactor
+   or move that work into the product/UX scope of 0.4.0.
+4. Keep provider configuration external. `~/.turbocode/models.json` is the
+   ground truth for endpoint and model selection; never modify it as part of
+   tests, never hardcode a model name into production or evaluation code, and
+   do not use the aesthetic model name as a session-behavior assertion. Record
+   only the provider/backend needed to explain a diagnostic result.
+5. If a real interactive validation is required, ask the user to run the app
+   or Xcode session and capture the resulting diagnostics; do not substitute a
+   synthetic model configuration for that validation.
+
+Every coherent slice should leave a recoverable checkpoint: focused tests,
+`git diff --check`, and a commit message that states the problem, the design
+decision, and the verification performed. This makes the repository itself the
+handoff record when conversational context is unavailable.
+
 ## Coding Style & Naming Conventions
 
 Follow Swift API design: four-space indentation, `UpperCamelCase` for types, and `lowerCamelCase` for methods, properties, and enum cases. Match filenames to their primary type, such as `SessionSearchViewModel.swift`. Prefer focused SwiftUI views and keep workspace, Git, Xcode, and provider behavior behind existing service/tool boundaries. Use `@MainActor` for UI-owned mutable state and preserve explicit concurrency annotations. No separate formatter or linter is configured; use Xcode formatting and keep warnings clean.
 
 ## Code Comments & Documentation
 
-Every code change must add or update comments that make the modified behavior easy to review and maintain. Document the intent behind non-obvious logic, invariants, provider-specific workarounds, concurrency or safety constraints, and important tradeoffs. Keep public types and APIs documented with concise Swift documentation comments where their purpose is not already self-evident. When behavior changes, update nearby comments so they remain accurate. Prefer comments that explain why the code exists and what must remain true; avoid comments that merely repeat the syntax or narrate an obvious statement.
+Comments are part of the implementation deliverable, not optional polish. Every code change must add or update the nearby comment when the modified behavior has non-obvious intent, an invariant, a provider-specific workaround, a concurrency or safety constraint, or an important tradeoff. Before finishing, inspect the diff and explicitly check that the changed behavior is explainable to the next maintainer without reconstructing the entire investigation. Keep public types and APIs documented with concise Swift documentation comments where their purpose is not already self-evident. When behavior changes, update nearby comments so they remain accurate. Prefer comments that explain why the code exists and what must remain true; avoid comments that merely repeat the syntax or narrate an obvious statement.
 
 ## Testing Guidelines
 
-Tests use Apple's Swift Testing framework (`import Testing`), with descriptive `@Suite` and `@Test` labels and `#expect` assertions. Name test methods by observable behavior, for example `recentSessionsAreLimitedAndOrdered()`. Add focused coverage in `TurboCodeEvaluations/` for changed logic; update golden evaluations only when intended agent behavior changes. Run the shared evaluation scheme before opening a pull request.
+Tests use Apple's Swift Testing framework (`import Testing`), with descriptive
+`@Suite` and `@Test` labels and `#expect` assertions. Name test methods by
+observable behavior, for example `recentSessionsAreLimitedAndOrdered()`. Add
+focused coverage in `TurboCodeEvaluations/` for changed logic; update golden
+evaluations only when intended agent behavior changes.
+
+During implementation, run only the focused suites that exercise the files,
+contracts, or behavior changed by the current slice. Do not run the complete
+evaluation scheme after every slice. Run it only when the user explicitly asks
+for it or at an explicitly approved final release/pull-request gate. Pure
+documentation changes do not require a test run unless they alter generated or
+validated documentation behavior.
 
 ## Commit & Pull Request Guidelines
 
-History uses short, imperative subjects such as `Add native session search` and `Fix DeepSeek edit argument parsing`. Keep commits scoped to one coherent change. Pull requests should explain the user-visible outcome, note build/test results, link relevant issues, and include screenshots for SwiftUI changes. Call out changes to entitlements, signing, model configuration, or persisted data.
+Use a short, imperative subject, but do not confuse a concise subject with an incomplete commit. Every feature, fix, refactor, or architectural slice must have a meaningful commit body that records the problem or observed symptom, the relevant context or investigation, the chosen solution and its boundary, and the verification performed. A useful shape is:
+
+```text
+Fix runtime contract documentation tests
+
+The custom-profile test expected an implicitly added capability even though
+explicit selections are authoritative. The tools guide also omitted the
+experimental Safari capability from the searchable reference.
+
+Keep explicit custom-profile boundaries and document the opt-in capability.
+Focused evaluation tests pass; the provider runtime is unchanged.
+```
+
+Keep each commit scoped to one coherent, reviewable change; "substantial" means complete context and rationale, not unrelated files or artificial size. Subject-only commits are reserved for genuinely trivial mechanical changes. Before committing, review the staged diff, run `git diff --check`, and include relevant test/build results in the body. Pull requests should explain the user-visible outcome, note build/test results, link relevant issues, and include screenshots for SwiftUI changes. Call out changes to entitlements, signing, model configuration, or persisted data.
 
 ## Security & Configuration
 

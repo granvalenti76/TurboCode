@@ -18,6 +18,14 @@ public final class SettingsStore {
         didSet { UserDefaults.standard.set(maxChatWidth, forKey: "maxChatWidth") }
     }
     public var workspacePaths: [String] = []
+    /// The newsroom taxonomy used by Editorial Desk metadata menus and
+    /// persisted independently from provider and agent configuration.
+    public var editorialDeskCatalog: EditorialDeskCatalog = .default {
+        didSet {
+            guard !isLoadingEditorialDeskCatalog else { return }
+            saveEditorialDeskCatalog()
+        }
+    }
 
     public var agentTuning: AgentTuningConfig = .default {
         didSet {
@@ -26,7 +34,6 @@ public final class SettingsStore {
                 let validated = try agentTuning.validated()
                 try TurboCodeConfig.shared.saveAgentTuning(validated)
                 agentTuningError = nil
-                ChatStore.shared?.applyAgentTuning(validated)
             } catch {
                 agentTuningError = error.localizedDescription
             }
@@ -56,7 +63,6 @@ public final class SettingsStore {
                 deepSeekCredentialConfigured = !deepseekAPIKey.isEmpty
                 credentialError = nil
                 reloadRemoteModels()
-                ChatStore.shared?.reloadRemoteModels()
             } catch {
                 credentialError = error.localizedDescription
             }
@@ -73,6 +79,7 @@ public final class SettingsStore {
 
     private var isLoadingCredentials = false
     private var isLoadingAgentTuning = false
+    private var isLoadingEditorialDeskCatalog = false
 
     public init() {}
 
@@ -110,9 +117,9 @@ public final class SettingsStore {
         }
         reloadAgentTuning()
         reloadRemoteModels()
+        loadEditorialDeskCatalog()
         // Do not read provider secrets while restoring general settings. The
         // Provider pane loads this value only when the user opens it.
-        ChatStore.shared?.reloadRemoteModels()
     }
 
     /// Loads only credential state for the provider pane.
@@ -140,6 +147,9 @@ public final class SettingsStore {
         remoteModels = (try? TurboCodeConfig.shared.loadRemoteModels())
             .flatMap { $0.isEmpty ? nil : $0 }
             ?? RemoteModelConfig.defaults
+        // PCC-RETIREMENT: remove this defensive filter with the legacy model
+        // role once old settings files no longer need compatibility handling.
+        remoteModels.removeAll { $0.isRetiredPCC }
     }
 
     public func isConfigured(_ model: RemoteModelConfig) -> Bool {
@@ -154,7 +164,6 @@ public final class SettingsStore {
             let loaded = try TurboCodeConfig.shared.loadAgentTuning()
             agentTuning = loaded
             agentTuningError = nil
-            ChatStore.shared?.applyAgentTuning(loaded)
         } catch {
             agentTuningError = error.localizedDescription
         }
@@ -166,6 +175,68 @@ public final class SettingsStore {
         defaults.set(language, forKey: "language")
         defaults.set(fontSize, forKey: "fontSize")
         defaults.set(maxChatWidth, forKey: "maxChatWidth")
+    }
+
+    private func loadEditorialDeskCatalog() {
+        isLoadingEditorialDeskCatalog = true
+        defer { isLoadingEditorialDeskCatalog = false }
+
+        guard let data = UserDefaults.standard.data(forKey: "editorialDeskCatalog"),
+              let catalog = try? JSONDecoder().decode(
+                  EditorialDeskCatalog.self,
+                  from: data
+              ) else {
+            editorialDeskCatalog = .default
+            saveEditorialDeskCatalog()
+            return
+        }
+        if isLegacyEditorialMockCatalog(catalog) {
+            editorialDeskCatalog = .default
+            saveEditorialDeskCatalog()
+        } else {
+            let merged = catalogByAddingDefaults(to: catalog)
+            editorialDeskCatalog = merged
+            if merged != catalog {
+                saveEditorialDeskCatalog()
+            }
+        }
+    }
+
+    /// Seeds newly shipped defaults without replacing or reordering entries
+    /// that the user already configured in Settings.
+    private func catalogByAddingDefaults(
+        to catalog: EditorialDeskCatalog
+    ) -> EditorialDeskCatalog {
+        var merged = catalog
+        for section in EditorialDeskCatalog.default.sections where !merged.sections.contains(where: {
+            $0.name.caseInsensitiveCompare(section.name) == .orderedSame
+        }) {
+            merged.sections.append(section)
+        }
+        for type in EditorialDeskCatalog.default.types where !merged.types.contains(where: {
+            $0.name.caseInsensitiveCompare(type.name) == .orderedSame
+        }) {
+            merged.types.append(type)
+        }
+        return merged
+    }
+
+    private func saveEditorialDeskCatalog() {
+        guard let data = try? JSONEncoder().encode(editorialDeskCatalog) else { return }
+        UserDefaults.standard.set(data, forKey: "editorialDeskCatalog")
+    }
+
+    private func isLegacyEditorialMockCatalog(_ catalog: EditorialDeskCatalog) -> Bool {
+        guard catalog.sections.count == 1,
+              catalog.types.count == 1,
+              catalog.sections[0].name == "Politica",
+              catalog.sections[0].systemImage == "building.columns",
+              catalog.types[0].name == "Breaking",
+              catalog.types[0].systemImage == "bolt.fill",
+              catalog.types[0].colorHex.caseInsensitiveCompare("#FF3B30") == .orderedSame else {
+            return false
+        }
+        return true
     }
 }
 

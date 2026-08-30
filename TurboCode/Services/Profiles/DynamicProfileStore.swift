@@ -20,7 +20,10 @@ nonisolated struct DynamicProfileStore: Sendable {
 
     func load() throws -> [UserDynamicProfile] {
         let contents = try readContents()
-        return contents.profiles.sorted {
+        // PCC overrides remain decodable for migration safety, but must not
+        // appear in the profile library after Apple's `fm serve` shutdown.
+        // PCC-RETIREMENT: remove this filter when the legacy enum case goes.
+        return contents.profiles.filter { $0.baseModelID != .pcc }.sorted {
             $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }
     }

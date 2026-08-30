@@ -1,17 +1,12 @@
 import SwiftUI
 
-// MARK: - Composer Enums
-
-enum ReasoningEffort: String, CaseIterable {
-    case low = "Low"
-    case medium = "Medium"
-    case high = "High"
-}
-
 // MARK: - InputFieldView — Composer input card
 
 struct InputFieldView: View {
     @Environment(ChatStore.self) private var chatStore
+    @Environment(ComposerCommandRouter.self) private var commandRouter
+    @Environment(ComposerViewModel.self) private var composer
+    @Environment(ChatPresentationViewModel.self) private var presentation
     @Environment(\.chatFontSize) private var chatFontSize
     @FocusState private var isFocused: Bool
     @State private var selectedSlashCommandIndex = 0
@@ -78,8 +73,8 @@ struct InputFieldView: View {
             TextField(
                 "What would you like to do in this project?",
                 text: Binding(
-                    get: { chatStore.composerInput },
-                    set: { chatStore.composerInput = $0 }
+                    get: { composer.messageText },
+                    set: { composer.messageText = $0 }
                 ),
                 axis: .vertical
             )
@@ -96,7 +91,7 @@ struct InputFieldView: View {
                         isFocused = true
                     }
                 )
-                .onChange(of: chatStore.composerInput) { oldValue, newValue in
+                .onChange(of: composer.messageText) { oldValue, newValue in
                     // A changed query describes a new result set; keeping the
                     // previous row selected could execute the wrong command.
                     selectedSlashCommandIndex = 0
@@ -133,7 +128,7 @@ struct InputFieldView: View {
                 }
 
                 Button {
-                    chatStore.composerInput = suggestion.insertion
+                    composer.messageText = suggestion.insertion
                     isFocused = true
                 } label: {
                     HStack(spacing: 10) {
@@ -207,19 +202,23 @@ struct InputFieldView: View {
             min(max(selectedSlashCommandIndex, 0), slashSuggestions.count - 1)
         ]
         guard suggestion.command != "/skill", suggestion.command != "/task" else {
-            chatStore.composerInput = suggestion.insertion
+            composer.messageText = suggestion.insertion
             isFocused = true
             return
         }
 
         let command = suggestion.command
-        chatStore.composerInput = ""
+        composer.reset()
         isFocused = false
-        Task { await chatStore.sendMessage(command) }
+        Task {
+            if await commandRouter.execute(command) == false {
+                await chatStore.sendMessage(command)
+            }
+        }
     }
 
     private var slashSuggestions: [SlashCommandSuggestion] {
-        let input = chatStore.composerInput
+        let input = composer.messageText
         guard input.hasPrefix("/"), !input.contains("\n") else { return [] }
 
         if input.hasPrefix("/skill ") {
@@ -269,6 +268,12 @@ struct InputFieldView: View {
                 insertion: "/compact",
                 description: "Compact conversation context for local models",
                 icon: "arrow.triangle.2.circle.clockwise"
+            ),
+            SlashCommandSuggestion(
+                command: "/reload",
+                insertion: "/reload",
+                description: "Reload profiles and TypeScript plugins",
+                icon: "arrow.clockwise"
             )
         ] + chatStore.availableSkills.map {
             SlashCommandSuggestion(
@@ -299,7 +304,7 @@ struct InputFieldView: View {
                 Menu {
                     Section("Default Profiles") {
                         Button {
-                            chatStore.selectBuiltInProfile(.onDevice)
+                            Task { await chatStore.selectBuiltInProfile(.onDevice) }
                         } label: {
                             if chatStore.activeDynamicProfileID == nil,
                                chatStore.activeBackend == .foundationApple {
@@ -313,7 +318,7 @@ struct InputFieldView: View {
 
                         ForEach(chatStore.enabledRemoteModels) { model in
                             Button {
-                                chatStore.switchRemoteModel(to: model.id)
+                                Task { await chatStore.switchRemoteModel(to: model.id) }
                             } label: {
                                 if chatStore.activeDynamicProfileID == nil,
                                    chatStore.activeRemoteModelID == model.id,
@@ -331,7 +336,7 @@ struct InputFieldView: View {
                         Section("Custom Profiles") {
                             ForEach(chatStore.dynamicProfiles) { profile in
                                 Button {
-                                    chatStore.selectDynamicProfile(profile.id)
+                                    Task { await chatStore.selectDynamicProfile(profile.id) }
                                 } label: {
                                     if chatStore.activeDynamicProfileID == profile.id {
                                         Label(profile.name, systemImage: "checkmark")
@@ -350,7 +355,7 @@ struct InputFieldView: View {
                             ForEach(ReasoningEffort.allCases, id: \.self) { effort in
                                 Button {
                                     reasoningEffort = effort
-                                    chatStore.setReasoningEffort(effort)
+                                    Task { await chatStore.setReasoningEffort(effort) }
                                 } label: {
                                     if reasoningEffort == effort {
                                         Label(
@@ -479,14 +484,14 @@ struct InputFieldView: View {
         .disabled(
             !chatStore.busy
                 && (
-                    chatStore.composerInput
+                    composer.messageText
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         .isEmpty
-                    || chatStore.isIncompleteSkillCommand(chatStore.composerInput)
-                    || chatStore.isIncompleteTaskCommand(chatStore.composerInput)
+                    || commandRouter.isIncompleteSkillCommand(composer.messageText)
+                    || commandRouter.isIncompleteTaskCommand(composer.messageText)
                     || (
                         !chatStore.activeProfileCanSend
-                            && !chatStore.isLocalCommand(chatStore.composerInput)
+                            && !commandRouter.isLocalCommand(composer.messageText)
                     )
                 )
         )
@@ -496,31 +501,35 @@ struct InputFieldView: View {
 
     private func sendComposerInput() {
         if chatStore.busy {
-            chatStore.interrupt()
+            Task { await chatStore.interrupt() }
             return
         }
-        let text = chatStore.composerInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = composer.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        if chatStore.isIncompleteSkillCommand(text) {
-            chatStore.composerInput = "/skill "
+        if commandRouter.isIncompleteSkillCommand(text) {
+            composer.messageText = "/skill "
             isFocused = true
             return
         }
-        if chatStore.isIncompleteTaskCommand(text) {
-            chatStore.composerInput = "/task "
+        if commandRouter.isIncompleteTaskCommand(text) {
+            composer.messageText = "/task "
             isFocused = true
             return
         }
         // Clear the shared draft before starting inference so recovery drafts
         // and ordinary composer input follow the same lifecycle.
-        chatStore.composerInput = ""
-        Task { await chatStore.sendMessage(text) }
+        composer.reset()
+        Task {
+            if await commandRouter.execute(text) == false {
+                await chatStore.sendMessage(text)
+            }
+        }
     }
 
     private var sendButtonHelp: String {
         if chatStore.busy { return "Stop response" }
         if !chatStore.activeProfileCanSend
-            && !chatStore.isLocalCommand(chatStore.composerInput) {
+            && !commandRouter.isLocalCommand(composer.messageText) {
             return "Wait for Codex to connect or sign in first"
         }
         return "Send message"
@@ -536,7 +545,7 @@ struct InputFieldView: View {
             Spacer()
 
             if chatStore.activeBackend == .llamaServer,
-               let contextUsage = chatStore.llamaContextUsage {
+               let contextUsage = presentation.llamaContextUsage {
                 llamaContextIndicator(contextUsage)
             }
         }
@@ -603,7 +612,7 @@ struct InputFieldView: View {
         Menu {
             Section("Profiles") {
                 Button {
-                    chatStore.selectDirectExecution()
+                    Task { await chatStore.selectDirectExecution() }
                 } label: {
                     if chatStore.activeDynamicProfile == nil,
                        chatStore.orchestratorMode == .standalone {
@@ -614,7 +623,7 @@ struct InputFieldView: View {
                 }
                 ForEach(chatStore.dynamicProfiles) { profile in
                     Button {
-                        chatStore.selectDynamicProfile(profile.id)
+                        Task { await chatStore.selectDynamicProfile(profile.id) }
                     } label: {
                         if chatStore.activeDynamicProfileID == profile.id,
                            chatStore.orchestratorMode == .standalone {
@@ -632,7 +641,7 @@ struct InputFieldView: View {
 
             Section("Compatibility") {
                 Button {
-                    chatStore.orchestratorMode = .orchestrator
+                    Task { await chatStore.setOrchestratorMode(.orchestrator) }
                 } label: {
                     if chatStore.orchestratorMode == .orchestrator {
                         Label(

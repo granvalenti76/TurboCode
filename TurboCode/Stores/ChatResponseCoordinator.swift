@@ -1,6 +1,5 @@
 import Foundation
 import FoundationModels
-import FoundationModelsUtilities
 import Observation
 
 /// Coordinates one response lifecycle across a runtime and the chat timeline.
@@ -16,11 +15,24 @@ final class ChatResponseCoordinator {
         let touchedConversation: Bool
     }
 
+    /// Captures ownership when the provider starts a native tool. Looking up
+    /// the current turn again at completion could mislabel a delayed callback
+    /// after cancellation, restore, or a subsequent submission.
+    private struct NativeToolInvocation {
+        let turnID: TurnID
+        let startedAt: Date
+    }
+
     private let timeline: ChatTimelineStore
     private let toolInteractions: ToolInteractionStore
     private let agentActivity: AgentActivityStore
-    private let codexRuntime: CodexRuntimeStore
-    private let nativeRunner: any NativeResponseRunning
+    private let agentRuntime: AgentRuntime
+    /// Concrete backend adapters are constructed and executed behind this
+    /// non-observable boundary. The coordinator supplies presentation output
+    /// ports but never receives or retains the provider session itself.
+    private let llmRuntime: LLMRuntime
+    private let workspaceNameProvider: @MainActor @Sendable () -> String?
+    private let activityPresentationRequested: @MainActor @Sendable () -> Void
 
     private(set) var isDelegating = false
     private(set) var activeEditGroupID: String?
@@ -28,19 +40,129 @@ final class ChatResponseCoordinator {
     private var productGuidePresentation: ProductGuideBlock?
     private var completedRootWrite: String?
     private var pendingCoordinatorTool: AgentActivityTool?
-
+    private var nativeToolInvocations: [String: NativeToolInvocation] = [:]
     init(
         timeline: ChatTimelineStore,
         toolInteractions: ToolInteractionStore,
         agentActivity: AgentActivityStore,
-        codexRuntime: CodexRuntimeStore,
-        nativeRunner: any NativeResponseRunning
+        agentRuntime: AgentRuntime = AgentRuntime(),
+        llmRuntime: LLMRuntime,
+        workspaceNameProvider: @escaping @MainActor @Sendable () -> String? = { nil },
+        activityPresentationRequested: @escaping @MainActor @Sendable () -> Void = {}
     ) {
         self.timeline = timeline
         self.toolInteractions = toolInteractions
         self.agentActivity = agentActivity
-        self.codexRuntime = codexRuntime
-        self.nativeRunner = nativeRunner
+        self.agentRuntime = agentRuntime
+        self.llmRuntime = llmRuntime
+        self.workspaceNameProvider = workspaceNameProvider
+        self.activityPresentationRequested = activityPresentationRequested
+    }
+
+    /// Provider sessions use this router for tool, delegation, and Activity
+    /// callbacks. Keeping construction here prevents the UI facade from
+    /// becoming the owner of provider stream closures; the injected closures
+    /// are presentation requests, not provider lifecycle ownership.
+    var modelSessionEvents: ModelSessionEvents {
+        ModelSessionEvents(
+            currentTurnID: { [weak self] in
+                await self?.currentTurnState()?.id
+            },
+            toolStarted: { [weak self] call, backend, owner in
+                await self?.toolStarted(
+                    call,
+                    backend: backend,
+                    owner: owner
+                )
+            },
+            toolFinished: { [weak self] call, output, backend, owner in
+                guard let self else { return }
+                let workspaceName = await MainActor.run {
+                    self.workspaceNameProvider()
+                }
+                await self.toolFinished(
+                    call,
+                    output: output,
+                    backend: backend,
+                    owner: owner,
+                    workspaceName: workspaceName
+                )
+            },
+            delegationChanged: { [weak self] isDelegating in
+                await MainActor.run {
+                    self?.delegationChanged(isDelegating)
+                }
+            },
+            agentActivityChanged: { [weak self] event in
+                await MainActor.run {
+                    self?.agentActivityChanged(event)
+                }
+            }
+        )
+    }
+
+    /// Keeps the runtime identity at the coordinator boundary while the
+    /// existing provider runners remain unchanged. A later callback may still
+    /// arrive after cancellation, so presentation code can reject it by ID.
+    func ownsTurn(_ turnID: TurnID) async -> Bool {
+        await agentRuntime.owns(turnID)
+    }
+
+    private func currentTurnState() async -> TurnState? {
+        await agentRuntime.currentTurnState
+    }
+
+    private func beginTurn(_ request: TurnRequest) async {
+        guard await acceptRuntimeEvent(.started(request)) else { return }
+        nativeToolInvocations.removeAll(keepingCapacity: true)
+        _ = await advanceTurn(to: .preparing, turnID: request.id)
+    }
+
+    @discardableResult
+    private func advanceTurn(to phase: TurnPhase, turnID: TurnID) async -> Bool {
+        await acceptRuntimeEvent(
+            .phaseChanged(turnID: turnID, phase: phase, at: Date())
+        )
+    }
+
+    private func finishTurn(
+        _ outcome: TurnOutcome,
+        turnID: TurnID
+    ) async {
+        _ = await acceptRuntimeEvent(
+            .completed(turnID: turnID, outcome: outcome, at: Date())
+        )
+        nativeToolInvocations.removeAll(keepingCapacity: true)
+    }
+
+    /// Accepts lifecycle and ownership changes before any event reaches a UI
+    /// projection. The actor publishes changed snapshots through its output
+    /// port; content-only events still pass the TurnID gate without invalidating
+    /// presentation state on every streamed token.
+    @discardableResult
+    private func acceptRuntimeEvent(_ event: AgentRuntimeEvent) async -> Bool {
+        await agentRuntime.apply(event)
+    }
+
+    /// Backend completion is settled after the coordinator has finalized its
+    /// timeline and diagnostics. Every nonterminal event is reduced immediately
+    /// so stale content, tool, and approval callbacks are rejected uniformly.
+    /// A redundant phase is not a reason to drop a current tool payload: native
+    /// widgets remain presentation projections, independent of reducer idempotency.
+    func acceptBackendEvent(_ event: AgentRuntimeEvent) async -> Bool {
+        guard await ownsTurn(event.turnID) else { return false }
+        if case .completed = event {
+            return true
+        }
+        _ = await acceptRuntimeEvent(event)
+        // Rich output is projected only after the owning TurnID passes the
+        // runtime gate. Native and Codex adapters therefore share one receipt
+        // path and stale callbacks cannot insert widgets into a newer thread.
+        if case .toolFinished(let result) = event,
+           let receipt = result.receipt {
+            present(receipt, toolCallID: result.id)
+        }
+        return true
     }
 
     /// Carries profile-owned Codex choices across the timeline boundary while
@@ -49,80 +171,145 @@ final class ChatResponseCoordinator {
         displayText: String,
         promptText: String,
         visibleInTimeline: Bool,
+        turnID: TurnID,
         turboThreadID: String,
         workspaceRoot: String,
         workspaceName: String?,
+        mode: OrchestratorMode,
+        workspaceKind: String,
         agentTuning: AgentTuningConfig,
         availableSkills: [TurboCodeSkillDefinition],
+        pluginTools: [TypeScriptPluginToolBinding] = [],
         codexModelID: String?,
         codexReasoningEffort: CodexReasoningEffort?,
         delegationInvoker: (any AgentTaskInvoking)?,
         modelName: String
     ) async -> Result {
         let placeholderID = UUID().uuidString
+        await beginTurn(
+            TurnRequest(
+                id: turnID,
+                prompt: promptText,
+                backend: .codex,
+                modelName: modelName,
+                workspaceRoot: workspaceRoot
+            )
+        )
+        _ = await advanceTurn(to: .streaming, turnID: turnID)
         timeline.beginResponse(
             displayText: visibleInTimeline ? displayText : nil,
             placeholderID: placeholderID,
             model: modelName
         )
-        var assistantText = ""
-        var reasoningText = ""
+        let diagnostics = CodexDiagnosticsCapture()
+        let diagnosticsRunID = await AgentDiagnosticsRecorder.shared.startRun(
+            backend: .codex,
+            mode: mode,
+            profileVersion: AgentProfileVersion.value(
+                for: .codex,
+                mode: mode
+            ),
+            workspaceKind: workspaceKind,
+            promptCharacters: promptText.count
+        )
+        activeDiagnosticsRunID = diagnosticsRunID
         var result = Result(errorMessage: nil, touchedConversation: false)
 
-        do {
-            let response = try await codexRuntime.runTurn(
-                request: CodexRuntimeStore.TurnRequest(
-                    turboThreadID: turboThreadID,
-                    prompt: promptText,
-                    workspaceRoot: workspaceRoot,
-                    workspaceName: workspaceName,
-                    agentTuning: agentTuning,
-                    availableSkills: availableSkills,
-                    modelID: codexModelID,
-                    reasoningEffort: codexReasoningEffort,
-                    delegationInvoker: delegationInvoker
-                ),
-                events: CodexRuntimeStore.TurnEvents(
-                    liveAssistantChanged: { [weak self] text in
-                        assistantText = text
-                        self?.timeline.liveAssistant = text
-                    },
-                    liveReasoningChanged: { [weak self] text in
-                        reasoningText = text
-                        self?.timeline.liveReasoning = text
-                    },
-                    activityStarted: { [weak self] call, summary in
-                        guard let self else { return }
-                        self.toolInteractions.beginActivity(
-                            id: call.callID,
+        let backendResult = await llmRuntime.executeCodex(
+            request: TurnRequest(
+                id: turnID,
+                prompt: promptText,
+                backend: .codex,
+                modelName: modelName,
+                workspaceRoot: workspaceRoot
+            ),
+            configuration: CodexLLMExecutionConfiguration(
+                turboThreadID: turboThreadID,
+                workspaceName: workspaceName,
+                agentTuning: agentTuning,
+                availableSkills: availableSkills,
+                pluginTools: agentTuning.experimental.thirdPartyPluginsEnabled
+                    ? pluginTools
+                    : [],
+                modelID: codexModelID,
+                reasoningEffort: codexReasoningEffort,
+                delegationInvoker: delegationInvoker,
+                activityStarted: { [weak self] call, summary in
+                    guard let self, await self.ownsTurn(turnID) else { return }
+                    self.toolInteractions.beginActivity(
+                        id: call.callID,
+                        toolName: call.tool,
+                        summary: self.routedToolSummary(
+                            summary,
                             toolName: call.tool,
-                            summary: self.routedToolSummary(
-                                summary,
-                                toolName: call.tool,
-                                owner: .coordinator
-                            )
+                            owner: .coordinator
                         )
-                        self.coordinatorToolStarted(
-                            AgentActivityRuntimeMapping.tool(
-                                from: call,
-                                owner: .coordinator
-                            )
+                    )
+                    self.coordinatorToolStarted(
+                        AgentActivityRuntimeMapping.tool(
+                            from: call,
+                            owner: .coordinator
                         )
-                    },
-                    activityEnded: { [weak self] id in
-                        self?.toolInteractions.endActivity(id: id)
-                        self?.coordinatorToolFinished(callID: id)
-                    },
-                    presentationRequested: { [weak self] presentation in
-                        self?.present(presentation)
-                    },
-                    approvalRequested: { [weak self] request in
-                        self?.toolInteractions.enqueueApproval(request)
-                    }
-                )
+                    )
+                },
+                activityEnded: { [weak self] id in
+                    guard let self, await self.ownsTurn(turnID) else { return }
+                    self.toolInteractions.endActivity(id: id)
+                    self.coordinatorToolFinished(callID: id)
+                },
+                approvalRequested: { [weak self] request in
+                    guard let self, await self.ownsTurn(turnID) else { return }
+                    _ = await self.acceptRuntimeEvent(
+                        .approvalRequested(
+                            Self.runtimeApproval(from: request, turnID: turnID)
+                        )
+                    )
+                    self.toolInteractions.enqueueApproval(request)
+                }
+            ),
+            events: BackendSessionEvents { [weak self] event in
+                guard let self,
+                      event.turnID == turnID,
+                      await self.acceptBackendEvent(event) else {
+                    return
+                }
+                switch event {
+                case .assistantTextChanged(_, let text):
+                    diagnostics.textChanged(text)
+                    self.timeline.liveAssistant = text
+                case .reasoningTextChanged(_, let text):
+                    diagnostics.textChanged(text)
+                    self.timeline.liveReasoning = text
+                case .toolStarted(let call):
+                    diagnostics.toolStarted(call)
+                case .toolFinished(let toolResult):
+                    diagnostics.toolFinished(toolResult)
+                default:
+                    break
+                }
+            }
+        )
+
+        let settlementStartedAt = Date()
+
+        await finishCodexDiagnostics(
+            runID: diagnosticsRunID,
+            capture: diagnostics,
+            outcome: backendResult.outcome
+        )
+
+        guard await ownsTurn(turnID) else {
+            await recordResponseBoundaries(
+                backend: .codex,
+                settlementStartedAt: settlementStartedAt,
+                publicationCount: diagnostics.publicationCount
             )
-            assistantText = response.assistantText
-            reasoningText = response.reasoningText
+            return Result(errorMessage: nil, touchedConversation: false)
+        }
+        switch backendResult.outcome {
+        case .succeeded:
+            let assistantText = backendResult.assistantText
+            let reasoningText = backendResult.reasoningText
             let assistantBlock = assistantText.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ).isEmpty ? nil : ChatBlock(
@@ -144,23 +331,26 @@ final class ChatResponseCoordinator {
                 assistantBlock: assistantBlock,
                 reasoningBlock: reasoningBlock
             )
+            _ = await advanceTurn(to: .settling, turnID: turnID)
+            await finishTurn(.succeeded, turnID: turnID)
             result = Result(errorMessage: nil, touchedConversation: true)
-        } catch where error is CancellationError || Task.isCancelled {
-            await codexRuntime.interrupt()
+        case .cancelled:
+            let partialText = backendResult.assistantText.isEmpty
+                ? backendResult.reasoningText
+                : backendResult.assistantText
             timeline.replaceBlock(
                 id: placeholderID,
                 with: ChatBlock(
                     id: placeholderID,
                     kind: .assistant,
-                    text: assistantText.isEmpty
+                    text: partialText.isEmpty
                         ? "Response interrupted."
-                        : assistantText,
+                        : partialText,
                     model: modelName
                 )
             )
-        } catch let codexError as CodexAppServerError
-            where codexError.requiresChatGPTLogin {
-            codexRuntime.markSignedOut()
+            await finishTurn(.cancelled(reason: "The turn was interrupted."), turnID: turnID)
+        case .failed(let failure) where failure.code == "codex.authentication":
             timeline.replaceBlock(
                 id: placeholderID,
                 with: ChatBlock(
@@ -170,25 +360,52 @@ final class ChatResponseCoordinator {
                     model: modelName
                 )
             )
-        } catch {
-            codexRuntime.markFailed(error.localizedDescription)
+            await finishTurn(
+                .failed(
+                    TurnFailure(
+                        code: "codex.authentication",
+                        message: "Codex authentication is required.",
+                        isRecoverable: true
+                    )
+                ),
+                turnID: turnID
+            )
+        case .failed(let failure):
             timeline.replaceBlock(
                 id: placeholderID,
                 with: ChatBlock(
                     id: placeholderID,
                     kind: .assistant,
-                    text: "Error: \(error.localizedDescription)",
+                    text: "Error: \(failure.message)",
                     model: modelName
                 )
             )
             result = Result(
-                errorMessage: error.localizedDescription,
+                errorMessage: failure.message,
                 touchedConversation: false
+            )
+            await finishTurn(
+                .failed(
+                    TurnFailure(
+                        code: "codex.request",
+                        message: failure.message
+                    )
+                ),
+                turnID: turnID
             )
         }
 
+        let settledTurnID = await currentTurnState()?.id
+        guard await ownsTurn(turnID) || settledTurnID == turnID else {
+            return Result(errorMessage: nil, touchedConversation: false)
+        }
         timeline.finishResponse(placeholderID: placeholderID)
         toolInteractions.clearActivities()
+        await recordResponseBoundaries(
+            backend: .codex,
+            settlementStartedAt: settlementStartedAt,
+            publicationCount: diagnostics.publicationCount
+        )
         return result
     }
 
@@ -196,14 +413,14 @@ final class ChatResponseCoordinator {
         displayText: String,
         promptText: String,
         visibleInTimeline: Bool,
+        turnID: TurnID,
         blocks: [ChatBlock],
-        session: LanguageModelSession,
         backend: ModelBackend,
         mode: OrchestratorMode,
         workspaceKind: String,
+        workspaceRoot: String,
         modelName: String,
         serverURL: String? = nil,
-        reasoningStreamRelay: ReasoningStreamRelay? = nil,
         contextChanged: @escaping @MainActor @Sendable (LlamaContextUsage?) -> Void = { _ in }
     ) async -> Result {
         let modelPrompt = WorkspaceListingFollowUpContext.enriching(
@@ -213,6 +430,15 @@ final class ChatResponseCoordinator {
         let editGroupID = UUID().uuidString
         activeEditGroupID = editGroupID
         let placeholderID = UUID().uuidString
+        await beginTurn(
+            TurnRequest(
+                id: turnID,
+                prompt: promptText,
+                backend: backend,
+                modelName: modelName,
+                workspaceRoot: workspaceRoot
+            )
+        )
         timeline.beginResponse(
             displayText: visibleInTimeline ? displayText : nil,
             placeholderID: placeholderID,
@@ -220,40 +446,75 @@ final class ChatResponseCoordinator {
         )
         productGuidePresentation = nil
         completedRootWrite = nil
+        let publications = ResponsePublicationCapture()
 
-        let outcome = await nativeRunner.run(
-            session: session,
-            request: NativeResponseRunner.Request(
+        let backendResult = await llmRuntime.executeNative(
+            request: TurnRequest(
+                id: turnID,
                 prompt: modelPrompt,
                 backend: backend,
+                modelName: modelName,
+                workspaceRoot: workspaceRoot
+            ),
+            configuration: NativeLLMExecutionConfiguration(
                 mode: mode,
                 workspaceKind: workspaceKind,
                 serverURL: serverURL,
-                reasoningStreamRelay: reasoningStreamRelay
-            ),
-            events: NativeResponseRunner.Events(
                 diagnosticsChanged: { [weak self] runID in
-                    self?.activeDiagnosticsRunID = runID
+                    guard let self, await self.ownsTurn(turnID) else { return }
+                    self.activeDiagnosticsRunID = runID
                 },
-                contextChanged: contextChanged,
-                liveContentChanged: { [weak self] content in
-                    self?.timeline.liveAssistant =
-                        Self.userVisibleAssistantText(content)
-                },
-                liveReasoningChanged: { [weak self] reasoning in
-                    self?.timeline.liveReasoning = reasoning
+                contextChanged: { [weak self] usage in
+                    guard let self, await self.ownsTurn(turnID) else { return }
+                    contextChanged(usage)
                 },
                 approvalRequested: { [weak self] request in
-                    self?.toolInteractions.enqueueApproval(request)
+                    guard let self, await self.ownsTurn(turnID) else { return }
+                    _ = await self.acceptRuntimeEvent(
+                        .approvalRequested(
+                            Self.runtimeApproval(from: request, turnID: turnID)
+                        )
+                    )
+                    self.toolInteractions.enqueueApproval(request)
                 }
-            )
+            ),
+            events: BackendSessionEvents { [weak self] event in
+                guard let self,
+                      event.turnID == turnID,
+                      await self.acceptBackendEvent(event) else {
+                    return
+                }
+                switch event {
+                case .assistantTextChanged(_, let content):
+                    publications.record()
+                    self.timeline.liveAssistant =
+                        Self.userVisibleAssistantText(content)
+                case .reasoningTextChanged(_, let reasoning):
+                    publications.record()
+                    self.timeline.liveReasoning = reasoning
+                default:
+                    break
+                }
+            }
         )
+        let settlementStartedAt = Date()
+        _ = await advanceTurn(to: .streaming, turnID: turnID)
         isDelegating = false
+        guard await ownsTurn(turnID) else {
+            await recordResponseBoundaries(
+                backend: backend,
+                settlementStartedAt: settlementStartedAt,
+                publicationCount: publications.count
+            )
+            return Result(errorMessage: nil, touchedConversation: false)
+        }
         toolInteractions.clearActivities()
         var result = Result(errorMessage: nil, touchedConversation: false)
 
-        switch outcome {
-        case .completed(let content, let reasoning):
+        switch backendResult.outcome {
+        case .succeeded:
+            let content = backendResult.assistantText
+            let reasoning = backendResult.reasoningText
             let rawFinalText = content.isEmpty
                 ? reasoning
                 : Self.userVisibleAssistantText(content)
@@ -284,8 +545,10 @@ final class ChatResponseCoordinator {
                 assistantBlock: assistantBlock,
                 reasoningBlock: reasoningBlock
             )
+            _ = await advanceTurn(to: .settling, turnID: turnID)
+            await finishTurn(.succeeded, turnID: turnID)
             result = Result(errorMessage: nil, touchedConversation: true)
-        case .repetitiveOutput:
+        case .failed(let failure) where failure.code == "native.repetitiveOutput":
             let stoppedText = completedRootWrite.map { "Created `\($0)`." }
                 ?? "Response stopped because the on-device model began repeating output. Please retry."
             timeline.replaceBlock(
@@ -297,7 +560,19 @@ final class ChatResponseCoordinator {
                     model: modelName
                 )
             )
-        case .cancelled(let content, let reasoning):
+            await finishTurn(
+                .failed(
+                    TurnFailure(
+                        code: "model.repetitiveOutput",
+                        message: stoppedText,
+                        isRecoverable: true
+                    )
+                ),
+                turnID: turnID
+            )
+        case .cancelled:
+            let content = backendResult.assistantText
+            let reasoning = backendResult.reasoningText
             let partialText = content.isEmpty ? reasoning : content
             timeline.replaceBlock(
                 id: placeholderID,
@@ -310,7 +585,12 @@ final class ChatResponseCoordinator {
                     model: modelName
                 )
             )
-        case .failed(let message, _, _):
+            await finishTurn(
+                .cancelled(reason: "The turn was interrupted."),
+                turnID: turnID
+            )
+        case .failed(let failure):
+            let message = failure.message
             timeline.replaceBlock(
                 id: placeholderID,
                 with: ChatBlock(
@@ -324,6 +604,10 @@ final class ChatResponseCoordinator {
                 errorMessage: message,
                 touchedConversation: false
             )
+            await finishTurn(
+                .failed(TurnFailure(code: "provider.request", message: message)),
+                turnID: turnID
+            )
         }
 
         timeline.liveReasoning = ""
@@ -333,7 +617,94 @@ final class ChatResponseCoordinator {
         }
         timeline.finishResponse(placeholderID: placeholderID)
         timeline.clearEditGroup(editGroupID)
+        await recordResponseBoundaries(
+            backend: backend,
+            settlementStartedAt: settlementStartedAt,
+            publicationCount: publications.count
+        )
         return result
+    }
+
+    /// Records only the provider-neutral timing/count baseline; detailed
+    /// provider diagnostics remain owned by their existing runtime recorders.
+    private func recordResponseBoundaries(
+        backend: ModelBackend,
+        settlementStartedAt: Date,
+        publicationCount: Int
+    ) async {
+        let duration = max(
+            0,
+            Int(Date().timeIntervalSince(settlementStartedAt) * 1_000)
+        )
+        await AgentDiagnosticsRecorder.shared.recordBoundary(
+            RuntimeBoundaryMetric(
+                boundary: .settlement,
+                backend: backend.rawValue,
+                durationMilliseconds: duration
+            )
+        )
+        await AgentDiagnosticsRecorder.shared.recordBoundary(
+            RuntimeBoundaryMetric(
+                boundary: .mainActorPublication,
+                backend: backend.rawValue,
+                eventCount: publicationCount
+            )
+        )
+    }
+
+    /// Flushes the Codex projection after the provider task settles. The
+    /// capture keeps synchronous adapter callbacks precise while the actor
+    /// recorder remains the only owner of persisted diagnostics.
+    private func finishCodexDiagnostics(
+        runID: String?,
+        capture: CodexDiagnosticsCapture,
+        outcome: TurnOutcome
+    ) async {
+        guard let runID else { return }
+        if let firstTokenAt = capture.firstTokenAt {
+            await AgentDiagnosticsRecorder.shared.markFirstToken(
+                runID: runID,
+                at: firstTokenAt
+            )
+        }
+        for call in capture.startedTools {
+            await AgentDiagnosticsRecorder.shared.toolStarted(
+                runID: runID,
+                call: call,
+                backend: .codex
+            )
+        }
+        for completion in capture.completedTools {
+            await AgentDiagnosticsRecorder.shared.toolFinished(
+                runID: runID,
+                call: completion.call,
+                output: completion.result,
+                backend: .codex
+            )
+        }
+
+        let diagnosticOutcome: AgentRunOutcome
+        let failure: TurnFailure?
+        switch outcome {
+        case .succeeded:
+            diagnosticOutcome = .success
+            failure = nil
+        case .cancelled:
+            diagnosticOutcome = .cancelled
+            failure = nil
+        case .failed(let turnFailure):
+            diagnosticOutcome = .failed
+            failure = turnFailure
+        }
+        await AgentDiagnosticsRecorder.shared.finishRun(
+            runID: runID,
+            outcome: diagnosticOutcome,
+            generatedCharacters: capture.generatedCharacters,
+            failure: failure
+        )
+        if activeDiagnosticsRunID == runID {
+            activeDiagnosticsRunID = nil
+        }
     }
 
     func toolStarted(
@@ -341,6 +712,23 @@ final class ChatResponseCoordinator {
         backend: ModelBackend,
         owner: AgentActivityToolOwner
     ) async {
+        guard let turnID = await currentTurnState()?.id else { return }
+        let startedAt = Date()
+        guard await ownsTurn(turnID) else { return }
+        _ = await acceptRuntimeEvent(
+            .toolStarted(
+                ToolCall(
+                    id: call.id,
+                    turnID: turnID,
+                    name: call.toolName,
+                    startedAt: startedAt
+                )
+            )
+        )
+        nativeToolInvocations[call.id] = NativeToolInvocation(
+            turnID: turnID,
+            startedAt: startedAt
+        )
         if let activeDiagnosticsRunID {
             await AgentDiagnosticsRecorder.shared.toolStarted(
                 runID: activeDiagnosticsRunID,
@@ -353,9 +741,9 @@ final class ChatResponseCoordinator {
                 AgentActivityRuntimeMapping.tool(from: call, owner: owner)
             )
         }
-        guard call.toolName != "diff_patch",
-              call.toolName != "apply_edits",
-              call.toolName != "edit_file" else { return }
+        // Every provider tool gets one transient live affordance. Native
+        // receipts and edit widgets still own the completed detail; this
+        // activity only answers the immediate question: what is running now?
         toolInteractions.beginActivity(
             id: call.id,
             toolName: call.toolName,
@@ -374,6 +762,44 @@ final class ChatResponseCoordinator {
         owner: AgentActivityToolOwner,
         workspaceName: String?
     ) async {
+        guard let invocation = nativeToolInvocations.removeValue(
+            forKey: call.id
+        ) else {
+            // A completion without its captured start belongs to an operation
+            // that was reset or never admitted; it cannot be re-parented to
+            // whichever turn happens to be current now.
+            return
+        }
+        let rawOutputText = output.segments.compactMap { segment -> String? in
+            switch segment {
+            case .text(let value):
+                return value.content
+            case .structure(let value):
+                return value.content.jsonString
+            default:
+                return nil
+            }
+        }.joined()
+        let pluginResult = TypeScriptPluginToolResultCodec.decode(rawOutputText)
+        let outputText = TypeScriptPluginToolResultCodec.visibleText(rawOutputText)
+        let result = ToolResult(
+            id: call.id,
+            turnID: invocation.turnID,
+            status: pluginResult?.isError == true ? .failed : .succeeded,
+            output: outputText,
+            errorMessage: pluginResult?.isError == true ? outputText : nil,
+            durationMilliseconds: max(
+                0,
+                Int(Date().timeIntervalSince(invocation.startedAt) * 1_000)
+            ),
+            receipt: pluginResult?.widget.map(ToolReceipt.pluginWidget)
+                ?? ToolReceiptRouter.receipt(
+                    for: call,
+                    output: output,
+                    workspaceName: workspaceName
+                )
+        )
+        guard await acceptBackendEvent(.toolFinished(result)) else { return }
         if let activeDiagnosticsRunID {
             await AgentDiagnosticsRecorder.shared.toolFinished(
                 runID: activeDiagnosticsRunID,
@@ -382,10 +808,7 @@ final class ChatResponseCoordinator {
                 backend: backend
             )
         }
-        let text = output.segments.compactMap { segment -> String? in
-            guard case .text(let value) = segment else { return nil }
-            return value.content
-        }.joined()
+        let text = outputText
         if call.toolName == "turbocode_guide" {
             productGuidePresentation = ProductGuideBlock(toolOutput: text)
         } else if call.toolName == "write_ondevice",
@@ -393,13 +816,6 @@ final class ChatResponseCoordinator {
             completedRootWrite = String(
                 text.dropFirst("WRITE_COMPLETE: ".count)
             )
-        }
-        if let presentation = ToolPresentationRouter.presentation(
-            for: call,
-            output: output,
-            workspaceName: workspaceName
-        ) {
-            present(presentation)
         }
         if owner == .coordinator {
             coordinatorToolFinished(callID: call.id)
@@ -412,6 +828,9 @@ final class ChatResponseCoordinator {
     /// task and attempt identifiers.
     func agentActivityChanged(_ event: AgentActivityRuntimeEvent) {
         guard agentActivity.apply(event) else { return }
+        if case .started = event {
+            activityPresentationRequested()
+        }
         switch event {
         case .started:
             if let pendingCoordinatorTool,
@@ -480,17 +899,12 @@ final class ChatResponseCoordinator {
         return "\(label) · \(summary)"
     }
 
-    private func present(_ presentation: ToolPresentation) {
-        switch presentation {
+    private func present(_ receipt: ToolReceipt, toolCallID: String) {
+        switch receipt {
         case .workspaceListing(let listing):
             timeline.presentWorkspaceListing(listing)
-        }
-    }
-
-    private func present(_ presentation: CodexToolPresentation) {
-        switch presentation {
-        case .workspaceListing(let listing):
-            timeline.presentWorkspaceListing(listing)
+        case .pluginWidget(let widget):
+            timeline.presentPluginWidget(widget, toolCallID: toolCallID)
         }
     }
 
@@ -597,33 +1011,71 @@ final class ChatResponseCoordinator {
         }
     }
 
+    /// Normalizes the app-owned approval request without leaking either
+    /// Foundation Models or Codex request types into the runtime. The existing
+    /// presentation ID is also the best stable tool correlation available at
+    /// this compatibility boundary.
+    private static func runtimeApproval(
+        from request: ApprovalRequest,
+        turnID: TurnID
+    ) -> Approval {
+        Approval(
+            id: request.id,
+            turnID: turnID,
+            toolCallID: request.id,
+            operation: request.operation,
+            path: request.path,
+            destination: request.destination,
+            summary: request.summary
+        )
+    }
+
     private static func userVisibleAssistantText(_ text: String) -> String {
-        let approvalKeys = Set([
-            "approval_id", "operation", "path", "destination", "summary"
-        ])
-        var isSkippingApproval = false
-        var visibleLines: [String] = []
-        for line in text.components(separatedBy: .newlines) {
-            let trimmed = line.trimmingCharacters(
-                in: .whitespacesAndNewlines
-            )
-            if trimmed.contains("TURBOCODE_APPROVAL_REQUIRED") {
-                isSkippingApproval = true
-                continue
-            }
-            if isSkippingApproval {
-                let key = trimmed.split(
-                    separator: ":",
-                    maxSplits: 1
-                ).first.map(String.init) ?? ""
-                if trimmed.isEmpty || approvalKeys.contains(key) {
-                    continue
-                }
-                isSkippingApproval = false
-            }
-            visibleLines.append(line)
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Captures Codex lifecycle values on the coordinator actor before they are
+/// flushed to the recorder. This avoids spawning one persistence hop per
+/// synchronous provider callback and keeps tool timestamps meaningful.
+@MainActor
+private final class CodexDiagnosticsCapture {
+    struct CompletedTool {
+        let call: ToolCall
+        let result: ToolResult
+    }
+
+    private(set) var firstTokenAt: Date?
+    private(set) var generatedCharacters = 0
+    private(set) var publicationCount = 0
+    private(set) var startedTools: [ToolCall] = []
+    private(set) var completedTools: [CompletedTool] = []
+
+    func textChanged(_ text: String) {
+        guard !text.isEmpty else { return }
+        publicationCount += 1
+        firstTokenAt = firstTokenAt ?? Date()
+        generatedCharacters = max(generatedCharacters, text.count)
+    }
+
+    func toolStarted(_ call: ToolCall) {
+        startedTools.append(call)
+    }
+
+    func toolFinished(_ result: ToolResult) {
+        guard let call = startedTools.last(where: { $0.id == result.id }) else {
+            return
         }
-        return visibleLines.joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        completedTools.append(CompletedTool(call: call, result: result))
+    }
+}
+
+/// Counts visible response publications without retaining their content.
+@MainActor
+private final class ResponsePublicationCapture {
+    private(set) var count = 0
+
+    func record() {
+        count += 1
     }
 }

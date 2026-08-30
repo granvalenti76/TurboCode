@@ -3,9 +3,8 @@ import Observation
 
 /// Owns the selected workspace and its derived Git presentation state.
 ///
-/// ChatStore remains the application-level coordinator: it forwards this state
-/// to existing views and reacts to workspace changes by rebuilding model
-/// sessions or closing inspectors.
+/// `WorkspaceLifecycleCoordinator` composes context changes with runtime and
+/// persistence. This observable store owns only workspace and Git projections.
 @MainActor
 @Observable
 final class WorkspaceStore {
@@ -54,8 +53,8 @@ final class WorkspaceStore {
     }
 
     /// Applies a user-selected workspace synchronously. Refreshes remain
-    /// explicit so ChatStore can rebuild its model session before async Git
-    /// results become visible.
+    /// explicit so the lifecycle coordinator can rebuild its model session
+    /// before async Git results become visible.
     func selectWorkspace(_ path: String) {
         root = path
         reviewDraftStore.begin(workspaceRoot: path)
@@ -85,7 +84,8 @@ final class WorkspaceStore {
     }
 
     /// Removes one recent workspace and clears derived state only when it is
-    /// the active root. The return value lets ChatStore handle session cleanup.
+    /// the active root. The return value lets the lifecycle coordinator rebuild
+    /// runtime context only when the selected workspace actually changed.
     @discardableResult
     func removeWorkspace(_ path: String) -> Bool {
         recentWorkspaces = recentWorkspaces.filter { $0 != path }

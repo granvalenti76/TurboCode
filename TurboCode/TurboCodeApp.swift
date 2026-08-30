@@ -8,6 +8,7 @@ struct TurboCodeApp: App {
     @Environment(\.openWindow) private var openWindow
     @State private var chatStore: ChatStore
     @State private var settingsStore = SettingsStore()
+    @State private var approvalStore = ApprovalStore()
 
     init() {
         let store = ChatStore()
@@ -21,14 +22,21 @@ struct TurboCodeApp: App {
                 .navigationTitle("")
                 .environment(chatStore)
                 .environment(settingsStore)
+                .environment(approvalStore)
                 .environment(\.chatFontSize, CGFloat(settingsStore.fontSize))
                 .preferredColorScheme(settingsStore.theme.colorScheme)
                 .task {
+                    approvalStore.start()
                     // First-launch onboarding
                     await chatStore.ensureOnboarding()
                     // Restore persisted sessions
                     await chatStore.restoreSessions()
                     settingsStore.loadFromUserDefaults()
+                    // Settings persistence does not reach into the chat facade.
+                    // App composition explicitly synchronizes runtime inputs so
+                    // TurboCodeCore can remain independent of global UI stores.
+                    await chatStore.applyAgentTuning(settingsStore.agentTuning)
+                    await chatStore.reloadRemoteModels()
                 }
         }
         .windowStyle(.titleBar)
@@ -101,6 +109,10 @@ struct TurboCodeApp: App {
                     Task { await chatStore.printToolFailureSummary() }
                 }
 
+                Button("Print Runtime Baseline") {
+                    Task { await chatStore.printRuntimeBaselineSummary() }
+                }
+
                 Button("On-Device Statistics") {
                     // A dedicated window keeps live developer diagnostics out
                     // of the product navigation and conversation state.
@@ -133,6 +145,28 @@ struct TurboCodeApp: App {
         }
         .defaultSize(width: 720, height: 520)
 #endif
+
+        WindowGroup("Plugin Widget", id: "plugin-widget", for: String.self) { $blockID in
+            if let blockID,
+               let widget = chatStore.detachedPluginWidget(for: blockID) {
+                PluginWidgetView(
+                    blockID: blockID,
+                    widget: widget,
+                    isDetachedWindow: true
+                )
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .environment(chatStore)
+            } else {
+                ContentUnavailableView(
+                    "Widget non disponibile",
+                    systemImage: "puzzlepiece.extension",
+                    description: Text("Il widget è stato chiuso o rimosso dalla conversazione.")
+                )
+            }
+        }
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 820, height: 680)
 
         // Native macOS Settings window
         Settings {

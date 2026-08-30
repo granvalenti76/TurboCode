@@ -6,6 +6,10 @@ struct SidebarView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var isSessionSearchPresented = false
     @State private var workspacePendingRemoval: String?
+    @State private var workspacePathsBeingRemoved: Set<String> = []
+    @State private var threadIDsBeingRemoved: Set<String> = []
+    @State private var exportErrorMessage: String?
+    @State private var sharePresenter = ConversationExportService.SharePresenter()
     @State private var visibleChatLimit = SidebarConversationDisclosure.batchSize
     @State private var expandedWorkspacePath: String?
 
@@ -37,6 +41,13 @@ struct SidebarView: View {
             }
         } message: {
             Text(workspaceRemovalMessage)
+        }
+        .alert("Export Failed", isPresented: exportErrorPresented) {
+            Button("OK", role: .cancel) {
+                exportErrorMessage = nil
+            }
+        } message: {
+            Text(exportErrorMessage ?? "")
         }
         .onChange(of: chatStore.selectedProject) { _, _ in
             // Each collection starts compact. Search can still reveal a result
@@ -214,7 +225,10 @@ struct SidebarView: View {
             // The selected workspace is the only expanded group, so All Chats can
             // remain a separate global collection without duplicating rows.
             ForEach(chatStore.recentWorkspaces, id: \.self) { path in
-                workspaceRow(path: path)
+                if !workspacePathsBeingRemoved.contains(path) {
+                    workspaceRow(path: path)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
 
             // Add workspace
@@ -286,18 +300,26 @@ struct SidebarView: View {
             .buttonStyle(.plain)
             .help(isActiveWorkspace ? "Active workspace" : "Show chats in \(name)")
             .accessibilityValue(isActiveWorkspace ? "Selected workspace" : "")
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button {
+                    exportWorkspace(path)
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .accessibilityLabel("Share")
+                }
+                .tint(.secondary)
+
+                Button(role: .destructive) {
+                    removeWorkspaceImmediately(path)
+                } label: {
+                    Image(systemName: "trash")
+                        .accessibilityLabel("Remove")
+                }
+            }
         }
         .listRowInsets(sidebarRowInsets)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) {
-                workspacePendingRemoval = path
-            } label: {
-                Label("Remove", systemImage: "trash")
-            }
-            .tint(.red)
-        }
         .contextMenu {
             Button("Remove Workspace…", role: .destructive) {
                 workspacePendingRemoval = path
@@ -310,9 +332,65 @@ struct SidebarView: View {
         // Sidebar project selection is the single workspace navigation path.
         // Reuse the established transition so model, Git, diffs, recency,
         // and inspector state remain consistent with the former toolbar menu.
-        chatStore.switchToWorkspace(path)
+        Task { await chatStore.switchToWorkspace(path) }
         expandedWorkspacePath = path
         visibleChatLimit = SidebarConversationDisclosure.batchSize
+    }
+
+    /// Swipe removal hides the row immediately, while the lifecycle coordinator
+    /// persists the sidebar change and associated chat cleanup. The coordinator
+    /// never deletes the workspace directory itself.
+    private func removeWorkspaceImmediately(_ path: String) {
+        guard !workspacePathsBeingRemoved.contains(path) else { return }
+        _ = withAnimation(.easeInOut(duration: 0.2)) {
+            workspacePathsBeingRemoved.insert(path)
+        }
+        Task { @MainActor in
+            await chatStore.removeWorkspace(path)
+            workspacePathsBeingRemoved.remove(path)
+        }
+    }
+
+    /// The lifecycle coordinator deletes the session file before mutating the
+    /// catalog. The temporary hidden state therefore animates instantly but is
+    /// cleared if durable deletion fails, keeping the row truthful.
+    private func removeThreadImmediately(_ id: String) {
+        guard !threadIDsBeingRemoved.contains(id) else { return }
+        _ = withAnimation(.easeInOut(duration: 0.2)) {
+            threadIDsBeingRemoved.insert(id)
+        }
+        Task { @MainActor in
+            await chatStore.deleteThread(id: id)
+            threadIDsBeingRemoved.remove(id)
+        }
+    }
+
+    private func exportWorkspace(_ path: String) {
+        let ids = chatStore.threads
+            .filter { $0.workspace == path }
+            .map(\.id)
+        let workspaceName = URL(fileURLWithPath: path).lastPathComponent
+        exportConversations(ids: ids, suggestedName: workspaceName)
+    }
+
+    private func exportConversation(_ thread: Conversation) {
+        exportConversations(ids: [thread.id], suggestedName: thread.title)
+    }
+
+    private func exportConversations(ids: [String], suggestedName: String) {
+        Task { @MainActor in
+            do {
+                let items = try await chatStore.exportConversationJSON(ids: ids)
+                guard !items.isEmpty else {
+                    throw ConversationExportService.ExportError.noSavedConversations
+                }
+                sharePresenter.present(items, suggestedName: suggestedName) { message in
+                    exportErrorMessage = message
+                }
+            } catch {
+                exportErrorMessage = error.localizedDescription
+            }
+        }
     }
 
     private func workspaceExpansionBinding(for path: String) -> Binding<Bool> {
@@ -386,8 +464,10 @@ struct SidebarView: View {
         // from the observable store so an asynchronously generated title is
         // immediately reflected without changing the row's stable identity.
         ForEach(visibleThreadIDs, id: \.self) { threadID in
-            if let thread = chatStore.threads.first(where: { $0.id == threadID }) {
+            if !threadIDsBeingRemoved.contains(threadID),
+               let thread = chatStore.threads.first(where: { $0.id == threadID }) {
                 threadRow(for: thread)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
                     .padding(.leading, indented ? 20 : 0)
                     .listRowInsets(sidebarRowInsets)
                     .listRowBackground(Color.clear)
@@ -453,6 +533,15 @@ struct SidebarView: View {
         )
     }
 
+    private var exportErrorPresented: Binding<Bool> {
+        Binding(
+            get: { exportErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented { exportErrorMessage = nil }
+            }
+        )
+    }
+
     private var workspaceRemovalMessage: String {
         guard let path = workspacePendingRemoval else { return "" }
         let name = URL(fileURLWithPath: path).lastPathComponent
@@ -483,7 +572,8 @@ struct SidebarView: View {
             onRename: { newTitle in Task { await chatStore.renameThread(id: thread.id, title: newTitle) } },
             onPin: { Task { await chatStore.pinThread(id: thread.id, pinned: !thread.isPinned) } },
             onArchive: { Task { await chatStore.archiveThread(id: thread.id) } },
-            onDelete: { Task { await chatStore.deleteThread(id: thread.id) } },
+            onShare: { exportConversation(thread) },
+            onDelete: { removeThreadImmediately(thread.id) },
             onRestore: { Task { await chatStore.restoreThread(id: thread.id) } }
         )
     }

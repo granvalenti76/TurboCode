@@ -79,6 +79,161 @@ nonisolated struct AgentRunMetric: Codable, Sendable {
     var contextSize: Int?
 }
 
+/// Boundaries measured by the 0.3.4 harness foundation. These metrics stay
+/// outside the normal UI so persistence and MainActor publication costs can be
+/// compared without exposing provider transport details.
+nonisolated enum RuntimeBoundary: String, Codable, Sendable {
+    case settlement
+    case persistence
+    case restore
+    case mainActorPublication
+}
+
+nonisolated struct RuntimeBoundaryMetric: Codable, Sendable {
+    let id: String
+    let createdAt: Date
+    let boundary: RuntimeBoundary
+    let backend: String?
+    let durationMilliseconds: Int?
+    let eventCount: Int?
+
+    init(
+        id: String = UUID().uuidString,
+        createdAt: Date = .now,
+        boundary: RuntimeBoundary,
+        backend: String? = nil,
+        durationMilliseconds: Int? = nil,
+        eventCount: Int? = nil
+    ) {
+        self.id = id
+        self.createdAt = createdAt
+        self.boundary = boundary
+        self.backend = backend
+        self.durationMilliseconds = durationMilliseconds.map { max(0, $0) }
+        self.eventCount = eventCount.map { max(0, $0) }
+    }
+}
+
+/// Aggregates the persisted 0.3.4 samples without exposing diagnostics in the
+/// normal product UI. Missing values remain absent so an empty or partial
+/// baseline cannot be mistaken for a measured zero.
+nonisolated struct RuntimeBaselineSummary: Sendable, Equatable {
+    let runCount: Int
+    let firstTokenSampleCount: Int
+    let averageFirstTokenMilliseconds: Int?
+    let providerSampleCount: Int
+    let averageProviderMilliseconds: Int?
+    let contextSampleCount: Int
+    let averageContextOccupancyPercent: Int?
+    let toolSampleCount: Int
+    let averageToolMilliseconds: Int?
+    let settlementSampleCount: Int
+    let averageSettlementMilliseconds: Int?
+    let persistenceSampleCount: Int
+    let averagePersistenceMilliseconds: Int?
+    let restoreSampleCount: Int
+    let averageRestoreMilliseconds: Int?
+    let publicationSampleCount: Int
+    let averagePublicationCount: Int?
+
+    init(
+        runs: [AgentRunMetric],
+        boundaries: [RuntimeBoundaryMetric]
+    ) {
+        let firstTokens = runs.compactMap(\.firstTokenMilliseconds)
+        let providerDurations = runs.compactMap(\.totalMilliseconds)
+        let contextOccupancies = runs.compactMap { run -> Int? in
+            guard let used = run.contextTokenCount,
+                  let size = run.contextSize,
+                  size > 0 else {
+                return nil
+            }
+            let ratio = Double(used) / Double(size)
+            return Int((min(1, max(0, ratio)) * 100).rounded())
+        }
+        let toolDurations = runs
+            .flatMap(\.tools)
+            .compactMap(\.durationMilliseconds)
+
+        let settlements = Self.boundaryValues(
+            boundaries,
+            for: .settlement,
+            keyPath: \.durationMilliseconds
+        )
+        let persistences = Self.boundaryValues(
+            boundaries,
+            for: .persistence,
+            keyPath: \.durationMilliseconds
+        )
+        let restores = Self.boundaryValues(
+            boundaries,
+            for: .restore,
+            keyPath: \.durationMilliseconds
+        )
+        let publications = Self.boundaryValues(
+            boundaries,
+            for: .mainActorPublication,
+            keyPath: \.eventCount
+        )
+
+        runCount = runs.count
+        firstTokenSampleCount = firstTokens.count
+        averageFirstTokenMilliseconds = Self.average(firstTokens)
+        providerSampleCount = providerDurations.count
+        averageProviderMilliseconds = Self.average(providerDurations)
+        contextSampleCount = contextOccupancies.count
+        averageContextOccupancyPercent = Self.average(contextOccupancies)
+        toolSampleCount = toolDurations.count
+        averageToolMilliseconds = Self.average(toolDurations)
+        settlementSampleCount = settlements.count
+        averageSettlementMilliseconds = Self.average(settlements)
+        persistenceSampleCount = persistences.count
+        averagePersistenceMilliseconds = Self.average(persistences)
+        restoreSampleCount = restores.count
+        averageRestoreMilliseconds = Self.average(restores)
+        publicationSampleCount = publications.count
+        averagePublicationCount = Self.average(publications)
+    }
+
+    var summary: String {
+        [
+            "Runs: \(runCount)",
+            "First token: \(formatted(averageFirstTokenMilliseconds)) ms (n=\(firstTokenSampleCount))",
+            "Provider/turn: \(formatted(averageProviderMilliseconds)) ms (n=\(providerSampleCount))",
+            "Context occupancy: \(formattedPercent(averageContextOccupancyPercent)) (n=\(contextSampleCount))",
+            "Tool duration: \(formatted(averageToolMilliseconds)) ms (n=\(toolSampleCount))",
+            "Settlement: \(formatted(averageSettlementMilliseconds)) ms (n=\(settlementSampleCount))",
+            "Persistence: \(formatted(averagePersistenceMilliseconds)) ms (n=\(persistenceSampleCount))",
+            "Restore: \(formatted(averageRestoreMilliseconds)) ms (n=\(restoreSampleCount))",
+            "MainActor publications: \(formatted(averagePublicationCount)) (n=\(publicationSampleCount))"
+        ].joined(separator: "\n")
+    }
+
+    private static func average(_ values: [Int]) -> Int? {
+        guard !values.isEmpty else { return nil }
+        return values.reduce(0, +) / values.count
+    }
+
+    private static func boundaryValues(
+        _ boundaries: [RuntimeBoundaryMetric],
+        for boundary: RuntimeBoundary,
+        keyPath: KeyPath<RuntimeBoundaryMetric, Int?>
+    ) -> [Int] {
+        boundaries.compactMap { metric in
+            guard metric.boundary == boundary else { return nil }
+            return metric[keyPath: keyPath]
+        }
+    }
+
+    private func formatted(_ value: Int?) -> String {
+        value.map(String.init) ?? "—"
+    }
+
+    private func formattedPercent(_ value: Int?) -> String {
+        value.map { "\($0)%" } ?? "—"
+    }
+}
+
 /// A persisted on-device context boundary, shown separately from inference
 /// runs so diagnostics can distinguish summarization from model failures.
 nonisolated struct OnDeviceCompactionMetric: Codable, Sendable, Identifiable {
@@ -180,6 +335,20 @@ actor AgentDiagnosticsRecorder {
         runs[runID] = run
     }
 
+    /// Records a provider-neutral first-token timestamp captured at the
+    /// runtime boundary. The explicit timestamp avoids measuring the whole
+    /// turn when an adapter forwards synchronous stream callbacks later.
+    func markFirstToken(runID: String, at timestamp: Date) {
+        guard var run = runs[runID], run.firstTokenMilliseconds == nil else {
+            return
+        }
+        run.firstTokenMilliseconds = max(
+            0,
+            Int(timestamp.timeIntervalSince(run.startedAt) * 1_000)
+        )
+        runs[runID] = run
+    }
+
     func toolStarted(runID: String, call: Transcript.ToolCall, backend: ModelBackend) {
         guard var run = runs[runID], !run.tools.contains(where: { $0.id == call.id }) else { return }
         let content = try? call.arguments.value(String.self, forProperty: "content")
@@ -192,6 +361,33 @@ actor AgentDiagnosticsRecorder {
                 inputContentCharacters: content?.count,
                 inputLineCount: content.map(Self.lineCount),
                 inputParagraphCount: content.map(Self.paragraphCount),
+                durationMilliseconds: nil,
+                outputCharacters: nil,
+                outcome: nil,
+                failureCategory: nil,
+                failureFingerprint: nil
+            )
+        )
+        runs[runID] = run
+    }
+
+    /// Records a normalized tool call without requiring a Foundation Models
+    /// ``Transcript.ToolCall``. Codex and future adapters retain their
+    /// serialized arguments at the runtime boundary, while diagnostics keep
+    /// the same persisted metric shape.
+    func toolStarted(runID: String, call: ToolCall, backend: ModelBackend) {
+        guard var run = runs[runID], !run.tools.contains(where: { $0.id == call.id }) else {
+            return
+        }
+        run.tools.append(
+            ToolRunMetric(
+                id: call.id,
+                toolName: call.name,
+                backend: backend.rawValue,
+                startedAt: call.startedAt,
+                inputContentCharacters: nil,
+                inputLineCount: nil,
+                inputParagraphCount: nil,
                 durationMilliseconds: nil,
                 outputCharacters: nil,
                 outcome: nil,
@@ -239,11 +435,67 @@ actor AgentDiagnosticsRecorder {
         runs[runID] = run
     }
 
+    /// Completes a normalized runtime tool metric using the provider-neutral
+    /// status and duration carried by ``ToolResult``.
+    func toolFinished(
+        runID: String,
+        call: ToolCall,
+        output: ToolResult,
+        backend: ModelBackend
+    ) {
+        guard var run = runs[runID] else { return }
+        let text = output.output
+        let classified = Self.classifyToolOutput(text, toolName: call.name)
+        let outcome: ToolRunOutcome
+        let category: AgentFailureCategory?
+        switch output.status {
+        case .succeeded:
+            outcome = classified.outcome
+            category = classified.category
+        case .failed:
+            outcome = .failed
+            category = classified.category ?? .toolExecution
+        case .cancelled:
+            outcome = .cancelled
+            category = .interrupted
+        }
+        let fingerprint = category == nil ? nil : Self.fingerprint(text)
+        let duration = output.durationMilliseconds
+            ?? max(0, Int(Date().timeIntervalSince(call.startedAt) * 1_000))
+
+        if let index = run.tools.firstIndex(where: { $0.id == call.id }) {
+            run.tools[index].durationMilliseconds = duration
+            run.tools[index].outputCharacters = text.count
+            run.tools[index].outcome = outcome
+            run.tools[index].failureCategory = category
+            run.tools[index].failureFingerprint = fingerprint
+        } else {
+            run.tools.append(
+                ToolRunMetric(
+                    id: call.id,
+                    toolName: call.name,
+                    backend: backend.rawValue,
+                    startedAt: call.startedAt,
+                    inputContentCharacters: nil,
+                    inputLineCount: nil,
+                    inputParagraphCount: nil,
+                    durationMilliseconds: duration,
+                    outputCharacters: text.count,
+                    outcome: outcome,
+                    failureCategory: category,
+                    failureFingerprint: fingerprint
+                )
+            )
+        }
+        runs[runID] = run
+    }
+
     func finishRun(
         runID: String,
         outcome: AgentRunOutcome,
         generatedCharacters: Int,
-        error: Error? = nil
+        error: Error? = nil,
+        failure: TurnFailure? = nil
     ) {
         guard var run = runs.removeValue(forKey: runID) else { return }
         let finishedAt = Date()
@@ -258,6 +510,10 @@ actor AgentDiagnosticsRecorder {
             run.failureCategory = Self.classifyFailure(detail)
             run.failureFingerprint = Self.fingerprint(detail)
             run.suspectedTool = Self.suspectedTool(in: detail)
+        } else if let failure {
+            run.failureCategory = Self.classifyFailure(failure.message)
+            run.failureFingerprint = Self.fingerprint(failure.message)
+            run.suspectedTool = Self.suspectedTool(in: failure.message)
         }
         append(run)
     }
@@ -384,6 +640,22 @@ actor AgentDiagnosticsRecorder {
         Self.appendJSONLine(
             metric,
             filename: "local-compactions.jsonl"
+        )
+    }
+
+    /// Persists one provider-neutral boundary sample for the 0.3.4 baseline.
+    func recordBoundary(_ metric: RuntimeBoundaryMetric) {
+        guard Self.isEnabled else { return }
+        Self.appendJSONLine(metric, filename: "boundaries.jsonl")
+    }
+
+    /// Reads the persisted run and boundary streams as one release baseline.
+    /// This is intentionally a report-only operation and never mutates the
+    /// diagnostic files or the active runtime.
+    func runtimeBaselineSummary() -> RuntimeBaselineSummary {
+        RuntimeBaselineSummary(
+            runs: Self.persistedRuns(),
+            boundaries: Self.persistedBoundaries()
         )
     }
 
@@ -608,6 +880,16 @@ actor AgentDiagnosticsRecorder {
         }
     }
 
+    nonisolated private static func persistedBoundaries() -> [RuntimeBoundaryMetric] {
+        let url = diagnosticsDirectoryURL.appendingPathComponent("boundaries.jsonl")
+        guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return contents.split(whereSeparator: \.isNewline).compactMap { line in
+            try? decoder.decode(RuntimeBoundaryMetric.self, from: Data(line.utf8))
+        }
+    }
+
     nonisolated private static func fingerprint(_ detail: String) -> String {
         let normalized = detail
             .lowercased()
@@ -624,6 +906,7 @@ enum AgentProfileVersion {
     static func value(for backend: ModelBackend, mode: OrchestratorMode) -> String {
         if mode == .orchestrator { return "orchestrator-v2" }
         switch backend {
+        // PCC-RETIREMENT: remove the retired diagnostic prefix with the backend.
         case .foundationServe: return "pcc-layout-guard-v6"
         case .foundationApple: return "ondevice-layout-guard-v6"
         case .llamaServer: return "llama-layout-guard-v6"

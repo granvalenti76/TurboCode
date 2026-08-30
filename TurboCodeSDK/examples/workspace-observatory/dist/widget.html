@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Workspace Observatory</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f1118; --panel: rgba(255, 255, 255, .055);
+        --line: rgba(255, 255, 255, .1); --muted: #8b93a7;
+        --text: #f6f7fb; --violet: #9b8cff; --cyan: #5ed7ff; --green: #66e3a0;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; min-width: 680px; background:
+          radial-gradient(circle at 85% 0%, rgba(102, 227, 160, .12), transparent 34%),
+          radial-gradient(circle at 15% 0%, rgba(155, 140, 255, .16), transparent 38%), var(--bg);
+        color: var(--text); font: 13px -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+      }
+      main { padding: 22px; }
+      .hero { display: flex; align-items: end; justify-content: space-between; margin-bottom: 18px; }
+      h1 { margin: 0 0 5px; font-size: 24px; letter-spacing: -.04em; }
+      .subtitle { color: var(--muted); }
+      button { border: 1px solid var(--line); border-radius: 8px; color: var(--text);
+        background: rgba(255,255,255,.08); padding: 8px 11px; cursor: pointer; }
+      button:hover { background: rgba(255,255,255,.15); }
+      .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 13px; padding: 14px; }
+      .signal-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+      .signal-value { margin-top: 7px; font-size: 17px; font-weight: 650; }
+      .violet { color: var(--violet); } .cyan { color: var(--cyan); } .green { color: var(--green); }
+      .columns { display: grid; grid-template-columns: 1.1fr .9fr; gap: 10px; margin-top: 10px; }
+      .card h2 { margin: 0 0 12px; font-size: 14px; }
+      .row { display: flex; align-items: center; gap: 9px; padding: 9px 0; border-top: 1px solid var(--line); }
+      .row:first-of-type { border-top: 0; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 14px currentColor; }
+      .row-main { flex: 1; min-width: 0; } .row-title { font-weight: 600; }
+      .row-detail { color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .file-value { color: var(--muted); font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; }
+      .pulse { animation: pulse 1.8s ease-in-out infinite; }
+      .pulse-status { color: var(--muted); font-size: 11px; margin-top: 6px; min-height: 15px; }
+      @keyframes pulse { 50% { opacity: .55; transform: scale(.86); } }
+      @media (max-width: 760px) { body { min-width: 0; } .columns { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <div>
+          <h1>Workspace Observatory</h1>
+          <div class="subtitle" id="subtitle">Waiting for the session snapshot...</div>
+        </div>
+        <div>
+          <button id="pulse">Pulse signal</button>
+          <div class="pulse-status" id="pulse-status"></div>
+        </div>
+      </section>
+      <section class="grid" id="signals"></section>
+      <section class="columns">
+        <div class="card"><h2>Workspace map</h2><div id="files"></div></div>
+        <div class="card"><h2>Recent activity</h2><div id="activity"></div></div>
+      </section>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const esc = (value) => String(value || "").replace(/[&<>"']/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]));
+      let pulseCount = 0;
+      function render(props) {
+        const session = props && props.session || {};
+        $("subtitle").textContent = (session.title || "Untitled session") + " · " +
+          (session.entries || 0) + " events";
+        $("signals").innerHTML = (props && props.signals || []).map((signal) =>
+          '<div class="card"><div class="signal-label">' + esc(signal.label) +
+          '</div><div class="signal-value ' + esc(signal.tone) + '">' +
+          esc(signal.value) + "</div></div>").join("");
+        $("files").innerHTML = (props && props.files || []).map((file) =>
+          '<div class="row"><div class="dot ' + (file.kind === "folder" ? "pulse" : "") +
+          '"></div><div class="row-main"><div class="row-title">' + esc(file.name) +
+          '</div></div><div class="file-value">' + esc(file.value) + "</div></div>").join("");
+        $("activity").innerHTML = (props && props.activity || []).map((event) =>
+          '<div class="row"><div class="row-main"><div class="row-title">' +
+          esc(event.kind) + '</div><div class="row-detail">' + esc(event.text) +
+          "</div></div></div>").join("") ||
+          '<div class="subtitle">No activity yet.</div>';
+        if (window.turbocode) window.turbocode.resize(document.body.scrollHeight + 8);
+      }
+      $("pulse").addEventListener("click", () => {
+        $("pulse").textContent = "Signal sent";
+        if (window.turbocode) window.turbocode.emit({ type: "action", action: "pulse" });
+        setTimeout(() => $("pulse").textContent = "Pulse signal", 1200);
+      });
+      window.addEventListener("turbocode-host-event", (event) => {
+        const detail = event.detail || {};
+        if (detail.type !== "action" || detail.action !== "pulse" || !detail.accepted) return;
+        pulseCount += 1;
+        $("pulse").textContent = "Pulse acknowledged · " + pulseCount;
+        $("pulse-status").textContent = "Host received it at " +
+          new Date(detail.receivedAt).toLocaleTimeString();
+      });
+      window.addEventListener("turbocode-props", (event) => render(event.detail));
+      if (window.turbocode) window.turbocode.emit({ type: "ready" });
+    </script>
+  </body>
+</html>

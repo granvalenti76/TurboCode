@@ -125,7 +125,7 @@ struct SwiftPackageManagerTool: Tool {
         reviewable Package.swift changes; resolve or update for dependency
         resolution; build, test, and run for package execution; clean or reset for
         package artifacts; and describe, showDependencies, or dumpPackage for
-        inspection. Prefer this tool over bash for every supported SwiftPM action.
+        inspection. Its structured results complement commands run through Bash.
         All paths are workspace-bound, manifest edits support Review/Undo, and
         command time, output, network access, and filesystem writes are bounded.
         """

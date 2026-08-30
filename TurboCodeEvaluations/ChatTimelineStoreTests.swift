@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 import Testing
 @testable import TurboCode
@@ -5,6 +6,29 @@ import Testing
 @MainActor
 @Suite("Chat timeline store")
 struct ChatTimelineStoreTests {
+    @Test("Runtime snapshots are projected without moving lifecycle ownership")
+    func projectsRuntimeSnapshot() {
+        let store = ChatTimelineStore()
+        let turnID = TurnID(rawValue: "timeline-runtime")
+        let snapshot = RuntimeSnapshot(
+            activeThreadID: "thread-1",
+            backend: .foundationApple,
+            turn: TurnState(
+                id: turnID,
+                phase: .streaming,
+                startedAt: Date(timeIntervalSince1970: 100)
+            ),
+            isQuiescing: true
+        )
+
+        store.applyRuntimeSnapshot(snapshot)
+
+        #expect(store.runtimeSnapshot == snapshot)
+        #expect(store.runtimeSnapshot?.turn?.id == turnID)
+        #expect(store.runtimeSnapshot?.isQuiescing == true)
+        #expect(store.blocks.isEmpty)
+    }
+
     @Test("Response receipts remain ahead of reasoning and assistant output")
     func responseOrderingPreservesToolReceipts() {
         let store = ChatTimelineStore()
@@ -68,6 +92,31 @@ struct ChatTimelineStoreTests {
         store.reset()
         #expect(store.blocks.isEmpty)
         #expect(store.isFirstMessage)
+    }
+
+    @Test("Stale response cleanup cannot clear a newer response")
+    func staleResponseCleanupPreservesCurrentResponse() {
+        let store = ChatTimelineStore()
+        store.beginResponse(
+            displayText: "Old request",
+            placeholderID: "old-response",
+            model: "test-model"
+        )
+        store.beginResponse(
+            displayText: "New request",
+            placeholderID: "new-response",
+            model: "test-model"
+        )
+        store.liveAssistant = "New partial answer"
+        store.liveReasoning = "New reasoning"
+
+        // A late settlement from the superseded turn must not clean the
+        // transient state that belongs to the currently active response.
+        store.finishResponse(placeholderID: "old-response")
+
+        #expect(store.activeAssistantPlaceholderID == "new-response")
+        #expect(store.liveAssistant == "New partial answer")
+        #expect(store.liveReasoning == "New reasoning")
     }
 
     @Test("Grouped edits retain first before-state and final after-state")

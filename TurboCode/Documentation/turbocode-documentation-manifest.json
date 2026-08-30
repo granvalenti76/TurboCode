@@ -1,5 +1,5 @@
 {
-  "version": "1.5.0",
+  "version": "1.7.0",
   "documents": [
     {
       "id": "capabilities",
@@ -18,9 +18,9 @@
     {
       "id": "models",
       "title": "Models and Orchestrator Mode",
-      "summary": "How to configure Apple PCC and Codex, and when to use on-device, standalone, or delegated models.",
+      "summary": "How to use Codex and when to use on-device, standalone, or delegated models.",
       "file": "turbocode-models.md",
-      "keywords": ["model", "Apple", "on-device", "orchestrator", "Llama", "PCC", "Private Cloud Compute", "Codex", "ChatGPT", "DeepSeek", "delegate", "configure", "configuro", "setup", "fm serve", "terminal", "1976", "endpoint"]
+      "keywords": ["model", "Apple", "on-device", "orchestrator", "Llama", "Codex", "ChatGPT", "DeepSeek", "delegate", "configure", "configuro", "setup"]
     },
     {
       "id": "xcode-tools",
@@ -42,6 +42,13 @@
       "summary": "Workspace boundaries, approvals, deterministic edits, review, and undo.",
       "file": "turbocode-safety.md",
       "keywords": ["safety", "approval", "workspace", "review", "undo", "privacy", "Git"]
+    },
+    {
+      "id": "typescript-plugins",
+      "title": "TypeScript Plugins",
+      "summary": "How to create, build, install, discover, and use Node 24 or newer TypeScript plugins, tools, and widgets.",
+      "file": "turbocode-typescript-plugins.md",
+      "keywords": ["TypeScript", "plugin", "plugins", "extension", "create", "build", "install", "Node", "npm", "SDK", "widget", "transcript", "session", "JSON-RPC"]
     }
   ]
 }

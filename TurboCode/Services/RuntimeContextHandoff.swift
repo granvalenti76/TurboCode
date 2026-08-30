@@ -98,6 +98,12 @@ nonisolated enum RuntimeContextHandoff {
             WORKSPACE LISTING: \(listing.path); \(listing.totalCount) entries\
             \(suffix): \(names)
             """
+        case .pluginWidget:
+            guard let widget = block.pluginWidget else { return nil }
+            return "PLUGIN WIDGET: \(widget.title) (\(widget.pluginID)/\(widget.widgetID))"
+        case .editorialPublication:
+            guard let publication = block.editorialPublication else { return nil }
+            return "EDITORIAL PUBLICATION: \(publication.relativePath); \(publication.wordCount) words"
         case .reasoning, .tool, .approval, .review, .compaction:
             return nil
         }

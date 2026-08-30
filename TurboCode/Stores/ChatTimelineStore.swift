@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 
 /// Owns the in-memory timeline aggregate shown by the chat canvas.
@@ -12,6 +13,11 @@ final class ChatTimelineStore {
     var liveReasoning = ""
     var liveAssistant = ""
     var isFirstMessage = true
+
+    /// Latest runtime context projected for presentation decisions. This is a
+    /// read-only copy; turn ownership and lifecycle transitions remain in
+    /// AgentRuntime rather than in the timeline aggregate.
+    private(set) var runtimeSnapshot: RuntimeSnapshot?
 
     private(set) var activeAssistantPlaceholderID: String?
     private(set) var workspaceListingPresentations: [WorkspaceListingBlock] = []
@@ -34,6 +40,16 @@ final class ChatTimelineStore {
         reset()
         blocks = restoredBlocks
         isFirstMessage = restoredBlocks.isEmpty
+    }
+
+    /// Applies a provider-neutral runtime snapshot without importing or
+    /// retaining a provider session, task, or lifecycle reducer.
+    func applyRuntimeSnapshot(_ snapshot: RuntimeSnapshot) {
+        // Shared composition and compatibility coordinators may observe the
+        // same runtime edge. Equality suppression keeps that harmless overlap
+        // from invalidating the transcript view twice.
+        guard runtimeSnapshot != snapshot else { return }
+        runtimeSnapshot = snapshot
     }
 
     /// Starts one visible response and records the exact placeholder used to
@@ -88,12 +104,11 @@ final class ChatTimelineStore {
     /// Ends only the matching response so a stale asynchronous completion
     /// cannot clear a newer response's placeholder identity.
     func finishResponse(placeholderID: String) {
+        guard activeAssistantPlaceholderID == placeholderID else { return }
         liveReasoning = ""
         liveAssistant = ""
         workspaceListingPresentations = []
-        if activeAssistantPlaceholderID == placeholderID {
-            activeAssistantPlaceholderID = nil
-        }
+        activeAssistantPlaceholderID = nil
     }
 
     func block(id: String) -> ChatBlock? {
@@ -111,6 +126,35 @@ final class ChatTimelineStore {
         )
         guard !blocks.contains(where: { $0.id == block.id }) else { return }
         workspaceListingPresentations.append(listing)
+        insertBeforeActivePlaceholderOrAppend(block)
+    }
+
+    /// Inserts a plugin-owned UI surface only when a tool explicitly returns
+    /// one. The widget remains a value in the timeline; WebKit is created by
+    /// the response view only while this block is rendered.
+    func presentPluginWidget(_ widget: TypeScriptPluginWidgetReceipt, toolCallID: String) {
+        let block = ChatBlock(
+            id: "plugin-widget-\(toolCallID)",
+            kind: .pluginWidget,
+            text: widget.title,
+            pluginWidget: widget
+        )
+        guard !blocks.contains(where: { $0.id == block.id }) else { return }
+        insertBeforeActivePlaceholderOrAppend(block)
+    }
+
+    /// Appends one application-owned publication receipt without creating a
+    /// user prompt or assistant placeholder. Repeated delivery of the same
+    /// immutable draft receipt is suppressed at the timeline boundary.
+    func presentEditorialPublication(_ publication: EditorialPublicationBlock) {
+        let block = ChatBlock(
+            id: "editorial-publication-\(publication.draftID.uuidString)-\(publication.publishedAt.timeIntervalSince1970)",
+            kind: .editorialPublication,
+            text: publication.fileName,
+            editorialPublication: publication
+        )
+        guard !blocks.contains(where: { $0.id == block.id }) else { return }
+        isFirstMessage = false
         insertBeforeActivePlaceholderOrAppend(block)
     }
 
