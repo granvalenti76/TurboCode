@@ -44,6 +44,7 @@ struct TurboCodeCoreArchitectureTests {
 
         #expect(relativePaths.contains("Domain/ModelBackend.swift"))
         #expect(relativePaths.contains("Domain/ReasoningEffort.swift"))
+        #expect(relativePaths.contains("Domain/ToolArtifact.swift"))
         #expect(relativePaths.contains("Runtime/RuntimeContracts.swift"))
         #expect(relativePaths.contains("Runtime/AgentRuntime.swift"))
     }

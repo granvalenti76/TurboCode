@@ -335,6 +335,10 @@ nonisolated struct ToolCall: Codable, Hashable, Sendable {
 nonisolated enum ToolReceipt: Codable, Hashable, Sendable {
     case workspaceListing(WorkspaceListingBlock)
     case pluginWidget(TypeScriptPluginWidgetReceipt)
+    case diffPatch(DiffPatchReceipt)
+    case gitStatus(GitStatusBlock)
+    case gitCommit(GitCommitBlock)
+    case repositoryChanged(RepositoryMutationReceipt)
 }
 
 /// Normalized completion of a tool invocation.

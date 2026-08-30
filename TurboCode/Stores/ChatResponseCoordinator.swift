@@ -905,6 +905,8 @@ final class ChatResponseCoordinator {
             timeline.presentWorkspaceListing(listing)
         case .pluginWidget(let widget):
             timeline.presentPluginWidget(widget, toolCallID: toolCallID)
+        case .diffPatch, .gitStatus, .gitCommit, .repositoryChanged:
+            break
         }
     }
 
