@@ -71,6 +71,9 @@ nonisolated struct ModelSessionEvents: Sendable {
     /// Sessions can outlive individual turns, so this must be a provider and
     /// not a value captured while the session is being built.
     let currentTurnID: @MainActor @Sendable () async -> TurnID?
+    /// Native tools and their provider completion callback share this actor so
+    /// typed artifacts remain correlated without a presentation side channel.
+    let toolReceiptRegistry: ToolReceiptRegistry
     let toolStarted: @Sendable (
         Transcript.ToolCall,
         ModelBackend,
@@ -89,6 +92,7 @@ nonisolated struct ModelSessionEvents: Sendable {
 
     init(
         currentTurnID: @escaping @MainActor @Sendable () async -> TurnID? = { nil },
+        toolReceiptRegistry: ToolReceiptRegistry = ToolReceiptRegistry(),
         toolStarted: @escaping @Sendable (
             Transcript.ToolCall,
             ModelBackend,
@@ -106,6 +110,7 @@ nonisolated struct ModelSessionEvents: Sendable {
         ) async -> Void = { _ in }
     ) {
         self.currentTurnID = currentTurnID
+        self.toolReceiptRegistry = toolReceiptRegistry
         self.toolStarted = toolStarted
         self.toolFinished = toolFinished
         self.delegationChanged = delegationChanged

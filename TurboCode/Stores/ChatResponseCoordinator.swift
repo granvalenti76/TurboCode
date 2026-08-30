@@ -27,6 +27,8 @@ final class ChatResponseCoordinator {
     private let toolInteractions: ToolInteractionStore
     private let agentActivity: AgentActivityStore
     private let agentRuntime: AgentRuntime
+    private let receiptRegistry: ToolReceiptRegistry
+    private let reviewCoordinator: ReviewCoordinator?
     /// Concrete backend adapters are constructed and executed behind this
     /// non-observable boundary. The coordinator supplies presentation output
     /// ports but never receives or retains the provider session itself.
@@ -47,6 +49,8 @@ final class ChatResponseCoordinator {
         agentActivity: AgentActivityStore,
         agentRuntime: AgentRuntime = AgentRuntime(),
         llmRuntime: LLMRuntime,
+        receiptRegistry: ToolReceiptRegistry = ToolReceiptRegistry(),
+        reviewCoordinator: ReviewCoordinator? = nil,
         workspaceNameProvider: @escaping @MainActor @Sendable () -> String? = { nil },
         activityPresentationRequested: @escaping @MainActor @Sendable () -> Void = {}
     ) {
@@ -55,6 +59,8 @@ final class ChatResponseCoordinator {
         self.agentActivity = agentActivity
         self.agentRuntime = agentRuntime
         self.llmRuntime = llmRuntime
+        self.receiptRegistry = receiptRegistry
+        self.reviewCoordinator = reviewCoordinator
         self.workspaceNameProvider = workspaceNameProvider
         self.activityPresentationRequested = activityPresentationRequested
     }
@@ -68,6 +74,7 @@ final class ChatResponseCoordinator {
             currentTurnID: { [weak self] in
                 await self?.currentTurnState()?.id
             },
+            toolReceiptRegistry: receiptRegistry,
             toolStarted: { [weak self] call, backend, owner in
                 await self?.toolStarted(
                     call,
@@ -781,7 +788,15 @@ final class ChatResponseCoordinator {
             }
         }.joined()
         let pluginResult = TypeScriptPluginToolResultCodec.decode(rawOutputText)
-        let outputText = TypeScriptPluginToolResultCodec.visibleText(rawOutputText)
+        let nativeResolution = await ToolReceiptRouter.resolve(
+            for: call,
+            output: output,
+            registry: receiptRegistry,
+            workspaceName: workspaceName
+        )
+        let outputText = pluginResult == nil
+            ? nativeResolution.text
+            : TypeScriptPluginToolResultCodec.visibleText(rawOutputText)
         let result = ToolResult(
             id: call.id,
             turnID: invocation.turnID,
@@ -793,11 +808,7 @@ final class ChatResponseCoordinator {
                 Int(Date().timeIntervalSince(invocation.startedAt) * 1_000)
             ),
             receipt: pluginResult?.widget.map(ToolReceipt.pluginWidget)
-                ?? ToolReceiptRouter.receipt(
-                    for: call,
-                    output: output,
-                    workspaceName: workspaceName
-                )
+                ?? nativeResolution.receipt
         )
         guard await acceptBackendEvent(.toolFinished(result)) else { return }
         if let activeDiagnosticsRunID {
