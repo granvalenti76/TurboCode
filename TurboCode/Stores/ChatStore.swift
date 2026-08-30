@@ -101,6 +101,7 @@ public final class ChatStore {
     let onDeviceToolCallingSupported: Bool
     let responseCoordinator: ChatResponseCoordinator
     private let sessionCoordinator: ConversationSessionCoordinator
+    private let conversationPersistence: ConversationPersistenceService
     private let profileSelectionCoordinator: ProfileSelectionCoordinator
     private let conversationLifecycleCoordinator: ConversationLifecycleCoordinator
     private let workspaceLifecycleCoordinator: WorkspaceLifecycleCoordinator
@@ -237,6 +238,7 @@ public final class ChatStore {
             persistence: conversationPersistence
         )
         self.sessionCoordinator = sessionCoordinator
+        self.conversationPersistence = conversationPersistence
         self.workspaceStore = workspace
         self.toolInteractionStore = toolInteractions
         self.agentActivityStore = agentActivity
@@ -600,6 +602,12 @@ public final class ChatStore {
 
     public func deleteThread(id: String) async {
         await conversationLifecycleCoordinator.deleteThread(id: id)
+    }
+
+    /// Exports only durable JSON snapshots; no workspace directory is read or
+    /// modified by the sidebar sharing flow.
+    func exportConversationJSON(ids: [String]) async throws -> [ConversationExportItem] {
+        try await conversationPersistence.exportJSON(ids: ids)
     }
 
     /// Removes a workspace from TurboCode and deletes only its persisted chats.

@@ -120,7 +120,12 @@ final class ConversationStore {
         return threads
             .filter { showsArchivedThreads || !$0.isArchived }
             .filter { thread in
-                guard let selectedProject else { return true }
+                guard let selectedProject else {
+                    // The global Chats section is reserved for conversations
+                    // with no workspace; project-bound sessions are rendered
+                    // only inside their workspace disclosure group.
+                    return thread.workspace == nil
+                }
                 return thread.workspace.flatMap {
                     URL(fileURLWithPath: $0).lastPathComponent
                 } == selectedProject

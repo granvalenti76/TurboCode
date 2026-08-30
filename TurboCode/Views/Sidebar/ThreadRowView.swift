@@ -9,6 +9,7 @@ struct ThreadRowView: View {
     let onRename: (String) -> Void
     let onPin: () -> Void
     let onArchive: () -> Void
+    let onShare: () -> Void
     let onDelete: () -> Void
     let onRestore: () -> Void
 
@@ -106,6 +107,18 @@ struct ThreadRowView: View {
             }
         }
         .buttonStyle(.plain)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(action: onShare) {
+                Image(systemName: "square.and.arrow.up")
+                    .accessibilityLabel("Share")
+            }
+            .tint(.secondary)
+
+            Button(role: .destructive, action: onDelete) {
+                Image(systemName: "trash")
+                    .accessibilityLabel("Delete")
+            }
+        }
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) {
                 isHovering = hovering

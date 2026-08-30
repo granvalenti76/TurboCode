@@ -41,6 +41,24 @@ nonisolated struct ConversationPersistenceService: Sendable {
         try await repository.load(id: id)
     }
 
+    /// Loads exportable session JSON through the repository boundary. Missing
+    /// rows are skipped because a newly-created draft can exist in the catalog
+    /// before its first durable checkpoint.
+    func exportJSON(ids: [String]) async throws -> [ConversationExportItem] {
+        var exports: [ConversationExportItem] = []
+        for id in ids {
+            guard let snapshot = try await repository.load(id: id) else { continue }
+            exports.append(
+                ConversationExportItem(
+                    id: id,
+                    title: snapshot.conversation.title,
+                    data: try snapshot.encodedJSON()
+                )
+            )
+        }
+        return exports
+    }
+
     func delete(id: String) async throws {
         try await repository.delete(id: id)
     }
@@ -83,6 +101,28 @@ nonisolated struct ConversationPersistenceService: Sendable {
             deletedConversationIDs: deletedConversationIDs,
             deletionErrors: deletionErrors
         )
+    }
+}
+
+/// JSON payload prepared for the sidebar's native export actions.
+nonisolated struct ConversationExportItem: Sendable {
+    let id: String
+    let title: String
+    let data: Data
+
+    var suggestedFileName: String {
+        let titlePart = Self.safeFileComponent(title, fallback: "conversation")
+        let idPart = Self.safeFileComponent(id, fallback: "session")
+        return "\(titlePart)-\(idPart).json"
+    }
+
+    private static func safeFileComponent(_ value: String, fallback: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_ "))
+        let sanitized = value.unicodeScalars
+            .map { allowed.contains($0) ? String($0) : "_" }
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return sanitized.isEmpty ? fallback : sanitized
     }
 }
 

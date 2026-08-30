@@ -37,6 +37,11 @@ struct ConversationStoreTests {
                 title: "Other project",
                 updatedAt: newer,
                 workspace: "/Work/Elsewhere"
+            ),
+            Conversation(
+                id: "general",
+                title: "General TurboCode",
+                updatedAt: newer
             )
         ]
         store.search = "turbocode"
@@ -51,6 +56,8 @@ struct ConversationStoreTests {
             store.sortedThreads(selectedProject: "TurboCode").map(\.id)
                 == ["pinned", "archived", "recent"]
         )
+
+        #expect(store.sortedThreads(selectedProject: nil).map(\.id) == ["general"])
     }
 
     @Test("Metadata mutations preserve identity and update the catalog")
@@ -114,6 +121,37 @@ struct ConversationStoreTests {
         #expect(saved.conversation.mode == .plan)
         #expect(saved.modelBackend == ModelBackend.foundationApple.rawValue)
         #expect(saved.blocks == [originalBlock])
+    }
+
+    @Test("Export encodes the persisted session schema and skips unsaved drafts")
+    func exportEncodesPersistedSessionSchema() async throws {
+        let conversation = Conversation(
+            id: "exported",
+            title: "Export / me",
+            workspace: "/Work/TurboCode"
+        )
+        let repository = RecordingConversationStoreRepository(
+            snapshots: [
+                ConversationSnapshot(
+                    conversation: conversation,
+                    modelBackend: ModelBackend.foundationApple.rawValue,
+                    blocks: [ChatBlock(kind: .assistant, text: "Saved")],
+                    transcript: nil
+                )
+            ]
+        )
+        let persistence = ConversationPersistenceService(repository: repository)
+
+        let exports = try await persistence.exportJSON(
+            ids: [conversation.id, "unsaved-draft"]
+        )
+        let item = try #require(exports.first)
+        let stored = try JSONDecoder().decode(StoredSession.self, from: item.data)
+
+        #expect(exports.count == 1)
+        #expect(stored.id == conversation.id)
+        #expect(stored.blocks.first?.text == "Saved")
+        #expect(item.suggestedFileName.contains("Export _ me"))
     }
 
     @Test("ChatStore conversation forwarding remains observable")

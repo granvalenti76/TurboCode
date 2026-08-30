@@ -9,6 +9,14 @@ nonisolated struct ConversationSnapshot: Sendable {
     let modelBackend: String
     let blocks: [ChatBlock]
     let transcript: Transcript?
+
+    /// Re-encodes the durable session shape without exposing repository paths
+    /// to UI code. Export therefore follows the same schema as persistence.
+    nonisolated func encodedJSON() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        return try encoder.encode(storedSession)
+    }
 }
 
 /// Persistence contract for conversations. Keeping this boundary protocol-based
