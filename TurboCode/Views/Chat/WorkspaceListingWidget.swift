@@ -334,8 +334,8 @@ private struct WorkspaceListingFileRow: View {
         HStack(spacing: 10) {
             Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.green)
-                .symbolRenderingMode(.hierarchical)
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.white, .red)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Editorial Desk")
