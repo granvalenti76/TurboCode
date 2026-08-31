@@ -101,6 +101,23 @@ struct TurboCodeCoreArchitectureTests {
         }
     }
 
+    /// Tools produce domain results; only the owning runtime completion may
+    /// project them into observable application state. Keeping this tripwire at
+    /// the source boundary prevents a convenience regression to the old global
+    /// facade while the tools still compile in the application target.
+    @Test("Tools do not reach the ChatStore singleton")
+    func toolsDoNotReachChatStoreSingleton() throws {
+        let toolsURL = Self.repositoryRoot
+            .appendingPathComponent("TurboCode/Tools", isDirectory: true)
+        let sourceURLs = try swiftSourceURLs(at: toolsURL)
+        #expect(!sourceURLs.isEmpty)
+
+        for sourceURL in sourceURLs {
+            let source = try String(contentsOf: sourceURL, encoding: .utf8)
+            #expect(!source.contains("ChatStore.shared"))
+        }
+    }
+
     /// The Xcode target defaults unannotated declarations to MainActor. These
     /// source guards therefore protect the explicit opt-out that keeps native
     /// provider streaming and lifecycle ownership away from the UI executor.
@@ -177,13 +194,16 @@ struct TurboCodeCoreArchitectureTests {
     }
 
     private func coreSwiftSourceURLs() throws -> [URL] {
-        let coreURL = Self.coreURL
+        try swiftSourceURLs(at: Self.coreURL)
+    }
+
+    private func swiftSourceURLs(at directoryURL: URL) throws -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
-            at: coreURL,
+            at: directoryURL,
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else {
-            throw TurboCodeCoreArchitectureTestError.cannotEnumerate(coreURL)
+            throw TurboCodeCoreArchitectureTestError.cannotEnumerate(directoryURL)
         }
 
         var sourceURLs: [URL] = []
