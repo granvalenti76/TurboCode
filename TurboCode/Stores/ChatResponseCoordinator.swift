@@ -23,12 +23,12 @@ final class ChatResponseCoordinator {
         let startedAt: Date
     }
 
-    private let timeline: ChatTimelineStore
     private let toolInteractions: ToolInteractionStore
     private let agentActivity: AgentActivityStore
     private let agentRuntime: AgentRuntime
     private let receiptRegistry: ToolReceiptRegistry
-    private let reviewCoordinator: ReviewCoordinator?
+    private let presenter: ChatResponsePresenter
+    private let diagnostics: ResponseDiagnostics
     /// Concrete backend adapters are constructed and executed behind this
     /// non-observable boundary. The coordinator supplies presentation output
     /// ports but never receives or retains the provider session itself.
@@ -38,7 +38,6 @@ final class ChatResponseCoordinator {
 
     private(set) var isDelegating = false
     private(set) var activeEditGroupID: String?
-    private var activeDiagnosticsRunID: String?
     private var productGuidePresentation: ProductGuideBlock?
     private var completedRootWrite: String?
     private var pendingCoordinatorTool: AgentActivityTool?
@@ -54,13 +53,16 @@ final class ChatResponseCoordinator {
         workspaceNameProvider: @escaping @MainActor @Sendable () -> String? = { nil },
         activityPresentationRequested: @escaping @MainActor @Sendable () -> Void = {}
     ) {
-        self.timeline = timeline
         self.toolInteractions = toolInteractions
         self.agentActivity = agentActivity
         self.agentRuntime = agentRuntime
         self.llmRuntime = llmRuntime
         self.receiptRegistry = receiptRegistry
-        self.reviewCoordinator = reviewCoordinator
+        self.presenter = ChatResponsePresenter(
+            timeline: timeline,
+            reviewCoordinator: reviewCoordinator
+        )
+        self.diagnostics = ResponseDiagnostics()
         self.workspaceNameProvider = workspaceNameProvider
         self.activityPresentationRequested = activityPresentationRequested
     }
@@ -167,7 +169,11 @@ final class ChatResponseCoordinator {
         // path and stale callbacks cannot insert widgets into a newer thread.
         if case .toolFinished(let result) = event,
            let receipt = result.receipt {
-            present(receipt, toolCallID: result.id)
+            presenter.present(
+                receipt,
+                toolCallID: result.id,
+                editGroupID: activeEditGroupID
+            )
         }
         return true
     }
@@ -203,23 +209,16 @@ final class ChatResponseCoordinator {
             )
         )
         _ = await advanceTurn(to: .streaming, turnID: turnID)
-        timeline.beginResponse(
+        presenter.beginResponse(
             displayText: visibleInTimeline ? displayText : nil,
             placeholderID: placeholderID,
             model: modelName
         )
-        let diagnostics = CodexDiagnosticsCapture()
-        let diagnosticsRunID = await AgentDiagnosticsRecorder.shared.startRun(
-            backend: .codex,
+        let diagnosticsCapture = await diagnostics.beginCodexRun(
             mode: mode,
-            profileVersion: AgentProfileVersion.value(
-                for: .codex,
-                mode: mode
-            ),
             workspaceKind: workspaceKind,
             promptCharacters: promptText.count
         )
-        activeDiagnosticsRunID = diagnosticsRunID
         var result = Result(errorMessage: nil, touchedConversation: false)
         let ingress = BackendEventIngress(
             turnID: turnID,
@@ -228,19 +227,23 @@ final class ChatResponseCoordinator {
                 guard let self else { return }
                 switch event {
                 case .assistantTextChanged(_, let text):
-                    diagnostics.textChanged(text) {
-                        self.timeline.liveAssistant = text
+                    diagnosticsCapture.recordCodexText(text) {
+                        self.presenter.publishAssistant(text)
                     }
                 case .reasoningTextChanged(_, let text):
-                    diagnostics.textChanged(text) {
-                        self.timeline.liveReasoning = text
+                    diagnosticsCapture.recordCodexText(text) {
+                        self.presenter.publishReasoning(text)
                     }
                 case .toolStarted(let call):
-                    diagnostics.toolStarted(call)
+                    diagnosticsCapture.toolStarted(call)
                 case .toolFinished(let toolResult):
-                    diagnostics.toolFinished(toolResult)
+                    diagnosticsCapture.toolFinished(toolResult)
                     if let receipt = toolResult.receipt {
-                        self.present(receipt, toolCallID: toolResult.id)
+                        self.presenter.present(
+                            receipt,
+                            toolCallID: toolResult.id,
+                            editGroupID: self.activeEditGroupID
+                        )
                     }
                 default:
                     break
@@ -308,19 +311,16 @@ final class ChatResponseCoordinator {
 
         let settlementStartedAt = Date()
 
-        await finishCodexDiagnostics(
-            runID: diagnosticsRunID,
-            capture: diagnostics,
+        await diagnostics.finishCodex(
+            capture: diagnosticsCapture,
             outcome: backendResult.outcome
         )
 
         guard await ownsTurn(turnID) else {
-            await recordResponseBoundaries(
+            await diagnostics.recordBoundaries(
                 backend: .codex,
                 settlementStartedAt: settlementStartedAt,
-                publicationCount: diagnostics.publicationCount,
-                publicationDurationMilliseconds:
-                    diagnostics.publicationDurationMilliseconds
+                capture: diagnosticsCapture
             )
             return Result(errorMessage: nil, touchedConversation: false)
         }
@@ -344,7 +344,7 @@ final class ChatResponseCoordinator {
                     model: modelName
                 )
                 : nil
-            timeline.finalizeResponse(
+            presenter.finalizeResponse(
                 placeholderID: placeholderID,
                 assistantBlock: assistantBlock,
                 reasoningBlock: reasoningBlock
@@ -356,9 +356,9 @@ final class ChatResponseCoordinator {
             let partialText = backendResult.assistantText.isEmpty
                 ? backendResult.reasoningText
                 : backendResult.assistantText
-            timeline.replaceBlock(
-                id: placeholderID,
-                with: ChatBlock(
+            presenter.replaceResponse(
+                placeholderID: placeholderID,
+                block: ChatBlock(
                     id: placeholderID,
                     kind: .assistant,
                     text: partialText.isEmpty
@@ -369,9 +369,9 @@ final class ChatResponseCoordinator {
             )
             await finishTurn(.cancelled(reason: "The turn was interrupted."), turnID: turnID)
         case .failed(let failure) where failure.code == "codex.authentication":
-            timeline.replaceBlock(
-                id: placeholderID,
-                with: ChatBlock(
+            presenter.replaceResponse(
+                placeholderID: placeholderID,
+                block: ChatBlock(
                     id: placeholderID,
                     kind: .assistant,
                     text: "Sign in with ChatGPT to continue with Codex.",
@@ -389,9 +389,9 @@ final class ChatResponseCoordinator {
                 turnID: turnID
             )
         case .failed(let failure):
-            timeline.replaceBlock(
-                id: placeholderID,
-                with: ChatBlock(
+            presenter.replaceResponse(
+                placeholderID: placeholderID,
+                block: ChatBlock(
                     id: placeholderID,
                     kind: .assistant,
                     text: "Error: \(failure.message)",
@@ -417,14 +417,12 @@ final class ChatResponseCoordinator {
         guard await ownsTurn(turnID) || settledTurnID == turnID else {
             return Result(errorMessage: nil, touchedConversation: false)
         }
-        timeline.finishResponse(placeholderID: placeholderID)
+        presenter.finishResponse(placeholderID: placeholderID)
         toolInteractions.clearActivities()
-        await recordResponseBoundaries(
+        await diagnostics.recordBoundaries(
             backend: .codex,
             settlementStartedAt: settlementStartedAt,
-            publicationCount: diagnostics.publicationCount,
-            publicationDurationMilliseconds:
-                diagnostics.publicationDurationMilliseconds
+            capture: diagnosticsCapture
         )
         return result
     }
@@ -459,14 +457,14 @@ final class ChatResponseCoordinator {
                 workspaceRoot: workspaceRoot
             )
         )
-        timeline.beginResponse(
+        presenter.beginResponse(
             displayText: visibleInTimeline ? displayText : nil,
             placeholderID: placeholderID,
             model: modelName
         )
         productGuidePresentation = nil
         completedRootWrite = nil
-        let publications = ResponsePublicationCapture()
+        let diagnosticsCapture = diagnostics.makePublicationCapture()
         let ingress = BackendEventIngress(
             turnID: turnID,
             runtime: agentRuntime,
@@ -474,17 +472,22 @@ final class ChatResponseCoordinator {
                 guard let self else { return }
                 switch event {
                 case .assistantTextChanged(_, let content):
-                    publications.record {
-                        self.timeline.liveAssistant =
+                    diagnosticsCapture.recordPublication {
+                        self.presenter.publishAssistant(
                             Self.userVisibleAssistantText(content)
+                        )
                     }
                 case .reasoningTextChanged(_, let reasoning):
-                    publications.record {
-                        self.timeline.liveReasoning = reasoning
+                    diagnosticsCapture.recordPublication {
+                        self.presenter.publishReasoning(reasoning)
                     }
                 case .toolFinished(let toolResult):
                     if let receipt = toolResult.receipt {
-                        self.present(receipt, toolCallID: toolResult.id)
+                        self.presenter.present(
+                            receipt,
+                            toolCallID: toolResult.id,
+                            editGroupID: self.activeEditGroupID
+                        )
                     }
                 default:
                     break
@@ -506,7 +509,7 @@ final class ChatResponseCoordinator {
                 serverURL: serverURL,
                 diagnosticsChanged: { [weak self] runID in
                     guard let self, await self.ownsTurn(turnID) else { return }
-                    self.activeDiagnosticsRunID = runID
+                    self.diagnostics.activateRun(runID)
                 },
                 contextChanged: { [weak self] usage in
                     guard let self, await self.ownsTurn(turnID) else { return }
@@ -531,12 +534,10 @@ final class ChatResponseCoordinator {
         _ = await advanceTurn(to: .streaming, turnID: turnID)
         isDelegating = false
         guard await ownsTurn(turnID) else {
-            await recordResponseBoundaries(
+            await diagnostics.recordBoundaries(
                 backend: backend,
                 settlementStartedAt: settlementStartedAt,
-                publicationCount: publications.count,
-                publicationDurationMilliseconds:
-                    publications.totalApplyDurationMilliseconds
+                capture: diagnosticsCapture
             )
             return Result(errorMessage: nil, touchedConversation: false)
         }
@@ -552,7 +553,7 @@ final class ChatResponseCoordinator {
                 : Self.userVisibleAssistantText(content)
             let finalText = NativeToolEchoFilter.filtering(
                 rawFinalText,
-                workspaceListings: timeline.workspaceListingPresentations
+                workspaceListings: presenter.workspaceListings
             )
             let assistantBlock = finalText.trimmingCharacters(
                 in: .whitespacesAndNewlines
@@ -572,7 +573,7 @@ final class ChatResponseCoordinator {
                     model: modelName
                 )
                 : nil
-            timeline.finalizeResponse(
+            presenter.finalizeResponse(
                 placeholderID: placeholderID,
                 assistantBlock: assistantBlock,
                 reasoningBlock: reasoningBlock
@@ -583,9 +584,9 @@ final class ChatResponseCoordinator {
         case .failed(let failure) where failure.code == "native.repetitiveOutput":
             let stoppedText = completedRootWrite.map { "Created `\($0)`." }
                 ?? "Response stopped because the on-device model began repeating output. Please retry."
-            timeline.replaceBlock(
-                id: placeholderID,
-                with: ChatBlock(
+            presenter.replaceResponse(
+                placeholderID: placeholderID,
+                block: ChatBlock(
                     id: placeholderID,
                     kind: .assistant,
                     text: stoppedText,
@@ -606,9 +607,9 @@ final class ChatResponseCoordinator {
             let content = backendResult.assistantText
             let reasoning = backendResult.reasoningText
             let partialText = content.isEmpty ? reasoning : content
-            timeline.replaceBlock(
-                id: placeholderID,
-                with: ChatBlock(
+            presenter.replaceResponse(
+                placeholderID: placeholderID,
+                block: ChatBlock(
                     id: placeholderID,
                     kind: .assistant,
                     text: partialText.isEmpty
@@ -623,9 +624,9 @@ final class ChatResponseCoordinator {
             )
         case .failed(let failure):
             let message = failure.message
-            timeline.replaceBlock(
-                id: placeholderID,
-                with: ChatBlock(
+            presenter.replaceResponse(
+                placeholderID: placeholderID,
+                block: ChatBlock(
                     id: placeholderID,
                     kind: .assistant,
                     text: "Error: \(message)",
@@ -642,106 +643,18 @@ final class ChatResponseCoordinator {
             )
         }
 
-        timeline.liveReasoning = ""
-        timeline.liveAssistant = ""
+        presenter.resetLiveResponse()
         if activeEditGroupID == editGroupID {
             activeEditGroupID = nil
         }
-        timeline.finishResponse(placeholderID: placeholderID)
-        timeline.clearEditGroup(editGroupID)
-        await recordResponseBoundaries(
+        presenter.finishResponse(placeholderID: placeholderID)
+        presenter.clearEditGroup(editGroupID)
+        await diagnostics.recordBoundaries(
             backend: backend,
             settlementStartedAt: settlementStartedAt,
-            publicationCount: publications.count,
-            publicationDurationMilliseconds:
-                publications.totalApplyDurationMilliseconds
+            capture: diagnosticsCapture
         )
         return result
-    }
-
-    /// Records the provider-neutral settlement, publication-count, and
-    /// MainActor apply baseline; detailed provider diagnostics remain owned by
-    /// their existing runtime recorders.
-    private func recordResponseBoundaries(
-        backend: ModelBackend,
-        settlementStartedAt: Date,
-        publicationCount: Int,
-        publicationDurationMilliseconds: Int
-    ) async {
-        let duration = max(
-            0,
-            Int(Date().timeIntervalSince(settlementStartedAt) * 1_000)
-        )
-        await AgentDiagnosticsRecorder.shared.recordBoundary(
-            RuntimeBoundaryMetric(
-                boundary: .settlement,
-                backend: backend.rawValue,
-                durationMilliseconds: duration
-            )
-        )
-        await AgentDiagnosticsRecorder.shared.recordBoundary(
-            RuntimeBoundaryMetric(
-                boundary: .mainActorPublication,
-                backend: backend.rawValue,
-                durationMilliseconds: publicationDurationMilliseconds,
-                eventCount: publicationCount
-            )
-        )
-    }
-
-    /// Flushes the Codex projection after the provider task settles. The
-    /// capture keeps synchronous adapter callbacks precise while the actor
-    /// recorder remains the only owner of persisted diagnostics.
-    private func finishCodexDiagnostics(
-        runID: String?,
-        capture: CodexDiagnosticsCapture,
-        outcome: TurnOutcome
-    ) async {
-        guard let runID else { return }
-        if let firstTokenAt = capture.firstTokenAt {
-            await AgentDiagnosticsRecorder.shared.markFirstToken(
-                runID: runID,
-                at: firstTokenAt
-            )
-        }
-        for call in capture.startedTools {
-            await AgentDiagnosticsRecorder.shared.toolStarted(
-                runID: runID,
-                call: call,
-                backend: .codex
-            )
-        }
-        for completion in capture.completedTools {
-            await AgentDiagnosticsRecorder.shared.toolFinished(
-                runID: runID,
-                call: completion.call,
-                output: completion.result,
-                backend: .codex
-            )
-        }
-
-        let diagnosticOutcome: AgentRunOutcome
-        let failure: TurnFailure?
-        switch outcome {
-        case .succeeded:
-            diagnosticOutcome = .success
-            failure = nil
-        case .cancelled:
-            diagnosticOutcome = .cancelled
-            failure = nil
-        case .failed(let turnFailure):
-            diagnosticOutcome = .failed
-            failure = turnFailure
-        }
-        await AgentDiagnosticsRecorder.shared.finishRun(
-            runID: runID,
-            outcome: diagnosticOutcome,
-            generatedCharacters: capture.generatedCharacters,
-            failure: failure
-        )
-        if activeDiagnosticsRunID == runID {
-            activeDiagnosticsRunID = nil
-        }
     }
 
     func toolStarted(
@@ -766,13 +679,7 @@ final class ChatResponseCoordinator {
             turnID: turnID,
             startedAt: startedAt
         )
-        if let activeDiagnosticsRunID {
-            await AgentDiagnosticsRecorder.shared.toolStarted(
-                runID: activeDiagnosticsRunID,
-                call: call,
-                backend: backend
-            )
-        }
+        await diagnostics.toolStarted(call, backend: backend)
         if owner == .coordinator {
             coordinatorToolStarted(
                 AgentActivityRuntimeMapping.tool(from: call, owner: owner)
@@ -841,14 +748,11 @@ final class ChatResponseCoordinator {
                 ?? nativeResolution.receipt
         )
         guard await acceptBackendEvent(.toolFinished(result)) else { return }
-        if let activeDiagnosticsRunID {
-            await AgentDiagnosticsRecorder.shared.toolFinished(
-                runID: activeDiagnosticsRunID,
-                call: call,
-                output: output,
-                backend: backend
-            )
-        }
+        await diagnostics.toolFinished(
+            call,
+            output: output,
+            backend: backend
+        )
         let text = outputText
         if call.toolName == "turbocode_guide" {
             productGuidePresentation = ProductGuideBlock(toolOutput: text)
@@ -938,27 +842,6 @@ final class ChatResponseCoordinator {
         }
         let label = owner == .coordinator ? "Coordinator" : "Worker"
         return "\(label) · \(summary)"
-    }
-
-    private func present(_ receipt: ToolReceipt, toolCallID: String) {
-        switch receipt {
-        case .workspaceListing(let listing):
-            timeline.presentWorkspaceListing(listing)
-        case .pluginWidget(let widget):
-            timeline.presentPluginWidget(widget, toolCallID: toolCallID)
-        case .diffPatch(let artifact):
-            reviewCoordinator?.presentDiffPatch(
-                artifact,
-                editGroupID: activeEditGroupID
-            )
-        case .gitStatus(let status):
-            reviewCoordinator?.presentGitStatus(status)
-        case .gitCommit(let commit):
-            reviewCoordinator?.presentGitCommit(commit)
-            reviewCoordinator?.repositoryChanged()
-        case .repositoryChanged:
-            reviewCoordinator?.repositoryChanged()
-        }
     }
 
     private static func toolSummary(
@@ -1085,60 +968,5 @@ final class ChatResponseCoordinator {
 
     private static func userVisibleAssistantText(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-}
-
-/// Captures Codex lifecycle values on the coordinator actor before they are
-/// flushed to the recorder. This avoids spawning one persistence hop per
-/// synchronous provider callback and keeps tool timestamps meaningful.
-@MainActor
-private final class CodexDiagnosticsCapture {
-    struct CompletedTool {
-        let call: ToolCall
-        let result: ToolResult
-    }
-
-    private(set) var firstTokenAt: Date?
-    private(set) var generatedCharacters = 0
-    private(set) var publicationCount = 0
-    private(set) var publicationDurationMilliseconds = 0
-    private(set) var startedTools: [ToolCall] = []
-    private(set) var completedTools: [CompletedTool] = []
-
-    func textChanged(_ text: String, apply: () -> Void) {
-        guard !text.isEmpty else { return }
-        let startedAt = DispatchTime.now().uptimeNanoseconds
-        apply()
-        let elapsed = DispatchTime.now().uptimeNanoseconds - startedAt
-        publicationDurationMilliseconds += Int(elapsed / 1_000_000)
-        publicationCount += 1
-        firstTokenAt = firstTokenAt ?? Date()
-        generatedCharacters = max(generatedCharacters, text.count)
-    }
-
-    func toolStarted(_ call: ToolCall) {
-        startedTools.append(call)
-    }
-
-    func toolFinished(_ result: ToolResult) {
-        guard let call = startedTools.last(where: { $0.id == result.id }) else {
-            return
-        }
-        completedTools.append(CompletedTool(call: call, result: result))
-    }
-}
-
-/// Counts visible response publications without retaining their content.
-@MainActor
-private final class ResponsePublicationCapture {
-    private(set) var count = 0
-    private(set) var totalApplyDurationMilliseconds = 0
-
-    func record(apply: () -> Void) {
-        let startedAt = DispatchTime.now().uptimeNanoseconds
-        apply()
-        let elapsed = DispatchTime.now().uptimeNanoseconds - startedAt
-        totalApplyDurationMilliseconds += Int(elapsed / 1_000_000)
-        count += 1
     }
 }

@@ -137,6 +137,43 @@ struct AgentDiagnosticsTests {
         #expect(summary.averagePublicationDurationMilliseconds == 3)
     }
 
+    @Test("Response diagnostics capture publications and matched Codex tools")
+    @MainActor
+    func responseDiagnosticsCapturePreservesBatchInputs() {
+        let capture = ResponseDiagnostics.Capture()
+        var appliedTexts: [String] = []
+
+        capture.recordCodexText("") {
+            appliedTexts.append("empty")
+        }
+        capture.recordCodexText("response") {
+            appliedTexts.append("response")
+        }
+        capture.recordPublication {
+            appliedTexts.append("native")
+        }
+
+        let turnID = TurnID(rawValue: "diagnostics-capture")
+        capture.toolStarted(
+            ToolCall(id: "tool", turnID: turnID, name: "read_file")
+        )
+        capture.toolFinished(
+            ToolResult(
+                id: "tool",
+                turnID: turnID,
+                status: .succeeded,
+                output: "ok"
+            )
+        )
+
+        #expect(appliedTexts == ["response", "native"])
+        #expect(capture.publicationCount == 2)
+        #expect(capture.generatedCharacters == 8)
+        #expect(capture.firstTokenAt != nil)
+        #expect(capture.startedTools.count == 1)
+        #expect(capture.completedTools.count == 1)
+    }
+
     private func metric(startedAt: Date) -> AgentRunMetric {
         AgentRunMetric(
             id: "run",

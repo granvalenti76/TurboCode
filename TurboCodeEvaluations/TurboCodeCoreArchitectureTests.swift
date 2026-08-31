@@ -134,6 +134,35 @@ struct TurboCodeCoreArchitectureTests {
         #expect(!assemblySource.contains("@Observable"))
     }
 
+    /// Response orchestration keeps one ordered turn, while executor-neutral
+    /// ingress, MainActor projection, and diagnostic persistence remain
+    /// independently testable boundaries.
+    @Test("Response coordination delegates buffering, presentation, and diagnostics")
+    func responseCoordinationUsesNarrowBoundaries() throws {
+        let coordinatorSource = try source(
+            at: "TurboCode/Stores/ChatResponseCoordinator.swift"
+        )
+        let presenterSource = try source(
+            at: "TurboCode/Stores/ChatResponsePresenter.swift"
+        )
+        let diagnosticsSource = try source(
+            at: "TurboCode/Diagnostics/ResponseDiagnostics.swift"
+        )
+        let ingressSource = try source(
+            at: "TurboCode/Services/Chat/BackendEventIngress.swift"
+        )
+
+        #expect(ingressSource.contains("actor BackendEventIngress"))
+        #expect(presenterSource.contains("@MainActor"))
+        #expect(!presenterSource.contains("AgentRuntime"))
+        #expect(!presenterSource.contains("LLMRuntime"))
+        #expect(diagnosticsSource.contains("AgentDiagnosticsRecorder.shared"))
+        #expect(!coordinatorSource.contains("private let timeline:"))
+        #expect(!coordinatorSource.contains("timeline.beginResponse"))
+        #expect(!coordinatorSource.contains("timeline.present"))
+        #expect(!coordinatorSource.contains("AgentDiagnosticsRecorder.shared"))
+    }
+
     /// The Xcode target defaults unannotated declarations to MainActor. These
     /// source guards therefore protect the explicit opt-out that keeps native
     /// provider streaming and lifecycle ownership away from the UI executor.
