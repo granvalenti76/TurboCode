@@ -118,6 +118,22 @@ struct TurboCodeCoreArchitectureTests {
         }
     }
 
+    /// The observable façade should forward its compatibility surface to a
+    /// non-observable composition root instead of rebuilding the dependency
+    /// graph whenever that façade evolves.
+    @Test("ChatStore delegates construction to the application assembly")
+    func chatStoreDelegatesConstructionToAssembly() throws {
+        let chatStoreSource = try source(at: "TurboCode/Stores/ChatStore.swift")
+        let assemblySource = try source(
+            at: "TurboCode/Stores/ChatApplicationAssembly.swift"
+        )
+
+        #expect(chatStoreSource.contains("private let assembly: ChatApplicationAssembly"))
+        #expect(chatStoreSource.contains("self.assembly = ChatApplicationAssembly("))
+        #expect(assemblySource.contains("final class ChatApplicationAssembly"))
+        #expect(!assemblySource.contains("@Observable"))
+    }
+
     /// The Xcode target defaults unannotated declarations to MainActor. These
     /// source guards therefore protect the explicit opt-out that keeps native
     /// provider streaming and lifecycle ownership away from the UI executor.
