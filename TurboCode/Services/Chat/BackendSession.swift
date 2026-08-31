@@ -3,18 +3,18 @@ import Foundation
 /// Ordered event sink used by the application's in-process provider adapters.
 ///
 /// The normalized event values belong to TurboCodeCore, but current Foundation
-/// Presentation projection remains an explicit output port. Its closure is
-/// MainActor-isolated because the current consumer reduces events into UI state,
-/// while the session invoking it is free to execute on its own actor.
+/// Presentation projection remains an explicit output port. The sink itself is
+/// executor-neutral; an ingress actor admits events before the current consumer
+/// reduces them into MainActor UI state.
 nonisolated struct BackendSessionEvents: Sendable {
     static let none = BackendSessionEvents()
 
     /// Backpressure is intentional: a provider must not overtake lifecycle
     /// reduction or publish completion before earlier stream/tool events settle.
-    let emit: @MainActor @Sendable (AgentRuntimeEvent) async -> Void
+    let emit: @Sendable (AgentRuntimeEvent) async -> Void
 
     init(
-        emit: @escaping @MainActor @Sendable (
+        emit: @escaping @Sendable (
             AgentRuntimeEvent
         ) async -> Void = { _ in }
     ) {

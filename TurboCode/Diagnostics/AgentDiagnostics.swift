@@ -114,9 +114,11 @@ nonisolated struct RuntimeBoundaryMetric: Codable, Sendable {
     }
 }
 
-/// Aggregates the persisted 0.3.4 samples without exposing diagnostics in the
-/// normal product UI. Missing values remain absent so an empty or partial
-/// baseline cannot be mistaken for a measured zero.
+/// Aggregates persisted runtime samples without exposing diagnostics in the
+/// normal product UI. Publication boundaries carry both frequency and total
+/// MainActor apply time so streaming changes can be compared empirically.
+/// Missing values remain absent so an empty or partial baseline cannot be
+/// mistaken for a measured zero.
 nonisolated struct RuntimeBaselineSummary: Sendable, Equatable {
     let runCount: Int
     let firstTokenSampleCount: Int
@@ -135,6 +137,8 @@ nonisolated struct RuntimeBaselineSummary: Sendable, Equatable {
     let averageRestoreMilliseconds: Int?
     let publicationSampleCount: Int
     let averagePublicationCount: Int?
+    let publicationDurationSampleCount: Int
+    let averagePublicationDurationMilliseconds: Int?
 
     init(
         runs: [AgentRunMetric],
@@ -175,6 +179,11 @@ nonisolated struct RuntimeBaselineSummary: Sendable, Equatable {
             for: .mainActorPublication,
             keyPath: \.eventCount
         )
+        let publicationDurations = Self.boundaryValues(
+            boundaries,
+            for: .mainActorPublication,
+            keyPath: \.durationMilliseconds
+        )
 
         runCount = runs.count
         firstTokenSampleCount = firstTokens.count
@@ -193,6 +202,8 @@ nonisolated struct RuntimeBaselineSummary: Sendable, Equatable {
         averageRestoreMilliseconds = Self.average(restores)
         publicationSampleCount = publications.count
         averagePublicationCount = Self.average(publications)
+        publicationDurationSampleCount = publicationDurations.count
+        averagePublicationDurationMilliseconds = Self.average(publicationDurations)
     }
 
     var summary: String {
@@ -205,7 +216,8 @@ nonisolated struct RuntimeBaselineSummary: Sendable, Equatable {
             "Settlement: \(formatted(averageSettlementMilliseconds)) ms (n=\(settlementSampleCount))",
             "Persistence: \(formatted(averagePersistenceMilliseconds)) ms (n=\(persistenceSampleCount))",
             "Restore: \(formatted(averageRestoreMilliseconds)) ms (n=\(restoreSampleCount))",
-            "MainActor publications: \(formatted(averagePublicationCount)) (n=\(publicationSampleCount))"
+            "MainActor publications: \(formatted(averagePublicationCount)) (n=\(publicationSampleCount))",
+            "MainActor apply: \(formatted(averagePublicationDurationMilliseconds)) ms (n=\(publicationDurationSampleCount))"
         ].joined(separator: "\n")
     }
 

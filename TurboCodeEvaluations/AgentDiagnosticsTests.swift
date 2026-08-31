@@ -118,6 +118,7 @@ struct AgentDiagnosticsTests {
             ),
             RuntimeBoundaryMetric(
                 boundary: .mainActorPublication,
+                durationMilliseconds: 3,
                 eventCount: 5
             )
         ]
@@ -133,6 +134,7 @@ struct AgentDiagnosticsTests {
         #expect(summary.averagePersistenceMilliseconds == 8)
         #expect(summary.averageRestoreMilliseconds == 16)
         #expect(summary.averagePublicationCount == 5)
+        #expect(summary.averagePublicationDurationMilliseconds == 3)
     }
 
     private func metric(startedAt: Date) -> AgentRunMetric {

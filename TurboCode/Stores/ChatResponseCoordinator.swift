@@ -221,6 +221,32 @@ final class ChatResponseCoordinator {
         )
         activeDiagnosticsRunID = diagnosticsRunID
         var result = Result(errorMessage: nil, touchedConversation: false)
+        let ingress = BackendEventIngress(
+            turnID: turnID,
+            runtime: agentRuntime,
+            delivery: { [weak self] event in
+                guard let self else { return }
+                switch event {
+                case .assistantTextChanged(_, let text):
+                    diagnostics.textChanged(text) {
+                        self.timeline.liveAssistant = text
+                    }
+                case .reasoningTextChanged(_, let text):
+                    diagnostics.textChanged(text) {
+                        self.timeline.liveReasoning = text
+                    }
+                case .toolStarted(let call):
+                    diagnostics.toolStarted(call)
+                case .toolFinished(let toolResult):
+                    diagnostics.toolFinished(toolResult)
+                    if let receipt = toolResult.receipt {
+                        self.present(receipt, toolCallID: toolResult.id)
+                    }
+                default:
+                    break
+                }
+            }
+        )
 
         let backendResult = await llmRuntime.executeCodex(
             request: TurnRequest(
@@ -274,28 +300,11 @@ final class ChatResponseCoordinator {
                     self.toolInteractions.enqueueApproval(request)
                 }
             ),
-            events: BackendSessionEvents { [weak self] event in
-                guard let self,
-                      event.turnID == turnID,
-                      await self.acceptBackendEvent(event) else {
-                    return
-                }
-                switch event {
-                case .assistantTextChanged(_, let text):
-                    diagnostics.textChanged(text)
-                    self.timeline.liveAssistant = text
-                case .reasoningTextChanged(_, let text):
-                    diagnostics.textChanged(text)
-                    self.timeline.liveReasoning = text
-                case .toolStarted(let call):
-                    diagnostics.toolStarted(call)
-                case .toolFinished(let toolResult):
-                    diagnostics.toolFinished(toolResult)
-                default:
-                    break
-                }
+            events: BackendSessionEvents { event in
+                await ingress.receive(event)
             }
         )
+        await ingress.close()
 
         let settlementStartedAt = Date()
 
@@ -309,7 +318,9 @@ final class ChatResponseCoordinator {
             await recordResponseBoundaries(
                 backend: .codex,
                 settlementStartedAt: settlementStartedAt,
-                publicationCount: diagnostics.publicationCount
+                publicationCount: diagnostics.publicationCount,
+                publicationDurationMilliseconds:
+                    diagnostics.publicationDurationMilliseconds
             )
             return Result(errorMessage: nil, touchedConversation: false)
         }
@@ -411,7 +422,9 @@ final class ChatResponseCoordinator {
         await recordResponseBoundaries(
             backend: .codex,
             settlementStartedAt: settlementStartedAt,
-            publicationCount: diagnostics.publicationCount
+            publicationCount: diagnostics.publicationCount,
+            publicationDurationMilliseconds:
+                diagnostics.publicationDurationMilliseconds
         )
         return result
     }
@@ -454,6 +467,30 @@ final class ChatResponseCoordinator {
         productGuidePresentation = nil
         completedRootWrite = nil
         let publications = ResponsePublicationCapture()
+        let ingress = BackendEventIngress(
+            turnID: turnID,
+            runtime: agentRuntime,
+            delivery: { [weak self] event in
+                guard let self else { return }
+                switch event {
+                case .assistantTextChanged(_, let content):
+                    publications.record {
+                        self.timeline.liveAssistant =
+                            Self.userVisibleAssistantText(content)
+                    }
+                case .reasoningTextChanged(_, let reasoning):
+                    publications.record {
+                        self.timeline.liveReasoning = reasoning
+                    }
+                case .toolFinished(let toolResult):
+                    if let receipt = toolResult.receipt {
+                        self.present(receipt, toolCallID: toolResult.id)
+                    }
+                default:
+                    break
+                }
+            }
+        )
 
         let backendResult = await llmRuntime.executeNative(
             request: TurnRequest(
@@ -485,25 +522,11 @@ final class ChatResponseCoordinator {
                     self.toolInteractions.enqueueApproval(request)
                 }
             ),
-            events: BackendSessionEvents { [weak self] event in
-                guard let self,
-                      event.turnID == turnID,
-                      await self.acceptBackendEvent(event) else {
-                    return
-                }
-                switch event {
-                case .assistantTextChanged(_, let content):
-                    publications.record()
-                    self.timeline.liveAssistant =
-                        Self.userVisibleAssistantText(content)
-                case .reasoningTextChanged(_, let reasoning):
-                    publications.record()
-                    self.timeline.liveReasoning = reasoning
-                default:
-                    break
-                }
+            events: BackendSessionEvents { event in
+                await ingress.receive(event)
             }
         )
+        await ingress.close()
         let settlementStartedAt = Date()
         _ = await advanceTurn(to: .streaming, turnID: turnID)
         isDelegating = false
@@ -511,7 +534,9 @@ final class ChatResponseCoordinator {
             await recordResponseBoundaries(
                 backend: backend,
                 settlementStartedAt: settlementStartedAt,
-                publicationCount: publications.count
+                publicationCount: publications.count,
+                publicationDurationMilliseconds:
+                    publications.totalApplyDurationMilliseconds
             )
             return Result(errorMessage: nil, touchedConversation: false)
         }
@@ -627,17 +652,21 @@ final class ChatResponseCoordinator {
         await recordResponseBoundaries(
             backend: backend,
             settlementStartedAt: settlementStartedAt,
-            publicationCount: publications.count
+            publicationCount: publications.count,
+            publicationDurationMilliseconds:
+                publications.totalApplyDurationMilliseconds
         )
         return result
     }
 
-    /// Records only the provider-neutral timing/count baseline; detailed
-    /// provider diagnostics remain owned by their existing runtime recorders.
+    /// Records the provider-neutral settlement, publication-count, and
+    /// MainActor apply baseline; detailed provider diagnostics remain owned by
+    /// their existing runtime recorders.
     private func recordResponseBoundaries(
         backend: ModelBackend,
         settlementStartedAt: Date,
-        publicationCount: Int
+        publicationCount: Int,
+        publicationDurationMilliseconds: Int
     ) async {
         let duration = max(
             0,
@@ -654,6 +683,7 @@ final class ChatResponseCoordinator {
             RuntimeBoundaryMetric(
                 boundary: .mainActorPublication,
                 backend: backend.rawValue,
+                durationMilliseconds: publicationDurationMilliseconds,
                 eventCount: publicationCount
             )
         )
@@ -1071,11 +1101,16 @@ private final class CodexDiagnosticsCapture {
     private(set) var firstTokenAt: Date?
     private(set) var generatedCharacters = 0
     private(set) var publicationCount = 0
+    private(set) var publicationDurationMilliseconds = 0
     private(set) var startedTools: [ToolCall] = []
     private(set) var completedTools: [CompletedTool] = []
 
-    func textChanged(_ text: String) {
+    func textChanged(_ text: String, apply: () -> Void) {
         guard !text.isEmpty else { return }
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        apply()
+        let elapsed = DispatchTime.now().uptimeNanoseconds - startedAt
+        publicationDurationMilliseconds += Int(elapsed / 1_000_000)
         publicationCount += 1
         firstTokenAt = firstTokenAt ?? Date()
         generatedCharacters = max(generatedCharacters, text.count)
@@ -1097,8 +1132,13 @@ private final class CodexDiagnosticsCapture {
 @MainActor
 private final class ResponsePublicationCapture {
     private(set) var count = 0
+    private(set) var totalApplyDurationMilliseconds = 0
 
-    func record() {
+    func record(apply: () -> Void) {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        apply()
+        let elapsed = DispatchTime.now().uptimeNanoseconds - startedAt
+        totalApplyDurationMilliseconds += Int(elapsed / 1_000_000)
         count += 1
     }
 }
