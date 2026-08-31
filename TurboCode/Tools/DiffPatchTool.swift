@@ -23,10 +23,16 @@ struct DiffPatchArguments {
 
 struct DiffPatchTool: Tool {
     typealias Arguments = DiffPatchArguments
-    typealias Output = String
+    typealias Output = ToolCommandOutput
 
     let workspaceRoot: String
+    private let receiptRegistry: ToolReceiptRegistry?
     private let service = DiffPatchService()
+
+    init(workspaceRoot: String, receiptRegistry: ToolReceiptRegistry? = nil) {
+        self.workspaceRoot = workspaceRoot
+        self.receiptRegistry = receiptRegistry
+    }
 
     var name: String { "diff_patch" }
     var description: String {
@@ -42,7 +48,7 @@ struct DiffPatchTool: Tool {
     }
     var includesSchemaInInstructions: Bool { true }
 
-    func call(arguments: DiffPatchArguments) async throws -> String {
+    func call(arguments: DiffPatchArguments) async throws -> ToolCommandOutput {
         let patch: String
         let edits = arguments.edits ?? []
         let usesStructuredEdits = !edits.isEmpty
@@ -83,28 +89,13 @@ struct DiffPatchTool: Tool {
                 tolerateInaccurateEOF: !usesStructuredEdits
             )
         } catch {
-            await MainActor.run {
-                ChatStore.shared?.beginDiffPatchBlock(
-                    id: id,
-                    patch: patch,
-                    files: files,
-                    status: .failed
-                )
-                ChatStore.shared?.updateDiffPatchBlock(
-                    id: id,
-                    status: .failed,
-                    errorMessage: error.localizedDescription
-                )
-            }
-            return "Error validating patch: \(error.localizedDescription)"
-        }
-
-        await MainActor.run {
-            ChatStore.shared?.beginDiffPatchBlock(
+            return await completionOutput(
+                text: "Error validating patch: \(error.localizedDescription)",
                 id: id,
                 patch: patch,
                 files: files,
-                status: .running
+                status: .failed,
+                errorMessage: error.localizedDescription
             )
         }
 
@@ -132,33 +123,57 @@ struct DiffPatchTool: Tool {
         files: [DiffPatchFileChange],
         id: String,
         tolerateInaccurateEOF: Bool
-    ) async -> String {
-        await MainActor.run {
-            ChatStore.shared?.updateDiffPatchBlock(id: id, status: .running)
-        }
-
+    ) async -> ToolCommandOutput {
         do {
             try await service.apply(
                 patch: patch,
                 workspaceRoot: workspaceRoot,
                 tolerateInaccurateEOF: tolerateInaccurateEOF
             )
-            await MainActor.run {
-                ChatStore.shared?.updateDiffPatchBlock(id: id, status: .applied)
-            }
             let additions = files.reduce(0) { $0 + $1.additions }
             let deletions = files.reduce(0) { $0 + $1.deletions }
-            return "Applied patch to \(files.count) file(s): +\(additions) -\(deletions)."
+            return await completionOutput(
+                text: "Applied patch to \(files.count) file(s): +\(additions) -\(deletions).",
+                id: id,
+                patch: patch,
+                files: files,
+                status: .applied,
+                errorMessage: nil
+            )
         } catch {
-            await MainActor.run {
-                ChatStore.shared?.updateDiffPatchBlock(
-                    id: id,
-                    status: .failed,
-                    errorMessage: error.localizedDescription
-                )
-            }
-            return "Error applying patch: \(error.localizedDescription)"
+            return await completionOutput(
+                text: "Error applying patch: \(error.localizedDescription)",
+                id: id,
+                patch: patch,
+                files: files,
+                status: .failed,
+                errorMessage: error.localizedDescription
+            )
         }
+    }
+
+    private func completionOutput(
+        text: String,
+        id: String,
+        patch: String,
+        files: [DiffPatchFileChange],
+        status: DiffPatchStatus,
+        errorMessage: String?
+    ) async -> ToolCommandOutput {
+        let block = DiffPatchBlock(
+            workspaceRoot: workspaceRoot,
+            patch: patch,
+            patches: nil,
+            files: files,
+            reviewFiles: nil,
+            status: status,
+            errorMessage: errorMessage
+        )
+        return await .recording(
+            .diffPatch(DiffPatchReceipt(transactionID: id, block: block)),
+            text: text,
+            in: receiptRegistry
+        )
     }
 }
 

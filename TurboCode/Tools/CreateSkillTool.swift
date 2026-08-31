@@ -15,9 +15,15 @@ struct CreateSkillArguments {
 /// transaction used by every other model-authored file change.
 struct CreateSkillTool: Tool {
     typealias Arguments = CreateSkillArguments
-    typealias Output = String
+    typealias Output = ToolCommandOutput
 
     let workspaceRoot: String
+    private let receiptRegistry: ToolReceiptRegistry?
+
+    init(workspaceRoot: String, receiptRegistry: ToolReceiptRegistry? = nil) {
+        self.workspaceRoot = workspaceRoot
+        self.receiptRegistry = receiptRegistry
+    }
 
     var name: String { "create_skill" }
     var description: String {
@@ -25,7 +31,7 @@ struct CreateSkillTool: Tool {
     }
     var includesSchemaInInstructions: Bool { true }
 
-    func call(arguments: CreateSkillArguments) async throws -> String {
+    func call(arguments: CreateSkillArguments) async throws -> ToolCommandOutput {
         let skillName = arguments.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let skillDescription = arguments.description.trimmingCharacters(
             in: .whitespacesAndNewlines
@@ -55,7 +61,10 @@ struct CreateSkillTool: Tool {
         ---
         \(skillInstructions)
         """
-        return try await EditFileTool(workspaceRoot: workspaceRoot).call(
+        return try await EditFileTool(
+            workspaceRoot: workspaceRoot,
+            receiptRegistry: receiptRegistry
+        ).call(
             arguments: EditFileArguments(
                 filePath: ".agents/skills/\(skillName)/SKILL.md",
                 revision: nil,

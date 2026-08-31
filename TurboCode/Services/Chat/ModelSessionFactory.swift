@@ -310,7 +310,8 @@ nonisolated enum ModelSessionFactory {
                     .safariMCP
                 ],
             repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
-                ?? 32_768
+                ?? 32_768,
+            receiptRegistry: events.toolReceiptRegistry
         )
         if standalonePlan.contains(.delegateTask) {
             // Profiles that explicitly include delegate_task receive the
@@ -338,6 +339,7 @@ nonisolated enum ModelSessionFactory {
                 dropsCompletedToolCalls: configuration.dropsCompletedToolCalls,
                 executionPolicy: configuration.agentTuning.execution,
                 gitPolicy: configuration.agentTuning.git,
+                toolReceiptRegistry: events.toolReceiptRegistry,
                 toolPlan: standalonePlan,
                 usesExclusiveToolSelection: usesExclusiveToolSelection,
                 supplementalTools: standaloneTools,
@@ -413,7 +415,8 @@ nonisolated enum ModelSessionFactory {
             delegateTools: toolInstances(
                 for: delegatePlan,
                 configuration: configuration,
-                repositoryMapContextTokens: configuration.delegateRemoteModel.contextWindowTokens
+                repositoryMapContextTokens: configuration.delegateRemoteModel.contextWindowTokens,
+                receiptRegistry: events.toolReceiptRegistry
             ),
             delegateInstructions: delegateInstructions,
             onToolStart: { call in
@@ -445,7 +448,8 @@ nonisolated enum ModelSessionFactory {
         )
         var orchestratorTools = toolInstances(
             for: orchestratorPlan,
-            configuration: configuration
+            configuration: configuration,
+            receiptRegistry: events.toolReceiptRegistry
         )
         if orchestratorPlan.contains(.callPowerfulModel) {
             orchestratorTools.append(powerfulTool)
@@ -513,7 +517,8 @@ nonisolated enum ModelSessionFactory {
         for plan: ModelToolPlan,
         configuration: ModelSessionConfiguration,
         including allowedIDs: Set<ToolCapabilityID>? = nil,
-        repositoryMapContextTokens: Int = 32_768
+        repositoryMapContextTokens: Int = 32_768,
+        receiptRegistry: ToolReceiptRegistry? = nil
     ) -> [any Tool] {
         var tools = plan.assignments.compactMap { assignment -> (any Tool)? in
             guard assignment.isRegistered,
@@ -540,12 +545,16 @@ nonisolated enum ModelSessionFactory {
                     executionPolicy: configuration.agentTuning.execution
                 )
             case .fileSystem:
-                return FileSystemTool(workspaceRoot: configuration.workspaceRoot)
+                return FileSystemTool(
+                    workspaceRoot: configuration.workspaceRoot,
+                    receiptRegistry: receiptRegistry
+                )
             case .git:
                 return GitTool(
                     workspaceRoot: configuration.workspaceRoot,
                     policy: configuration.agentTuning.git,
-                    executionPolicy: configuration.agentTuning.execution
+                    executionPolicy: configuration.agentTuning.execution,
+                    receiptRegistry: receiptRegistry
                 )
             case .bash:
                 return BashTool(
@@ -555,7 +564,8 @@ nonisolated enum ModelSessionFactory {
             case .swiftPackageManager:
                 return SwiftPackageManagerTool(
                     workspaceRoot: configuration.workspaceRoot,
-                    executionPolicy: configuration.agentTuning.execution
+                    executionPolicy: configuration.agentTuning.execution,
+                    receiptRegistry: receiptRegistry
                 )
             case .xcodeProject:
                 return XcodeProjectTool(
@@ -566,11 +576,17 @@ nonisolated enum ModelSessionFactory {
             case .editFile:
                 // Keep revision-bound edits on their dedicated implementation;
                 // coordinator routing must not change workspace safety semantics.
-                return EditFileTool(workspaceRoot: configuration.workspaceRoot)
+                return EditFileTool(
+                    workspaceRoot: configuration.workspaceRoot,
+                    receiptRegistry: receiptRegistry
+                )
             case .writeOnDevice:
                 // The constrained on-device writer remains distinct from the
                 // broader edit tool so its intentionally small schema survives.
-                return WriteOnDeviceTool(workspaceRoot: configuration.workspaceRoot)
+                return WriteOnDeviceTool(
+                    workspaceRoot: configuration.workspaceRoot,
+                    receiptRegistry: receiptRegistry
+                )
             case .removeFile:
                 return RemoveFileTool(workspaceRoot: configuration.workspaceRoot)
             case .safariMCP:
@@ -583,7 +599,10 @@ nonisolated enum ModelSessionFactory {
                 return LoadSkillTool(skills: configuration.availableSkills)
             case .createSkill:
                 guard !configuration.workspaceRoot.isEmpty else { return nil }
-                return CreateSkillTool(workspaceRoot: configuration.workspaceRoot)
+                return CreateSkillTool(
+                    workspaceRoot: configuration.workspaceRoot,
+                    receiptRegistry: receiptRegistry
+                )
             case .delegateTask, .callPowerfulModel:
                 return nil
             }
@@ -648,7 +667,8 @@ nonisolated enum ModelSessionFactory {
                     for: plan,
                     configuration: configuration,
                     repositoryMapContextTokens:
-                        configuration.delegateRemoteModel.contextWindowTokens
+                        configuration.delegateRemoteModel.contextWindowTokens,
+                    receiptRegistry: events.toolReceiptRegistry
                 ),
                 workspaceRoot: configuration.workspaceRoot,
                 instructions: systemPrompt(

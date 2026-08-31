@@ -331,6 +331,10 @@ nonisolated enum CodexTurboCodeToolBridge {
                 receipt: pluginResult.widget.map(ToolReceipt.pluginWidget)
             )
         }
+        // Codex already carries receipts beside model-facing text, so a
+        // call-scoped registry is enough to reuse the exact native tool path
+        // without exposing the opaque token to App Server.
+        let receiptRegistry = ToolReceiptRegistry()
         switch call.tool {
         case "list_workspace":
             let output = try await ListWorkspaceTool(
@@ -399,13 +403,17 @@ nonisolated enum CodexTurboCodeToolBridge {
             ))
             return .init(result: .success(text), receipt: nil)
         case "apply_edits":
-            let text = try await ApplyEditsTool(workspaceRoot: workspaceRoot)
-                .call(arguments: try applyEditsArguments(call))
-            return .init(result: .success(text), receipt: nil)
-        case "swift_package_manager":
-            let text = try await SwiftPackageManagerTool(
+            let output = try await ApplyEditsTool(
                 workspaceRoot: workspaceRoot,
-                executionPolicy: agentTuning.execution
+                receiptRegistry: receiptRegistry
+            )
+                .call(arguments: try applyEditsArguments(call))
+            return await execution(from: output, registry: receiptRegistry)
+        case "swift_package_manager":
+            let output = try await SwiftPackageManagerTool(
+                workspaceRoot: workspaceRoot,
+                executionPolicy: agentTuning.execution,
+                receiptRegistry: receiptRegistry
             ).call(arguments: SwiftPackageManagerArguments(
                 action: try requiredString("action", in: call),
                 packageName: optionalString("packageName", in: call),
@@ -422,7 +430,7 @@ nonisolated enum CodexTurboCodeToolBridge {
                 filter: optionalString("filter", in: call),
                 timeoutSeconds: optionalInteger("timeoutSeconds", in: call)
             ))
-            return .init(result: .success(text), receipt: nil)
+            return await execution(from: output, registry: receiptRegistry)
         case "xcode_project":
             let text = try await XcodeProjectTool(
                 workspaceRoot: workspaceRoot,
@@ -438,10 +446,11 @@ nonisolated enum CodexTurboCodeToolBridge {
             ))
             return .init(result: .success(text), receipt: nil)
         case "git":
-            let text = try await GitTool(
+            let output = try await GitTool(
                 workspaceRoot: workspaceRoot,
                 policy: agentTuning.git,
-                executionPolicy: agentTuning.execution
+                executionPolicy: agentTuning.execution,
+                receiptRegistry: receiptRegistry
             ).call(arguments: GitArguments(
                 operation: try requiredString("operation", in: call),
                 paths: call.arguments["paths"]?.arrayValue?.compactMap(\.stringValue),
@@ -450,7 +459,7 @@ nonisolated enum CodexTurboCodeToolBridge {
                 remote: optionalString("remote", in: call),
                 limit: optionalInteger("limit", in: call)
             ))
-            return .init(result: .success(text), receipt: nil)
+            return await execution(from: output, registry: receiptRegistry)
         case "delegate_task":
             guard let delegationInvoker else {
                 throw CodexToolBridgeError.unsupportedTool(call.tool)
@@ -474,14 +483,17 @@ nonisolated enum CodexTurboCodeToolBridge {
             )
             return .init(result: .success(text), receipt: nil)
         case "create_skill":
-            let text = try await CreateSkillTool(workspaceRoot: workspaceRoot).call(
+            let output = try await CreateSkillTool(
+                workspaceRoot: workspaceRoot,
+                receiptRegistry: receiptRegistry
+            ).call(
                 arguments: CreateSkillArguments(
                     name: try requiredString("name", in: call),
                     description: try requiredString("description", in: call),
                     instructions: try requiredString("instructions", in: call)
                 )
             )
-            return .init(result: .success(text), receipt: nil)
+            return await execution(from: output, registry: receiptRegistry)
         case "safari_mcp":
             guard agentTuning.experimental.safariMCPEnabled else {
                 return .init(
@@ -495,6 +507,21 @@ nonisolated enum CodexTurboCodeToolBridge {
         default:
             throw CodexToolBridgeError.unsupportedTool(call.tool)
         }
+    }
+
+    private static func execution(
+        from output: ToolCommandOutput,
+        registry: ToolReceiptRegistry
+    ) async -> CodexToolExecution {
+        let receipt: ToolReceipt? = if let token = output.receiptToken {
+            await registry.take(token)
+        } else {
+            nil
+        }
+        return CodexToolExecution(
+            result: .success(output.text),
+            receipt: receipt
+        )
     }
 
     private static func executeSafariMCP(

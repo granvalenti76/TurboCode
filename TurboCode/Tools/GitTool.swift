@@ -27,12 +27,13 @@ struct GitArguments {
 
 struct GitTool: Tool {
     typealias Arguments = GitArguments
-    typealias Output = String
+    typealias Output = ToolCommandOutput
 
     let workspaceRoot: String
     let policy: GitPolicy
     let executionPolicy: ExecutionPolicy
     let taskScope: AgentTaskPathScope?
+    private let receiptRegistry: ToolReceiptRegistry?
     private let service = StructuredGitService()
     private let statusService = GitDiffService()
 
@@ -40,12 +41,14 @@ struct GitTool: Tool {
         workspaceRoot: String,
         policy: GitPolicy,
         executionPolicy: ExecutionPolicy,
-        taskScope: AgentTaskPathScope? = nil
+        taskScope: AgentTaskPathScope? = nil,
+        receiptRegistry: ToolReceiptRegistry? = nil
     ) {
         self.workspaceRoot = workspaceRoot
         self.policy = policy
         self.executionPolicy = executionPolicy
         self.taskScope = taskScope
+        self.receiptRegistry = receiptRegistry
     }
 
     func restricted(to scope: AgentTaskPathScope) -> Self {
@@ -53,7 +56,8 @@ struct GitTool: Tool {
             workspaceRoot: workspaceRoot,
             policy: policy,
             executionPolicy: executionPolicy,
-            taskScope: scope
+            taskScope: scope,
+            receiptRegistry: receiptRegistry
         )
     }
 
@@ -75,7 +79,7 @@ struct GitTool: Tool {
     }
     var includesSchemaInInstructions: Bool { true }
 
-    func call(arguments: GitArguments) async throws -> String {
+    func call(arguments: GitArguments) async throws -> ToolCommandOutput {
         // Git status, history, branch, remote, and index operations are
         // repository-wide. A narrow delegated scope cannot safely constrain
         // their side effects or disclosures, so the worker must decline them.
@@ -118,19 +122,11 @@ struct GitTool: Tool {
             timeoutSeconds: command.timeoutSeconds(executionPolicy),
             outputLimit: executionPolicy.maximumToolOutputCharacters
         )
-        if operation == .commit,
-           result.succeeded,
-           let receipt = await service.latestCommitReceipt(workspaceRoot: workspaceRoot) {
-            await ChatStore.shared?.presentGitCommit(receipt)
-        }
-        if operation == .status, result.succeeded {
-            // The model still receives the canonical `git status` text while
-            // the UI gets a richer, immutable snapshot from the same moment.
-            let status = await statusReceipt(statusOutput: result.stdout)
-            await ChatStore.shared?.presentGitStatus(status)
-        }
-        await refreshGitUIIfNeeded(result: result, mutatesRepository: command.mutatesRepository)
-        return result.rendered
+        return await completionOutput(
+            result: result,
+            operation: operation,
+            mutatesRepository: command.mutatesRepository
+        )
     }
 
     private func statusReceipt(statusOutput: String) async -> GitStatusBlock {
@@ -272,13 +268,17 @@ struct GitTool: Tool {
         }
     }
 
-    private func requestApproval(operation: GitOperation, command: GitCommand) async -> String {
+    private func requestApproval(
+        operation: GitOperation,
+        command: GitCommand
+    ) async -> ToolCommandOutput {
         let id = UUID().uuidString
         let summary = approvalSummary(for: operation, arguments: command.arguments)
         let service = service
         let workspaceRoot = workspaceRoot
         let outputLimit = executionPolicy.maximumToolOutputCharacters
         let timeout = command.timeoutSeconds(executionPolicy)
+        let relay = GitCommandResultRelay()
         let request = PendingToolApproval(
             id: id,
             operation: "git.\(operation.rawValue)",
@@ -292,20 +292,46 @@ struct GitTool: Tool {
                     timeoutSeconds: timeout,
                     outputLimit: outputLimit
                 )
-                if result.succeeded && command.mutatesRepository {
-                    await ChatStore.shared?.refreshGitAfterToolMutation()
-                }
+                await relay.store(result)
                 return result.rendered
             }
         )
         // Keep the tool call suspended until the host-owned approval resolves;
         // the model receives only the final Git result or an explicit denial.
-        return await ToolApprovalRegistry.shared.request(request)
+        let approvalText = await ToolApprovalRegistry.shared.request(request)
+        guard let result = await relay.take() else {
+            return .plain(approvalText)
+        }
+        return await completionOutput(
+            result: result,
+            operation: operation,
+            mutatesRepository: command.mutatesRepository
+        )
     }
 
-    private func refreshGitUIIfNeeded(result: GitCommandResult, mutatesRepository: Bool) async {
-        guard result.succeeded, mutatesRepository else { return }
-        await ChatStore.shared?.refreshGitAfterToolMutation()
+    private func completionOutput(
+        result: GitCommandResult,
+        operation: GitOperation,
+        mutatesRepository: Bool
+    ) async -> ToolCommandOutput {
+        guard result.succeeded else { return .plain(result.rendered) }
+
+        let receipt: ToolReceipt?
+        if operation == .commit,
+           let commit = await service.latestCommitReceipt(workspaceRoot: workspaceRoot) {
+            receipt = .gitCommit(commit)
+        } else if operation == .status {
+            // The model still receives canonical Git text while the host owns
+            // an immutable enriched snapshot from the same completion.
+            receipt = .gitStatus(await statusReceipt(statusOutput: result.stdout))
+        } else if mutatesRepository {
+            receipt = .repositoryChanged(
+                RepositoryMutationReceipt(workspaceRoot: workspaceRoot)
+            )
+        } else {
+            receipt = nil
+        }
+        return await .recording(receipt, text: result.rendered, in: receiptRegistry)
     }
 
     private func relativePaths(_ values: [String]) throws -> [String] {
@@ -409,6 +435,19 @@ private struct GitCommandResult: Sendable {
         if !stderr.isEmpty { sections.append("STDERR:\n\(stderr)") }
         if stdout.isEmpty && stderr.isEmpty { sections.append("Git operation completed with no output.") }
         return sections.joined(separator: "\n\n")
+    }
+}
+
+private actor GitCommandResultRelay {
+    private var result: GitCommandResult?
+
+    func store(_ result: GitCommandResult) {
+        self.result = result
+    }
+
+    func take() -> GitCommandResult? {
+        defer { result = nil }
+        return result
     }
 }
 

@@ -550,6 +550,15 @@ struct CodexProfileTests {
             availableSkills: [skill]
         )
         #expect(createExecution.result.succeeded)
+        guard case .diffPatch(let artifact) = createExecution.receipt else {
+            Issue.record("Expected the shared editor's typed diff receipt")
+            return
+        }
+        #expect(artifact.block.status == .applied)
+        #expect(
+            artifact.block.files.map(\.path)
+                == [".agents/skills/workspace-review/SKILL.md"]
+        )
         let createdURL = root
             .appendingPathComponent(".agents/skills/workspace-review/SKILL.md")
         #expect(FileManager.default.fileExists(atPath: createdURL.path))

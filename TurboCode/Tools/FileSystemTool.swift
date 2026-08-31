@@ -57,21 +57,24 @@ struct FileSystemArguments {
 /// External targets cross the shared host-owned approval ring before execution.
 struct FileSystemTool: Tool {
     typealias Arguments = FileSystemArguments
-    typealias Output = String
+    typealias Output = ToolCommandOutput
 
     let workspaceRoot: String
     let taskScope: AgentTaskPathScope?
+    private let receiptRegistry: ToolReceiptRegistry?
     private let requestApproval: @Sendable (PendingToolApproval) async -> String
 
     init(
         workspaceRoot: String,
         taskScope: AgentTaskPathScope? = nil,
+        receiptRegistry: ToolReceiptRegistry? = nil,
         requestApproval: @escaping @Sendable (PendingToolApproval) async -> String = {
             await ToolApprovalRegistry.shared.request($0)
         }
     ) {
         self.workspaceRoot = workspaceRoot
         self.taskScope = taskScope
+        self.receiptRegistry = receiptRegistry
         self.requestApproval = requestApproval
     }
 
@@ -79,6 +82,7 @@ struct FileSystemTool: Tool {
         Self(
             workspaceRoot: workspaceRoot,
             taskScope: scope,
+            receiptRegistry: receiptRegistry,
             requestApproval: requestApproval
         )
     }
@@ -108,7 +112,7 @@ struct FileSystemTool: Tool {
     }
     var includesSchemaInInstructions: Bool { true }
 
-    func call(arguments: FileSystemArguments) async throws -> String {
+    func call(arguments: FileSystemArguments) async throws -> ToolCommandOutput {
         // 1. Resolve operation
         guard let operation = FileOperation(rawValue: arguments.operation) else {
             return "Error: Unknown operation '\(arguments.operation)'. Valid: \(FileOperation.allCases.map(\.rawValue).joined(separator: ", "))"
@@ -140,7 +144,8 @@ struct FileSystemTool: Tool {
                 return "Error: 'content' is required for \(operation.rawValue)."
             }
             if !source.isInsideWorkspace {
-                return await WorkspaceAccessGate.shared.performExternalOperation(
+                let relay = ToolCommandOutputRelay()
+                let approvalText = await WorkspaceAccessGate.shared.performExternalOperation(
                     tool: name,
                     operation: .write,
                     workspaceRoot: workspaceRoot,
@@ -148,17 +153,20 @@ struct FileSystemTool: Tool {
                     requestApproval: requestApproval,
                     action: { [self] in
                         do {
-                            return try await applyTextChange(
+                            let output = try await applyTextChange(
                                 path: source.url.path,
                                 content: content,
                                 append: operation == .append,
                                 preauthorizedExternalPaths: [source.url.path]
                             )
+                            await relay.store(output)
+                            return output.text
                         } catch {
                             return "Error: \(error.localizedDescription)"
                         }
                     }
                 )
+                return await relay.take() ?? .plain(approvalText)
             }
             return try await applyTextChange(
                 path: source.url.path,
@@ -176,7 +184,8 @@ struct FileSystemTool: Tool {
             let expectedSnapshots = operation == .move || operation == .delete
                 ? targets.map { fileSnapshot(at: $0.url.path) }
                 : nil
-            return await WorkspaceAccessGate.shared.performExternalOperation(
+            let relay = ToolCommandOutputRelay()
+            let approvalText = await WorkspaceAccessGate.shared.performExternalOperation(
                 tool: name,
                 operation: accessOperation(for: operation),
                 workspaceRoot: workspaceRoot,
@@ -189,15 +198,18 @@ struct FileSystemTool: Tool {
                        }) {
                         return "Error: The destructive target changed before approval."
                     }
-                    return await executeResolved(
+                    let output = await executeResolved(
                         operation: operation,
                         path: source.url.path,
                         destination: resolvedDestination?.url.path,
                         pattern: arguments.pattern,
                         bypassDestructiveApproval: true
                     )
+                    await relay.store(output)
+                    return output.text
                 }
             )
+            return await relay.take() ?? .plain(approvalText)
         }
 
         return await executeResolved(
@@ -215,42 +227,42 @@ struct FileSystemTool: Tool {
         destination: String?,
         pattern: String?,
         bypassDestructiveApproval: Bool
-    ) async -> String {
+    ) async -> ToolCommandOutput {
         switch operation {
-        case .list: return listDirectory(at: path)
-        case .info: return fileInfo(at: path)
-        case .find: return await findFiles(in: path, pattern: pattern)
+        case .list: return .plain(listDirectory(at: path))
+        case .info: return .plain(fileInfo(at: path))
+        case .find: return .plain(await findFiles(in: path, pattern: pattern))
         case .createDirectory:
-            return await execute(
+            return .plain(await execute(
                 operation: .createDirectory,
                 path: path,
                 destination: nil,
                 content: nil
-            )
+            ))
         case .write, .append:
             return "Error: Text mutations must use the atomic edit path."
         case .copy:
             guard let destination else { return "Error: 'destination' is required for copy." }
-            return await execute(operation: .copy, path: path, destination: destination, content: nil)
+            return .plain(await execute(operation: .copy, path: path, destination: destination, content: nil))
         case .move:
             guard let destination else { return "Error: 'destination' is required for move." }
             if bypassDestructiveApproval {
-                return await execute(operation: .move, path: path, destination: destination, content: nil)
+                return .plain(await execute(operation: .move, path: path, destination: destination, content: nil))
             }
-            return await requestMoveApproval(
+            return .plain(await requestMoveApproval(
                 path: path,
                 destination: destination,
                 requestedPath: path,
                 requestedDestination: destination
-            )
+            ))
         case .delete:
             if bypassDestructiveApproval {
-                return await execute(operation: .delete, path: path, destination: nil, content: nil)
+                return .plain(await execute(operation: .delete, path: path, destination: nil, content: nil))
             }
-            return await requestDeletionApproval(
+            return .plain(await requestDeletionApproval(
                 path: path,
                 requestedPath: path
-            )
+            ))
         }
     }
 
@@ -479,7 +491,7 @@ struct FileSystemTool: Tool {
         content: String,
         append: Bool,
         preauthorizedExternalPaths: Set<String>
-    ) async throws -> String {
+    ) async throws -> ToolCommandOutput {
         let exists = FileManager.default.fileExists(atPath: path)
         if append && !exists {
             return "Error: File not found at '\(path)'. Use 'write' to create a new file."
@@ -519,6 +531,7 @@ struct FileSystemTool: Tool {
         return try await ApplyEditsTool(
             workspaceRoot: workspaceRoot,
             preauthorizedExternalPaths: preauthorizedExternalPaths,
+            receiptRegistry: receiptRegistry,
             requestApproval: requestApproval
         ).call(
             arguments: ApplyEditsArguments(files: [request])

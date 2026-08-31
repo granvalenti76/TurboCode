@@ -60,6 +60,36 @@ final class ReviewCoordinator {
         }
     }
 
+    /// Projects one terminal tool artifact. In-flight progress remains in the
+    /// generic activity surface, so the timeline receives a single immutable
+    /// review receipt owned by the provider completion.
+    func presentDiffPatch(
+        _ receipt: DiffPatchReceipt,
+        editGroupID: String?
+    ) {
+        let block = receipt.block
+        beginDiffPatch(
+            id: receipt.transactionID,
+            editGroupID: editGroupID,
+            workspaceRoot: block.workspaceRoot,
+            patch: block.patch,
+            files: block.files,
+            reviewFiles: block.reviewFiles ?? [],
+            status: block.status
+        )
+        // `beginDiffPatch` also serves the older running-then-update API and
+        // therefore initializes errors to nil. Terminal receipts must restore
+        // their immutable failure detail without reintroducing a side channel.
+        if let errorMessage = block.errorMessage {
+            timeline.updateDiffPatch(
+                id: receipt.transactionID,
+                status: block.status,
+                errorMessage: errorMessage
+            )
+        }
+        Task { await workspace.reloadDiffs() }
+    }
+
     func reviewDiffPatch(_ id: String) {
         guard timeline.block(id: id)?.diffPatch != nil else { return }
         workbench.rightPanelMode = .changes
@@ -78,6 +108,14 @@ final class ReviewCoordinator {
 
     func presentGitCommit(_ receipt: GitCommitBlock) {
         timeline.presentGitCommit(receipt)
+    }
+
+    func presentGitStatus(_ receipt: GitStatusBlock) {
+        timeline.presentGitStatus(receipt)
+    }
+
+    func repositoryChanged() {
+        Task { await workspace.refreshGitAfterToolMutation() }
     }
 
     func reviewGitCommit(_ id: String) {

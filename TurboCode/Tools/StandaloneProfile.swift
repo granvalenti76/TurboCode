@@ -17,6 +17,7 @@ nonisolated struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let dropsCompletedToolCalls: Bool
     let executionPolicy: ExecutionPolicy
     let gitPolicy: GitPolicy
+    let toolReceiptRegistry: ToolReceiptRegistry
     let toolPlan: ModelToolPlan
     let usesExclusiveToolSelection: Bool
     let supplementalTools: [any Tool]
@@ -65,7 +66,8 @@ nonisolated struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                         GitTool(
                             workspaceRoot: workspaceRoot,
                             policy: gitPolicy,
-                            executionPolicy: executionPolicy
+                            executionPolicy: executionPolicy,
+                            receiptRegistry: toolReceiptRegistry
                         )
                     }
                     if toolPlan.contains(.bash) {
@@ -74,7 +76,8 @@ nonisolated struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                     if toolPlan.contains(.swiftPackageManager) {
                         SwiftPackageManagerTool(
                             workspaceRoot: workspaceRoot,
-                            executionPolicy: executionPolicy
+                            executionPolicy: executionPolicy,
+                            receiptRegistry: toolReceiptRegistry
                         )
                     }
                     if toolPlan.contains(.searchWorkspace) {
@@ -88,10 +91,16 @@ nonisolated struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                     if toolPlan.contains(.fileSystem) {
                         // Profiles authorize tools directly. Skills remain
                         // instruction packs and never alter runtime capability.
-                        FileSystemTool(workspaceRoot: workspaceRoot)
+                        FileSystemTool(
+                            workspaceRoot: workspaceRoot,
+                            receiptRegistry: toolReceiptRegistry
+                        )
                     }
                     if toolPlan.contains(.editFile) {
-                        EditFileTool(workspaceRoot: workspaceRoot)
+                        EditFileTool(
+                            workspaceRoot: workspaceRoot,
+                            receiptRegistry: toolReceiptRegistry
+                        )
                     }
                 }
                 if toolPlan.contains(.loadSkill) {

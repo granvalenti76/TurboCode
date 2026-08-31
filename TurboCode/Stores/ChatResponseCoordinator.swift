@@ -916,8 +916,18 @@ final class ChatResponseCoordinator {
             timeline.presentWorkspaceListing(listing)
         case .pluginWidget(let widget):
             timeline.presentPluginWidget(widget, toolCallID: toolCallID)
-        case .diffPatch, .gitStatus, .gitCommit, .repositoryChanged:
-            break
+        case .diffPatch(let artifact):
+            reviewCoordinator?.presentDiffPatch(
+                artifact,
+                editGroupID: activeEditGroupID
+            )
+        case .gitStatus(let status):
+            reviewCoordinator?.presentGitStatus(status)
+        case .gitCommit(let commit):
+            reviewCoordinator?.presentGitCommit(commit)
+            reviewCoordinator?.repositoryChanged()
+        case .repositoryChanged:
+            reviewCoordinator?.repositoryChanged()
         }
     }
 

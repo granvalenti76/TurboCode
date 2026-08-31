@@ -255,12 +255,21 @@ public final class ChatStore {
         self.llmRuntime = llmRuntime
         self.onDeviceToolCallingSupported =
             FoundationModelsCapabilities.onDeviceSupportsToolCalling
+        let reviewCoordinator = ReviewCoordinator(
+            timeline: timeline,
+            workbench: workbench,
+            workspace: workspace,
+            gitService: gitService,
+            diffPatchService: diffPatchService
+        )
+        self.reviewCoordinator = reviewCoordinator
         let responseCoordinator = ChatResponseCoordinator(
             timeline: timeline,
             toolInteractions: toolInteractions,
             agentActivity: agentActivity,
             agentRuntime: agentRuntime,
             llmRuntime: llmRuntime,
+            reviewCoordinator: reviewCoordinator,
             workspaceNameProvider: {
                 workspace.label.isEmpty ? nil : workspace.label
             },
@@ -351,13 +360,6 @@ public final class ChatStore {
             modelRuntime: modelRuntime,
             codexRuntime: codexRuntime,
             messageSender: messageSendCoordinator
-        )
-        self.reviewCoordinator = ReviewCoordinator(
-            timeline: timeline,
-            workbench: workbench,
-            workspace: workspace,
-            gitService: gitService,
-            diffPatchService: diffPatchService
         )
     }
 

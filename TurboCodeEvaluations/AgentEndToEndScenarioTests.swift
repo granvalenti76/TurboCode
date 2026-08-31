@@ -420,7 +420,7 @@ private struct ScenarioEditingWorker: AgentTaskWorkerExecuting {
         )
         await events.toolFinished(Self.finished(
             editCall,
-            output: editOutput,
+            output: editOutput.text,
             envelope: envelope
         ))
 
