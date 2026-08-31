@@ -9,6 +9,7 @@ struct InputFieldView: View {
     @Environment(ChatPresentationViewModel.self) private var presentation
     @Environment(\.chatFontSize) private var chatFontSize
     @FocusState private var isFocused: Bool
+    @State private var composerSelection: TextSelection?
     @State private var selectedSlashCommandIndex = 0
     @State private var isLlamaContextHovering = false
 
@@ -76,6 +77,7 @@ struct InputFieldView: View {
                     get: { composer.messageText },
                     set: { composer.messageText = $0 }
                 ),
+                selection: $composerSelection,
                 axis: .vertical
             )
                 .textFieldStyle(.plain)
@@ -95,6 +97,9 @@ struct InputFieldView: View {
                     // A changed query describes a new result set; keeping the
                     // previous row selected could execute the wrong command.
                     selectedSlashCommandIndex = 0
+                    if newValue.isEmpty {
+                        composerSelection = nil
+                    }
                     // Inspector recovery actions prepare a reviewable draft
                     // rather than executing work immediately. Focus only when
                     // text is inserted externally, not while the user types.
@@ -172,6 +177,13 @@ struct InputFieldView: View {
     }
 
     private func handleComposerKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        if press.key == .return,
+           press.modifiers.contains(.shift),
+           press.modifiers.intersection([.command, .control, .option]).isEmpty {
+            insertComposerNewline()
+            return .handled
+        }
+
         guard !slashSuggestions.isEmpty, !chatStore.busy else { return .ignored }
 
         switch press.key {
@@ -187,6 +199,41 @@ struct InputFieldView: View {
         default:
             return .ignored
         }
+    }
+
+    private func insertComposerNewline() {
+        let currentText = composer.messageText
+        let replacementRange: Range<String.Index>
+
+        switch composerSelection?.indices {
+        case .selection(let range):
+            replacementRange = range
+        case .multiSelection(let ranges):
+            // A plain composer normally has one selection. If SwiftUI exposes
+            // multiple ranges, use the first instead of losing the key press.
+            replacementRange = ranges.ranges.first
+                ?? currentText.endIndex..<currentText.endIndex
+        case nil:
+            replacementRange = currentText.endIndex..<currentText.endIndex
+        @unknown default:
+            // Future SwiftUI selection forms must degrade to insertion at the
+            // end instead of making the composer uncompilable after an SDK bump.
+            replacementRange = currentText.endIndex..<currentText.endIndex
+        }
+
+        let insertionOffset = currentText.distance(
+            from: currentText.startIndex,
+            to: replacementRange.lowerBound
+        )
+        var updatedText = currentText
+        updatedText.replaceSubrange(replacementRange, with: "\n")
+        let insertionPoint = updatedText.index(
+            updatedText.startIndex,
+            offsetBy: insertionOffset + 1
+        )
+
+        composer.messageText = updatedText
+        composerSelection = TextSelection(insertionPoint: insertionPoint)
     }
 
     private func moveSlashSelection(by offset: Int) {
