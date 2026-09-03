@@ -191,6 +191,10 @@ private actor RecordingCodexTransport: CodexAppServerServing {
 
     func interruptActiveTurn() async {}
 
+    func steerActiveTurn(input: String) async throws -> String {
+        "server-turn-1"
+    }
+
     func resolveApproval(
         _ request: CodexApprovalRequest,
         approved: Bool

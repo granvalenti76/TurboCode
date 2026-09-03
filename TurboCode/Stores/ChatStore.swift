@@ -34,6 +34,12 @@ public final class ChatStore {
             || presentationViewModel.isProfileTransitioning
     }
 
+    /// Value-only steering projection for the composer card. Delivery state is
+    /// owned by `AgentRuntime`; the facade exposes it without a second queue.
+    var steeringRequests: [SteeringRequest] {
+        agentRuntimeProjectionStore.snapshot.steering.requests
+    }
+
     /// Keeps detached plugin surfaces associated with their timeline block.
     /// The receipt is intentionally in-memory only: closing a detached window
     /// can restore the exact widget without adding window state to sessions.
@@ -509,6 +515,43 @@ public final class ChatStore {
         await sendMessage(text, promptText: promptText, visibleInTimeline: true)
     }
 
+    /// Captures a correction for the active conversational turn. The runtime
+    /// decides whether the current operation is steerable; `busy` is not used
+    /// as an admission shortcut.
+    func enqueueSteering(
+        _ text: String
+    ) async -> SteeringEnqueueResult {
+        let result = await assembly.steeringCoordinator.enqueue(text: text)
+        if case .rejected(let rejection) = result {
+            presentationViewModel.errorMessage = switch rejection {
+            case .emptyText: "Enter steering text first."
+            case .noActiveConversation: "Steering is unavailable without an active conversation."
+            case .independentOperation: "Steering will be available after the independent operation finishes."
+            case .staleContext: "The conversation changed; keep this draft for the new context."
+            case .quiescing: "Steering is paused while the conversation changes."
+            }
+        }
+        return result
+    }
+
+    func showSteeringUnavailableMessage() {
+        presentationViewModel.errorMessage =
+            "Commands are unavailable while a response is running."
+    }
+
+    /// Requests immediate delivery of the currently queued steering batch.
+    public func sendSteeringNow() async {
+        await assembly.steeringCoordinator.sendNow()
+    }
+
+    func removeSteering(_ id: SteeringRequestID) async {
+        _ = await agentRuntime.removeSteering(id)
+    }
+
+    func recoverSteering(_ id: SteeringRequestID) async {
+        _ = await agentRuntime.recoverSteering(id)
+    }
+
     /// Sends all valid inline annotations as one explicit user request. The
     /// compact timeline text remains readable while the model receives stable
     /// reviewed excerpts and sides through the provider-neutral prompt path.
@@ -706,6 +749,7 @@ public final class ChatStore {
     }
 
     public func interrupt() async {
+        await assembly.steeringCoordinator.pause()
         await agentRuntime.requestOperationCancellation()
         let shouldInterruptCodex = activeBackend == .codex
         let approvals = toolInteractionStore.takeAllApprovals()

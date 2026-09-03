@@ -11,8 +11,14 @@ import Observation
 @MainActor
 @Observable
 final class ComposerViewModel {
-    var messageText: String = ""
+    var messageText: String = "" {
+        didSet { editGeneration &+= 1 }
+    }
     var mode: ConversationMode = .agent
+
+    /// Lets asynchronous queue admission clear only the draft it observed;
+    /// text entered while admission is suspended must never be discarded.
+    private(set) var editGeneration: UInt64 = 0
 
     var canSend: Bool {
         !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

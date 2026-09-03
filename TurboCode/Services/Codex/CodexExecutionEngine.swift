@@ -106,6 +106,7 @@ nonisolated protocol CodexAppServerServing: Sendable {
         additionalApplicationContext: String?
     ) async throws -> AsyncThrowingStream<CodexTurnEvent, any Error>
     func interruptActiveTurn() async
+    func steerActiveTurn(input: String) async throws -> String
     func resolveApproval(
         _ request: CodexApprovalRequest,
         approved: Bool
@@ -141,6 +142,7 @@ actor CodexExecutionEngine {
     private var importedContexts: [String: String] = [:]
     private var handoffBoundaryBlockIDs: [String: String] = [:]
     private var approvals: [String: CodexApprovalRequest] = [:]
+    private var activeTurnIDs: [String: TurnID] = [:]
 
     init(client: any CodexAppServerServing = CodexAppServerClient()) {
         self.client = client
@@ -316,6 +318,8 @@ actor CodexExecutionEngine {
             effort: effectiveEffort,
             additionalApplicationContext: importedContexts[request.turboThreadID]
         )
+        activeTurnIDs[request.turboThreadID] = request.turnID
+        defer { activeTurnIDs.removeValue(forKey: request.turboThreadID) }
         var assistantText = ""
         var reasoningText = ""
         for try await event in stream {
@@ -404,6 +408,19 @@ actor CodexExecutionEngine {
         await client.interruptActiveTurn()
     }
 
+    func steerActiveTurn(
+        turboThreadID: String,
+        localTurnID: TurnID,
+        input: String
+    ) async throws -> String {
+        guard activeTurnIDs[turboThreadID] == localTurnID else {
+            throw CodexAppServerError.invalidResponse(
+                "the local Codex turn identity is stale"
+            )
+        }
+        return try await client.steerActiveTurn(input: input)
+    }
+
     /// Hidden compaction turns cannot execute tools or approve mutations.
     private func requestHandoffSummary(
         turboThreadID: String,
@@ -469,6 +486,12 @@ nonisolated protocol CodexTurnRunning: AnyObject, Sendable {
     ) async throws -> CodexTurnResult
 
     func interrupt() async
+
+    func steerActiveTurn(
+        turboThreadID: String,
+        localTurnID: TurnID,
+        input: String
+    ) async throws -> String
 }
 
 extension CodexExecutionEngine: CodexTurnRunning {}

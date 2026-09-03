@@ -8,6 +8,9 @@ import Foundation
 final class ChatResponsePresenter {
     private let timeline: ChatTimelineStore
     private let reviewCoordinator: ReviewCoordinator?
+    private var segmentPlaceholders: [TurnID: String] = [:]
+    private var assistantPrefixes: [TurnID: String] = [:]
+    private var reasoningPrefixes: [TurnID: String] = [:]
 
     init(
         timeline: ChatTimelineStore,
@@ -24,21 +27,71 @@ final class ChatResponsePresenter {
     func beginResponse(
         displayText: String?,
         placeholderID: String,
-        model: String
+        model: String,
+        turnID: TurnID
     ) {
         timeline.beginResponse(
             displayText: displayText,
             placeholderID: placeholderID,
             model: model
         )
+        segmentPlaceholders[turnID] = placeholderID
     }
 
-    func publishAssistant(_ text: String) {
-        timeline.liveAssistant = text
+    @discardableResult
+    func beginSteeringSegment(
+        turnID: TurnID,
+        displayText: String,
+        metadata: SteeringDeliveryMetadata,
+        model: String
+    ) -> Bool {
+        let assistantPrefix = timeline.liveAssistant
+        let reasoningPrefix = timeline.liveReasoning
+        guard let placeholderID = timeline.beginSteeringSegment(
+            displayText: displayText,
+            metadata: metadata,
+            model: model
+        ) else { return false }
+        segmentPlaceholders[turnID] = placeholderID
+        assistantPrefixes[turnID] = assistantPrefix
+        reasoningPrefixes[turnID] = reasoningPrefix
+        return true
     }
 
-    func publishReasoning(_ text: String) {
-        timeline.liveReasoning = text
+    func presentSteeringDelivery(
+        displayText: String,
+        metadata: SteeringDeliveryMetadata
+    ) {
+        timeline.presentSteeringDelivery(
+            displayText: displayText,
+            metadata: metadata
+        )
+    }
+
+    func placeholderID(for turnID: TurnID, fallback: String) -> String {
+        segmentPlaceholders[turnID] ?? fallback
+    }
+
+    func publishAssistant(_ text: String, turnID: TurnID) {
+        timeline.liveAssistant = segmented(
+            text,
+            prefix: assistantPrefixes[turnID]
+        )
+    }
+
+    func publishReasoning(_ text: String, turnID: TurnID) {
+        timeline.liveReasoning = segmented(
+            text,
+            prefix: reasoningPrefixes[turnID]
+        )
+    }
+
+    func segmentedAssistantText(_ text: String, turnID: TurnID) -> String {
+        segmented(text, prefix: assistantPrefixes[turnID])
+    }
+
+    func segmentedReasoningText(_ text: String, turnID: TurnID) -> String {
+        segmented(text, prefix: reasoningPrefixes[turnID])
     }
 
     func finalizeResponse(
@@ -58,7 +111,13 @@ final class ChatResponsePresenter {
     }
 
     func finishResponse(placeholderID: String) {
+        let turnID = segmentPlaceholders.first { $0.value == placeholderID }?.key
         timeline.finishResponse(placeholderID: placeholderID)
+        segmentPlaceholders = segmentPlaceholders.filter { $0.value != placeholderID }
+        if let turnID {
+            assistantPrefixes.removeValue(forKey: turnID)
+            reasoningPrefixes.removeValue(forKey: turnID)
+        }
     }
 
     func resetLiveResponse() {
@@ -93,5 +152,12 @@ final class ChatResponsePresenter {
         case .repositoryChanged:
             reviewCoordinator?.repositoryChanged()
         }
+    }
+
+    private func segmented(_ text: String, prefix: String?) -> String {
+        guard let prefix, !prefix.isEmpty, text.hasPrefix(prefix) else {
+            return text
+        }
+        return String(text.dropFirst(prefix.count))
     }
 }

@@ -44,7 +44,7 @@ struct ProductDocumentationTests {
             .resolve(query: "What can TurboCode do?")
 
         #expect(resolution.presentation.title == "What TurboCode Can Do")
-        #expect(resolution.presentation.documentationVersion == "1.6.0")
+        #expect(resolution.presentation.documentationVersion == "1.7.0")
         #expect(resolution.presentation.sources.contains { $0.id == "capabilities" })
         #expect(resolution.markdown.contains("TurboCode"))
         #expect(resolution.documentContext.contains("<document id=\"capabilities\""))

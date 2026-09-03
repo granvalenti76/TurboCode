@@ -14,7 +14,13 @@ actor AgentRuntime {
     /// Presentation receives only `hasActiveOperation` in the snapshot.
     private var operationTask: Task<Void, Never>?
     private var operationTurnID: TurnID?
+    private var operationKind: RuntimeOperationKind?
+    /// Retained until the context changes so a completed `/task` cannot be
+    /// mistaken for a conversational turn during the idle/release boundary.
+    private var contextOperationKind: RuntimeOperationKind?
     private var idleWaiters: [CheckedContinuation<Void, Never>] = []
+    private var steeringState = SteeringState()
+    private var activeSteeringContext: SteeringContext?
     private(set) var snapshot: RuntimeSnapshot
     private let snapshotChanged: @Sendable (RuntimeSnapshot) async -> Void
 
@@ -44,12 +50,36 @@ actor AgentRuntime {
         operationTurnID == turnID
     }
 
+    var activeOperationKind: RuntimeOperationKind? {
+        operationKind
+    }
+
+    var steeringContextGeneration: UInt64 {
+        steeringState.contextGeneration
+    }
+
+    var steeringSnapshot: SteeringQueueSnapshot {
+        steeringState.snapshot
+    }
+
+    /// Returns the context identity captured for the active conversational
+    /// turn. Callers cannot manufacture a valid generation from UI state.
+    func steeringContext(for turnID: TurnID) -> SteeringContext? {
+        guard activeSteeringContext?.originTurnID == turnID,
+              snapshot.turn?.id == turnID,
+              snapshot.turn != nil else {
+            return nil
+        }
+        return activeSteeringContext
+    }
+
     /// Admits and owns one response or independent worker operation. Detached
     /// execution prevents provider work from inheriting actor isolation; the
     /// actor retains only its task handle and terminal ownership protocol.
     @discardableResult
     func runOperation(
         turnID: TurnID,
+        operationKind: RuntimeOperationKind = .conversational,
         operation: @escaping @Sendable () async -> Void,
         afterRelease: @escaping @Sendable () async -> Void = {}
     ) async -> Bool {
@@ -60,11 +90,26 @@ actor AgentRuntime {
         }
         operationTask = task
         operationTurnID = turnID
+        self.operationKind = operationKind
+        contextOperationKind = operationKind
         await publish(hasActiveOperation: true)
         await task.value
         await finishOperation(for: turnID)
         await afterRelease()
         return true
+    }
+
+    /// Reserves the context role before an independent coordinator performs
+    /// its first asynchronous setup step. This closes the admission gap
+    /// between `.started` and the worker's retained operation handle.
+    func reserveOperationKind(
+        _ kind: RuntimeOperationKind,
+        for turnID: TurnID
+    ) {
+        guard snapshot.turn?.id == turnID, snapshot.turn?.outcome == nil else {
+            return
+        }
+        contextOperationKind = kind
     }
 
     /// Cancels and awaits the owned task before publishing idle. Context
@@ -97,6 +142,7 @@ actor AgentRuntime {
         guard operationTurnID == turnID else { return }
         operationTask = nil
         operationTurnID = nil
+        operationKind = nil
         await publish(hasActiveOperation: false)
         let waiters = idleWaiters
         idleWaiters.removeAll(keepingCapacity: true)
@@ -181,7 +227,181 @@ actor AgentRuntime {
 
     func begin(_ request: TurnRequest) async {
         turnReducer.begin(request)
+        activeSteeringContext = SteeringContext(
+            conversationID: snapshot.activeThreadID,
+            originTurnID: request.id,
+            contextGeneration: steeringState.contextGeneration,
+            workspaceRoot: request.workspaceRoot,
+            providerSelection: RuntimeBackendSelection(
+                backend: request.backend,
+                modelName: request.modelName
+            )
+        )
+        contextOperationKind = .conversational
         await publish(backend: request.backend, at: request.createdAt)
+    }
+
+    /// Atomically captures text only for the active conversational operation.
+    /// Independent work may keep the composer editable, but it cannot receive
+    /// steering input merely because it makes the facade report `busy`.
+    func enqueueSteering(
+        text: String,
+        context: SteeringContext,
+        id: SteeringRequestID = SteeringRequestID(),
+        queuedAt: Date = Date()
+    ) async -> SteeringEnqueueResult {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else {
+            return .rejected(.emptyText)
+        }
+        guard !snapshot.isQuiescing else {
+            return .rejected(.quiescing)
+        }
+        guard let activeSteeringContext,
+              activeSteeringContext == context,
+              snapshot.turn?.id == context.originTurnID,
+              (snapshot.turn?.outcome == nil
+                || snapshot.turn?.outcome == .succeeded) else {
+            return .rejected(.staleContext)
+        }
+        if contextOperationKind == .independent
+            || (operationTask != nil && operationKind != .conversational) {
+            return .rejected(.independentOperation)
+        }
+        guard let request = steeringState.enqueue(
+            text: normalized,
+            context: context,
+            id: id,
+            queuedAt: queuedAt
+        ) else {
+            return .rejected(.staleContext)
+        }
+        await publish()
+        return .accepted(request)
+    }
+
+    /// Claims the pending FIFO batch while still inside the lifecycle owner.
+    /// The continuation/provider adapter will settle this claim later.
+    func claimSteeringBatch(
+        for context: SteeringContext,
+        intent: SteeringDeliveryIntent,
+        id: SteeringDeliveryID = SteeringDeliveryID(),
+        claimedAt: Date = Date()
+    ) async -> SteeringDeliveryBatch? {
+        guard activeSteeringContext == context,
+              snapshot.turn?.id == context.originTurnID,
+              (snapshot.turn?.outcome == nil
+                || snapshot.turn?.outcome == .succeeded),
+              !snapshot.isQuiescing else { return nil }
+        let batch = steeringState.claimBatch(
+            for: context,
+            intent: intent,
+            id: id,
+            claimedAt: claimedAt
+        )
+        if batch != nil {
+            await publish()
+        }
+        return batch
+    }
+
+    @discardableResult
+    func acknowledgeSteering(
+        _ batch: SteeringDeliveryBatch,
+        receipt: SteeringDeliveryReceipt
+    ) async -> Bool {
+        let changed = steeringState.acknowledge(batch, receipt: receipt)
+        if changed { await publish() }
+        return changed
+    }
+
+    @discardableResult
+    func failSteering(
+        _ batch: SteeringDeliveryBatch,
+        failure: TurnFailure
+    ) async -> Bool {
+        let changed = steeringState.fail(batch, failure: failure)
+        if changed { await publish() }
+        return changed
+    }
+
+    @discardableResult
+    func markSteeringUncertain(
+        _ batch: SteeringDeliveryBatch
+    ) async -> Bool {
+        let changed = steeringState.markUncertain(batch)
+        if changed { await publish() }
+        return changed
+    }
+
+    /// Stops accepting the current queue without claiming provider delivery.
+    /// A batch already handed to a provider is marked uncertain because Stop
+    /// cannot prove whether that transport accepted the input.
+    @discardableResult
+    func pauseSteering() async -> Bool {
+        if let activeDelivery = steeringState.activeDelivery {
+            let changed = steeringState.markUncertain(activeDelivery)
+            if changed { await publish() }
+            return changed
+        }
+        return await pausePendingSteering() > 0
+    }
+
+    func steeringRequests(
+        for batch: SteeringDeliveryBatch
+    ) -> [SteeringRequest] {
+        steeringState.requests(for: batch)
+    }
+
+    func ownsSteeringDelivery(_ batch: SteeringDeliveryBatch) -> Bool {
+        steeringState.activeDelivery == batch
+    }
+
+    @discardableResult
+    func pausePendingSteering() async -> Int {
+        let changed = steeringState.pausePending()
+        if changed > 0 { await publish() }
+        return changed
+    }
+
+    @discardableResult
+    func removeSteering(_ id: SteeringRequestID) async -> Bool {
+        let changed = steeringState.remove(id)
+        if changed { await publish() }
+        return changed
+    }
+
+    @discardableResult
+    func resumeSteering(
+        _ id: SteeringRequestID,
+        in context: SteeringContext
+    ) async -> Bool {
+        guard activeSteeringContext == context else { return false }
+        let changed = steeringState.resume(id, in: context)
+        if changed { await publish() }
+        return changed
+    }
+
+    /// Restores only durable queue metadata. In-flight delivery claims become
+    /// uncertain at the process boundary and are never replayed automatically.
+    func restoreSteering(_ snapshot: SteeringQueueSnapshot) async {
+        guard operationTask == nil, steeringState.activeDelivery == nil else {
+            return
+        }
+        steeringState = SteeringState(restoring: snapshot)
+        await publish()
+    }
+
+    /// Explicitly binds a recoverable request to the currently active turn.
+    /// This is the only path that can move restored work into a new context.
+    @discardableResult
+    func recoverSteering(_ id: SteeringRequestID) async -> Bool {
+        guard let context = activeSteeringContext,
+              snapshot.turn?.id == context.originTurnID,
+              snapshot.turn?.outcome == nil else { return false }
+        let changed = steeringState.recover(id, in: context)
+        if changed { await publish() }
+        return changed
     }
 
     @discardableResult
@@ -237,7 +457,9 @@ actor AgentRuntime {
             turn: turnReducer.state,
             hasActiveOperation: hasActiveOperation
                 ?? snapshot.hasActiveOperation,
+            operationKind: operationKind,
             isQuiescing: isQuiescing ?? snapshot.isQuiescing,
+            steering: steeringState.snapshot,
             updatedAt: date
         )
         await snapshotChanged(snapshot)
@@ -252,12 +474,17 @@ actor AgentRuntime {
         guard snapshot.turn?.outcome != nil || snapshot.turn == nil else {
             return false
         }
+        guard steeringState.advanceContextGeneration() else { return false }
         turnReducer.reset()
+        activeSteeringContext = nil
+        contextOperationKind = nil
         snapshot = RuntimeSnapshot(
             activeThreadID: activeThreadID,
             backend: backend,
             hasActiveOperation: snapshot.hasActiveOperation,
+            operationKind: operationKind,
             isQuiescing: snapshot.isQuiescing,
+            steering: steeringState.snapshot,
             updatedAt: date
         )
         await snapshotChanged(snapshot)

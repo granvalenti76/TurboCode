@@ -22,6 +22,15 @@ nonisolated struct BackendSessionEvents: Sendable {
     }
 }
 
+/// Result of a provider steering request. A transport timeout is represented
+/// as `uncertain` so callers never retry a possibly accepted input blindly.
+nonisolated enum BackendSteeringResult: Sendable, Equatable {
+    case accepted(providerTurnID: String?)
+    case unsupported
+    case failed(TurnFailure)
+    case uncertain
+}
+
 /// In-process application port for one configured provider session.
 ///
 /// This is intentionally an adapter contract, not a second transport stack:
@@ -37,4 +46,6 @@ nonisolated protocol BackendSession: AnyObject, Sendable {
     ) async -> BackendSessionResult
 
     func interrupt() async
+
+    func steer(input: String) async -> BackendSteeringResult
 }

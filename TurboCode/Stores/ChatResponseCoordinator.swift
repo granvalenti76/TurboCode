@@ -15,6 +15,23 @@ final class ChatResponseCoordinator {
         let touchedConversation: Bool
     }
 
+    /// Closes the current Codex response segment before `turn/steer` is sent;
+    /// cumulative provider text is then rendered only in the new segment.
+    @discardableResult
+    func beginSteeringSegment(
+        turnID: TurnID,
+        displayText: String,
+        metadata: SteeringDeliveryMetadata,
+        model: String
+    ) -> Bool {
+        presenter.beginSteeringSegment(
+            turnID: turnID,
+            displayText: displayText,
+            metadata: metadata,
+            model: model
+        )
+    }
+
     /// Captures ownership when the provider starts a native tool. Looking up
     /// the current turn again at completion could mislabel a delayed callback
     /// after cancellation, restore, or a subsequent submission.
@@ -212,7 +229,8 @@ final class ChatResponseCoordinator {
         presenter.beginResponse(
             displayText: visibleInTimeline ? displayText : nil,
             placeholderID: placeholderID,
-            model: modelName
+            model: modelName,
+            turnID: turnID
         )
         let diagnosticsCapture = await diagnostics.beginCodexRun(
             mode: mode,
@@ -228,11 +246,11 @@ final class ChatResponseCoordinator {
                 switch event {
                 case .assistantTextChanged(_, let text):
                     diagnosticsCapture.recordCodexText(text) {
-                        self.presenter.publishAssistant(text)
+                        self.presenter.publishAssistant(text, turnID: turnID)
                     }
                 case .reasoningTextChanged(_, let text):
                     diagnosticsCapture.recordCodexText(text) {
-                        self.presenter.publishReasoning(text)
+                        self.presenter.publishReasoning(text, turnID: turnID)
                     }
                 case .toolStarted(let call):
                     diagnosticsCapture.toolStarted(call)
@@ -324,14 +342,24 @@ final class ChatResponseCoordinator {
             )
             return Result(errorMessage: nil, touchedConversation: false)
         }
+        let outputPlaceholderID = presenter.placeholderID(
+            for: turnID,
+            fallback: placeholderID
+        )
         switch backendResult.outcome {
         case .succeeded:
-            let assistantText = backendResult.assistantText
-            let reasoningText = backendResult.reasoningText
+            let assistantText = presenter.segmentedAssistantText(
+                backendResult.assistantText,
+                turnID: turnID
+            )
+            let reasoningText = presenter.segmentedReasoningText(
+                backendResult.reasoningText,
+                turnID: turnID
+            )
             let assistantBlock = assistantText.trimmingCharacters(
                 in: .whitespacesAndNewlines
             ).isEmpty ? nil : ChatBlock(
-                id: placeholderID,
+                id: outputPlaceholderID,
                 kind: .assistant,
                 text: assistantText,
                 model: modelName
@@ -345,7 +373,7 @@ final class ChatResponseCoordinator {
                 )
                 : nil
             presenter.finalizeResponse(
-                placeholderID: placeholderID,
+                placeholderID: outputPlaceholderID,
                 assistantBlock: assistantBlock,
                 reasoningBlock: reasoningBlock
             )
@@ -357,9 +385,9 @@ final class ChatResponseCoordinator {
                 ? backendResult.reasoningText
                 : backendResult.assistantText
             presenter.replaceResponse(
-                placeholderID: placeholderID,
+                placeholderID: outputPlaceholderID,
                 block: ChatBlock(
-                    id: placeholderID,
+                    id: outputPlaceholderID,
                     kind: .assistant,
                     text: partialText.isEmpty
                         ? "Response interrupted."
@@ -370,9 +398,9 @@ final class ChatResponseCoordinator {
             await finishTurn(.cancelled(reason: "The turn was interrupted."), turnID: turnID)
         case .failed(let failure) where failure.code == "codex.authentication":
             presenter.replaceResponse(
-                placeholderID: placeholderID,
+                placeholderID: outputPlaceholderID,
                 block: ChatBlock(
-                    id: placeholderID,
+                    id: outputPlaceholderID,
                     kind: .assistant,
                     text: "Sign in with ChatGPT to continue with Codex.",
                     model: modelName
@@ -390,9 +418,9 @@ final class ChatResponseCoordinator {
             )
         case .failed(let failure):
             presenter.replaceResponse(
-                placeholderID: placeholderID,
+                placeholderID: outputPlaceholderID,
                 block: ChatBlock(
-                    id: placeholderID,
+                    id: outputPlaceholderID,
                     kind: .assistant,
                     text: "Error: \(failure.message)",
                     model: modelName
@@ -417,7 +445,9 @@ final class ChatResponseCoordinator {
         guard await ownsTurn(turnID) || settledTurnID == turnID else {
             return Result(errorMessage: nil, touchedConversation: false)
         }
-        presenter.finishResponse(placeholderID: placeholderID)
+        presenter.finishResponse(
+            placeholderID: outputPlaceholderID
+        )
         toolInteractions.clearActivities()
         await diagnostics.recordBoundaries(
             backend: .codex,
@@ -460,7 +490,8 @@ final class ChatResponseCoordinator {
         presenter.beginResponse(
             displayText: visibleInTimeline ? displayText : nil,
             placeholderID: placeholderID,
-            model: modelName
+            model: modelName,
+            turnID: turnID
         )
         productGuidePresentation = nil
         completedRootWrite = nil
@@ -474,12 +505,16 @@ final class ChatResponseCoordinator {
                 case .assistantTextChanged(_, let content):
                     diagnosticsCapture.recordPublication {
                         self.presenter.publishAssistant(
-                            Self.userVisibleAssistantText(content)
+                            Self.userVisibleAssistantText(content),
+                            turnID: turnID
                         )
                     }
                 case .reasoningTextChanged(_, let reasoning):
                     diagnosticsCapture.recordPublication {
-                        self.presenter.publishReasoning(reasoning)
+                        self.presenter.publishReasoning(
+                            reasoning,
+                            turnID: turnID
+                        )
                     }
                 case .toolFinished(let toolResult):
                     if let receipt = toolResult.receipt {

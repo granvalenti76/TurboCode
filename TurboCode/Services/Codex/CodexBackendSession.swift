@@ -31,6 +31,7 @@ actor CodexBackendSession: BackendSession {
         ApprovalRequest
     ) async -> Void
     private var activeRun: Task<BackendSessionResult, Never>?
+    private var activeLocalTurnID: TurnID?
 
     init(
         runtime: any CodexTurnRunning,
@@ -97,6 +98,7 @@ actor CodexBackendSession: BackendSession {
         let activityEnded = self.activityEnded
         let approvalRequested = self.approvalRequested
         let toolTimings = CodexToolTimingRegistry()
+        activeLocalTurnID = request.id
 
         let task = Task {
             await events.emit(.started(request))
@@ -248,12 +250,45 @@ actor CodexBackendSession: BackendSession {
         if activeRun != nil {
             activeRun = nil
         }
+        activeLocalTurnID = nil
         return result
     }
 
     func interrupt() async {
         activeRun?.cancel()
         await runtime.interrupt()
+    }
+
+    func steer(input: String) async -> BackendSteeringResult {
+        guard let activeLocalTurnID else { return .unsupported }
+        do {
+            let providerTurnID = try await runtime.steerActiveTurn(
+                turboThreadID: turboThreadID,
+                localTurnID: activeLocalTurnID,
+                input: input
+            )
+            return .accepted(providerTurnID: providerTurnID)
+        } catch CodexAppServerError.requestTimedOut {
+            return .uncertain
+        } catch CodexAppServerError.rpc(let code, _) where code == -32601 {
+            return .unsupported
+        } catch let error as CodexAppServerError {
+            return .failed(
+                TurnFailure(
+                    code: "codex.steer",
+                    message: error.localizedDescription,
+                    isRecoverable: true
+                )
+            )
+        } catch {
+            return .failed(
+                TurnFailure(
+                    code: "codex.steer",
+                    message: error.localizedDescription,
+                    isRecoverable: true
+                )
+            )
+        }
     }
 
     nonisolated private static func toolCall(

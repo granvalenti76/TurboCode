@@ -77,6 +77,94 @@ final class ChatTimelineStore {
         workspaceListingPresentations = []
     }
 
+    /// Closes the currently visible assistant segment before an accepted
+    /// in-turn steering delivery. The provider may keep reporting cumulative
+    /// text, so the response coordinator remaps its finalization to the new
+    /// placeholder returned here.
+    @discardableResult
+    func beginSteeringSegment(
+        displayText: String,
+        metadata: SteeringDeliveryMetadata,
+        model: String
+    ) -> String? {
+        guard let placeholderID = activeAssistantPlaceholderID,
+              let index = blocks.firstIndex(where: { $0.id == placeholderID }) else {
+            return nil
+        }
+        let partialAssistant = liveAssistant
+        let partialReasoning = liveReasoning
+        var segmentEndIndex = index
+        if partialAssistant.isEmpty && partialReasoning.isEmpty {
+            blocks.remove(at: index)
+        } else if partialAssistant.isEmpty {
+            blocks.remove(at: index)
+            blocks.insert(
+                ChatBlock(kind: .reasoning, text: partialReasoning, model: model),
+                at: index
+            )
+            segmentEndIndex = index + 1
+        } else {
+            let existing = blocks[index]
+            var partialBlock = ChatBlock(
+                id: existing.id,
+                kind: existing.kind,
+                text: partialAssistant,
+                createdAt: existing.createdAt,
+                model: existing.model,
+                providerId: existing.providerId,
+                diffPatch: existing.diffPatch,
+                gitCommit: existing.gitCommit,
+                gitStatus: existing.gitStatus,
+                productGuide: existing.productGuide,
+                workspaceListing: existing.workspaceListing,
+                pluginWidget: existing.pluginWidget,
+                editorialPublication: existing.editorialPublication
+            )
+            partialBlock.steeringDelivery = existing.steeringDelivery
+            blocks[index] = partialBlock
+            if !partialReasoning.isEmpty {
+                blocks.insert(
+                    ChatBlock(kind: .reasoning, text: partialReasoning, model: model),
+                    at: index
+                )
+                segmentEndIndex = index + 2
+            } else {
+                segmentEndIndex = index + 1
+            }
+        }
+        let insertionIndex = min(segmentEndIndex, blocks.count)
+        var userBlock = ChatBlock(kind: .user, text: displayText)
+        userBlock.steeringDelivery = metadata
+        let newPlaceholderID = UUID().uuidString
+        blocks.insert(userBlock, at: insertionIndex)
+        blocks.insert(
+            ChatBlock(
+                id: newPlaceholderID,
+                kind: .assistant,
+                text: "",
+                model: model
+            ),
+            at: insertionIndex + 1
+        )
+        activeAssistantPlaceholderID = newPlaceholderID
+        liveReasoning = ""
+        liveAssistant = ""
+        workspaceListingPresentations = []
+        return newPlaceholderID
+    }
+
+    /// Adds a delivered steering request when the previous response has
+    /// already settled and therefore has no active placeholder to split.
+    func presentSteeringDelivery(
+        displayText: String,
+        metadata: SteeringDeliveryMetadata
+    ) {
+        var block = ChatBlock(kind: .user, text: displayText)
+        block.steeringDelivery = metadata
+        isFirstMessage = false
+        blocks.append(block)
+    }
+
     /// Replaces or removes a response placeholder, then optionally inserts a
     /// reasoning block immediately before the finalized assistant block.
     func finalizeResponse(

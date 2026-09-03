@@ -553,6 +553,14 @@ nonisolated private final class AdapterCodexRuntime: CodexTurnRunning, Sendable 
     }
 
     func interrupt() async {}
+
+    func steerActiveTurn(
+        turboThreadID: String,
+        localTurnID: TurnID,
+        input: String
+    ) async throws -> String {
+        "server-turn"
+    }
 }
 
 /// Provider doubles for terminal error and cancellation paths. The blocking
@@ -573,6 +581,14 @@ private actor FailingAdapterCodexRuntime: CodexTurnRunning {
     }
 
     func interrupt() async {}
+
+    func steerActiveTurn(
+        turboThreadID: String,
+        localTurnID: TurnID,
+        input: String
+    ) async throws -> String {
+        "server-turn"
+    }
 }
 
 private actor BlockingAdapterCodexRuntime: CodexTurnRunning {
@@ -608,6 +624,14 @@ private actor BlockingAdapterCodexRuntime: CodexTurnRunning {
         interrupted = true
         continuation?.resume(throwing: CancellationError())
         continuation = nil
+    }
+
+    func steerActiveTurn(
+        turboThreadID: String,
+        localTurnID: TurnID,
+        input: String
+    ) async throws -> String {
+        "server-turn"
     }
 }
 

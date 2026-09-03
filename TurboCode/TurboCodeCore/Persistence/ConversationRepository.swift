@@ -9,6 +9,23 @@ nonisolated struct ConversationSnapshot: Sendable {
     let modelBackend: String
     let blocks: [ChatBlock]
     let transcript: Transcript?
+    /// Steering is persisted with the conversation, but its provider claim is
+    /// never resumed implicitly after a process or context boundary.
+    let steering: SteeringQueueSnapshot
+
+    init(
+        conversation: Conversation,
+        modelBackend: String,
+        blocks: [ChatBlock],
+        transcript: Transcript?,
+        steering: SteeringQueueSnapshot = .empty
+    ) {
+        self.conversation = conversation
+        self.modelBackend = modelBackend
+        self.blocks = blocks
+        self.transcript = transcript
+        self.steering = steering
+    }
 
     /// Re-encodes the durable session shape without exposing repository paths
     /// to UI code. Export therefore follows the same schema as persistence.
@@ -129,6 +146,7 @@ private extension ConversationSnapshot {
         modelBackend = stored.modelBackend
         blocks = stored.blocks.map(ChatBlock.init)
         transcript = stored.transcript
+        steering = stored.steering
     }
 
     nonisolated var storedSession: StoredSession {
@@ -146,7 +164,8 @@ private extension ConversationSnapshot {
             mode: conversation.mode,
             modelBackend: modelBackend,
             blocks: blocks.map(StoredBlock.init),
-            transcript: transcript
+            transcript: transcript,
+            steering: steering
         )
     }
 }
@@ -168,12 +187,13 @@ private extension ChatBlock {
             pluginWidget: stored.pluginWidget,
             editorialPublication: stored.editorialPublication
         )
+        steeringDelivery = stored.steeringDelivery
     }
 }
 
 private extension StoredBlock {
     nonisolated init(_ block: ChatBlock) {
-        self.init(
+        var stored = StoredBlock(
             id: block.id,
             kind: block.kind.rawValue,
             text: block.text,
@@ -188,5 +208,7 @@ private extension StoredBlock {
             pluginWidget: block.pluginWidget,
             editorialPublication: block.editorialPublication
         )
+        stored.steeringDelivery = block.steeringDelivery
+        self = stored
     }
 }

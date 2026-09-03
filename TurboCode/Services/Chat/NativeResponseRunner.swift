@@ -459,6 +459,10 @@ actor NativeBackendSession: BackendSession {
         activeRun?.cancel()
     }
 
+    func steer(input: String) async -> BackendSteeringResult {
+        .unsupported
+    }
+
     nonisolated private static func result(
         from outcome: NativeResponseRunner.Outcome
     ) -> BackendSessionResult {

@@ -24,6 +24,7 @@ struct InputFieldView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            SteeringQueueView()
             composerCard
                 .background(
                     Color(nsColor: .textBackgroundColor),
@@ -53,7 +54,12 @@ struct InputFieldView: View {
                     Spacer()
 
                     backendMenu
-                    sendButton
+                    if chatStore.busy {
+                        queueButton
+                        stopButton
+                    } else {
+                        sendButton
+                    }
                 }
             }
             .padding(16)
@@ -84,12 +90,10 @@ struct InputFieldView: View {
                 .font(AppTypography.chatBody(size: chatFontSize))
                 .lineLimit(1...10)
                 .focused($isFocused)
-                .disabled(chatStore.busy)
                 .padding(.bottom, compact ? 12 : 18)
                 .contentShape(Rectangle())
                 .simultaneousGesture(
                     TapGesture().onEnded {
-                        guard !chatStore.busy else { return }
                         isFocused = true
                     }
                 )
@@ -181,6 +185,16 @@ struct InputFieldView: View {
            press.modifiers.contains(.shift),
            press.modifiers.intersection([.command, .control, .option]).isEmpty {
             insertComposerNewline()
+            return .handled
+        }
+
+        if press.key == .return,
+           press.modifiers.intersection([.command, .control, .option]).isEmpty {
+            if !chatStore.busy, !slashSuggestions.isEmpty {
+                executeSelectedSlashCommand()
+                return .handled
+            }
+            sendComposerInput()
             return .handled
         }
 
@@ -523,32 +537,37 @@ struct InputFieldView: View {
         Button {
             sendComposerInput()
         } label: {
-            Image(systemName: chatStore.busy ? "stop.fill" : "arrow.up")
+            Image(systemName: "arrow.up")
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.regular)
         .clipShape(Circle())
         .disabled(
-            !chatStore.busy
-                && (
-                    composer.messageText
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                        .isEmpty
-                    || commandRouter.isIncompleteSkillCommand(composer.messageText)
+            composer.messageText
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+                || (
+                    commandRouter.isIncompleteSkillCommand(composer.messageText)
                     || commandRouter.isIncompleteTaskCommand(composer.messageText)
                     || (
                         !chatStore.activeProfileCanSend
                             && !commandRouter.isLocalCommand(composer.messageText)
                     )
                 )
-        )
-        .keyboardShortcut(.return, modifiers: [])
+            )
         .help(sendButtonHelp)
     }
 
     private func sendComposerInput() {
         if chatStore.busy {
-            Task { await chatStore.interrupt() }
+            let text = composer.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !commandRouter.isLocalCommand(text),
+                  !commandRouter.isIncompleteSkillCommand(text),
+                  !commandRouter.isIncompleteTaskCommand(text) else {
+                chatStore.showSteeringUnavailableMessage()
+                return
+            }
+            enqueueComposerSteering()
             return
         }
         let text = composer.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -573,8 +592,45 @@ struct InputFieldView: View {
         }
     }
 
+    private func enqueueComposerSteering() {
+        let text = composer.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let generation = composer.editGeneration
+        Task {
+            let result = await chatStore.enqueueSteering(text)
+            guard case .accepted = result,
+                  composer.editGeneration == generation else { return }
+            composer.reset()
+        }
+    }
+
+    private var stopButton: some View {
+        Button {
+            Task { await chatStore.interrupt() }
+        } label: {
+            Image(systemName: "stop.fill")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .clipShape(Circle())
+        .help("Stop response")
+    }
+
+    private var queueButton: some View {
+        Button("Queue") {
+            enqueueComposerSteering()
+        }
+        .buttonStyle(.borderless)
+        .disabled(
+            composer.messageText
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+        )
+        .help("Queue steering for the next controlled step")
+    }
+
     private var sendButtonHelp: String {
-        if chatStore.busy { return "Stop response" }
+        if chatStore.busy { return "Queue steering" }
         if !chatStore.activeProfileCanSend
             && !commandRouter.isLocalCommand(composer.messageText) {
             return "Wait for Codex to connect or sign in first"

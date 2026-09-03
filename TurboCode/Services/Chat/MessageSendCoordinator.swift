@@ -21,6 +21,7 @@ final class MessageSendCoordinator {
     private let sessions: ConversationSessionCoordinator
     private let profiles: ProfileSelectionCoordinator
     private let lifecycle: ConversationLifecycleCoordinator
+    private let steering: SteeringCoordinator
 
     init(
         runtime: AgentRuntime,
@@ -37,7 +38,8 @@ final class MessageSendCoordinator {
         presentation: ChatPresentationViewModel,
         sessions: ConversationSessionCoordinator,
         profiles: ProfileSelectionCoordinator,
-        lifecycle: ConversationLifecycleCoordinator
+        lifecycle: ConversationLifecycleCoordinator,
+        steering: SteeringCoordinator
     ) {
         self.runtime = runtime
         self.llmRuntime = llmRuntime
@@ -54,6 +56,7 @@ final class MessageSendCoordinator {
         self.sessions = sessions
         self.profiles = profiles
         self.lifecycle = lifecycle
+        self.steering = steering
     }
 
     func preparePrompt(for text: String) async -> String? {
@@ -100,6 +103,7 @@ final class MessageSendCoordinator {
         // Routing is immutable for the accepted turn. A later menu selection
         // cannot redirect this operation after provider execution begins.
         let responseBackend = modelRuntime.activeBackend
+        let steering = self.steering
         await runtime.runOperation(
             turnID: turnID,
             operation: { [weak self] in
@@ -121,8 +125,9 @@ final class MessageSendCoordinator {
                 }
             },
             afterRelease: { [weak self] in
+                guard let self else { return }
+                await steering.deliverAutomatically(after: turnID)
                 guard visibleInTimeline,
-                      let self,
                       let titleThreadID else { return }
                 // Optional title inference starts only after response ownership
                 // is released, so it can never leave the composer on Stop.
@@ -131,6 +136,156 @@ final class MessageSendCoordinator {
             }
         )
         return true
+    }
+
+    /// Runs one native continuation for a claimed steering batch. The batch is
+    /// already owned by `SteeringCoordinator`; this method only starts a new
+    /// operation after the previous provider session has fully unwound.
+    func deliverSteering(
+        batch: SteeringDeliveryBatch,
+        requests: [SteeringRequest]
+    ) async -> SteeringCoordinator.DeliveryResult {
+        let backend = batch.context.providerSelection.backend
+        guard conversations.activeThreadID == batch.context.conversationID,
+              modelRuntime.activeBackend == backend,
+              await runtime.ownsSteeringDelivery(batch) else {
+            return .failed(
+                TurnFailure(
+                    code: "steering.stale_context",
+                    message: "The conversation context changed before delivery.",
+                    isRecoverable: true
+                )
+            )
+        }
+
+        let ordered = requests.sorted { $0.sequence < $1.sequence }
+        let displayText = ordered.map(\.text).joined(separator: "\n\n")
+        let promptText = ordered.map { request in
+            "Steering instruction \(request.sequence):\n\(request.text)"
+        }.joined(separator: "\n\n")
+        let turnID = TurnID()
+        let modelName = batch.context.providerSelection.modelName
+            ?? modelRuntime.composerModel
+        let request = TurnRequest(
+            id: turnID,
+            prompt: promptText,
+            backend: backend,
+            modelName: modelName,
+            workspaceRoot: batch.context.workspaceRoot
+        )
+        let metadata = SteeringDeliveryMetadata(
+            requestIDs: batch.requestIDs,
+            deliveryID: batch.id,
+            providerTurnID: turnID.rawValue
+        )
+        timeline.presentSteeringDelivery(
+            displayText: displayText,
+            metadata: metadata
+        )
+        guard await runtime.apply(.started(request)) else {
+            return .failed(
+                TurnFailure(
+                    code: "steering.continuation_not_admitted",
+                    message: "The steering continuation could not be admitted.",
+                    isRecoverable: true
+                )
+            )
+        }
+
+        let responseCoordinator = self.responseCoordinator
+        let timeline = self.timeline
+        let mode = modelRuntime.orchestratorMode
+        let workspaceKind = self.workspaceKind
+        let serverURL = backend == .llamaServer
+            ? modelRuntime.activeRemoteModel?.url
+            : nil
+        let resultBox = SteeringResultBox()
+        let admitted = await runtime.runOperation(
+            turnID: turnID,
+            operationKind: .conversational,
+            operation: { [weak self] in
+                guard let self else { return }
+                let result: ChatResponseCoordinator.Result
+                if backend == .codex {
+                    await self.performCodex(
+                        displayText: displayText,
+                        promptText: promptText,
+                        visibleInTimeline: true,
+                        turnID: turnID
+                    )
+                    switch await self.runtime.currentTurnState?.outcome {
+                    case .succeeded:
+                        result = ChatResponseCoordinator.Result(
+                            errorMessage: nil,
+                            touchedConversation: true
+                        )
+                    case .failed(let failure):
+                        result = ChatResponseCoordinator.Result(
+                            errorMessage: failure.message,
+                            touchedConversation: false
+                        )
+                    case .cancelled:
+                        result = ChatResponseCoordinator.Result(
+                            errorMessage: "The steering continuation was cancelled.",
+                            touchedConversation: false
+                        )
+                    case nil:
+                        result = ChatResponseCoordinator.Result(
+                            errorMessage: "The steering continuation did not settle.",
+                            touchedConversation: false
+                        )
+                    }
+                } else {
+                    result = await responseCoordinator.performNative(
+                        displayText: displayText,
+                        promptText: promptText,
+                        visibleInTimeline: false,
+                        turnID: turnID,
+                        blocks: timeline.blocks,
+                        backend: backend,
+                        mode: mode,
+                        workspaceKind: workspaceKind,
+                        workspaceRoot: batch.context.workspaceRoot,
+                        modelName: modelName,
+                        serverURL: serverURL,
+                        contextChanged: { usage in
+                            guard backend == .llamaServer else {
+                                return
+                            }
+                            self.presentation.setLlamaContextUsage(usage)
+                        }
+                    )
+                }
+                await resultBox.set(result)
+            },
+            afterRelease: { [weak self] in
+                guard let self else { return }
+                await steering.deliverAutomatically(after: turnID)
+            }
+        )
+        guard admitted, let result = await resultBox.value else {
+            return .failed(
+                TurnFailure(
+                    code: "steering.continuation_not_admitted",
+                    message: "The steering continuation could not start.",
+                    isRecoverable: true
+                )
+            )
+        }
+        guard result.errorMessage == nil, result.touchedConversation else {
+            return .failed(
+                TurnFailure(
+                    code: "steering.continuation_failed",
+                    message: result.errorMessage
+                        ?? "The steering continuation did not complete.",
+                    isRecoverable: true
+                )
+            )
+        }
+        if let conversationID = conversations.activeThreadID {
+            await sessions.persistActiveSession(id: conversationID)
+        }
+        return .accepted(providerTurnID: turnID.rawValue)
     }
 
     func generateTitle(from prompt: String, threadID: String? = nil) async {
@@ -277,5 +432,20 @@ final class MessageSendCoordinator {
         guard !workspace.root.isEmpty else { return "none" }
         let marker = URL(fileURLWithPath: workspace.root).appendingPathComponent(".git")
         return FileManager.default.fileExists(atPath: marker.path) ? "git" : "nonGit"
+    }
+
+}
+
+/// Sendable handoff for the result produced inside the detached runtime
+/// operation. The coordinator remains the only owner of provider execution.
+private actor SteeringResultBox {
+    private var storedResult: ChatResponseCoordinator.Result?
+
+    func set(_ result: ChatResponseCoordinator.Result) {
+        storedResult = result
+    }
+
+    var value: ChatResponseCoordinator.Result? {
+        storedResult
     }
 }

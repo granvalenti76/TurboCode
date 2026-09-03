@@ -138,6 +138,7 @@ final class ConversationLifecycleCoordinator {
             keepingHistory: false,
             restoringHistory: restoredHistory
         )
+        await runtime.restoreSteering(snapshot.steering)
         await AgentDiagnosticsRecorder.shared.recordBoundary(
             RuntimeBoundaryMetric(
                 boundary: .restore,

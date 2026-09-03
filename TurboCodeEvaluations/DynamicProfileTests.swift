@@ -611,7 +611,9 @@ struct DynamicProfileTests {
         }
         let names = instructions.toolDefinitions.map { $0.name }
         #expect(names.contains("file_system"))
-        #expect(names.contains("ripgrep"))
+        // Search is an explicit opt-in capability for the standalone profile;
+        // its absence here proves the direct tool surface remains bounded.
+        #expect(!names.contains("ripgrep"))
         #expect(names.contains("swift_package_manager"))
         #expect(!names.contains("toggle_skill"))
         // DeepSeek depends on a fixed direct tool surface so otherwise equal

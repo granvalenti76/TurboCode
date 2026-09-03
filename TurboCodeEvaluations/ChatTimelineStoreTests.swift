@@ -70,6 +70,38 @@ struct ChatTimelineStoreTests {
         #expect(store.workspaceListingPresentations.map(\.toolCallID) == ["listing"])
     }
 
+    @Test("Steering delivery splits cumulative assistant output once")
+    func steeringDeliverySplitsCumulativeOutput() {
+        let store = ChatTimelineStore()
+        store.beginResponse(
+            displayText: "Initial request",
+            placeholderID: "response-1",
+            model: "test-model"
+        )
+        store.liveAssistant = "Already completed"
+        store.liveReasoning = "Earlier reasoning"
+        let requestID = SteeringRequestID(rawValue: "request-1")
+        let deliveryID = SteeringDeliveryID(rawValue: "delivery-1")
+
+        let newPlaceholder = store.beginSteeringSegment(
+            displayText: "Please continue carefully",
+            metadata: SteeringDeliveryMetadata(
+                requestIDs: [requestID],
+                deliveryID: deliveryID,
+                providerTurnID: "server-turn-1"
+            ),
+            model: "test-model"
+        )
+
+        #expect(newPlaceholder != nil)
+        #expect(store.blocks.map(\.kind) == [
+            .user, .reasoning, .assistant, .user, .assistant
+        ])
+        #expect(store.blocks[2].text == "Already completed")
+        #expect(store.blocks[3].steeringDelivery?.deliveryID == deliveryID)
+        #expect(store.activeAssistantPlaceholderID == newPlaceholder)
+    }
+
     @Test("Restore and reset discard transient response state")
     func restoreAndResetDiscardTransientState() {
         let store = ChatTimelineStore()

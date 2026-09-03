@@ -31,6 +31,7 @@ final class ChatApplicationAssembly {
     let workspaceLifecycleCoordinator: WorkspaceLifecycleCoordinator
     let independentTaskCoordinator: IndependentTaskCoordinator
     let messageSendCoordinator: MessageSendCoordinator
+    let steeringCoordinator: SteeringCoordinator
     let editorialDeskAssembly: EditorialDeskAssembly
     let reviewCoordinator: ReviewCoordinator
 
@@ -96,6 +97,7 @@ final class ChatApplicationAssembly {
             timeline: timeline,
             modelRuntime: modelRuntime,
             llmRuntime: llmRuntime,
+            runtime: agentRuntime,
             persistence: conversationPersistence
         )
         let reviewCoordinator = ReviewCoordinator(
@@ -119,6 +121,26 @@ final class ChatApplicationAssembly {
                 workbench.rightPanelMode = .activity
             }
         )
+        let steeringCoordinator = SteeringCoordinator(
+            runtime: agentRuntime,
+            llmRuntime: llmRuntime,
+            interrupt: { [weak llmRuntime] turnID in
+                await llmRuntime?.interrupt(turnID: turnID)
+            },
+            prepareNativeDelivery: { [weak responseCoordinator] turnID, text, metadata, model in
+                responseCoordinator?.beginSteeringSegment(
+                    turnID: turnID,
+                    displayText: text,
+                    metadata: metadata,
+                    model: model
+                ) ?? false
+            },
+            persist: { [weak sessionCoordinator, weak conversations] in
+                guard let sessionCoordinator,
+                      let threadID = conversations?.activeThreadID else { return }
+                await sessionCoordinator.persistActiveSession(id: threadID)
+            }
+        )
         let profileSelectionCoordinator = ProfileSelectionCoordinator(
             modelRuntime: modelRuntime,
             codexRuntime: codexRuntime,
@@ -133,7 +155,12 @@ final class ChatApplicationAssembly {
         )
         let transitionBarrier = RuntimeTransitionBarrier(
             runtime: agentRuntime,
-            profiles: profileSelectionCoordinator
+            profiles: profileSelectionCoordinator,
+            checkpoint: { [weak sessionCoordinator, weak conversations] in
+                guard let sessionCoordinator,
+                      let threadID = conversations?.activeThreadID else { return }
+                await sessionCoordinator.persistActiveSession(id: threadID)
+            }
         )
         let conversationLifecycleCoordinator = ConversationLifecycleCoordinator(
             conversations: conversations,
@@ -191,8 +218,16 @@ final class ChatApplicationAssembly {
             presentation: presentation,
             sessions: sessionCoordinator,
             profiles: profileSelectionCoordinator,
-            lifecycle: conversationLifecycleCoordinator
+            lifecycle: conversationLifecycleCoordinator,
+            steering: steeringCoordinator
         )
+        steeringCoordinator.setDeliveryHandler { [weak messageSendCoordinator] batch, requests in
+            guard let messageSendCoordinator else { return .uncertain }
+            return await messageSendCoordinator.deliverSteering(
+                batch: batch,
+                requests: requests
+            )
+        }
 
         self.workspaceStore = workspace
         self.conversationStore = conversations
@@ -219,6 +254,7 @@ final class ChatApplicationAssembly {
         self.workspaceLifecycleCoordinator = workspaceLifecycleCoordinator
         self.independentTaskCoordinator = independentTaskCoordinator
         self.messageSendCoordinator = messageSendCoordinator
+        self.steeringCoordinator = steeringCoordinator
         self.editorialDeskAssembly = EditorialDeskAssembly(
             runtime: llmRuntime,
             modelRuntime: modelRuntime,

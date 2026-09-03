@@ -86,11 +86,15 @@ final class IndependentTaskCoordinator {
             workspaceRoot: workspace.root
         )
         guard await runtime.apply(.started(request)) else { return }
+        await runtime.reserveOperationKind(.independent, for: turnID)
         _ = await runtime.apply(
             .phaseChanged(turnID: turnID, phase: .preparing, at: Date())
         )
         responseCoordinator.delegationChanged(true)
-        await runtime.runOperation(turnID: turnID) { [weak self] in
+        await runtime.runOperation(
+            turnID: turnID,
+            operationKind: .independent
+        ) { [weak self] in
             guard let self else { return }
             _ = await runtime.apply(
                 .phaseChanged(turnID: turnID, phase: .streaming, at: Date())

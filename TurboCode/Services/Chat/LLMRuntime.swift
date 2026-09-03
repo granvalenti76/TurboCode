@@ -421,6 +421,24 @@ actor LLMRuntime {
         await activeSession.interrupt()
     }
 
+    /// Delivers provider-native steering through the session that owns the
+    /// active turn. The runtime never constructs a competing provider run.
+    func steer(
+        turnID: TurnID,
+        input: String
+    ) async -> BackendSteeringResult {
+        guard ownsSession(for: turnID), let activeSession else {
+            return .failed(
+                TurnFailure(
+                    code: "llm_runtime.no_active_session",
+                    message: "The provider turn is no longer active.",
+                    isRecoverable: true
+                )
+            )
+        }
+        return await activeSession.steer(input: input)
+    }
+
     private func releaseSession(for turnID: TurnID) {
         guard activeTurnID == turnID else { return }
         activeSession = nil

@@ -28,7 +28,8 @@ nonisolated struct ConversationPersistenceService: Sendable {
             conversation: conversation,
             modelBackend: existing?.modelBackend ?? defaultModelBackend,
             blocks: existing?.blocks ?? [],
-            transcript: existing?.transcript
+            transcript: existing?.transcript,
+            steering: existing?.steering ?? .empty
         )
         try await repository.save(snapshot)
     }

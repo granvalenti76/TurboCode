@@ -203,11 +203,36 @@ struct ConversationStoreTests {
             mode: .plan
         )
         let block = ChatBlock(kind: .assistant, text: "Persisted response")
+        let steeringRequest = SteeringRequest(
+            id: SteeringRequestID(rawValue: "steering-request"),
+            sequence: 1,
+            context: SteeringContext(
+                conversationID: conversation.id,
+                originTurnID: TurnID(rawValue: "origin-turn"),
+                contextGeneration: 3,
+                workspaceRoot: "/Work/TurboCode",
+                providerSelection: RuntimeBackendSelection(
+                    backend: .foundationApple,
+                    modelName: "configured-model"
+                )
+            ),
+            text: "Keep the parser change focused",
+            state: .delivered,
+            receipt: SteeringDeliveryReceipt(
+                deliveryID: SteeringDeliveryID(rawValue: "delivery"),
+                providerTurnID: "provider-turn"
+            )
+        )
         let snapshot = ConversationSnapshot(
             conversation: conversation,
             modelBackend: ModelBackend.foundationApple.rawValue,
             blocks: [block],
-            transcript: nil
+            transcript: nil,
+            steering: SteeringQueueSnapshot(
+                contextGeneration: 3,
+                requests: [steeringRequest],
+                activeDelivery: nil
+            )
         )
 
         try await repository.save(snapshot)
@@ -217,6 +242,7 @@ struct ConversationStoreTests {
         #expect(loaded.conversation == conversation)
         #expect(loaded.modelBackend == ModelBackend.foundationApple.rawValue)
         #expect(loaded.blocks == [block])
+        #expect(loaded.steering.requests == [steeringRequest])
         #expect(try await repository.list().map(\.conversation.id) == [conversation.id])
 
         try await repository.delete(id: conversation.id)

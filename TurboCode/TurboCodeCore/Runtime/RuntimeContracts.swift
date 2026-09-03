@@ -224,7 +224,9 @@ nonisolated struct RuntimeSnapshot: Codable, Hashable, Sendable {
     let backend: ModelBackend
     let turn: TurnState?
     let hasActiveOperation: Bool
+    let operationKind: RuntimeOperationKind?
     let isQuiescing: Bool
+    let steering: SteeringQueueSnapshot
     let updatedAt: Date
 
     init(
@@ -232,15 +234,51 @@ nonisolated struct RuntimeSnapshot: Codable, Hashable, Sendable {
         backend: ModelBackend,
         turn: TurnState? = nil,
         hasActiveOperation: Bool = false,
+        operationKind: RuntimeOperationKind? = nil,
         isQuiescing: Bool = false,
+        steering: SteeringQueueSnapshot = .empty,
         updatedAt: Date = Date()
     ) {
         self.activeThreadID = activeThreadID
         self.backend = backend
         self.turn = turn
         self.hasActiveOperation = hasActiveOperation
+        self.operationKind = operationKind
         self.isQuiescing = isQuiescing
+        self.steering = steering
         self.updatedAt = updatedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case activeThreadID
+        case backend
+        case turn
+        case hasActiveOperation
+        case operationKind
+        case isQuiescing
+        case steering
+        case updatedAt
+    }
+
+    init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        activeThreadID = try values.decodeIfPresent(String.self, forKey: .activeThreadID)
+        backend = try values.decode(ModelBackend.self, forKey: .backend)
+        turn = try values.decodeIfPresent(TurnState.self, forKey: .turn)
+        hasActiveOperation = try values.decodeIfPresent(
+            Bool.self,
+            forKey: .hasActiveOperation
+        ) ?? false
+        operationKind = try values.decodeIfPresent(
+            RuntimeOperationKind.self,
+            forKey: .operationKind
+        )
+        isQuiescing = try values.decodeIfPresent(Bool.self, forKey: .isQuiescing) ?? false
+        steering = try values.decodeIfPresent(
+            SteeringQueueSnapshot.self,
+            forKey: .steering
+        ) ?? .empty
+        updatedAt = try values.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
     }
 }
 
