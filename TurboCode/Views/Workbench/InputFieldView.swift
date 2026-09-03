@@ -413,7 +413,7 @@ struct InputFieldView: View {
                        chatStore.activeBackend != .codex {
                         Divider()
                         Section("Reasoning") {
-                            ForEach(ReasoningEffort.allCases, id: \.self) { effort in
+                            ForEach(reasoningEffortOptions, id: \.self) { effort in
                                 Button {
                                     reasoningEffort = effort
                                     Task { await chatStore.setReasoningEffort(effort) }
@@ -528,7 +528,26 @@ struct InputFieldView: View {
         if chatStore.activeBackend == .codex {
             return chatStore.codexReasoningEffort.displayName
         }
+        if reasoningEffort == .xhigh,
+           chatStore.activeBackend != .llamaServer,
+           chatStore.activeBackend != .foundationApple {
+            // X-High is prompt-only for Llama and Apple. A remote provider
+            // selected after it maps to its existing native High setting.
+            return ReasoningEffort.high.rawValue
+        }
         return reasoningEffort.rawValue
+    }
+
+    /// X-High is a local prompt policy, not a value sent to remote providers.
+    /// Keep their existing Low/Medium/High menu stable even after the shared
+    /// preference was previously selected for Llama or Apple On-Device.
+    private var reasoningEffortOptions: [ReasoningEffort] {
+        switch chatStore.activeBackend {
+        case .llamaServer, .foundationApple:
+            ReasoningEffort.allCases
+        case .foundationServe, .premium, .codex:
+            ReasoningEffort.allCases.filter { $0 != .xhigh }
+        }
     }
 
     // MARK: - Send Button

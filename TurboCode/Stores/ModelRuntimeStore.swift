@@ -57,15 +57,17 @@ final class ModelRuntimeStore {
 
     var activeModelSupportsReasoning: Bool {
         activeBackend == .codex
+            || activeBackend == .foundationApple
             || (
-                activeBackend != .foundationApple
-                    && (activeRemoteModel?.supportsReasoning ?? false)
+                activeRemoteModel?.supportsReasoning ?? false
             )
     }
 
     var reasoningEffort: ReasoningEffort? {
-        guard activeBackend != .foundationApple,
-              activeBackend != .codex else { return nil }
+        guard activeBackend != .codex else { return nil }
+        if activeBackend == .foundationApple {
+            return persistedReasoningEffort
+        }
         return reasoningEffort(for: activeRemoteModel)
     }
 
@@ -471,6 +473,13 @@ final class ModelRuntimeStore {
         for model: RemoteModelConfig?
     ) -> ReasoningEffort? {
         guard let model, model.supportsReasoning else { return nil }
+        return persistedReasoningEffort
+    }
+
+    /// One chooser is shared by the eligible local and on-device sessions so
+    /// switching between them preserves intent. Non-local remote transports
+    /// never receive the prompt-level X-High policy.
+    private var persistedReasoningEffort: ReasoningEffort {
         let raw = UserDefaults.standard.string(forKey: "reasoningEffort")
             ?? ReasoningEffort.medium.rawValue
         return ReasoningEffort(rawValue: raw) ?? .medium

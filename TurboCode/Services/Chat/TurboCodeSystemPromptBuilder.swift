@@ -18,6 +18,31 @@ nonisolated struct TurboCodeSystemPromptContext: Sendable {
     let toolNames: [String]
     let availableSkills: [TurboCodeSkillDefinition]
     let workspaceInstructions: WorkspaceInstructions?
+    /// Present only for the local and Apple on-device backends, whose prompt
+    /// contract provides the product-level reasoning control.
+    let reasoningEffort: ReasoningEffort?
+
+    init(
+        role: TurboCodeSystemPromptRole,
+        backend: ModelBackend,
+        workspaceRoot: String,
+        agentTuning: AgentTuningConfig,
+        toolIDs: [ToolCapabilityID],
+        toolNames: [String],
+        availableSkills: [TurboCodeSkillDefinition],
+        workspaceInstructions: WorkspaceInstructions?,
+        reasoningEffort: ReasoningEffort? = nil
+    ) {
+        self.role = role
+        self.backend = backend
+        self.workspaceRoot = workspaceRoot
+        self.agentTuning = agentTuning
+        self.toolIDs = toolIDs
+        self.toolNames = toolNames
+        self.availableSkills = availableSkills
+        self.workspaceInstructions = workspaceInstructions
+        self.reasoningEffort = reasoningEffort
+    }
 }
 
 /// Builds the shared TurboCode prompt while keeping volatile workspace content last.
@@ -33,6 +58,10 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             TurboCodePersonality.default.prompt,
             behaviorSection(for: context)
         ]
+
+        if let reasoningGuidance = reasoningGuidance(for: context) {
+            sections.append(reasoningGuidance)
+        }
 
         if !context.toolNames.isEmpty {
             sections.append(
@@ -128,6 +157,43 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             guidelines.append("Use short plain-text responses; use Markdown only when it materially improves readability.")
         }
         return "Guidelines:\n" + guidelines.map { "- \($0)" }.joined(separator: "\n")
+    }
+
+    /// Llama's OpenAI-compatible transport has no reasoning-effort request
+    /// field, and Apple On-Device needs a consistent product-level policy.
+    /// Keep this guidance out of hosted providers that expose native controls.
+    private static func reasoningGuidance(
+        for context: TurboCodeSystemPromptContext
+    ) -> String? {
+        guard let effort = context.reasoningEffort else { return nil }
+
+        let runtime: String
+        switch context.backend {
+        case .llamaServer:
+            runtime = "Llama"
+        case .foundationApple:
+            runtime = "Apple On-Device"
+        case .foundationServe, .premium, .codex:
+            return nil
+        }
+
+        let instruction: String
+        switch effort {
+        case .low:
+            instruction = "Use the shortest sound reasoning path. Resolve the request directly and do not explore alternatives unless they are necessary to avoid an error."
+        case .medium:
+            instruction = "Before acting, identify the important steps and verify the assumptions that materially affect the result."
+        case .high:
+            instruction = "Before acting, form a concrete plan, inspect relevant evidence, check important edge cases, and validate the result before replying."
+        case .xhigh:
+            instruction = "Treat correctness as the primary objective. Decompose the task, inspect evidence before every consequential action, test assumptions and edge cases, validate each result with available tools, and correct inconsistencies before replying. Do not guess or claim verification without evidence."
+        }
+
+        return """
+        Reasoning policy (\(runtime), \(effort.rawValue)):
+        \(instruction)
+        Keep private reasoning internal. Provide the user with conclusions, decisions, and concise supporting evidence rather than a chain-of-thought transcript.
+        """
     }
 
     private static func toolGuidance(

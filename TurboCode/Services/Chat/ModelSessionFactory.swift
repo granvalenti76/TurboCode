@@ -822,8 +822,26 @@ nonisolated enum ModelSessionFactory {
                 // with the legacy `grep` ID now implemented by `ripgrep`.
                 toolNames: toolIDs.map(\.runtimeName),
                 availableSkills: configuration.availableSkills,
-                workspaceInstructions: configuration.workspaceInstructions
+                workspaceInstructions: configuration.workspaceInstructions,
+                reasoningEffort: promptReasoningEffort(
+                    for: configuration,
+                    backend: backend
+                )
             )
         )
+    }
+
+    /// Llama and Apple On-Device rely on an instruction-level effort policy.
+    /// Hosted providers retain their transport-specific reasoning controls.
+    private static func promptReasoningEffort(
+        for configuration: ModelSessionConfiguration,
+        backend: ModelBackend
+    ) -> ReasoningEffort? {
+        switch backend {
+        case .llamaServer, .foundationApple:
+            configuration.reasoningEffort
+        case .foundationServe, .premium, .codex:
+            nil
+        }
     }
 }

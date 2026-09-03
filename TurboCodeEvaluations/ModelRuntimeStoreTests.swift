@@ -26,5 +26,6 @@ struct ModelRuntimeStoreTests {
         #expect(ReasoningEffort.low.rawValue == "Low")
         #expect(ReasoningEffort.medium.rawValue == "Medium")
         #expect(ReasoningEffort.high.rawValue == "High")
+        #expect(ReasoningEffort.xhigh.rawValue == "X-High")
     }
 }

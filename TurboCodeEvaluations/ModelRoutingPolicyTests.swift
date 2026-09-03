@@ -209,6 +209,55 @@ struct ModelRoutingPolicyTests {
         #expect(prompt.contains("Do not claim the tool is unavailable"))
     }
 
+    @Test("Llama and Apple prompts receive their selected reasoning policy")
+    func promptIncludesLocalReasoningPolicy() {
+        for (backend, effort, expected) in [
+            (ModelBackend.llamaServer, ReasoningEffort.low, "shortest sound reasoning path"),
+            (ModelBackend.llamaServer, .medium, "identify the important steps"),
+            (ModelBackend.llamaServer, .high, "form a concrete plan"),
+            (ModelBackend.llamaServer, .xhigh, "Treat correctness as the primary objective"),
+            (ModelBackend.foundationApple, .xhigh, "Apple On-Device, X-High")
+        ] {
+            let prompt = TurboCodeSystemPromptBuilder.build(
+                TurboCodeSystemPromptContext(
+                    role: .standalone,
+                    backend: backend,
+                    workspaceRoot: "/workspace",
+                    agentTuning: .default,
+                    toolIDs: [],
+                    toolNames: [],
+                    availableSkills: [],
+                    workspaceInstructions: nil,
+                    reasoningEffort: effort
+                )
+            )
+
+            #expect(prompt.contains(expected))
+            #expect(prompt.contains("Keep private reasoning internal"))
+        }
+    }
+
+    @Test("Hosted providers do not receive local prompt reasoning policy")
+    func hostedPromptsOmitLocalReasoningPolicy() {
+        for backend in [ModelBackend.foundationServe, .premium, .codex] {
+            let prompt = TurboCodeSystemPromptBuilder.build(
+                TurboCodeSystemPromptContext(
+                    role: .standalone,
+                    backend: backend,
+                    workspaceRoot: "/workspace",
+                    agentTuning: .default,
+                    toolIDs: [],
+                    toolNames: [],
+                    availableSkills: [],
+                    workspaceInstructions: nil,
+                    reasoningEffort: .xhigh
+                )
+            )
+
+            #expect(!prompt.contains("Reasoning policy ("))
+        }
+    }
+
     @Test("Legacy on-device coordinator is visibly experimental")
     func legacyCoordinatorIsExperimental() {
         #expect(
