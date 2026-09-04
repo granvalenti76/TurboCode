@@ -1,5 +1,25 @@
 import Foundation
 
+nonisolated struct BackgroundToolArtifact: Sendable {
+    let toolCallID: String
+    let receipt: ToolReceipt
+}
+
+/// Buffers terminal worker events outside the active response lane. Their
+/// typed receipts are resolved only after the worker settles, when the harness
+/// can route them using the captured conversation identity.
+actor BackgroundToolJournal {
+    private var events: [AgentTaskToolOutputEvent] = []
+
+    func record(_ event: AgentTaskToolOutputEvent) {
+        events.append(event)
+    }
+
+    func snapshot() -> [AgentTaskToolOutputEvent] {
+        events
+    }
+}
+
 /// Owns the explicit `/task` application command from TurnID admission through
 /// worker settlement, visible receipt, transcript handoff, and persistence.
 /// This is not a model tool and therefore never depends on the active profile's
@@ -19,6 +39,7 @@ final class IndependentTaskCoordinator {
     private let sessions: ConversationSessionCoordinator
     private let profiles: ProfileSelectionCoordinator
     private let lifecycle: ConversationLifecycleCoordinator
+    private let background: BackgroundDelegationCoordinator
 
     init(
         runtime: AgentRuntime,
@@ -33,7 +54,8 @@ final class IndependentTaskCoordinator {
         presentation: ChatPresentationViewModel,
         sessions: ConversationSessionCoordinator,
         profiles: ProfileSelectionCoordinator,
-        lifecycle: ConversationLifecycleCoordinator
+        lifecycle: ConversationLifecycleCoordinator,
+        background: BackgroundDelegationCoordinator
     ) {
         self.runtime = runtime
         self.runtimeProjection = runtimeProjection
@@ -48,6 +70,7 @@ final class IndependentTaskCoordinator {
         self.sessions = sessions
         self.profiles = profiles
         self.lifecycle = lifecycle
+        self.background = background
     }
 
     func run(goal: String) async {
@@ -77,6 +100,18 @@ final class IndependentTaskCoordinator {
             events: responseCoordinator.modelSessionEvents
         )
         presentation.errorMessage = nil
+        if modelRuntime.agentTuning.orchestrator.runsDelegatedTasksInBackground {
+            do {
+                _ = try await background.submitCommandTask(
+                    command: command,
+                    envelope: envelope,
+                    invoker: invoker
+                )
+            } catch {
+                presentation.errorMessage = error.localizedDescription
+            }
+            return
+        }
         let turnID = TurnID()
         let request = TurnRequest(
             id: turnID,
@@ -205,6 +240,278 @@ final class IndependentTaskCoordinator {
                     message: result.failureDetail ?? result.technicalSummary
                 )
             )
+        }
+    }
+}
+
+/// Routes detached worker settlement back into the conversation that admitted
+/// it. The coordinator captures stable identity before execution and never
+/// consults the currently visible workspace to decide where a result belongs.
+@MainActor
+final class BackgroundDelegationCoordinator {
+    private enum Origin: Sendable {
+        case tool
+        case command(String)
+    }
+
+    private let supervisor: DelegatedTaskSupervisor
+    private let runtime: AgentRuntime
+    private let responseCoordinator: ChatResponseCoordinator
+    private let modelRuntime: ModelRuntimeStore
+    private let conversations: ConversationStore
+    private let timeline: ChatTimelineStore
+    private let codexRuntime: CodexRuntimeStore
+    private let persistence: ConversationPersistenceService
+    private let sessions: ConversationSessionCoordinator
+    private let profiles: ProfileSelectionCoordinator
+
+    init(
+        supervisor: DelegatedTaskSupervisor,
+        runtime: AgentRuntime,
+        responseCoordinator: ChatResponseCoordinator,
+        modelRuntime: ModelRuntimeStore,
+        conversations: ConversationStore,
+        timeline: ChatTimelineStore,
+        codexRuntime: CodexRuntimeStore,
+        persistence: ConversationPersistenceService,
+        sessions: ConversationSessionCoordinator,
+        profiles: ProfileSelectionCoordinator
+    ) {
+        self.supervisor = supervisor
+        self.runtime = runtime
+        self.responseCoordinator = responseCoordinator
+        self.modelRuntime = modelRuntime
+        self.conversations = conversations
+        self.timeline = timeline
+        self.codexRuntime = codexRuntime
+        self.persistence = persistence
+        self.sessions = sessions
+        self.profiles = profiles
+    }
+
+    func submitToolTask(
+        envelope: AgentTaskEnvelope,
+        invoker: any AgentTaskInvoking,
+        parentTurnID: TurnID?
+    ) async throws -> DelegatedTaskReceipt {
+        try await submit(
+            envelope: envelope,
+            invoker: invoker,
+            parentTurnID: parentTurnID,
+            origin: .tool
+        )
+    }
+
+    func submitCommandTask(
+        command: String,
+        envelope: AgentTaskEnvelope,
+        invoker: any AgentTaskInvoking
+    ) async throws -> DelegatedTaskReceipt {
+        try await submit(
+            envelope: envelope,
+            invoker: invoker,
+            parentTurnID: nil,
+            origin: .command(command)
+        )
+    }
+
+    private func submit(
+        envelope: AgentTaskEnvelope,
+        invoker: any AgentTaskInvoking,
+        parentTurnID: TurnID?,
+        origin: Origin
+    ) async throws -> DelegatedTaskReceipt {
+        guard let threadID = conversations.activeThreadID else {
+            throw DelegatedTaskSupervisorError.missingOriginatingConversation
+        }
+        let backend = modelRuntime.activeBackend
+        let workspaceName = responseCoordinator.currentWorkspaceName
+        let journal = BackgroundToolJournal()
+        // Production workers are configured values, so their immutable model
+        // and tool context can be retained while transient parent-turn events
+        // are replaced. Test invokers have no tool event stream to isolate.
+        let retainedInvoker: any AgentTaskInvoking
+        if let configured = invoker as? ConfiguredAgentTaskInvoker {
+            retainedInvoker = configured.backgroundIsolated { event in
+                await journal.record(event)
+            }
+        } else {
+            retainedInvoker = invoker
+        }
+        // Publish busy delegation before crossing to the supervisor so an
+        // immediately completing fake or local worker cannot invert true/false.
+        responseCoordinator.delegationChanged(true)
+        let receipt = try await supervisor.submit(
+            envelope: envelope,
+            invoker: retainedInvoker,
+            parentTurnID: parentTurnID
+        ) { [weak self] result in
+            await self?.finish(
+                result: result,
+                envelope: envelope,
+                threadID: threadID,
+                backend: backend,
+                workspaceName: workspaceName,
+                journal: journal
+            )
+        }
+        if case .command(let command) = origin {
+            let acknowledgement = Self.acknowledgement(for: receipt)
+            let blocks = [
+                ChatBlock(kind: .user, text: command),
+                ChatBlock(kind: .assistant, text: acknowledgement)
+            ]
+            timeline.presentTaskTurn(
+                command: command,
+                response: acknowledgement
+            )
+            conversations.touchThread(id: threadID)
+            await appendToActiveContext(
+                blocks: blocks,
+                threadID: threadID,
+                backend: backend
+            )
+        }
+        return receipt
+    }
+
+    private func finish(
+        result: AgentTaskResult,
+        envelope: AgentTaskEnvelope,
+        threadID: String,
+        backend: ModelBackend,
+        workspaceName: String?,
+        journal: BackgroundToolJournal
+    ) async {
+        // A tool-authored task can outlive its parent response. Waiting for the
+        // conversational lane prevents rebuilding a live provider session.
+        await runtime.waitUntilIdle()
+        let response = IndependentTaskCoordinator.render(result)
+        let visibleBlocks = [ChatBlock(kind: .assistant, text: response)]
+        let artifacts = await responseCoordinator.resolveBackgroundToolArtifacts(
+            await journal.snapshot(),
+            workspaceName: workspaceName
+        )
+        let artifactBlocks = Self.blocks(for: artifacts)
+        let contextBlocks = [
+            ChatBlock(
+                kind: .user,
+                text: "Background delegated task completed: \(envelope.goal)"
+            ),
+            ChatBlock(kind: .assistant, text: response)
+        ]
+
+        if conversations.activeThreadID == threadID {
+            responseCoordinator.presentBackgroundToolArtifacts(artifacts)
+            timeline.presentTaskCompletion(visibleBlocks[0])
+            conversations.touchThread(id: threadID)
+            await appendToActiveContext(
+                blocks: contextBlocks,
+                threadID: threadID,
+                backend: modelRuntime.activeBackend
+            )
+        } else {
+            do {
+                try await persistence.append(
+                    id: threadID,
+                    blocks: artifactBlocks + visibleBlocks,
+                    transcriptEntries: backend == .codex
+                        ? []
+                        : RuntimeContextHandoff.transcript(from: contextBlocks)
+                )
+                conversations.touchThread(id: threadID)
+                // Navigation can make the origin visible while the repository
+                // actor is appending. Reconcile by stable block identity after
+                // the active response lane settles, without duplicating a load
+                // that already observed the atomic append.
+                await runtime.waitUntilIdle()
+                if conversations.activeThreadID == threadID,
+                   !timeline.blocks.contains(where: {
+                       $0.id == visibleBlocks[0].id
+                   }) {
+                    responseCoordinator.presentBackgroundToolArtifacts(artifacts)
+                    timeline.presentTaskCompletion(visibleBlocks[0])
+                    await appendToActiveContext(
+                        blocks: contextBlocks,
+                        threadID: threadID,
+                        backend: modelRuntime.activeBackend
+                    )
+                }
+            } catch {
+                print(
+                    "[TurboCode] Failed to deliver background task: \(error.localizedDescription)"
+                )
+            }
+        }
+        responseCoordinator.delegationChanged(false)
+    }
+
+    private func appendToActiveContext(
+        blocks: [ChatBlock],
+        threadID: String,
+        backend: ModelBackend
+    ) async {
+        if backend == .codex {
+            await codexRuntime.captureImportedContext(
+                turboThreadID: threadID,
+                blocks: timeline.blocks
+            )
+        } else if let transcript = await sessions.foundationModelsCanonicalTranscript() {
+            let existing = SessionRebuildHistory.prepare(
+                transcript,
+                keepingHistory: true,
+                discardingCapabilityContext: false
+            )
+            await profiles.rebuildSession(
+                restoringHistory: existing
+                    + RuntimeContextHandoff.transcript(from: blocks)
+            )
+        }
+        await sessions.persistActiveSession(id: threadID)
+    }
+
+    private nonisolated static func acknowledgement(
+        for receipt: DelegatedTaskReceipt
+    ) -> String {
+        "Background task accepted (`\(receipt.taskID)`). TurboCode will report the result when the worker finishes."
+    }
+
+    /// Converts immutable receipts into the same durable blocks used by live
+    /// presentation. Repository-only invalidations intentionally have no row;
+    /// the workspace is refreshed when its conversation becomes active.
+    private nonisolated static func blocks(
+        for artifacts: [BackgroundToolArtifact]
+    ) -> [ChatBlock] {
+        artifacts.compactMap { artifact in
+            switch artifact.receipt {
+            case .workspaceListing(let listing):
+                ChatBlock(
+                    id: "workspace-listing-\(artifact.toolCallID)",
+                    kind: .workspaceListing,
+                    text: listing.path,
+                    workspaceListing: listing
+                )
+            case .pluginWidget(let widget):
+                ChatBlock(
+                    id: "plugin-widget-\(artifact.toolCallID)",
+                    kind: .pluginWidget,
+                    text: widget.title,
+                    pluginWidget: widget
+                )
+            case .diffPatch(let receipt):
+                ChatBlock(
+                    id: receipt.transactionID,
+                    kind: .diffPatch,
+                    text: "",
+                    diffPatch: receipt.block
+                )
+            case .gitStatus(let status):
+                ChatBlock(kind: .gitStatus, text: "", gitStatus: status)
+            case .gitCommit(let commit):
+                ChatBlock(kind: .gitCommit, text: "", gitCommit: commit)
+            case .repositoryChanged:
+                nil
+            }
         }
     }
 }

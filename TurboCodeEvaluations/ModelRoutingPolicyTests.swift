@@ -209,6 +209,31 @@ struct ModelRoutingPolicyTests {
         #expect(prompt.contains("Do not claim the tool is unavailable"))
     }
 
+    @Test("Prompt explains accepted background delegation receipts")
+    func promptGuidesBackgroundDelegation() {
+        let tuning = AgentTuningConfig(
+            orchestrator: OrchestratorPolicy(
+                runsDelegatedTasksInBackground: true
+            )
+        )
+        let prompt = TurboCodeSystemPromptBuilder.build(
+            TurboCodeSystemPromptContext(
+                role: .standalone,
+                backend: .foundationApple,
+                workspaceRoot: "/workspace",
+                agentTuning: tuning,
+                toolIDs: [.delegateTask],
+                toolNames: ["delegate_task"],
+                availableSkills: [],
+                workspaceInstructions: nil
+            )
+        )
+
+        #expect(prompt.contains("accepted delegate_task receipt"))
+        #expect(prompt.contains("without waiting or polling"))
+        #expect(prompt.contains("deliver the terminal result separately"))
+    }
+
     @Test("Apple prompts receive their selected instruction-level reasoning policy")
     func applePromptIncludesReasoningPolicy() {
         let workspaceInstructions = WorkspaceInstructions(

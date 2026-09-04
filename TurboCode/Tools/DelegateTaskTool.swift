@@ -80,6 +80,87 @@ nonisolated enum AgentTaskInvocation {
     }
 }
 
+/// Stable acknowledgement returned when the harness retains a delegated task
+/// after the invoking model turn is free to settle.
+nonisolated struct DelegatedTaskReceipt: Codable, Sendable, Hashable {
+    let status: String
+    let taskID: String
+    let attemptID: String
+
+    init(envelope: AgentTaskEnvelope) {
+        status = "accepted"
+        taskID = envelope.taskID
+        attemptID = envelope.attemptID
+    }
+}
+
+/// Application-owned admission port shared by Foundation Models, Codex, and
+/// the explicit `/task` command. The invoker remains immutable worker context;
+/// the receiver decides how to retain and surface its asynchronous lifetime.
+typealias DelegatedTaskBackgroundSubmission = @Sendable (
+    _ envelope: AgentTaskEnvelope,
+    _ invoker: any AgentTaskInvoking,
+    _ parentTurnID: TurnID?
+) async throws -> DelegatedTaskReceipt
+
+nonisolated enum DelegatedTaskSupervisorError: LocalizedError, Sendable {
+    case workerAlreadyRunning
+    case missingOriginatingConversation
+
+    var errorDescription: String? {
+        switch self {
+        case .workerAlreadyRunning:
+            "A delegated task is already running in the background."
+        case .missingOriginatingConversation:
+            "TurboCode could not identify the originating conversation."
+        }
+    }
+}
+
+/// Retains one background worker independently from the conversational runtime.
+/// Single-flight admission prevents two delegated workers from racing over the
+/// same workspace while the first version of this feature is evaluated.
+actor DelegatedTaskSupervisor {
+    typealias Completion = @Sendable (AgentTaskResult) async -> Void
+
+    private var activeIdentity: String?
+    private var operation: Task<Void, Never>?
+
+    func submit(
+        envelope: AgentTaskEnvelope,
+        invoker: any AgentTaskInvoking,
+        parentTurnID: TurnID?,
+        completion: @escaping Completion
+    ) throws -> DelegatedTaskReceipt {
+        guard activeIdentity == nil else {
+            throw DelegatedTaskSupervisorError.workerAlreadyRunning
+        }
+
+        let identity = "\(envelope.taskID):\(envelope.attemptID)"
+        activeIdentity = identity
+        operation = Task { [weak self] in
+            let result = await AgentTaskInvocation.invoke(
+                invoker,
+                envelope: envelope,
+                parentTurnID: parentTurnID
+            )
+            await completion(result)
+            await self?.settle(identity: identity)
+        }
+        return DelegatedTaskReceipt(envelope: envelope)
+    }
+
+    func cancel() {
+        operation?.cancel()
+    }
+
+    private func settle(identity: String) {
+        guard activeIdentity == identity else { return }
+        operation = nil
+        activeIdentity = nil
+    }
+}
+
 /// Binds a routed worker context to the bounded task runner.
 nonisolated struct ConfiguredAgentTaskInvoker: TurnAwareAgentTaskInvoking {
     let runner: any AgentTaskRunning
@@ -105,6 +186,21 @@ nonisolated struct ConfiguredAgentTaskInvoker: TurnAwareAgentTaskInvoking {
         self.coordinator = coordinator
         self.worker = worker
         self.activityChanged = activityChanged
+    }
+
+    /// Detaches a retained worker from its parent turn's transient Activity and
+    /// tool callbacks. The background harness supplies durable callbacks whose
+    /// output can be routed by originating conversation after the turn ends.
+    func backgroundIsolated(
+        toolFinished: @escaping @Sendable (
+            AgentTaskToolOutputEvent
+        ) async -> Void
+    ) -> Self {
+        Self(
+            runner: runner,
+            context: context,
+            events: AgentTaskRunnerEvents(toolFinished: toolFinished)
+        )
     }
 
     @MainActor
@@ -169,13 +265,16 @@ struct DelegateTaskTool: Tool {
 
     let invoker: any AgentTaskInvoking
     let currentTurnID: @MainActor @Sendable () async -> TurnID?
+    let backgroundSubmission: DelegatedTaskBackgroundSubmission?
 
     init(
         invoker: any AgentTaskInvoking,
-        currentTurnID: @escaping @MainActor @Sendable () async -> TurnID? = { nil }
+        currentTurnID: @escaping @MainActor @Sendable () async -> TurnID? = { nil },
+        backgroundSubmission: DelegatedTaskBackgroundSubmission? = nil
     ) {
         self.invoker = invoker
         self.currentTurnID = currentTurnID
+        self.backgroundSubmission = backgroundSubmission
     }
 
     var name: String { "delegate_task" }
@@ -185,22 +284,36 @@ struct DelegateTaskTool: Tool {
         must inspect or change the workspace: it receives the complete worker
         tool bundle configured by the active profile. Use text when the worker only needs to
         return prose: it receives no tools.
-        TurboCode returns a JSON AgentTaskResult; inspect its outcome and remain
-        responsible for the final response.
+        TurboCode returns either a JSON AgentTaskResult or an accepted receipt
+        when background delegation is enabled. Do not wait or poll after an
+        accepted receipt; the harness reports the result when the worker ends.
         """
     }
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: DelegateTaskArguments) async throws -> String {
         let envelope = try arguments.envelope()
+        let parentTurnID = await currentTurnID()
+        if let backgroundSubmission {
+            let receipt = try await backgroundSubmission(
+                envelope,
+                invoker,
+                parentTurnID
+            )
+            return try Self.encode(receipt)
+        }
         let result = await AgentTaskInvocation.invoke(
             invoker,
             envelope: envelope,
-            parentTurnID: await currentTurnID()
+            parentTurnID: parentTurnID
         )
+        return try Self.encode(result)
+    }
+
+    private static func encode<Value: Encodable>(_ value: Value) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        let data = try encoder.encode(result)
+        let data = try encoder.encode(value)
         guard let json = String(data: data, encoding: .utf8) else {
             throw AgentTaskWorkerError.invalidEnvelopeEncoding
         }

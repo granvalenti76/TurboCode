@@ -29,6 +29,7 @@ nonisolated struct CodexLLMExecutionConfiguration: Sendable {
     let modelID: String?
     let reasoningEffort: CodexReasoningEffort?
     let delegationInvoker: (any AgentTaskInvoking)?
+    let backgroundTaskSubmission: DelegatedTaskBackgroundSubmission?
     /// Editorial Desk reuses the runtime gate while opting out of all
     /// workspace tools and approval flows.
     let allowsTools: Bool
@@ -50,6 +51,7 @@ nonisolated struct CodexLLMExecutionConfiguration: Sendable {
         modelID: String?,
         reasoningEffort: CodexReasoningEffort?,
         delegationInvoker: (any AgentTaskInvoking)?,
+        backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil,
         allowsTools: Bool = true,
         activityStarted: @escaping @MainActor @Sendable (
             CodexDynamicToolCall,
@@ -68,6 +70,7 @@ nonisolated struct CodexLLMExecutionConfiguration: Sendable {
         self.modelID = modelID
         self.reasoningEffort = reasoningEffort
         self.delegationInvoker = delegationInvoker
+        self.backgroundTaskSubmission = backgroundTaskSubmission
         self.allowsTools = allowsTools
         self.activityStarted = activityStarted
         self.activityEnded = activityEnded
@@ -152,6 +155,7 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
                 ?? codexRuntime.reasoningEffort,
             persistsModelPreference: persistsModelPreference,
             delegationInvoker: configuration.delegationInvoker,
+            backgroundTaskSubmission: configuration.backgroundTaskSubmission,
             allowsTools: configuration.allowsTools,
             runtimeSnapshotChanged: { [weak codexRuntime] snapshot, persists in
                 codexRuntime?.applyExecutionSnapshot(

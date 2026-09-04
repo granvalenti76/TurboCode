@@ -316,6 +316,7 @@ nonisolated enum CodexTurboCodeToolBridge {
         availableSkills: [TurboCodeSkillDefinition] = [],
         pluginTools: [TypeScriptPluginToolBinding] = [],
         delegationInvoker: (any AgentTaskInvoking)? = nil,
+        backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil,
         parentTurnID: TurnID? = nil
     ) async throws -> CodexToolExecution {
         if let plugin = pluginTools.first(where: {
@@ -465,9 +466,22 @@ nonisolated enum CodexTurboCodeToolBridge {
                 throw CodexToolBridgeError.unsupportedTool(call.tool)
             }
             let arguments = try delegateTaskArguments(call)
+            let envelope = try arguments.envelope()
+            if let backgroundTaskSubmission {
+                let receipt = try await backgroundTaskSubmission(
+                    envelope,
+                    delegationInvoker,
+                    parentTurnID
+                )
+                let data = try JSONEncoder().encode(receipt)
+                guard let json = String(data: data, encoding: .utf8) else {
+                    throw AgentTaskWorkerError.invalidEnvelopeEncoding
+                }
+                return .init(result: .success(json), receipt: nil)
+            }
             let result = await AgentTaskInvocation.invoke(
                 delegationInvoker,
-                envelope: try arguments.envelope(),
+                envelope: envelope,
                 parentTurnID: parentTurnID
             )
             let data = try JSONEncoder().encode(result)
@@ -827,7 +841,7 @@ nonisolated enum CodexTurboCodeToolBridge {
     /// text-only worker. Runtime policy remains application-owned.
     private static let delegateTaskSpecification = CodexDynamicToolSpec(
         name: "delegate_task",
-        description: "Delegate one goal to the configured worker. Use coding for workspace work with the profile-configured worker tools, or text for a tool-free prose response.",
+        description: "Delegate one goal to the configured worker. The result is either terminal or an accepted background receipt; after acceptance, do not wait or poll because TurboCode reports completion through its harness.",
         inputSchema: objectSchema(
             properties: [
                 "mode": enumSchema(["coding", "text"]),

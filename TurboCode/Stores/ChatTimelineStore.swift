@@ -353,6 +353,13 @@ final class ChatTimelineStore {
         blocks.append(ChatBlock(kind: .assistant, text: response))
     }
 
+    /// Appends the terminal delivery for a task whose admission was already
+    /// shown. The harness, not the user, authors this asynchronous update.
+    func presentTaskCompletion(_ block: ChatBlock) {
+        isFirstMessage = false
+        insertBeforeActivePlaceholderOrAppend(block)
+    }
+
     private func insertBeforeActivePlaceholderOrAppend(_ block: ChatBlock) {
         if let activeAssistantPlaceholderID,
            let index = blocks.firstIndex(where: { $0.id == activeAssistantPlaceholderID }) {

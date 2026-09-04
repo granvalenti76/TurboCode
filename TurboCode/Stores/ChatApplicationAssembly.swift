@@ -29,6 +29,7 @@ final class ChatApplicationAssembly {
     let profileSelectionCoordinator: ProfileSelectionCoordinator
     let conversationLifecycleCoordinator: ConversationLifecycleCoordinator
     let workspaceLifecycleCoordinator: WorkspaceLifecycleCoordinator
+    let backgroundDelegationCoordinator: BackgroundDelegationCoordinator
     let independentTaskCoordinator: IndependentTaskCoordinator
     let messageSendCoordinator: MessageSendCoordinator
     let steeringCoordinator: SteeringCoordinator
@@ -153,6 +154,29 @@ final class ChatApplicationAssembly {
             runtimeProjection: runtimeProjection,
             responseCoordinator: responseCoordinator
         )
+        let backgroundDelegationCoordinator = BackgroundDelegationCoordinator(
+            supervisor: DelegatedTaskSupervisor(),
+            runtime: agentRuntime,
+            responseCoordinator: responseCoordinator,
+            modelRuntime: modelRuntime,
+            conversations: conversations,
+            timeline: timeline,
+            codexRuntime: codexRuntime,
+            persistence: conversationPersistence,
+            sessions: sessionCoordinator,
+            profiles: profileSelectionCoordinator
+        )
+        responseCoordinator.setBackgroundTaskSubmission {
+            [weak backgroundDelegationCoordinator] envelope, invoker, parentTurnID in
+            guard let backgroundDelegationCoordinator else {
+                throw DelegatedTaskSupervisorError.missingOriginatingConversation
+            }
+            return try await backgroundDelegationCoordinator.submitToolTask(
+                envelope: envelope,
+                invoker: invoker,
+                parentTurnID: parentTurnID
+            )
+        }
         let transitionBarrier = RuntimeTransitionBarrier(
             runtime: agentRuntime,
             profiles: profileSelectionCoordinator,
@@ -201,7 +225,8 @@ final class ChatApplicationAssembly {
             presentation: presentation,
             sessions: sessionCoordinator,
             profiles: profileSelectionCoordinator,
-            lifecycle: conversationLifecycleCoordinator
+            lifecycle: conversationLifecycleCoordinator,
+            background: backgroundDelegationCoordinator
         )
         let messageSendCoordinator = MessageSendCoordinator(
             runtime: agentRuntime,
@@ -252,6 +277,7 @@ final class ChatApplicationAssembly {
         self.profileSelectionCoordinator = profileSelectionCoordinator
         self.conversationLifecycleCoordinator = conversationLifecycleCoordinator
         self.workspaceLifecycleCoordinator = workspaceLifecycleCoordinator
+        self.backgroundDelegationCoordinator = backgroundDelegationCoordinator
         self.independentTaskCoordinator = independentTaskCoordinator
         self.messageSendCoordinator = messageSendCoordinator
         self.steeringCoordinator = steeringCoordinator

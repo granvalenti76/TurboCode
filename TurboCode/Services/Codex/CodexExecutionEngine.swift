@@ -18,6 +18,7 @@ nonisolated struct CodexTurnRequest: Sendable {
     let reasoningEffort: CodexReasoningEffort
     let persistsModelPreference: Bool
     let delegationInvoker: (any AgentTaskInvoking)?
+    let backgroundTaskSubmission: DelegatedTaskBackgroundSubmission?
     let pluginTools: [TypeScriptPluginToolBinding]
     let allowsTools: Bool
 
@@ -33,6 +34,7 @@ nonisolated struct CodexTurnRequest: Sendable {
         reasoningEffort: CodexReasoningEffort,
         persistsModelPreference: Bool,
         delegationInvoker: (any AgentTaskInvoking)?,
+        backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil,
         pluginTools: [TypeScriptPluginToolBinding] = [],
         allowsTools: Bool = true
     ) {
@@ -47,6 +49,7 @@ nonisolated struct CodexTurnRequest: Sendable {
         self.reasoningEffort = reasoningEffort
         self.persistsModelPreference = persistsModelPreference
         self.delegationInvoker = delegationInvoker
+        self.backgroundTaskSubmission = backgroundTaskSubmission
         self.pluginTools = pluginTools
         self.allowsTools = allowsTools
     }
@@ -358,6 +361,11 @@ actor CodexExecutionEngine {
                         availableSkills: request.availableSkills,
                         pluginTools: pluginTools,
                         delegationInvoker: request.delegationInvoker,
+                        backgroundTaskSubmission:
+                            request.agentTuning.orchestrator
+                                .runsDelegatedTasksInBackground
+                                ? request.backgroundTaskSubmission
+                                : nil,
                         parentTurnID: request.turnID
                     )
                     result = execution.result

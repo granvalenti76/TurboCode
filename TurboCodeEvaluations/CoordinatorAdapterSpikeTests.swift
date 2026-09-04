@@ -54,6 +54,50 @@ struct CoordinatorAdapterSpikeTests {
         )
     }
 
+    @Test("Background adapter returns an accepted receipt without invoking inline")
+    func foundationModelsAdapterReturnsBackgroundReceipt() async throws {
+        let invoker = RecordingTaskInvoker()
+        let tool = DelegateTaskTool(
+            invoker: invoker,
+            backgroundSubmission: { envelope, _, _ in
+                DelegatedTaskReceipt(envelope: envelope)
+            }
+        )
+
+        let json = try await tool.call(arguments: makeArguments())
+        let receipt = try JSONDecoder().decode(
+            DelegatedTaskReceipt.self,
+            from: Data(json.utf8)
+        )
+
+        #expect(receipt.status == "accepted")
+        #expect(!receipt.taskID.isEmpty)
+        #expect(invoker.lastEnvelope == nil)
+    }
+
+    @Test("Background supervisor admits only one worker")
+    func backgroundSupervisorIsSingleFlight() async throws {
+        let supervisor = DelegatedTaskSupervisor()
+        let invoker = SuspendingTaskInvoker()
+        let first = try await supervisor.submit(
+            envelope: makeArguments().envelope(),
+            invoker: invoker,
+            parentTurnID: nil,
+            completion: { _ in }
+        )
+
+        #expect(first.status == "accepted")
+        await #expect(throws: DelegatedTaskSupervisorError.self) {
+            _ = try await supervisor.submit(
+                envelope: self.makeArguments().envelope(),
+                invoker: invoker,
+                parentTurnID: nil,
+                completion: { _ in }
+            )
+        }
+        await supervisor.cancel()
+    }
+
     @Test("Shared invocation propagates worker events and cancellation")
     func sharedInvocationPropagatesEventsAndCancellation() async throws {
         let recorder = AgentTaskEventRecorder()
@@ -89,6 +133,33 @@ struct CoordinatorAdapterSpikeTests {
         task.cancel()
 
         #expect(await task.value.outcome == .cancelled)
+    }
+
+    @Test("Background workers detach tool events from the parent turn")
+    func backgroundWorkerIsolatesParentEvents() async throws {
+        let parentRecorder = AgentTaskEventRecorder()
+        let backgroundRecorder = AgentTaskEventRecorder()
+        let configured = ConfiguredAgentTaskInvoker(
+            runner: BoundedAgentTaskRunner(
+                worker: SpikeTaskWorker(behavior: .emitEvent)
+            ),
+            context: makeContext(),
+            events: AgentTaskRunnerEvents(
+                toolStarted: { event in await parentRecorder.recordStart(event) },
+                toolFinished: { event in await parentRecorder.recordFinish(event) }
+            )
+        )
+        let retained = configured.backgroundIsolated { event in
+            await backgroundRecorder.recordFinish(event)
+        }
+
+        let result = await retained.invoke(try makeRuntimeEnvelope())
+
+        #expect(result.outcome == .completed)
+        #expect(await parentRecorder.identifiers.isEmpty)
+        #expect(await backgroundRecorder.identifiers == [
+            "finish:task-spike-runtime:attempt-spike-runtime"
+        ])
     }
 
     @Test("Codex coordinator exposes the profile-scoped tool and shared result contract")
@@ -131,6 +202,36 @@ struct CoordinatorAdapterSpikeTests {
         #expect(result.taskID == invoker.lastEnvelope?.taskID)
         #expect(result.attemptID == invoker.lastEnvelope?.attemptID)
         #expect(invoker.lastEnvelope?.verificationParameters == nil)
+    }
+
+    @Test("Codex bridge returns the shared background receipt")
+    func codexBridgeReturnsBackgroundReceipt() async throws {
+        let invoker = RecordingTaskInvoker()
+        let call = CodexDynamicToolCall(
+            rpcID: .integer(74),
+            callID: "call-background-delegate",
+            tool: "delegate_task",
+            arguments: codexArguments()
+        )
+
+        let execution = try await CodexTurboCodeToolBridge.execute(
+            call,
+            workspaceRoot: "/workspace",
+            workspaceName: "Fixture",
+            agentTuning: .default,
+            delegationInvoker: invoker,
+            backgroundTaskSubmission: { envelope, _, _ in
+                DelegatedTaskReceipt(envelope: envelope)
+            }
+        )
+        let receipt = try JSONDecoder().decode(
+            DelegatedTaskReceipt.self,
+            from: Data(execution.result.text.utf8)
+        )
+
+        #expect(execution.result.succeeded)
+        #expect(receipt.status == "accepted")
+        #expect(invoker.lastEnvelope == nil)
     }
 
     private func makeArguments() -> DelegateTaskArguments {
@@ -188,6 +289,22 @@ private final class RecordingTaskInvoker: AgentTaskInvoking {
             attemptID: envelope.attemptID,
             outcome: .completed,
             technicalSummary: "Worker completed the spike task."
+        )) ?? .invalidContractResult(
+            taskID: envelope.taskID,
+            attemptID: envelope.attemptID
+        )
+    }
+}
+
+@MainActor
+private final class SuspendingTaskInvoker: AgentTaskInvoking {
+    func invoke(_ envelope: AgentTaskEnvelope) async -> AgentTaskResult {
+        try? await Task.sleep(for: .seconds(60))
+        return (try? AgentTaskResult(
+            taskID: envelope.taskID,
+            attemptID: envelope.attemptID,
+            outcome: Task.isCancelled ? .cancelled : .completed,
+            technicalSummary: "Suspending worker settled."
         )) ?? .invalidContractResult(
             taskID: envelope.taskID,
             attemptID: envelope.attemptID

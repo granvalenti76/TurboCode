@@ -155,6 +155,7 @@ struct FirstLaunchBootstrapTests {
             fileURL: config.dynamicProfilesURL
         ).load()
         #expect(migratedTuning.schemaVersion == AgentTuningConfig.currentSchemaVersion)
+        #expect(!migratedTuning.orchestrator.runsDelegatedTasksInBackground)
         #expect(migratedProfilesValue == [legacyProfile])
         let migratedProfiles = try JSONSerialization.jsonObject(
             with: Data(contentsOf: config.dynamicProfilesURL)

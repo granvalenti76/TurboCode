@@ -69,6 +69,7 @@ final class ChatResponseCoordinator {
     private let llmRuntime: LLMRuntime
     private let workspaceNameProvider: @MainActor @Sendable () -> String?
     private let activityPresentationRequested: @MainActor @Sendable () -> Void
+    private var backgroundTaskSubmission: DelegatedTaskBackgroundSubmission?
 
     private(set) var isDelegating = false
     private(set) var activeEditGroupID: String?
@@ -140,8 +141,60 @@ final class ChatResponseCoordinator {
                 await MainActor.run {
                     self?.agentActivityChanged(event)
                 }
-            }
+            },
+            backgroundTaskSubmission: backgroundTaskSubmission
         )
+    }
+
+    /// Assembly installs the background route after profile construction has
+    /// closed its dependency cycle with this response coordinator.
+    func setBackgroundTaskSubmission(
+        _ submission: @escaping DelegatedTaskBackgroundSubmission
+    ) {
+        backgroundTaskSubmission = submission
+    }
+
+    var currentWorkspaceName: String? {
+        workspaceNameProvider()
+    }
+
+    /// Resolves receipts against the registry captured by the worker tools,
+    /// without admitting them through a conversational TurnID that has already
+    /// settled. Presentation remains a separate origin-thread decision.
+    func resolveBackgroundToolArtifacts(
+        _ events: [AgentTaskToolOutputEvent],
+        workspaceName: String?
+    ) async -> [BackgroundToolArtifact] {
+        var artifacts: [BackgroundToolArtifact] = []
+        for event in events {
+            let resolution = await ToolReceiptRouter.resolve(
+                for: event.call,
+                output: event.output,
+                registry: receiptRegistry,
+                workspaceName: workspaceName
+            )
+            if let receipt = resolution.receipt {
+                artifacts.append(
+                    BackgroundToolArtifact(
+                        toolCallID: event.call.id,
+                        receipt: receipt
+                    )
+                )
+            }
+        }
+        return artifacts
+    }
+
+    func presentBackgroundToolArtifacts(
+        _ artifacts: [BackgroundToolArtifact]
+    ) {
+        for artifact in artifacts {
+            presenter.present(
+                artifact.receipt,
+                toolCallID: artifact.toolCallID,
+                editGroupID: nil
+            )
+        }
     }
 
     /// Keeps the runtime identity at the coordinator boundary while the
@@ -305,6 +358,10 @@ final class ChatResponseCoordinator {
                 modelID: codexModelID,
                 reasoningEffort: codexReasoningEffort,
                 delegationInvoker: delegationInvoker,
+                backgroundTaskSubmission: agentTuning.orchestrator
+                    .runsDelegatedTasksInBackground
+                    ? backgroundTaskSubmission
+                    : nil,
                 activityStarted: { [weak self] call, summary in
                     guard let self, await self.ownsTurn(turnID) else { return }
                     self.toolInteractions.beginActivity(

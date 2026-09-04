@@ -1,7 +1,7 @@
 import Foundation
 
 nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
 
     /// The former one-shot PCC Shortcut was persisted as a delegated worker
     /// even though it was never a remote model from `models.json`.
@@ -138,17 +138,32 @@ nonisolated public struct OrchestratorPolicy: Codable, Hashable, Sendable {
     /// ID of the remote model used by `call_powerful_model` in orchestrator mode.
     /// The ID is resolved against `~/.turbocode/models.json` at session creation.
     public var delegateModelID: String
+    /// When enabled, `/task` and model-authored `delegate_task` calls return
+    /// control after admission while the harness retains the worker operation.
+    public var runsDelegatedTasksInBackground: Bool
 
-    public init(delegateModelID: String = "llama") {
+    public init(
+        delegateModelID: String = "llama",
+        runsDelegatedTasksInBackground: Bool = false
+    ) {
         self.delegateModelID = delegateModelID
+        self.runsDelegatedTasksInBackground = runsDelegatedTasksInBackground
     }
 
-    private enum CodingKeys: String, CodingKey { case delegateModelID }
+    private enum CodingKeys: String, CodingKey {
+        case delegateModelID, runsDelegatedTasksInBackground
+    }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         delegateModelID = try values.decodeIfPresent(String.self, forKey: .delegateModelID)
             ?? "llama"
+        // Older tuning files predate background delegation and must preserve
+        // the blocking behavior users already reviewed.
+        runsDelegatedTasksInBackground = try values.decodeIfPresent(
+            Bool.self,
+            forKey: .runsDelegatedTasksInBackground
+        ) ?? false
     }
 }
 

@@ -72,7 +72,11 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             )
         }
 
-        let toolGuidance = toolGuidance(for: tools)
+        let toolGuidance = toolGuidance(
+            for: tools,
+            runsDelegatedTasksInBackground: context.agentTuning.orchestrator
+                .runsDelegatedTasksInBackground
+        )
         if !toolGuidance.isEmpty {
             sections.append("Tool guidelines:\n" + toolGuidance.joined(separator: "\n"))
         }
@@ -226,7 +230,8 @@ nonisolated enum TurboCodeSystemPromptBuilder {
     }
 
     private static func toolGuidance(
-        for tools: Set<ToolCapabilityID>
+        for tools: Set<ToolCapabilityID>,
+        runsDelegatedTasksInBackground: Bool
     ) -> [String] {
         var lines: [String] = []
         if tools.contains(.turboCodeGuide) {
@@ -264,6 +269,9 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         }
         if tools.contains(.delegateTask) {
             lines.append("- delegate_task is available: use it when the user asks to delegate work, or when a bounded workspace task is better handled by the configured worker; choose coding for workspace work and text for prose-only output. Do not claim the tool is unavailable.")
+            if runsDelegatedTasksInBackground {
+                lines.append("- Background delegation is enabled. An accepted delegate_task receipt means the harness retained the worker: continue the current response without waiting or polling; TurboCode will deliver the terminal result separately.")
+            }
         }
         if tools.contains(.editFile)
             || tools.contains(.writeOnDevice)

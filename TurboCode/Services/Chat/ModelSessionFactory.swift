@@ -89,6 +89,9 @@ nonisolated struct ModelSessionEvents: Sendable {
     let agentActivityChanged: @Sendable (
         AgentActivityRuntimeEvent
     ) async -> Void
+    /// Optional harness admission used only when the user enables background
+    /// delegation. A nil port preserves the blocking tool contract.
+    let backgroundTaskSubmission: DelegatedTaskBackgroundSubmission?
 
     init(
         currentTurnID: @escaping @MainActor @Sendable () async -> TurnID? = { nil },
@@ -107,7 +110,8 @@ nonisolated struct ModelSessionEvents: Sendable {
         delegationChanged: @escaping @Sendable (Bool) async -> Void,
         agentActivityChanged: @escaping @Sendable (
             AgentActivityRuntimeEvent
-        ) async -> Void = { _ in }
+        ) async -> Void = { _ in },
+        backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil
     ) {
         self.currentTurnID = currentTurnID
         self.toolReceiptRegistry = toolReceiptRegistry
@@ -115,6 +119,7 @@ nonisolated struct ModelSessionEvents: Sendable {
         self.toolFinished = toolFinished
         self.delegationChanged = delegationChanged
         self.agentActivityChanged = agentActivityChanged
+        self.backgroundTaskSubmission = backgroundTaskSubmission
     }
 }
 
@@ -322,7 +327,11 @@ nonisolated enum ModelSessionFactory {
                         configuration: configuration,
                         events: events
                     ),
-                    currentTurnID: events.currentTurnID
+                    currentTurnID: events.currentTurnID,
+                    backgroundSubmission: configuration.agentTuning.orchestrator
+                        .runsDelegatedTasksInBackground
+                        ? events.backgroundTaskSubmission
+                        : nil
                 )
             )
         }

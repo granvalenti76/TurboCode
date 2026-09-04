@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 import Observation
 import Testing
 @testable import TurboCode
@@ -247,6 +248,83 @@ struct ConversationStoreTests {
 
         try await repository.delete(id: conversation.id)
         #expect(try await repository.load(id: conversation.id) == nil)
+    }
+
+    @Test("Disk repository appends a background completion atomically")
+    func diskRepositoryAppendsBackgroundCompletion() async throws {
+        let directoryURL = temporarySessionDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let repository = DiskConversationRepository(directoryURL: directoryURL)
+        let conversation = Conversation(
+            id: "background-origin",
+            title: "Origin conversation",
+            updatedAt: Date(timeIntervalSince1970: 10)
+        )
+        let initialBlocks = [
+            ChatBlock(kind: .user, text: "Start the task"),
+            ChatBlock(kind: .assistant, text: "Task accepted")
+        ]
+        let initialEntries = RuntimeContextHandoff.transcript(
+            from: initialBlocks
+        )
+        try await repository.save(
+            ConversationSnapshot(
+                conversation: conversation,
+                modelBackend: ModelBackend.foundationApple.rawValue,
+                blocks: initialBlocks,
+                transcript: Transcript(entries: initialEntries)
+            )
+        )
+
+        let completionBlock = ChatBlock(
+            kind: .assistant,
+            text: "Background task completed"
+        )
+        let completionEntries = RuntimeContextHandoff.transcript(from: [
+            ChatBlock(kind: .user, text: "Background completion"),
+            completionBlock
+        ])
+        try await repository.append(
+            id: conversation.id,
+            blocks: [completionBlock],
+            transcriptEntries: completionEntries
+        )
+
+        let loadedSnapshot = try await repository.load(id: conversation.id)
+        let loaded = try #require(loadedSnapshot)
+        #expect(loaded.blocks.map(\.text) == [
+            "Start the task",
+            "Task accepted",
+            "Background task completed"
+        ])
+        #expect(
+            loaded.transcript.map { Array($0).count }
+                == initialEntries.count + completionEntries.count
+        )
+        #expect(loaded.conversation.updatedAt > conversation.updatedAt)
+
+        let transcriptless = Conversation(
+            id: "background-without-transcript",
+            title: "Migrated conversation"
+        )
+        try await repository.save(
+            ConversationSnapshot(
+                conversation: transcriptless,
+                modelBackend: ModelBackend.foundationApple.rawValue,
+                blocks: [],
+                transcript: nil
+            )
+        )
+        try await repository.append(
+            id: transcriptless.id,
+            blocks: [completionBlock],
+            transcriptEntries: completionEntries
+        )
+        let migrated = try #require(
+            try await repository.load(id: transcriptless.id)
+        )
+        #expect(migrated.transcript.map { Array($0).count } == completionEntries.count)
     }
 
     @Test("Disk repository rejects session IDs containing path syntax")

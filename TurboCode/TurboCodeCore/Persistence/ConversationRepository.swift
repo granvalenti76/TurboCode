@@ -46,6 +46,29 @@ nonisolated protocol ConversationRepository: Sendable {
     func load(id: String) async throws -> ConversationSnapshot?
     func list() async throws -> [ConversationSnapshot]
     func delete(id: String) async throws
+    func append(
+        id: String,
+        blocks: [ChatBlock],
+        transcriptEntries: [Transcript.Entry]
+    ) async throws
+}
+
+extension ConversationRepository {
+    /// Default composition keeps lightweight test repositories source
+    /// compatible. Disk storage overrides this as one actor-isolated update.
+    func append(
+        id: String,
+        blocks: [ChatBlock],
+        transcriptEntries: [Transcript.Entry]
+    ) async throws {
+        guard let existing = try await load(id: id) else { return }
+        try await save(
+            existing.appending(
+                blocks: blocks,
+                transcriptEntries: transcriptEntries
+            )
+        )
+    }
 }
 
 /// Serializes session-file access away from MainActor presentation state.
@@ -100,6 +123,22 @@ actor DiskConversationRepository: ConversationRepository {
         try FileManager.default.removeItem(at: url)
     }
 
+    /// Load, merge, and atomic replacement stay inside the repository actor so
+    /// an inactive thread cannot lose a completion to an overlapping save.
+    func append(
+        id: String,
+        blocks: [ChatBlock],
+        transcriptEntries: [Transcript.Entry]
+    ) throws {
+        guard let existing = try load(id: id) else { return }
+        try save(
+            existing.appending(
+                blocks: blocks,
+                transcriptEntries: transcriptEntries
+            )
+        )
+    }
+
     private var encoder: JSONEncoder {
         let value = JSONEncoder()
         value.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -127,6 +166,36 @@ actor DiskConversationRepository: ConversationRepository {
             throw ConversationRepositoryError.invalidSessionID(id)
         }
         return directoryURL.appendingPathComponent("\(id).json")
+    }
+}
+
+private extension ConversationSnapshot {
+    nonisolated func appending(
+        blocks newBlocks: [ChatBlock],
+        transcriptEntries: [Transcript.Entry]
+    ) -> ConversationSnapshot {
+        var updatedConversation = conversation
+        updatedConversation.updatedAt = .now
+        let updatedTranscript: Transcript?
+        if let transcript {
+            updatedTranscript = Transcript(
+                entries: Array(transcript) + transcriptEntries
+            )
+        } else if !transcriptEntries.isEmpty {
+            // A background completion can be the first portable provider
+            // context persisted for a lightweight or migrated conversation.
+            updatedTranscript = Transcript(entries: transcriptEntries)
+        } else {
+            updatedTranscript = nil
+        }
+        return ConversationSnapshot(
+            conversation: updatedConversation,
+            modelBackend: modelBackend,
+            blocks: blocks + newBlocks,
+            transcript: updatedTranscript,
+            contextProjection: contextProjection,
+            steering: steering
+        )
     }
 }
 

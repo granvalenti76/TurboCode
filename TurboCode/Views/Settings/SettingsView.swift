@@ -619,6 +619,18 @@ struct AgentSettingsView: View {
                     }
                 }
 
+                Toggle(
+                    "Run delegated tasks in background",
+                    isOn: s.agentTuning.orchestrator.runsDelegatedTasksInBackground
+                )
+                .help(
+                    "Return control after the worker starts and report its result when it finishes."
+                )
+
+                Text("Returns control immediately. TurboCode reports the result in the originating conversation when the worker finishes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Text("Fallback for older profiles and experimental on-device delegation. New coordinator profiles store their worker in Custom Profiles.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
