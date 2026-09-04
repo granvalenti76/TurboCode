@@ -10,9 +10,26 @@ import Observation
 @MainActor
 @Observable
 final class ChatResponseCoordinator {
-    struct Result {
+    nonisolated struct InterruptedNativeTurn: Sendable {
+        let prompt: String
+        let reasoning: String
+        let assistantText: String
+    }
+
+    nonisolated struct Result: Sendable {
         let errorMessage: String?
         let touchedConversation: Bool
+        let interruptedNativeTurn: InterruptedNativeTurn?
+
+        init(
+            errorMessage: String?,
+            touchedConversation: Bool,
+            interruptedNativeTurn: InterruptedNativeTurn? = nil
+        ) {
+            self.errorMessage = errorMessage
+            self.touchedConversation = touchedConversation
+            self.interruptedNativeTurn = interruptedNativeTurn
+        }
     }
 
     /// Closes the current Codex response segment before `turn/steer` is sent;
@@ -641,16 +658,37 @@ final class ChatResponseCoordinator {
         case .cancelled:
             let content = backendResult.assistantText
             let reasoning = backendResult.reasoningText
-            let partialText = content.isEmpty ? reasoning : content
-            presenter.replaceResponse(
+            let visibleContent = Self.userVisibleAssistantText(content)
+            let assistantBlock = ChatBlock(
+                id: placeholderID,
+                kind: .assistant,
+                text: visibleContent.isEmpty
+                    ? "Response interrupted."
+                    : visibleContent,
+                model: modelName
+            )
+            let reasoningBlock = reasoning.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty ? nil : ChatBlock(
+                kind: .reasoning,
+                text: reasoning,
+                model: modelName
+            )
+            // A cancelled provider turn is still part of the conversation.
+            // Keep reasoning and visible output as distinct blocks so session
+            // reconciliation can preserve the same semantic boundary.
+            presenter.finalizeResponse(
                 placeholderID: placeholderID,
-                block: ChatBlock(
-                    id: placeholderID,
-                    kind: .assistant,
-                    text: partialText.isEmpty
-                        ? "Response interrupted."
-                        : partialText,
-                    model: modelName
+                assistantBlock: assistantBlock,
+                reasoningBlock: reasoningBlock
+            )
+            result = Result(
+                errorMessage: nil,
+                touchedConversation: false,
+                interruptedNativeTurn: InterruptedNativeTurn(
+                    prompt: modelPrompt,
+                    reasoning: reasoning,
+                    assistantText: content
                 )
             )
             await finishTurn(

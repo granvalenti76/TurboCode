@@ -6,6 +6,79 @@ import Testing
 @MainActor
 @Suite("Model switching")
 struct ModelSwitchRegressionTests {
+    @Test("Interrupted turn repair restores a transcript omitted by cancellation")
+    func interruptedTurnRepairAddsMissingSemanticEntries() throws {
+        let text: (String) -> Transcript.Segment = {
+            .text(Transcript.TextSegment(content: $0))
+        }
+        let textContent: ([Transcript.Segment]) -> String = { segments in
+            segments.compactMap { segment in
+                guard case .text(let text) = segment else { return nil }
+                return text.content
+            }.joined()
+        }
+        let baseline: [Transcript.Entry] = [
+            .prompt(Transcript.Prompt(segments: [text("Earlier request")])),
+            .response(Transcript.Response(
+                assetIDs: [],
+                segments: [text("Earlier response")]
+            ))
+        ]
+
+        let repaired = SessionRebuildHistory.reconcilingInterruptedTurn(
+            baseline: baseline,
+            current: baseline,
+            prompt: "Interrupted request",
+            reasoning: "Partial reasoning",
+            response: "Partial response"
+        )
+
+        #expect(repaired.count == 5)
+        guard case .prompt(let prompt) = repaired[2],
+              case .reasoning(let reasoning) = repaired[3],
+              case .response(let response) = repaired[4] else {
+            Issue.record("Interrupted semantic entries were not restored in order")
+            return
+        }
+        #expect(textContent(prompt.segments) == "Interrupted request")
+        #expect(textContent(reasoning.segments) == "Partial reasoning")
+        #expect(textContent(response.segments) == "Partial response")
+    }
+
+    @Test("Interrupted turn repair retains provider entries without duplication")
+    func interruptedTurnRepairKeepsExistingProviderDelta() {
+        let text: (String) -> Transcript.Segment = {
+            .text(Transcript.TextSegment(content: $0))
+        }
+        let baseline: [Transcript.Entry] = [
+            .prompt(Transcript.Prompt(segments: [text("Earlier request")]))
+        ]
+        let current = baseline + [
+            Transcript.Entry.prompt(
+                Transcript.Prompt(segments: [text("Interrupted request")])
+            ),
+            .reasoning(
+                Transcript.Reasoning(segments: [text("Recorded reasoning")])
+            ),
+            .response(
+                Transcript.Response(
+                    assetIDs: [],
+                    segments: [text("Recorded response")]
+                )
+            )
+        ]
+
+        let repaired = SessionRebuildHistory.reconcilingInterruptedTurn(
+            baseline: baseline,
+            current: current,
+            prompt: "Interrupted request",
+            reasoning: "Duplicate reasoning",
+            response: "Duplicate response"
+        )
+
+        #expect(repaired.count == current.count)
+    }
+
     @Test("Llama profiles retain completed tool calls for cache-stable history")
     func llamaProfilesKeepAppendOnlyHistory() {
         // Built-in and custom Llama profiles both resolve to llamaServer, so the

@@ -51,6 +51,9 @@ public actor ReasoningStreamRelay {
   private var pendingDelta = ""
   private var pendingSequence: UInt64 = 0
   private var deliveryScheduled = false
+  /// Request-local source of truth used when an interrupted stream settles
+  /// before the asynchronous presentation drain reaches the main actor.
+  private var accumulatedText = ""
 
   public init() {}
 
@@ -63,7 +66,14 @@ public actor ReasoningStreamRelay {
     pendingDelta.removeAll(keepingCapacity: true)
     pendingSequence = 0
     deliveryScheduled = false
+    accumulatedText.removeAll(keepingCapacity: true)
     return id
+  }
+
+  /// Returns all reasoning published for the installed request, including
+  /// deltas that are still waiting for presentation delivery.
+  public func textSnapshot() -> String {
+    accumulatedText
   }
 
   public func remove(_ id: UUID) {
@@ -74,6 +84,7 @@ public actor ReasoningStreamRelay {
     pendingDelta.removeAll(keepingCapacity: true)
     pendingSequence = 0
     deliveryScheduled = false
+    accumulatedText.removeAll(keepingCapacity: true)
   }
 
   public func publish(_ reasoning: String) {
@@ -81,6 +92,7 @@ public actor ReasoningStreamRelay {
           sink != nil,
           registrationID != nil else { return }
     nextSequence &+= 1
+    accumulatedText += reasoning
     pendingDelta += reasoning
     pendingSequence = nextSequence
 

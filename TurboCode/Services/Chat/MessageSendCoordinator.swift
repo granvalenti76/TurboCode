@@ -6,6 +6,14 @@ import Foundation
 /// UI inputs once and never makes a provider task depend on repaint cadence.
 @MainActor
 final class MessageSendCoordinator {
+    private enum InterruptedHistoryRestore {
+        case pending([FoundationModelsTranscriptEntry])
+        case restoring(
+            entries: [FoundationModelsTranscriptEntry],
+            task: Task<Bool, Never>
+        )
+    }
+
     private let runtime: AgentRuntime
     private let llmRuntime: LLMRuntime
     private let titleGenerator: any ConversationTitleGenerating
@@ -22,6 +30,9 @@ final class MessageSendCoordinator {
     private let profiles: ProfileSelectionCoordinator
     private let lifecycle: ConversationLifecycleCoordinator
     private let steering: SteeringCoordinator
+    /// Captured before runtime ownership is released, then consumed exactly
+    /// once by either the release callback or an immediate steering delivery.
+    private var interruptedHistoryRestores: [TurnID: InterruptedHistoryRestore] = [:]
 
     init(
         runtime: AgentRuntime,
@@ -126,6 +137,7 @@ final class MessageSendCoordinator {
             },
             afterRelease: { [weak self] in
                 guard let self else { return }
+                _ = await reconcileInterruptedTurnIfNeeded(turnID)
                 await steering.deliverAutomatically(after: turnID)
                 guard visibleInTimeline,
                       let titleThreadID else { return }
@@ -153,6 +165,17 @@ final class MessageSendCoordinator {
                 TurnFailure(
                     code: "steering.stale_context",
                     message: "The conversation context changed before delivery.",
+                    isRecoverable: true
+                )
+            )
+        }
+        guard await reconcileInterruptedTurnIfNeeded(
+            batch.context.originTurnID
+        ) else {
+            return .failed(
+                TurnFailure(
+                    code: "steering.history_restore_failed",
+                    message: "The interrupted response could not be restored before steering.",
                     isRecoverable: true
                 )
             )
@@ -236,6 +259,7 @@ final class MessageSendCoordinator {
                         )
                     }
                 } else {
+                    let baselineHistory = await self.foundationModelsHistory()
                     result = await responseCoordinator.performNative(
                         displayText: displayText,
                         promptText: promptText,
@@ -255,11 +279,17 @@ final class MessageSendCoordinator {
                             self.presentation.setLlamaContextUsage(usage)
                         }
                     )
+                    await self.stageInterruptedTurn(
+                        from: result,
+                        baseline: baselineHistory,
+                        turnID: turnID
+                    )
                 }
                 await resultBox.set(result)
             },
             afterRelease: { [weak self] in
                 guard let self else { return }
+                _ = await reconcileInterruptedTurnIfNeeded(turnID)
                 await steering.deliverAutomatically(after: turnID)
             }
         )
@@ -398,6 +428,7 @@ final class MessageSendCoordinator {
         presentation.runtimeStatus = .ready
         presentation.errorMessage = nil
         let backend = modelRuntime.activeBackend
+        let baselineHistory = await foundationModelsHistory()
         let result = await responseCoordinator.performNative(
             displayText: displayText,
             promptText: promptText,
@@ -417,6 +448,11 @@ final class MessageSendCoordinator {
                 presentation.setLlamaContextUsage(usage)
             }
         )
+        await stageInterruptedTurn(
+            from: result,
+            baseline: baselineHistory,
+            turnID: turnID
+        )
         presentation.errorMessage = result.errorMessage
         if result.touchedConversation, let conversationID {
             conversations.touchThread(id: conversationID)
@@ -426,6 +462,70 @@ final class MessageSendCoordinator {
            conversations.activeThreadID == conversationID {
             await sessions.persistActiveSession(id: conversationID)
         }
+    }
+
+    /// Reads only portable history. Session instructions are rebuilt from the
+    /// current profile and must never be copied into a replacement session.
+    private func foundationModelsHistory() async -> [FoundationModelsTranscriptEntry] {
+        guard let transcript = await llmRuntime.foundationModelsTranscript() else {
+            return []
+        }
+        return SessionRebuildHistory.prepare(
+            transcript,
+            keepingHistory: true,
+            discardingCapabilityContext: false
+        )
+    }
+
+    private func stageInterruptedTurn(
+        from result: ChatResponseCoordinator.Result,
+        baseline: [FoundationModelsTranscriptEntry],
+        turnID: TurnID
+    ) async {
+        guard let interrupted = result.interruptedNativeTurn else { return }
+        let current = await foundationModelsHistory()
+        interruptedHistoryRestores[turnID] = .pending(
+            SessionRebuildHistory.reconcilingInterruptedTurn(
+                baseline: baseline,
+                current: current,
+                prompt: interrupted.prompt,
+                reasoning: interrupted.reasoning,
+                response: interrupted.assistantText
+            )
+        )
+    }
+
+    /// Rebuilds after the provider adapter releases its session. Removing the
+    /// pending value before awaiting would let a concurrent send-now path race
+    /// the rebuild, so both callers join the same retained task instead.
+    private func reconcileInterruptedTurnIfNeeded(_ turnID: TurnID) async -> Bool {
+        guard let restore = interruptedHistoryRestores[turnID] else {
+            return true
+        }
+        let entries: [FoundationModelsTranscriptEntry]
+        let task: Task<Bool, Never>
+        switch restore {
+        case .pending(let pendingEntries):
+            entries = pendingEntries
+            task = Task { [profiles] in
+                await profiles.restoreInterruptedTurnHistory(pendingEntries)
+            }
+            interruptedHistoryRestores[turnID] = .restoring(
+                entries: pendingEntries,
+                task: task
+            )
+        case .restoring(let restoringEntries, let restoringTask):
+            entries = restoringEntries
+            task = restoringTask
+        }
+
+        let restored = await task.value
+        if restored {
+            interruptedHistoryRestores.removeValue(forKey: turnID)
+        } else {
+            interruptedHistoryRestores[turnID] = .pending(entries)
+        }
+        return restored
     }
 
     private var workspaceKind: String {

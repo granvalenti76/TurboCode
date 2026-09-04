@@ -225,6 +225,42 @@ struct AgentEndToEndScenarioTests {
             == ScenarioWorkspace.editedContent)
     }
 
+    @Test("Cancelled native turn preserves separate reasoning and partial response")
+    func cancellationPreservesPartialSemanticOutput() async {
+        let timeline = ChatTimelineStore()
+        let response = makeResponseCoordinator(
+            timeline: timeline,
+            activity: AgentActivityStore()
+        ) {
+            .cancelled(
+                partialContent: "A partial answer",
+                reasoning: "A partial reasoning trace"
+            )
+        }
+        let turnID = TurnID(rawValue: "turn-partial-cancel")
+
+        let result = await response.performNative(
+            displayText: "Original request",
+            promptText: "Original model prompt",
+            visibleInTimeline: true,
+            turnID: turnID,
+            blocks: [],
+            backend: .llamaServer,
+            mode: .standalone,
+            workspaceKind: "none",
+            workspaceRoot: "",
+            modelName: "Scenario Model"
+        )
+
+        #expect(!result.touchedConversation)
+        #expect(result.interruptedNativeTurn?.prompt == "Original model prompt")
+        #expect(result.interruptedNativeTurn?.reasoning == "A partial reasoning trace")
+        #expect(result.interruptedNativeTurn?.assistantText == "A partial answer")
+        #expect(timeline.blocks.map(\.kind) == [.user, .reasoning, .assistant])
+        #expect(timeline.blocks[1].text == "A partial reasoning trace")
+        #expect(timeline.blocks[2].text == "A partial answer")
+    }
+
     private func makeInvoker(
         worker: any AgentTaskWorkerExecuting,
         verifier: any AgentTaskVerificationRunning,

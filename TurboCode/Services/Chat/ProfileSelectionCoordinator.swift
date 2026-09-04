@@ -359,6 +359,23 @@ final class ProfileSelectionCoordinator {
         )
     }
 
+    /// Replaces only the released Foundation Models session after an
+    /// interrupted turn. Unlike a profile transition, this must not reset the
+    /// agent runtime because a claimed steering batch still owns its queue.
+    @discardableResult
+    func restoreInterruptedTurnHistory(
+        _ history: [FoundationModelsTranscriptEntry]
+    ) async -> Bool {
+        let configuration = modelRuntime.makeSessionConfiguration(
+            workspaceRoot: workspace.root
+        )
+        return await llmRuntime.rebuildFoundationModelsSession(
+            configuration: configuration,
+            restoringHistory: history,
+            events: responseCoordinator.modelSessionEvents
+        )
+    }
+
     /// Joins profile tasks at navigation boundaries so their delayed callbacks
     /// cannot mutate the model selected for a different conversation.
     func cancelAndWaitForTransitions() async {

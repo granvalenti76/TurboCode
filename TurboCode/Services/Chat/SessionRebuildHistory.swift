@@ -115,6 +115,82 @@ nonisolated enum SessionRebuildHistory {
         }
     }
 
+    /// Repairs the semantic history of a provider turn that was cancelled
+    /// before Foundation Models committed a complete transcript entry set.
+    /// Existing turn-local entries win so completed tool calls are retained;
+    /// only missing prompt, reasoning, and partial response entries are added.
+    static func reconcilingInterruptedTurn(
+        baseline: [Transcript.Entry],
+        current: [Transcript.Entry],
+        prompt: String,
+        reasoning: String,
+        response: String
+    ) -> [Transcript.Entry] {
+        let currentDelta = current.count >= baseline.count
+            ? Array(current.dropFirst(baseline.count))
+            : []
+        var turnEntries = currentDelta
+
+        let containsPrompt = turnEntries.contains { entry in
+            if case .prompt = entry { return true }
+            return false
+        }
+        if !containsPrompt {
+            turnEntries.insert(.prompt(promptEntry(prompt)), at: 0)
+        }
+
+        let meaningfulReasoning = reasoning.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let containsReasoning = turnEntries.contains { entry in
+            if case .reasoning = entry { return true }
+            return false
+        }
+        if !meaningfulReasoning.isEmpty, !containsReasoning {
+            let insertionIndex = turnEntries.firstIndex { entry in
+                switch entry {
+                case .toolCalls, .response:
+                    return true
+                default:
+                    return false
+                }
+            } ?? turnEntries.endIndex
+            turnEntries.insert(
+                .reasoning(reasoningEntry(reasoning)),
+                at: insertionIndex
+            )
+        }
+
+        let meaningfulResponse = response.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        let containsResponse = turnEntries.contains { entry in
+            if case .response = entry { return true }
+            return false
+        }
+        if !meaningfulResponse.isEmpty, !containsResponse {
+            turnEntries.append(.response(responseEntry(response)))
+        }
+
+        return baseline + turnEntries
+    }
+
+    private static func promptEntry(_ text: String) -> Transcript.Prompt {
+        Transcript.Prompt(segments: [textSegment(text)])
+    }
+
+    private static func reasoningEntry(_ text: String) -> Transcript.Reasoning {
+        Transcript.Reasoning(segments: [textSegment(text)])
+    }
+
+    private static func responseEntry(_ text: String) -> Transcript.Response {
+        Transcript.Response(assetIDs: [], segments: [textSegment(text)])
+    }
+
+    private static func textSegment(_ text: String) -> Transcript.Segment {
+        .text(Transcript.TextSegment(content: text))
+    }
+
     /// Best-effort migration for sessions saved before semantic transcripts
     /// were persisted. Presentation-only blocks are intentionally ignored.
     static func fromVisibleBlocks(_ blocks: [ChatBlock]) -> [Transcript.Entry] {

@@ -85,15 +85,22 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
             )
             : nil
 
+        enum CompletionDisposition {
+            case completed
+            case repetitiveOutput
+            case cancelled
+            case failed(String)
+        }
+
         var outcome: AgentRunOutcome = .success
         var recordedError: Error?
         var generatedCharacters = 0
+        var disposition = CompletionDisposition.completed
         var didRecordFirstToken = false
         var content = ""
         var reasoning = ""
         var latestInputTokenCount: Int?
         var latestUsage: LanguageModelSession.Usage?
-        var result: Outcome
         let reasoningRelayID: UUID?
         let relayProjection = ReasoningStreamProjection()
 
@@ -176,31 +183,45 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
                 }
             }
             try Task.checkCancellation()
-            result = .completed(content: content, reasoning: reasoning)
         } catch OnDeviceStreamingGuard.Failure.repetitiveOutput {
             outcome = .failed
-            result = .repetitiveOutput(
-                partialContent: content,
-                reasoning: reasoning
-            )
+            disposition = .repetitiveOutput
         } catch where error is CancellationError || Task.isCancelled {
             outcome = .cancelled
-            result = .cancelled(partialContent: content, reasoning: reasoning)
+            disposition = .cancelled
         } catch {
             outcome = .failed
             recordedError = error
-            result = .failed(
-                message: error.localizedDescription,
-                partialContent: content,
-                reasoning: reasoning
-            )
+            disposition = .failed(error.localizedDescription)
         }
 
         // A cancelled or failed stream may not yield a final Foundation Models
-        // transcript snapshot. Preserve the request-scoped transport projection
-        // so the visible partial response remains complete.
+        // transcript snapshot. Resolve the request-scoped transport projection
+        // before constructing the outcome so callers receive the recovered text.
+        if let relay = request.reasoningStreamRelay {
+            reasoning = Self.accumulatedReasoning(
+                previous: reasoning,
+                incoming: await relay.textSnapshot()
+            )
+        }
         if reasoning.isEmpty {
             reasoning = await relayProjection.text
+        }
+        generatedCharacters = max(generatedCharacters, reasoning.count)
+
+        let result: Outcome = switch disposition {
+        case .completed:
+            .completed(content: content, reasoning: reasoning)
+        case .repetitiveOutput:
+            .repetitiveOutput(partialContent: content, reasoning: reasoning)
+        case .cancelled:
+            .cancelled(partialContent: content, reasoning: reasoning)
+        case .failed(let message):
+            .failed(
+                message: message,
+                partialContent: content,
+                reasoning: reasoning
+            )
         }
 
         if request.backend == .llamaServer,

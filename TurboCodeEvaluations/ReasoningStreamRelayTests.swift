@@ -51,6 +51,19 @@ struct ReasoningStreamRelayTests {
         #expect(secondRecorder.events.first?.delta == "second")
     }
 
+    @Test("Snapshot includes reasoning before presentation delivery settles")
+    func snapshotIsIndependentFromPresentationDrain() async {
+        let relay = ReasoningStreamRelay()
+        let requestID = await relay.install { _ in }
+
+        await relay.publish("first")
+        await relay.publish(" second")
+
+        #expect(await relay.textSnapshot() == "first second")
+        await relay.remove(requestID)
+        #expect(await relay.textSnapshot().isEmpty)
+    }
+
     private func waitForEvents(
         _ recorder: RelayEventRecorder,
         count: Int
