@@ -361,7 +361,8 @@ actor LLMRuntime {
             : ProviderLanguageModel(
                 configuration: configuration.remoteModel,
                 credential: configuration.remoteModel.credential,
-                reasoningStreamRelay: nil
+                reasoningStreamRelay: nil,
+                reasoningEffort: reasoningEffort
             )
         let result = await AgentBenchmarkRunner.runSuite(
             backend: configuration.backend,

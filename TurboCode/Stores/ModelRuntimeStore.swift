@@ -47,7 +47,8 @@ final class ModelRuntimeStore {
         FoundationModelsBootstrapConfiguration(
             backend: activeBackend,
             usesSystemModel: activeBackend == .foundationApple,
-            remoteModel: activeRemoteModel ?? RemoteModelConfig.fallbackLlama
+            remoteModel: activeRemoteModel ?? RemoteModelConfig.fallbackLlama,
+            reasoningEffort: reasoningEffort
         )
     }
 
@@ -61,6 +62,20 @@ final class ModelRuntimeStore {
             || (
                 activeRemoteModel?.supportsReasoning ?? false
             )
+    }
+
+    /// Separates reasoning output capability from user-adjustable effort. A
+    /// server-managed endpoint may stream reasoning while intentionally
+    /// ignoring the composer's effort selector.
+    var activeModelOffersReasoningControl: Bool {
+        if activeBackend == .codex || activeBackend == .foundationApple {
+            return true
+        }
+        guard let model = activeRemoteModel, model.supportsReasoning else {
+            return false
+        }
+        return model.reasoningTransport == .deepseekThinking
+            || model.reasoningConfiguration.mode == .requestTokenBudget
     }
 
     var reasoningEffort: ReasoningEffort? {

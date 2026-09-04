@@ -21,6 +21,10 @@ struct SettingsTabView: View {
                 .tabItem { Label("Providers", systemImage: "network") }
                 .tag(SettingsSection.providers)
 
+            ReasoningSettingsView()
+                .tabItem { Label("Reasoning", systemImage: "brain") }
+                .tag(SettingsSection.reasoning)
+
             AgentSettingsView()
                 .tabItem { Label("Agents", systemImage: "wand.and.stars") }
                 .tag(SettingsSection.agents)
@@ -382,6 +386,158 @@ struct GeneralSettingsView: View {
 
 // MARK: - Provider Settings
 
+struct ReasoningSettingsView: View {
+    @Environment(SettingsStore.self) private var settings
+    @Environment(ChatStore.self) private var chatStore
+    @State private var selectedModelID = ""
+    @State private var reasoningDraft: RemoteReasoningConfiguration = .serverManaged
+    @State private var reasoningSaveError: String?
+
+    var body: some View {
+        Form {
+            Section("Remote Reasoning") {
+                if configurableModels.isEmpty {
+                    Text("No compatible remote models are configured.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Model", selection: $selectedModelID) {
+                        ForEach(configurableModels) { model in
+                            Text(model.name).tag(model.id)
+                        }
+                    }
+
+                    Picker("Control", selection: $reasoningDraft.mode) {
+                        Text("Managed by server")
+                            .tag(RemoteReasoningControlMode.serverManaged)
+                        Text("Per-request token budget")
+                            .tag(RemoteReasoningControlMode.requestTokenBudget)
+                    }
+
+                    if reasoningDraft.mode == .requestTokenBudget {
+                        LabeledContent("Low") {
+                            tokenBudgetField($reasoningDraft.lowTokenBudget)
+                        }
+                        LabeledContent("Medium") {
+                            tokenBudgetField($reasoningDraft.mediumTokenBudget)
+                        }
+                        LabeledContent("High") {
+                            tokenBudgetField($reasoningDraft.highTokenBudget)
+                        }
+                        Toggle("Unlimited maximum", isOn: unlimitedMaximumBinding)
+                        if reasoningDraft.maximumTokenBudget != nil {
+                            LabeledContent("Maximum") {
+                                tokenBudgetField(finiteMaximumBinding)
+                            }
+                        }
+                    }
+
+                    Text(reasoningExplanation)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if let reasoningSaveError {
+                        Label(reasoningSaveError, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button("Apply") {
+                            applyReasoningConfiguration()
+                        }
+                        .disabled(!reasoningDraftHasChanges)
+                    }
+                }
+            }
+
+        }
+        .formStyle(.grouped)
+        .padding()
+        .task {
+            selectInitialReasoningModelIfNeeded()
+        }
+        .onChange(of: selectedModelID) {
+            loadReasoningDraft()
+        }
+    }
+
+    private var configurableModels: [RemoteModelConfig] {
+        settings.remoteModels.filter {
+            $0.provider == .openAICompatible && $0.role == .local
+        }
+    }
+
+    private var selectedReasoningModel: RemoteModelConfig? {
+        configurableModels.first(where: { $0.id == selectedModelID })
+    }
+
+    private var reasoningDraftHasChanges: Bool {
+        guard let selectedReasoningModel else { return false }
+        return reasoningDraft != selectedReasoningModel.reasoningConfiguration
+    }
+
+    private var reasoningExplanation: String {
+        switch reasoningDraft.mode {
+        case .serverManaged:
+            "TurboCode adds no reasoning fields. The endpoint uses its launch and template configuration."
+        case .requestTokenBudget:
+            "TurboCode sends a thinking switch and the selected token budget with each request."
+        }
+    }
+
+    private var unlimitedMaximumBinding: Binding<Bool> {
+        Binding(
+            get: { reasoningDraft.maximumTokenBudget == nil },
+            set: { isUnlimited in
+                reasoningDraft.maximumTokenBudget = isUnlimited
+                    ? nil
+                    : max(reasoningDraft.highTokenBudget, 16_384)
+            }
+        )
+    }
+
+    private var finiteMaximumBinding: Binding<Int> {
+        Binding(
+            get: { reasoningDraft.maximumTokenBudget ?? 16_384 },
+            set: { reasoningDraft.maximumTokenBudget = $0 }
+        )
+    }
+
+    private func tokenBudgetField(_ value: Binding<Int>) -> some View {
+        TextField("Tokens", value: value, format: .number)
+            .multilineTextAlignment(.trailing)
+            .monospacedDigit()
+            .frame(width: 120)
+    }
+
+    private func selectInitialReasoningModelIfNeeded() {
+        guard !configurableModels.isEmpty else { return }
+        if !configurableModels.contains(where: { $0.id == selectedModelID }) {
+            selectedModelID = configurableModels[0].id
+        }
+        loadReasoningDraft()
+    }
+
+    private func loadReasoningDraft() {
+        guard let selectedReasoningModel else { return }
+        reasoningDraft = selectedReasoningModel.reasoningConfiguration
+        reasoningSaveError = nil
+    }
+
+    private func applyReasoningConfiguration() {
+        do {
+            try settings.updateReasoningConfiguration(
+                reasoningDraft,
+                for: selectedModelID
+            )
+            reasoningSaveError = nil
+            Task { await chatStore.reloadRemoteModels() }
+        } catch {
+            reasoningSaveError = error.localizedDescription
+        }
+    }
+}
+
 struct ProviderSettingsView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(ChatStore.self) private var chatStore
@@ -412,7 +568,6 @@ struct ProviderSettingsView: View {
                         .foregroundStyle(.red)
                 }
             }
-
         }
         .formStyle(.grouped)
         .padding()

@@ -152,7 +152,10 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         case .concise:
             guidelines.append("Keep responses concise and include only details needed to act or verify.")
         case .balanced:
-            guidelines.append("Keep responses focused, with enough implementation and verification detail to be useful.")
+            // Balanced is the neutral default. The shared personality already
+            // adapts depth to the request, so another length directive here
+            // would reintroduce a fixed stylistic bias.
+            break
         case .detailed:
             guidelines.append("Explain decisions and verification in detail without repeating tool output.")
         }
@@ -165,9 +168,9 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         return "Guidelines:\n" + guidelines.map { "- \($0)" }.joined(separator: "\n")
     }
 
-    /// Llama's OpenAI-compatible transport has no reasoning-effort request
-    /// field, and Apple On-Device needs a consistent product-level policy.
-    /// Keep this guidance out of hosted providers that expose native controls.
+    /// Apple On-Device has no request transport for effort, so it retains an
+    /// instruction-level policy. Remote endpoints use their configured wire
+    /// contract and must not receive a second, potentially conflicting policy.
     private static func reasoningGuidance(
         for context: TurboCodeSystemPromptContext
     ) -> String? {
@@ -175,11 +178,9 @@ nonisolated enum TurboCodeSystemPromptBuilder {
 
         let runtime: String
         switch context.backend {
-        case .llamaServer:
-            runtime = "Llama"
         case .foundationApple:
             runtime = "Apple On-Device"
-        case .foundationServe, .premium, .codex:
+        case .llamaServer, .foundationServe, .premium, .codex:
             return nil
         }
 
@@ -212,11 +213,9 @@ nonisolated enum TurboCodeSystemPromptBuilder {
 
         let runtime: String
         switch context.backend {
-        case .llamaServer:
-            runtime = "Llama"
         case .foundationApple:
             runtime = "Apple On-Device"
-        case .foundationServe, .premium, .codex:
+        case .llamaServer, .foundationServe, .premium, .codex:
             return nil
         }
 
@@ -270,11 +269,6 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             || tools.contains(.writeOnDevice)
             || tools.contains(.fileSystem) {
             lines.append("- Preserve real newline characters and blank paragraph breaks in long-form content.")
-        }
-        if tools.contains(.listWorkspace)
-            || tools.contains(.editFile)
-            || tools.contains(.git) {
-            lines.append("- Structured tool results and native receipts are already visible; do not repeat their contents unless the user asks for analysis.")
         }
         return lines
     }

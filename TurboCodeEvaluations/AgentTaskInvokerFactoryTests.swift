@@ -26,8 +26,8 @@ struct AgentTaskInvokerFactoryTests {
         )
     }
 
-    @Test("Local delegate prompt uses the worker reasoning effort")
-    func localDelegatePromptUsesWorkerEffort() {
+    @Test("Remote delegate prompt leaves reasoning control to its transport")
+    func remoteDelegatePromptOmitsReasoningPolicy() {
         let factory = AgentTaskInvokerFactory()
         let workerEffort = factory.makeIndependentTaskInvoker(
             configuration: Self.makeConfiguration(
@@ -44,11 +44,7 @@ struct AgentTaskInvokerFactoryTests {
             events: Self.noopEvents
         )
 
-        #expect(
-            workerEffort.context.instructions.contains(
-                "Reasoning policy (Llama, X-High)"
-            )
-        )
+        #expect(!workerEffort.context.instructions.contains("Reasoning policy ("))
         #expect(
             !coordinatorEffort.context.instructions.contains(
                 "Reasoning policy ("

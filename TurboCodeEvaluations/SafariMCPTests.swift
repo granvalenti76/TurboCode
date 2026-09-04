@@ -10,6 +10,15 @@ struct SafariMCPTests {
         #expect(!AgentTuningConfig.default.experimental.safariMCPEnabled)
     }
 
+    @Test("Safari activation guidance preserves unrelated tool access")
+    func activationGuidanceDoesNotSuppressOtherTools() {
+        let instructions = SafariMCPFeature.activationInstructions
+
+        #expect(instructions.contains("leave this skill inactive and continue normally"))
+        #expect(instructions.contains("does not restrict any other available"))
+        #expect(!instructions.contains("without calling tools"))
+    }
+
     @Test("Legacy agent configuration keeps Safari MCP disabled")
     func legacyConfigurationDefaultsToDisabled() throws {
         let data = try JSONSerialization.data(withJSONObject: [

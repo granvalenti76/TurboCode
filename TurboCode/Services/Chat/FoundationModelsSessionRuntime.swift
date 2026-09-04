@@ -10,6 +10,19 @@ struct FoundationModelsBootstrapConfiguration {
     let backend: ModelBackend
     let usesSystemModel: Bool
     let remoteModel: RemoteModelConfig
+    let reasoningEffort: ReasoningEffort?
+
+    init(
+        backend: ModelBackend,
+        usesSystemModel: Bool,
+        remoteModel: RemoteModelConfig,
+        reasoningEffort: ReasoningEffort? = nil
+    ) {
+        self.backend = backend
+        self.usesSystemModel = usesSystemModel
+        self.remoteModel = remoteModel
+        self.reasoningEffort = reasoningEffort
+    }
 }
 
 /// Value-only history type exposed at persistence and navigation boundaries.
@@ -46,7 +59,8 @@ actor FoundationModelsSessionRuntime {
                 credential: configuration.remoteModel.credential,
                 reasoningStreamRelay: configuration.backend == .llamaServer
                     ? relay
-                    : nil
+                    : nil,
+                reasoningEffort: configuration.reasoningEffort
             )
         session = LanguageModelSession(model: model)
     }

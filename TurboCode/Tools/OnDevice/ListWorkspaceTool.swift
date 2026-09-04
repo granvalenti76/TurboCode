@@ -54,8 +54,7 @@ struct ListWorkspaceTool: Tool {
     var description: String {
         """
         List one directory in the active workspace. Pass a workspace-relative
-        path; use "." for the root. The result is read-only and shown natively,
-        so do not repeat its entries unless the user asks for analysis.
+        path; use "." for the root. The result is read-only and shown natively.
         """
     }
     var includesSchemaInInstructions: Bool { true }

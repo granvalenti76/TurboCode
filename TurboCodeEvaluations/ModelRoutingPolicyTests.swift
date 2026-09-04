@@ -209,24 +209,23 @@ struct ModelRoutingPolicyTests {
         #expect(prompt.contains("Do not claim the tool is unavailable"))
     }
 
-    @Test("Llama and Apple prompts receive their selected reasoning policy")
-    func promptIncludesLocalReasoningPolicy() {
+    @Test("Apple prompts receive their selected instruction-level reasoning policy")
+    func applePromptIncludesReasoningPolicy() {
         let workspaceInstructions = WorkspaceInstructions(
             relativePath: "AGENTS.md",
             content: "Prefer focused tests.",
             revision: FileRevision.hash("Prefer focused tests.")
         )
-        for (backend, effort, expected) in [
-            (ModelBackend.llamaServer, ReasoningEffort.low, "shortest sound reasoning path"),
-            (ModelBackend.llamaServer, .medium, "identify the important steps"),
-            (ModelBackend.llamaServer, .high, "form a concrete plan"),
-            (ModelBackend.llamaServer, .xhigh, "Treat correctness as the primary objective"),
-            (ModelBackend.foundationApple, .xhigh, "Apple On-Device, X-High")
+        for (effort, expected) in [
+            (ReasoningEffort.low, "shortest sound reasoning path"),
+            (.medium, "identify the important steps"),
+            (.high, "form a concrete plan"),
+            (.xhigh, "Treat correctness as the primary objective")
         ] {
             let prompt = TurboCodeSystemPromptBuilder.build(
                 TurboCodeSystemPromptContext(
                     role: .standalone,
-                    backend: backend,
+                    backend: .foundationApple,
                     workspaceRoot: "/workspace",
                     agentTuning: .default,
                     toolIDs: [],
@@ -252,9 +251,9 @@ struct ModelRoutingPolicyTests {
         }
     }
 
-    @Test("Hosted providers do not receive local prompt reasoning policy")
-    func hostedPromptsOmitLocalReasoningPolicy() {
-        for backend in [ModelBackend.foundationServe, .premium, .codex] {
+    @Test("Remote providers do not receive prompt-level reasoning policy")
+    func remotePromptsOmitReasoningPolicy() {
+        for backend in [ModelBackend.llamaServer, .foundationServe, .premium, .codex] {
             let prompt = TurboCodeSystemPromptBuilder.build(
                 TurboCodeSystemPromptContext(
                     role: .standalone,

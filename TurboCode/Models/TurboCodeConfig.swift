@@ -552,6 +552,19 @@ public final class TurboCodeConfig {
             .filter { !$0.isRetiredPCC }
     }
 
+    /// Persists the complete model catalog after a Settings edit. Callers
+    /// replace one entry in their in-memory snapshot first so unrelated model
+    /// metadata and locally configured endpoints remain untouched.
+    public func saveRemoteModels(_ models: [RemoteModelConfig]) throws {
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let validated = try models.map { model in
+            var model = model
+            model.reasoningConfiguration = try model.reasoningConfiguration.validated()
+            return model
+        }
+        try encoder.encode(validated).write(to: modelsURL, options: .atomic)
+    }
+
     private func migrateRemoteModels() throws {
         var models: [RemoteModelConfig]
         if FileManager.default.fileExists(atPath: modelsURL.path) {
@@ -593,6 +606,87 @@ nonisolated public enum RemoteReasoningTransport: String, Codable, Hashable, Sen
     case none
 }
 
+/// Declares which side owns reasoning intensity for an OpenAI-compatible
+/// endpoint. This is explicit configuration: model names are never inspected
+/// to infer a wire contract.
+nonisolated public enum RemoteReasoningControlMode: String, Codable, Hashable, Sendable {
+    case serverManaged
+    case requestTokenBudget
+}
+
+/// Per-model request budgets used only when request-level control is enabled.
+/// A nil maximum is encoded on the wire as the endpoint's unlimited sentinel.
+nonisolated public struct RemoteReasoningConfiguration: Codable, Hashable, Sendable {
+    public var mode: RemoteReasoningControlMode
+    public var lowTokenBudget: Int
+    public var mediumTokenBudget: Int
+    public var highTokenBudget: Int
+    public var maximumTokenBudget: Int?
+
+    public init(
+        mode: RemoteReasoningControlMode = .serverManaged,
+        lowTokenBudget: Int = 512,
+        mediumTokenBudget: Int = 2_048,
+        highTokenBudget: Int = 8_192,
+        maximumTokenBudget: Int? = nil
+    ) {
+        self.mode = mode
+        self.lowTokenBudget = lowTokenBudget
+        self.mediumTokenBudget = mediumTokenBudget
+        self.highTokenBudget = highTokenBudget
+        self.maximumTokenBudget = maximumTokenBudget
+    }
+
+    public static let serverManaged = RemoteReasoningConfiguration()
+    public static let requestTokenBudget = RemoteReasoningConfiguration(
+        mode: .requestTokenBudget
+    )
+
+    private enum CodingKeys: String, CodingKey {
+        case mode, lowTokenBudget, mediumTokenBudget, highTokenBudget
+        case maximumTokenBudget
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        mode = try values.decodeIfPresent(RemoteReasoningControlMode.self, forKey: .mode)
+            ?? .serverManaged
+        lowTokenBudget = try values.decodeIfPresent(Int.self, forKey: .lowTokenBudget) ?? 512
+        mediumTokenBudget = try values.decodeIfPresent(Int.self, forKey: .mediumTokenBudget)
+            ?? 2_048
+        highTokenBudget = try values.decodeIfPresent(Int.self, forKey: .highTokenBudget)
+            ?? 8_192
+        maximumTokenBudget = try values.decodeIfPresent(Int.self, forKey: .maximumTokenBudget)
+    }
+
+    func validated() throws -> Self {
+        let namedBudgets = [
+            ("lowTokenBudget", lowTokenBudget),
+            ("mediumTokenBudget", mediumTokenBudget),
+            ("highTokenBudget", highTokenBudget),
+        ]
+        for (name, value) in namedBudgets where !(1...1_048_576).contains(value) {
+            throw RemoteReasoningConfigurationError.invalidBudget(name)
+        }
+        if let maximumTokenBudget,
+           !(1...1_048_576).contains(maximumTokenBudget) {
+            throw RemoteReasoningConfigurationError.invalidBudget("maximumTokenBudget")
+        }
+        return self
+    }
+}
+
+nonisolated private enum RemoteReasoningConfigurationError: LocalizedError {
+    case invalidBudget(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidBudget(let field):
+            "\(field) must be between 1 and 1,048,576 tokens."
+        }
+    }
+}
+
 nonisolated public enum RemoteRepositoryMapCapability: String, Codable, Hashable, Sendable {
     case none
     case compact
@@ -618,6 +712,7 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
     public var provider: RemoteModelProvider
     public var role: RemoteModelRole
     public var reasoningTransport: RemoteReasoningTransport
+    public var reasoningConfiguration: RemoteReasoningConfiguration
     public var supportsReasoning: Bool
     public var supportsGuidedGeneration: Bool
     public var contextWindowTokens: Int
@@ -641,6 +736,7 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
         provider: RemoteModelProvider = .openAICompatible,
         role: RemoteModelRole = .local,
         reasoningTransport: RemoteReasoningTransport = .contextOptions,
+        reasoningConfiguration: RemoteReasoningConfiguration = .serverManaged,
         supportsReasoning: Bool = true,
         supportsGuidedGeneration: Bool = true,
         contextWindowTokens: Int = 32_768,
@@ -652,6 +748,7 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
         self.modelName = modelName; self.temperature = temperature
         self.provider = provider; self.role = role
         self.reasoningTransport = reasoningTransport
+        self.reasoningConfiguration = reasoningConfiguration
         self.supportsReasoning = supportsReasoning
         self.supportsGuidedGeneration = supportsGuidedGeneration
         self.contextWindowTokens = contextWindowTokens
@@ -661,7 +758,8 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
 
     private enum CodingKeys: String, CodingKey {
         case id, name, url, modelName, temperature, provider, role
-        case reasoningTransport, supportsReasoning, supportsGuidedGeneration
+        case reasoningTransport, reasoningConfiguration
+        case supportsReasoning, supportsGuidedGeneration
         case contextWindowTokens, repositoryMap
         case credential, enabled
     }
@@ -679,6 +777,10 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
             ?? (id == "apple-pcc" ? .pcc : (provider == .deepseek ? .premium : .local))
         reasoningTransport = try values.decodeIfPresent(RemoteReasoningTransport.self, forKey: .reasoningTransport)
             ?? (provider == .deepseek ? .deepseekThinking : (role == .pcc ? .none : .contextOptions))
+        reasoningConfiguration = try values.decodeIfPresent(
+            RemoteReasoningConfiguration.self,
+            forKey: .reasoningConfiguration
+        ) ?? .serverManaged
         supportsReasoning = try values.decodeIfPresent(Bool.self, forKey: .supportsReasoning)
             ?? (role != .pcc)
         supportsGuidedGeneration = try values.decodeIfPresent(Bool.self, forKey: .supportsGuidedGeneration)

@@ -105,6 +105,22 @@ struct WorkspaceInstructionsTests {
         #expect(!prompt.contains("write_ondevice"))
     }
 
+    @Test("Prompt leaves discussion of tool results to the model")
+    func promptDoesNotSilenceToolResults() {
+        let prompt = TurboCodeSystemPromptBuilder.build(
+            makePromptContext(
+                toolIDs: [.listWorkspace, .editFile, .git],
+                toolNames: ["list_workspace", "edit_file", "git"]
+            )
+        )
+        let listingTool = ListWorkspaceTool(workspaceRoot: "/tmp/workspace")
+
+        #expect(!prompt.contains("do not repeat their contents"))
+        #expect(!prompt.contains("unless the user asks for analysis"))
+        #expect(!listingTool.description.contains("do not repeat"))
+        #expect(!listingTool.description.contains("unless the user asks for analysis"))
+    }
+
     @Test("Prompt names only the SDK and plugin locations")
     func bashPromptKeepsOnlyPluginLocations() {
         let prompt = TurboCodeSystemPromptBuilder.build(
@@ -124,8 +140,32 @@ struct WorkspaceInstructionsTests {
         #expect(!prompt.contains("JSON-RPC handshake plus one real tool call"))
     }
 
-    @Test("Prompt includes the shared personality exactly once")
-    func promptUsesSharedPersonality() {
+    @Test("Prompt includes the adaptive personality once without fixed brevity bias")
+    func promptUsesAdaptivePersonality() {
+        let prompt = TurboCodeSystemPromptBuilder.build(
+            makePromptContext(
+                toolIDs: [],
+                toolNames: []
+            )
+        )
+        let marker = "Be a calm, perceptive collaborator in ideas and actions."
+
+        #expect(prompt.contains(marker))
+        #expect(
+            prompt.components(
+                separatedBy: marker
+            ).count == 2
+        )
+        #expect(prompt.contains("Match the depth, structure, and tone of the response"))
+        #expect(prompt.contains("without artificial brevity or padding"))
+        #expect(!prompt.contains("what can be left out"))
+        #expect(!prompt.contains("over maximal output"))
+        #expect(!prompt.contains("overbuilt"))
+    }
+
+    @Test("Balanced remains the neutral default response style")
+    func balancedStyleAddsNoFixedDepthDirective() {
+        #expect(AgentPolicy().responseStyle == .balanced)
         let prompt = TurboCodeSystemPromptBuilder.build(
             makePromptContext(
                 toolIDs: [],
@@ -133,12 +173,25 @@ struct WorkspaceInstructionsTests {
             )
         )
 
-        #expect(prompt.contains("Be a calm, perceptive editor of ideas and actions."))
-        #expect(
-            prompt.components(
-                separatedBy: "Be a calm, perceptive editor of ideas and actions."
-            ).count == 2
+        #expect(prompt.contains("Match the depth, structure, and tone of the response"))
+        #expect(!prompt.contains("Keep responses focused"))
+        #expect(!prompt.contains("Keep responses concise"))
+        #expect(!prompt.contains("Explain decisions and verification in detail"))
+    }
+
+    @Test("Explicit response styles retain their requested guidance")
+    func explicitResponseStylesRemainAvailable() {
+        let concise = TurboCodeSystemPromptBuilder.build(
+            makePromptContext(responseStyle: .concise)
         )
+        let detailed = TurboCodeSystemPromptBuilder.build(
+            makePromptContext(responseStyle: .detailed)
+        )
+
+        #expect(concise.contains("Keep responses concise"))
+        #expect(!concise.contains("Explain decisions and verification in detail"))
+        #expect(detailed.contains("Explain decisions and verification in detail"))
+        #expect(!detailed.contains("Keep responses concise"))
     }
 
     @Test("Codex keeps workspace operations on TurboCode dynamic tools")
@@ -180,13 +233,16 @@ struct WorkspaceInstructionsTests {
     private func makePromptContext(
         toolIDs: [ToolCapabilityID] = [.readFile],
         toolNames: [String] = ["read_file"],
-        workspaceInstructions: WorkspaceInstructions? = nil
+        workspaceInstructions: WorkspaceInstructions? = nil,
+        responseStyle: AgentResponseStyle = .balanced
     ) -> TurboCodeSystemPromptContext {
         TurboCodeSystemPromptContext(
             role: .standalone,
             backend: .llamaServer,
             workspaceRoot: "/workspace",
-            agentTuning: .default,
+            agentTuning: AgentTuningConfig(
+                agent: AgentPolicy(responseStyle: responseStyle)
+            ),
             toolIDs: toolIDs,
             toolNames: toolNames,
             availableSkills: [],

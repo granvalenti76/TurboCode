@@ -77,7 +77,7 @@ struct ChatArchitectureTests {
         )
         #expect(
             SettingsSection.allCases.map(\.rawValue)
-                == ["general", "editorialDesk", "providers", "agents", "shortcuts"]
+                == ["general", "editorialDesk", "providers", "reasoning", "agents", "shortcuts"]
         )
     }
 

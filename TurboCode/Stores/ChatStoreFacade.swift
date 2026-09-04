@@ -183,6 +183,10 @@ extension ChatStore {
         modelRuntimeStore.activeModelSupportsReasoning
     }
 
+    public var activeModelOffersReasoningControl: Bool {
+        modelRuntimeStore.activeModelOffersReasoningControl
+    }
+
     var codexConnectionState: CodexConnectionState {
         codexRuntimeStore.connectionState
     }

@@ -409,7 +409,7 @@ struct InputFieldView: View {
                         }
                     }
 
-                    if chatStore.activeModelSupportsReasoning,
+                    if chatStore.activeModelOffersReasoningControl,
                        chatStore.activeBackend != .codex {
                         Divider()
                         Section("Reasoning") {
@@ -431,7 +431,7 @@ struct InputFieldView: View {
                         }
                     }
                 } label: {
-                    if chatStore.activeModelSupportsReasoning {
+                    if chatStore.activeModelOffersReasoningControl {
                         Text(
                             "\(chatStore.composerModel) · \(activeReasoningLabel)"
                         )

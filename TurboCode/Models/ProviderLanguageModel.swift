@@ -9,15 +9,20 @@ struct ProviderLanguageModel: LanguageModel {
     /// Keeps only the Keychain account reference in the session. The secret is
     /// resolved when a request is sent so app startup never touches Keychain.
     let credential: String?
+    /// Exact product level retained alongside the model because Foundation
+    /// Models collapses High and X-High to the same native context option.
+    let reasoningEffort: ReasoningEffort?
 
     init(
         configuration: RemoteModelConfig,
         credential: String? = nil,
-        reasoningStreamRelay: ReasoningStreamRelay? = nil
+        reasoningStreamRelay: ReasoningStreamRelay? = nil,
+        reasoningEffort: ReasoningEffort? = nil
     ) {
         self.configuration = configuration
         self.credential = credential ?? configuration.credential
         self.reasoningStreamRelay = reasoningStreamRelay
+        self.reasoningEffort = reasoningEffort
     }
 
     var capabilities: LanguageModelCapabilities {
@@ -33,7 +38,11 @@ struct ProviderLanguageModel: LanguageModel {
     }
 
     var executorConfiguration: Executor.Configuration {
-        Executor.Configuration(model: configuration, credential: credential)
+        Executor.Configuration(
+            model: configuration,
+            credential: credential,
+            reasoningEffort: reasoningEffort
+        )
     }
 
     struct Executor: LanguageModelExecutor {
@@ -47,6 +56,7 @@ struct ProviderLanguageModel: LanguageModel {
         struct Configuration: Hashable, Sendable {
             let model: RemoteModelConfig
             let credential: String?
+            let reasoningEffort: ReasoningEffort?
         }
 
         func respond(
@@ -76,6 +86,16 @@ struct ProviderLanguageModel: LanguageModel {
                 )
                 let value = URLSessionConfiguration.ephemeral
                 value.protocolClasses = [DeepSeekRequestAdapter.self]
+                sessionConfiguration = value
+            } else if let directive = configuration.model.reasoningConfiguration
+                .requestDirective(for: configuration.reasoningEffort) {
+                headers[RemoteReasoningRequestAdapter.adapterHeader] = "token-budget"
+                headers[RemoteReasoningRequestAdapter.directiveHeader] = switch directive {
+                case .disabled: "disabled"
+                case .tokenBudget(let tokens): String(tokens)
+                }
+                let value = URLSessionConfiguration.ephemeral
+                value.protocolClasses = [RemoteReasoningRequestAdapter.self]
                 sessionConfiguration = value
             }
 

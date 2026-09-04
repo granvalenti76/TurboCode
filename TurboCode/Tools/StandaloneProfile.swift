@@ -42,6 +42,7 @@ nonisolated struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                 Skills(
                     activations: safariSkillActivations,
                     toolName: "activate_safari_skill",
+                    instructions: Instructions(SafariMCPFeature.activationInstructions),
                     skills: [SafariMCPFeature.skill]
                 )
             }

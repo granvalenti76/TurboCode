@@ -383,7 +383,10 @@ nonisolated enum ModelSessionFactory {
         events: ModelSessionEvents
     ) -> LanguageModelSession {
         let delegateBackend = backend(for: configuration.delegateRemoteModel.role)
-        let delegateModel = providerModel(for: configuration.delegateRemoteModel)
+        let delegateModel = providerModel(
+            for: configuration.delegateRemoteModel,
+            reasoningEffort: configuration.delegateReasoningEffort
+        )
         let delegateCapabilities = ModelCapabilityPolicy.resolve(
             for: delegateModel,
             requestedReasoningLevel: FoundationModelsReasoningLevel.resolve(
@@ -632,7 +635,10 @@ nonisolated enum ModelSessionFactory {
         events: ModelSessionEvents,
         runner: (any AgentTaskRunning)? = nil
     ) -> ConfiguredAgentTaskInvoker {
-        let delegateModel = providerModel(for: configuration.delegateRemoteModel)
+        let delegateModel = providerModel(
+            for: configuration.delegateRemoteModel,
+            reasoningEffort: configuration.delegateReasoningEffort
+        )
         let delegateBackend = backend(for: configuration.delegateRemoteModel.role)
         let capabilities = ModelCapabilityPolicy.resolve(
             for: delegateModel,
@@ -771,7 +777,8 @@ nonisolated enum ModelSessionFactory {
         case .foundationServe, .llamaServer, .premium:
             providerModel(
                 for: configuration.activeRemoteModel ?? RemoteModelConfig.fallbackLlama,
-                reasoningStreamRelay: reasoningStreamRelay
+                reasoningStreamRelay: reasoningStreamRelay,
+                reasoningEffort: configuration.reasoningEffort
             )
         case .codex:
             // ChatStore dispatches Codex turns before this placeholder session
@@ -782,12 +789,14 @@ nonisolated enum ModelSessionFactory {
 
     private static func providerModel(
         for model: RemoteModelConfig,
-        reasoningStreamRelay: ReasoningStreamRelay? = nil
+        reasoningStreamRelay: ReasoningStreamRelay? = nil,
+        reasoningEffort: ReasoningEffort? = nil
     ) -> ProviderLanguageModel {
         ProviderLanguageModel(
             configuration: model,
             credential: model.credential,
-            reasoningStreamRelay: reasoningStreamRelay
+            reasoningStreamRelay: reasoningStreamRelay,
+            reasoningEffort: reasoningEffort
         )
     }
 
@@ -825,28 +834,22 @@ nonisolated enum ModelSessionFactory {
                 workspaceInstructions: configuration.workspaceInstructions,
                 reasoningEffort: promptReasoningEffort(
                     for: configuration,
-                    role: role,
                     backend: backend
                 )
             )
         )
     }
 
-    /// Llama and Apple On-Device rely on an instruction-level effort policy.
-    /// Hosted providers retain their transport-specific reasoning controls.
+    /// Only Apple On-Device uses instruction-level effort. Remote endpoints
+    /// either own reasoning themselves or receive their configured wire fields.
     private static func promptReasoningEffort(
         for configuration: ModelSessionConfiguration,
-        role: TurboCodeSystemPromptRole,
         backend: ModelBackend
     ) -> ReasoningEffort? {
         switch backend {
-        case .llamaServer, .foundationApple:
-            // Delegates have an independently resolved capability contract;
-            // their prompt must not inherit or lose the coordinator's effort.
-            role == .delegate
-                ? configuration.delegateReasoningEffort
-                : configuration.reasoningEffort
-        case .foundationServe, .premium, .codex:
+        case .foundationApple:
+            configuration.reasoningEffort
+        case .llamaServer, .foundationServe, .premium, .codex:
             nil
         }
     }
