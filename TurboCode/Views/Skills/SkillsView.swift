@@ -17,6 +17,7 @@ struct SkillsView: View {
     @State private var availableDropTargeted = false
     @State private var hoveredTool: ToolHoverPresentation?
     @State private var pendingToolHover: Task<Void, Never>?
+    @State private var selectedAgentNode: ProfileAgentNodeID = .primary
 
     private enum CapabilityKind: String, CaseIterable, Identifiable {
         case tools = "Tools"
@@ -27,7 +28,10 @@ struct SkillsView: View {
     var body: some View {
         HStack(spacing: 0) {
             profileLibrary
-                .frame(width: 272)
+                .frame(width: 230)
+            Divider()
+            agentTeam
+                .frame(width: 300)
             Divider()
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -50,6 +54,11 @@ struct SkillsView: View {
         }
         .onDisappear {
             pendingToolHover?.cancel()
+        }
+        .onChange(of: viewModel.draft?.usesDelegation) { _, usesDelegation in
+            if usesDelegation != true, selectedAgentNode == .worker {
+                selectedAgentNode = .primary
+            }
         }
         .sheet(isPresented: $newProfilePresented) {
             NewDynamicProfileSheet(
@@ -107,6 +116,132 @@ struct SkillsView: View {
         } message: {
             Text(viewModel.errorMessage ?? "The profile could not be updated.")
         }
+    }
+
+    private var agentTeam: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Agent Team")
+                        .font(.system(size: 16, weight: .semibold))
+                    Text(agentTeamSummary)
+                        .font(AppTypography.metadata)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 16)
+            .padding(.bottom, 10)
+
+            List(selection: $selectedAgentNode) {
+                switch viewModel.selection {
+                case .builtIn(let modelID):
+                    agentNodeRow(
+                        ProfileAgentNode(
+                            id: .primary,
+                            title: modelID.displayName,
+                            subtitle: "Built-in agent",
+                            systemImage: modelID.systemImage,
+                            depth: 0
+                        )
+                    )
+                    .tag(ProfileAgentNodeID.primary)
+                case .custom:
+                    if let draft = viewModel.draft {
+                        ForEach(
+                            viewModel.agentNodes(
+                                for: draft,
+                                fallbackWorkerID: settings.agentTuning
+                                    .orchestrator.delegateModelID
+                            )
+                        ) { node in
+                            agentNodeRow(node)
+                                .tag(node.id)
+                                .contextMenu {
+                                    if node.id == .worker {
+                                        Button("Remove Subagent", role: .destructive) {
+                                            viewModel.setTool(
+                                                .delegateTask,
+                                                included: false
+                                            )
+                                            selectedAgentNode = .primary
+                                        }
+                                        .disabled(chatStore.busy)
+                                    }
+                                }
+                        }
+                    }
+                }
+            }
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
+
+            Divider()
+            VStack(alignment: .leading, spacing: 6) {
+                if case .custom = viewModel.selection,
+                   let draft = viewModel.draft {
+                    Button {
+                        viewModel.setTool(.delegateTask, included: true)
+                        selectedAgentNode = .worker
+                    } label: {
+                        Label("Add Subagent…", systemImage: "plus")
+                    }
+                    .disabled(draft.usesDelegation || chatStore.busy)
+                    .help(
+                        draft.usesDelegation
+                            ? "This version supports one delegated worker per profile."
+                            : "Add the delegated worker supported by this profile."
+                    )
+                    if draft.usesDelegation {
+                        Text("One delegated worker per profile in this version.")
+                            .font(AppTypography.metadata)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("Built-in profiles cannot be edited.")
+                        .font(AppTypography.metadata)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var agentTeamSummary: String {
+        guard case .custom = viewModel.selection,
+              let draft = viewModel.draft else {
+            return "Built-in configuration"
+        }
+        return draft.usesDelegation ? "1 subagent" : "No subagents"
+    }
+
+    private func agentNodeRow(_ node: ProfileAgentNode) -> some View {
+        HStack(spacing: 9) {
+            if node.depth > 0 {
+                Image(systemName: "arrow.turn.down.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 16)
+            }
+            Image(systemName: node.systemImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(node.title)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .lineLimit(1)
+                Text(node.subtitle)
+                    .font(AppTypography.metadata)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer()
+        }
+        .padding(.leading, node.depth > 0 ? 12 : 0)
+        .padding(.vertical, 4)
     }
 
     private var profileLibrary: some View {
@@ -246,7 +381,11 @@ struct SkillsView: View {
             builtInDetail(modelID)
         case .custom:
             if let draft = viewModel.draft {
-                customDetail(draft)
+                if selectedAgentNode == .worker, draft.usesDelegation {
+                    workerDetail(draft)
+                } else {
+                    customDetail(draft)
+                }
             } else {
                 ContentUnavailableView("Profile Unavailable", systemImage: "exclamationmark.triangle")
             }
@@ -334,38 +473,24 @@ struct SkillsView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HStack(alignment: .top, spacing: 14) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Custom Profile")
-                            .font(.system(size: 27, weight: .semibold))
-                        Text("Only included tools and skills are loaded into the model session.")
+                        Label(
+                            draft.name,
+                            systemImage: "person.crop.rectangle.stack"
+                        )
+                        .font(.system(size: 27, weight: .semibold))
+                        Text(
+                            draft.usesDelegation
+                                ? "Coordinator agent"
+                                : "Custom agent"
+                        )
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button(role: .destructive) {
-                        deleteConfirmationPresented = true
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
-                    .disabled(chatStore.busy)
-                    Button("Revert") { viewModel.discardChanges() }
-                        .disabled(!viewModel.isDirty)
-                    Button("Save") {
-                        if viewModel.save() {
-                            Task { await chatStore.reloadDynamicProfiles() }
-                        }
-                    }
-                        .keyboardShortcut("s", modifiers: .command)
-                        .disabled(!viewModel.canSave || chatStore.busy)
-                    Button("Use Profile") {
-                        if !viewModel.isDirty || viewModel.save() {
-                            Task {
-                                await chatStore.reloadDynamicProfiles()
-                                await chatStore.selectDynamicProfile(draft.id)
-                            }
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!routeIsAvailable || chatStore.busy)
+                    profileActions(
+                        draft: draft,
+                        routeIsAvailable: routeIsAvailable
+                    )
                 }
 
                 if !option.isAvailable {
@@ -389,7 +514,10 @@ struct SkillsView: View {
                     )
                 }
 
-                sectionCard(title: "Profile", subtitle: "A recognizable name and the model this profile controls.") {
+                sectionCard(
+                    title: "Agent",
+                    subtitle: "Identity and model for the primary agent."
+                ) {
                     Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 12) {
                         GridRow {
                             Text("Name").foregroundStyle(.secondary)
@@ -400,6 +528,10 @@ struct SkillsView: View {
                             Text("Description").foregroundStyle(.secondary)
                             TextField("What is this profile for?", text: summaryBinding)
                                 .textFieldStyle(.roundedBorder)
+                        }
+                        GridRow {
+                            Text("Role").foregroundStyle(.secondary)
+                            Text(draft.usesDelegation ? "Coordinator" : "Agent")
                         }
                         GridRow {
                             Text("Model").foregroundStyle(.secondary)
@@ -471,38 +603,6 @@ struct SkillsView: View {
                     }
                 }
 
-                if draft.usesDelegation {
-                    sectionCard(
-                        title: "Delegation",
-                        subtitle: "Delegate Task is included. Choose the model that handles bounded implementation work."
-                    ) {
-                        DisclosureGroup {
-                            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 12) {
-                                GridRow {
-                                    Text("Worker").foregroundStyle(.secondary)
-                                    Picker("Worker", selection: workerModelBinding) {
-                                        ForEach(viewModel.workerOptions(settings: settings)) { model in
-                                            Label(model.id.displayName, systemImage: model.id.systemImage)
-                                                .tag(model.id.rawValue)
-                                                .disabled(!model.isAvailable)
-                                        }
-                                    }
-                                    .labelsHidden()
-                                    .frame(maxWidth: 280, alignment: .leading)
-                                }
-                            }
-                            Text("The worker choice is stored with this profile and used whenever Delegate Task runs.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 3)
-
-                            workerToolDisclosure(draft: draft)
-                        } label: {
-                            Label("Worker model", systemImage: "person.2")
-                        }
-                    }
-                }
-
                 if !viewModel.discoveredTypeScriptPlugins.isEmpty || !pluginRuntime.orderedSnapshots.isEmpty {
                     typeScriptPluginSection(draft: draft)
                 }
@@ -525,6 +625,132 @@ struct SkillsView: View {
             .frame(maxWidth: 1120, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .top)
         }
+    }
+
+    private func workerDetail(_ draft: UserDynamicProfile) -> some View {
+        let option = viewModel.modelOption(
+            for: draft.baseModelID,
+            settings: settings
+        )
+        let workerOption = viewModel.workerOptions(settings: settings).first {
+            $0.id.rawValue == draft.resolvedWorkerModelID(
+                fallback: ProfileBaseModelID.llama.rawValue
+            )
+        }
+        let routeIsAvailable = option.isAvailable
+            && workerOption?.isAvailable == true
+            && codexConfigurationIsAvailable(for: draft)
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                HStack(alignment: .top, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Delegated Worker", systemImage: "hammer")
+                            .font(.system(size: 27, weight: .semibold))
+                        Text("Subagent of \(draft.name)")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    profileActions(
+                        draft: draft,
+                        routeIsAvailable: routeIsAvailable
+                    )
+                }
+
+                if workerOption?.isAvailable != true {
+                    infoBanner(
+                        icon: "exclamationmark.triangle",
+                        title: "Worker unavailable",
+                        text: "Enable and configure the selected worker before using this profile."
+                    )
+                }
+
+                sectionCard(
+                    title: "Model & Role",
+                    subtitle: "The worker executes bounded tasks delegated by the primary agent."
+                ) {
+                    Grid(
+                        alignment: .leading,
+                        horizontalSpacing: 14,
+                        verticalSpacing: 12
+                    ) {
+                        GridRow {
+                            Text("Role").foregroundStyle(.secondary)
+                            Text("Coding subagent")
+                        }
+                        GridRow {
+                            Text("Model").foregroundStyle(.secondary)
+                            Picker("Worker", selection: workerModelBinding) {
+                                ForEach(
+                                    viewModel.workerOptions(settings: settings)
+                                ) { model in
+                                    Label(
+                                        model.id.displayName,
+                                        systemImage: model.id.systemImage
+                                    )
+                                    .tag(model.id.rawValue)
+                                    .disabled(!model.isAvailable)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(maxWidth: 280, alignment: .leading)
+                        }
+                    }
+                }
+
+                sectionCard(
+                    title: "Worker Capabilities",
+                    subtitle: "Choose the tools available only inside delegated tasks."
+                ) {
+                    workerToolDisclosure(draft: draft)
+                }
+
+                Button(role: .destructive) {
+                    viewModel.setTool(.delegateTask, included: false)
+                    selectedAgentNode = .primary
+                } label: {
+                    Label("Remove Subagent", systemImage: "minus.circle")
+                }
+                .disabled(chatStore.busy)
+            }
+            .padding(28)
+            .frame(maxWidth: 920, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
+    }
+
+    @ViewBuilder
+    private func profileActions(
+        draft: UserDynamicProfile,
+        routeIsAvailable: Bool
+    ) -> some View {
+        Button(role: .destructive) {
+            deleteConfirmationPresented = true
+        } label: {
+            Image(systemName: "trash")
+        }
+        .help("Delete Profile")
+        .disabled(chatStore.busy)
+
+        Button("Revert") { viewModel.discardChanges() }
+            .disabled(!viewModel.isDirty)
+        Button("Save") {
+            if viewModel.save() {
+                Task { await chatStore.reloadDynamicProfiles() }
+            }
+        }
+        .keyboardShortcut("s", modifiers: .command)
+        .disabled(!viewModel.canSave || chatStore.busy)
+        Button("Use Profile") {
+            if !viewModel.isDirty || viewModel.save() {
+                Task {
+                    await chatStore.reloadDynamicProfiles()
+                    await chatStore.selectDynamicProfile(draft.id)
+                }
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(!routeIsAvailable || chatStore.busy)
     }
 
     private func typeScriptPluginSection(draft: UserDynamicProfile? = nil) -> some View {
@@ -1196,7 +1422,12 @@ struct SkillsView: View {
     private var selectionBinding: Binding<ProfileLibrarySelection?> {
         Binding(
             get: { viewModel.selection },
-            set: { if let value = $0 { viewModel.select(value) } }
+            set: {
+                if let value = $0 {
+                    viewModel.select(value)
+                    selectedAgentNode = .primary
+                }
+            }
         )
     }
 

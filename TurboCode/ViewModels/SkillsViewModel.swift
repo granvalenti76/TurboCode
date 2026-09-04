@@ -6,6 +6,22 @@ nonisolated enum ProfileLibrarySelection: Hashable, Sendable {
     case custom(UUID)
 }
 
+/// Stable selection identity for the profile editor's agent hierarchy.
+/// The first UI slice mirrors the runtime truth: one primary agent and at most
+/// one delegated worker, while leaving the outline extensible for 0.5.
+nonisolated enum ProfileAgentNodeID: String, Hashable, Sendable {
+    case primary
+    case worker
+}
+
+nonisolated struct ProfileAgentNode: Identifiable, Hashable, Sendable {
+    let id: ProfileAgentNodeID
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let depth: Int
+}
+
 nonisolated struct ProfileModelOption: Identifiable, Hashable, Sendable {
     let id: ProfileBaseModelID
     let subtitle: String
@@ -191,6 +207,40 @@ final class SkillsViewModel {
                 value.toolIDs.removeAll { $0 == id.rawValue }
             }
         }
+    }
+
+    /// Projects the persisted profile into the hierarchy rendered by the
+    /// editor. No extra subagent is advertised until the runtime can execute
+    /// it; enabling delegation creates the single worker already supported.
+    func agentNodes(
+        for profile: UserDynamicProfile,
+        fallbackWorkerID: String
+    ) -> [ProfileAgentNode] {
+        var nodes = [
+            ProfileAgentNode(
+                id: .primary,
+                title: profile.name,
+                subtitle: "\(profile.usesDelegation ? "Coordinator" : "Agent") · \(profile.baseModelID.displayName)",
+                systemImage: "person.crop.rectangle.stack",
+                depth: 0
+            )
+        ]
+        guard profile.usesDelegation else { return nodes }
+        let workerID = profile.resolvedWorkerModelID(
+            fallback: fallbackWorkerID
+        )
+        let workerName = ProfileBaseModelID(rawValue: workerID)?.displayName
+            ?? workerID
+        nodes.append(
+            ProfileAgentNode(
+                id: .worker,
+                title: "Delegated Worker",
+                subtitle: "Subagent · \(workerName)",
+                systemImage: "hammer",
+                depth: 1
+            )
+        )
+        return nodes
     }
 
     func containsSkill(_ name: String) -> Bool {

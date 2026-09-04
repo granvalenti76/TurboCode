@@ -311,6 +311,11 @@ private struct CustomProfilesSheet: View {
             Divider()
             SkillsView()
         }
-        .frame(minWidth: 960, idealWidth: 1080, minHeight: 580, idealHeight: 680)
+        .frame(
+            minWidth: 1_160,
+            idealWidth: 1_280,
+            minHeight: 640,
+            idealHeight: 760
+        )
     }
 }

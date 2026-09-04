@@ -348,6 +348,36 @@ struct DynamicProfileTests {
         #expect(viewModel.draft?.toolIDs.contains(ToolCapabilityID.readFile.rawValue) == true)
     }
 
+    @Test("Agent outline exposes only executable profile roles")
+    func agentOutlineMirrorsDelegationRuntime() {
+        let viewModel = SkillsViewModel()
+        let direct = UserDynamicProfile(
+            name: "Direct",
+            baseModelID: .onDevice
+        )
+        let delegated = UserDynamicProfile(
+            name: "Coordinator",
+            baseModelID: .deepseek,
+            workerModelID: ProfileBaseModelID.llama.rawValue,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+
+        let directNodes = viewModel.agentNodes(
+            for: direct,
+            fallbackWorkerID: ProfileBaseModelID.deepseek.rawValue
+        )
+        let delegatedNodes = viewModel.agentNodes(
+            for: delegated,
+            fallbackWorkerID: ProfileBaseModelID.deepseek.rawValue
+        )
+
+        #expect(directNodes.map(\.id) == [.primary])
+        #expect(directNodes.first?.subtitle == "Agent · On-device")
+        #expect(delegatedNodes.map(\.id) == [.primary, .worker])
+        #expect(delegatedNodes.last?.subtitle == "Subagent · Llama")
+        #expect(delegatedNodes.last?.depth == 1)
+    }
+
     @Test("Profile validation repairs delegated sampling and worker invariants")
     func validationRepairsDelegatedProfileInvariants() throws {
         let blankWorker = UserDynamicProfile(
