@@ -70,7 +70,7 @@ struct WorkspaceInstructionsTests {
         #expect(WorkspaceInstructionsLoader.load(from: root.path) == nil)
     }
 
-    @Test("Prompt omits absent instructions and appends present instructions last")
+    @Test("Prompt appends present instructions after the deterministic prefix")
     func promptKeepsDynamicInstructionsAtTheTail() {
         let withoutInstructions = TurboCodeSystemPromptBuilder.build(
             makePromptContext(workspaceInstructions: nil)

@@ -418,7 +418,7 @@ struct InputFieldView: View {
                                     reasoningEffort = effort
                                     Task { await chatStore.setReasoningEffort(effort) }
                                 } label: {
-                                    if reasoningEffort == effort {
+                                    if effectiveReasoningEffort == effort {
                                         Label(
                                             effort.rawValue,
                                             systemImage: "checkmark"
@@ -528,14 +528,19 @@ struct InputFieldView: View {
         if chatStore.activeBackend == .codex {
             return chatStore.codexReasoningEffort.displayName
         }
-        if reasoningEffort == .xhigh,
-           chatStore.activeBackend != .llamaServer,
-           chatStore.activeBackend != .foundationApple {
-            // X-High is prompt-only for Llama and Apple. A remote provider
-            // selected after it maps to its existing native High setting.
-            return ReasoningEffort.high.rawValue
+        return effectiveReasoningEffort.rawValue
+    }
+
+    /// Preserve the local X-High preference while presenting the equivalent
+    /// native High selection when the user temporarily switches providers.
+    private var effectiveReasoningEffort: ReasoningEffort {
+        guard reasoningEffort == .xhigh else { return reasoningEffort }
+        switch chatStore.activeBackend {
+        case .llamaServer, .foundationApple:
+            return .xhigh
+        case .foundationServe, .premium, .codex:
+            return .high
         }
-        return reasoningEffort.rawValue
     }
 
     /// X-High is a local prompt policy, not a value sent to remote providers.

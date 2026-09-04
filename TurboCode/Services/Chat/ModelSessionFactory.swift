@@ -825,6 +825,7 @@ nonisolated enum ModelSessionFactory {
                 workspaceInstructions: configuration.workspaceInstructions,
                 reasoningEffort: promptReasoningEffort(
                     for: configuration,
+                    role: role,
                     backend: backend
                 )
             )
@@ -835,11 +836,16 @@ nonisolated enum ModelSessionFactory {
     /// Hosted providers retain their transport-specific reasoning controls.
     private static func promptReasoningEffort(
         for configuration: ModelSessionConfiguration,
+        role: TurboCodeSystemPromptRole,
         backend: ModelBackend
     ) -> ReasoningEffort? {
         switch backend {
         case .llamaServer, .foundationApple:
-            configuration.reasoningEffort
+            // Delegates have an independently resolved capability contract;
+            // their prompt must not inherit or lose the coordinator's effort.
+            role == .delegate
+                ? configuration.delegateReasoningEffort
+                : configuration.reasoningEffort
         case .foundationServe, .premium, .codex:
             nil
         }

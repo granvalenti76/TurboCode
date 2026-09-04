@@ -26,6 +26,36 @@ struct AgentTaskInvokerFactoryTests {
         )
     }
 
+    @Test("Local delegate prompt uses the worker reasoning effort")
+    func localDelegatePromptUsesWorkerEffort() {
+        let factory = AgentTaskInvokerFactory()
+        let workerEffort = factory.makeIndependentTaskInvoker(
+            configuration: Self.makeConfiguration(
+                reasoningEffort: nil,
+                delegateReasoningEffort: .xhigh
+            ),
+            events: Self.noopEvents
+        )
+        let coordinatorEffort = factory.makeIndependentTaskInvoker(
+            configuration: Self.makeConfiguration(
+                reasoningEffort: .xhigh,
+                delegateReasoningEffort: nil
+            ),
+            events: Self.noopEvents
+        )
+
+        #expect(
+            workerEffort.context.instructions.contains(
+                "Reasoning policy (Llama, X-High)"
+            )
+        )
+        #expect(
+            !coordinatorEffort.context.instructions.contains(
+                "Reasoning policy ("
+            )
+        )
+    }
+
     private static var noopEvents: ModelSessionEvents {
         ModelSessionEvents(
             toolStarted: { _, _, _ in },
@@ -35,6 +65,13 @@ struct AgentTaskInvokerFactoryTests {
     }
 
     private static var configuration: ModelSessionConfiguration {
+        makeConfiguration()
+    }
+
+    private static func makeConfiguration(
+        reasoningEffort: ReasoningEffort? = nil,
+        delegateReasoningEffort: ReasoningEffort? = nil
+    ) -> ModelSessionConfiguration {
         ModelSessionConfiguration(
             backend: .llamaServer,
             activeRemoteModel: .fallbackLlama,
@@ -45,8 +82,8 @@ struct AgentTaskInvokerFactoryTests {
             availableSkills: [],
             documentationStore: .live,
             activeDynamicProfile: nil,
-            reasoningEffort: nil,
-            delegateReasoningEffort: nil,
+            reasoningEffort: reasoningEffort,
+            delegateReasoningEffort: delegateReasoningEffort,
             activeTemperature: nil,
             delegateTemperature: nil,
             delegateToolIDs: nil,

@@ -45,7 +45,9 @@ nonisolated struct TurboCodeSystemPromptContext: Sendable {
     }
 }
 
-/// Builds the shared TurboCode prompt while keeping volatile workspace content last.
+/// Builds the shared TurboCode prompt with volatile workspace content outside
+/// the deterministic prefix. Local backends may receive a compact final effort
+/// reminder after that content because they are sensitive to instruction recency.
 ///
 /// DeepSeek caches a leading token prefix, so identity, safety, and tool policy
 /// must remain deterministic. Workspace paths and AGENTS.md are appended only
@@ -123,7 +125,11 @@ nonisolated enum TurboCodeSystemPromptBuilder {
                 --- BEGIN \(instructions.relativePath) \(instructions.revision.prefix(12)) ---
                 \(instructions.content)
                 --- END \(instructions.relativePath) ---
-                """)
+            """)
+        }
+
+        if let reasoningReminder = finalReasoningReminder(for: context) {
+            sections.append(reasoningReminder)
         }
 
         return sections.joined(separator: "\n\n")
@@ -192,7 +198,31 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         return """
         Reasoning policy (\(runtime), \(effort.rawValue)):
         \(instruction)
-        Keep private reasoning internal. Provide the user with conclusions, decisions, and concise supporting evidence rather than a chain-of-thought transcript.
+        """
+    }
+
+    /// Repeats the selected effort after volatile workspace instructions. Local
+    /// instruction-following models are often sensitive to recency within a
+    /// single system message, so this preserves the policy at the final prompt
+    /// boundary without weakening project-authored constraints.
+    private static func finalReasoningReminder(
+        for context: TurboCodeSystemPromptContext
+    ) -> String? {
+        guard let effort = context.reasoningEffort else { return nil }
+
+        let runtime: String
+        switch context.backend {
+        case .llamaServer:
+            runtime = "Llama"
+        case .foundationApple:
+            runtime = "Apple On-Device"
+        case .foundationServe, .premium, .codex:
+            return nil
+        }
+
+        return """
+        Final reasoning requirement (\(runtime), \(effort.rawValue)):
+        Apply the selected reasoning policy to the entire turn. Do not reduce its required planning, evidence checks, or validation merely to answer faster. Follow this requirement together with all project instructions above.
         """
     }
 

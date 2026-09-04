@@ -211,6 +211,11 @@ struct ModelRoutingPolicyTests {
 
     @Test("Llama and Apple prompts receive their selected reasoning policy")
     func promptIncludesLocalReasoningPolicy() {
+        let workspaceInstructions = WorkspaceInstructions(
+            relativePath: "AGENTS.md",
+            content: "Prefer focused tests.",
+            revision: FileRevision.hash("Prefer focused tests.")
+        )
         for (backend, effort, expected) in [
             (ModelBackend.llamaServer, ReasoningEffort.low, "shortest sound reasoning path"),
             (ModelBackend.llamaServer, .medium, "identify the important steps"),
@@ -227,13 +232,23 @@ struct ModelRoutingPolicyTests {
                     toolIDs: [],
                     toolNames: [],
                     availableSkills: [],
-                    workspaceInstructions: nil,
+                    workspaceInstructions: workspaceInstructions,
                     reasoningEffort: effort
                 )
             )
 
             #expect(prompt.contains(expected))
-            #expect(prompt.contains("Keep private reasoning internal"))
+            #expect(!prompt.contains("chain-of-thought transcript"))
+            #expect(prompt.hasSuffix(
+                "Follow this requirement together with all project instructions above."
+            ))
+            let projectEnd = prompt.range(of: "--- END AGENTS.md ---")
+            let reminderStart = prompt.range(of: "Final reasoning requirement (")
+            #expect(projectEnd != nil)
+            #expect(reminderStart != nil)
+            if let projectEnd, let reminderStart {
+                #expect(projectEnd.lowerBound < reminderStart.lowerBound)
+            }
         }
     }
 
