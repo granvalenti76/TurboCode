@@ -5,15 +5,6 @@ import SwiftUI
 struct WorkbenchSplitView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var hoveredToolbarButton: ToolbarButtonID?
-
-    private enum ToolbarButtonID: Hashable {
-        case editorialDesk
-        case delegatedTask
-        case terminal
-        case transcript
-        case changes
-    }
 
     private let sidebarWidth: Double = 268
     private let mainMinWidth: Double = 520
@@ -118,7 +109,6 @@ struct WorkbenchSplitView: View {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 4) {
                     toolbarPillButton(
-                        id: .editorialDesk,
                         icon: "newspaper",
                         label: "Editorial desk",
                         help: chatStore.workspaceRoot.isEmpty
@@ -131,7 +121,6 @@ struct WorkbenchSplitView: View {
                     }
 
                     toolbarPillButton(
-                        id: .delegatedTask,
                         icon: "person.2",
                         label: "Delegated task activity",
                         help: chatStore.rightPanelMode == .activity
@@ -143,7 +132,6 @@ struct WorkbenchSplitView: View {
                     }
 
                     toolbarPillButton(
-                        id: .terminal,
                         icon: chatStore.terminalPresented ? "terminal.fill" : "terminal",
                         label: chatStore.terminalPresented
                             ? "Close project terminal"
@@ -168,7 +156,6 @@ struct WorkbenchSplitView: View {
             ToolbarItem(placement: .primaryAction) {
                 HStack(spacing: 4) {
                     toolbarPillButton(
-                        id: .transcript,
                         icon: "text.document",
                         label: "Show transcript",
                         help: chatStore.activeThreadId == nil
@@ -182,7 +169,6 @@ struct WorkbenchSplitView: View {
                     }
 
                     toolbarPillButton(
-                        id: .changes,
                         icon: "sidebar.right",
                         label: "Changes",
                         help: chatStore.rightPanelMode == .changes
@@ -239,7 +225,6 @@ struct WorkbenchSplitView: View {
     }
 
     private func toolbarPillButton(
-        id: ToolbarButtonID,
         icon: String,
         label: String,
         help: String,
@@ -247,28 +232,20 @@ struct WorkbenchSplitView: View {
         isDisabled: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        let isHovered = hoveredToolbarButton == id && !isDisabled
-
-        return Button(action: action) {
+        // Retain the automatic toolbar button style so AppKit owns inactive-
+        // window click-through and pointer tracking. A plain button combined
+        // with parent-owned hover state can rebuild during the first click.
+        Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 16, weight: .medium))
                 .frame(width: 34, height: 34)
         }
-        .buttonStyle(.plain)
         .foregroundStyle(isActive ? Color.primary : Color.secondary)
         .background(
-            isActive
-                ? Color.accentColor.opacity(0.14)
-                : isHovered
-                    ? Color.primary.opacity(0.10)
-                    : .clear,
+            isActive ? Color.accentColor.opacity(0.14) : .clear,
             in: RoundedRectangle(cornerRadius: 9, style: .continuous)
         )
-        .animation(.easeOut(duration: 0.12), value: isHovered)
         .disabled(isDisabled)
-        .onHover { hovering in
-            hoveredToolbarButton = hovering && !isDisabled ? id : nil
-        }
         .help(help)
         .accessibilityLabel(label)
         .accessibilityAddTraits(isActive ? .isSelected : [])

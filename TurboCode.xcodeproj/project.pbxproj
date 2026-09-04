@@ -12,8 +12,8 @@
 		5E5203CD30053A3A00C554D4 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 		5E77E3E630075DF800C3E506 /* turbocode-logo-provisional.png in Resources */ = {isa = PBXBuildFile; fileRef = 5E77E3E530075DF800C3E506 /* turbocode-logo-provisional.png */; };
 		5E77E52930081E4000C3E506 /* Media.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5E77E52830081E4000C3E506 /* Media.xcassets */; };
-		5E9A1003300A000100C554D4 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 5E9A1002300A000100C554D4 /* SwiftTerm */; };
 		5E77E54130081E4000C3E506 /* TurboCodeSDK in Resources */ = {isa = PBXBuildFile; fileRef = 5E77E54030081E4000C3E506 /* TurboCodeSDK */; };
+		5E9A1003300A000100C554D4 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 5E9A1002300A000100C554D4 /* SwiftTerm */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
