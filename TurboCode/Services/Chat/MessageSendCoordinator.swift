@@ -356,7 +356,10 @@ final class MessageSendCoordinator {
               ) else { return }
 
         timeline.presentCompaction(compaction.summary)
-        await profiles.rebuildSession(restoringHistory: compaction.history)
+        await profiles.rebuildSession(
+            restoringHistory: compaction.history,
+            restoringProjection: .empty
+        )
         Task {
             await AgentDiagnosticsRecorder.shared.recordCompaction(
                 turnCount: turnCount,
@@ -466,8 +469,10 @@ final class MessageSendCoordinator {
 
     /// Reads only portable history. Session instructions are rebuilt from the
     /// current profile and must never be copied into a replacement session.
+    /// The canonical view is required here so interrupted-turn repair cannot
+    /// accidentally make a reversible context exclusion permanent.
     private func foundationModelsHistory() async -> [FoundationModelsTranscriptEntry] {
-        guard let transcript = await llmRuntime.foundationModelsTranscript() else {
+        guard let transcript = await llmRuntime.foundationModelsCanonicalTranscript() else {
             return []
         }
         return SessionRebuildHistory.prepare(

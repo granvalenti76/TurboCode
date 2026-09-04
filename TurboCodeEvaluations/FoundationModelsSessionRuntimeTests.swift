@@ -35,7 +35,8 @@ struct FoundationModelsSessionRuntimeTests {
         )
         await runtime.rebuild(
             configuration: Self.onDeviceConfiguration(),
-            history: [],
+            canonicalHistory: [],
+            projection: .empty,
             events: Self.noopEvents
         )
 
@@ -43,6 +44,47 @@ struct FoundationModelsSessionRuntimeTests {
         let secondRelay = try #require(secondResources.reasoningRelay)
         #expect(secondResources.session !== firstSession)
         #expect(secondRelay !== firstRelay)
+    }
+
+    @Test("Context projection preserves canonical tool history")
+    func projectionKeepsCanonicalHistory() async throws {
+        let runtime = FoundationModelsSessionRuntime(
+            backend: .llamaServer,
+            modelBuilder: { _ in SystemLanguageModel.default }
+        )
+        let text: (String) -> Transcript.Segment = {
+            .text(Transcript.TextSegment(content: $0))
+        }
+        let call = Transcript.ToolCall(
+            id: "call-context",
+            toolName: "read_file",
+            arguments: GeneratedContent(properties: ["path": "README.md"])
+        )
+        let canonical: [Transcript.Entry] = [
+            .prompt(Transcript.Prompt(segments: [text("Inspect")])),
+            .toolCalls(Transcript.ToolCalls([call])),
+            .toolOutput(Transcript.ToolOutput(
+                id: call.id,
+                toolName: call.toolName,
+                segments: [text("Contents")]
+            )),
+            .response(Transcript.Response(assetIDs: [], segments: [text("Done")]))
+        ]
+
+        await runtime.rebuild(
+            configuration: Self.onDeviceConfiguration(),
+            canonicalHistory: canonical,
+            projection: TranscriptContextProjection(
+                excludedToolCallIDs: [call.id]
+            ),
+            events: Self.noopEvents
+        )
+
+        let persisted = await runtime.canonicalTranscript()
+        let materialized = await runtime.transcript
+        #expect(persisted.contains { if case .toolCalls = $0 { true } else { false } })
+        #expect(materialized.contains { if case .toolCalls = $0 { true } else { false } } == false)
+        #expect(materialized.contains { if case .toolOutput = $0 { true } else { false } } == false)
     }
 
     private static var noopEvents: ModelSessionEvents {

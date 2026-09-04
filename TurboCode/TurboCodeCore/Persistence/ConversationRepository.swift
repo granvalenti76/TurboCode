@@ -9,6 +9,7 @@ nonisolated struct ConversationSnapshot: Sendable {
     let modelBackend: String
     let blocks: [ChatBlock]
     let transcript: Transcript?
+    let contextProjection: TranscriptContextProjection
     /// Steering is persisted with the conversation, but its provider claim is
     /// never resumed implicitly after a process or context boundary.
     let steering: SteeringQueueSnapshot
@@ -18,12 +19,14 @@ nonisolated struct ConversationSnapshot: Sendable {
         modelBackend: String,
         blocks: [ChatBlock],
         transcript: Transcript?,
+        contextProjection: TranscriptContextProjection = .empty,
         steering: SteeringQueueSnapshot = .empty
     ) {
         self.conversation = conversation
         self.modelBackend = modelBackend
         self.blocks = blocks
         self.transcript = transcript
+        self.contextProjection = contextProjection
         self.steering = steering
     }
 
@@ -146,6 +149,7 @@ private extension ConversationSnapshot {
         modelBackend = stored.modelBackend
         blocks = stored.blocks.map(ChatBlock.init)
         transcript = stored.transcript
+        contextProjection = stored.contextProjection
         steering = stored.steering
     }
 
@@ -165,6 +169,7 @@ private extension ConversationSnapshot {
             modelBackend: modelBackend,
             blocks: blocks.map(StoredBlock.init),
             transcript: transcript,
+            contextProjection: contextProjection,
             steering: steering
         )
     }

@@ -35,6 +35,14 @@ final class ConversationSessionCoordinator {
         await llmRuntime.foundationModelsTranscript()
     }
 
+    func foundationModelsCanonicalTranscript() async -> Transcript? {
+        await llmRuntime.foundationModelsCanonicalTranscript()
+    }
+
+    func foundationModelsContextProjection() async -> TranscriptContextProjection {
+        await llmRuntime.foundationModelsContextProjection() ?? .empty
+    }
+
     /// Captures all mutable MainActor values before awaiting disk I/O. The
     /// immutable snapshot therefore belongs to one conversation boundary even
     /// if navigation becomes reentrant while the repository is suspended.
@@ -49,7 +57,10 @@ final class ConversationSessionCoordinator {
         let steering = await runtime.steeringSnapshot
         let transcript = backend == .codex
             ? nil
-            : await llmRuntime.foundationModelsTranscript()
+            : await llmRuntime.foundationModelsCanonicalTranscript()
+        let contextProjection = backend == .codex
+            ? TranscriptContextProjection.empty
+            : await llmRuntime.foundationModelsContextProjection() ?? .empty
         let snapshot = ConversationSnapshot(
             conversation: conversation,
             modelBackend: modelRuntime.persistedModelIdentifier,
@@ -57,6 +68,7 @@ final class ConversationSessionCoordinator {
             // Codex persists its own rollout. Saving an unrelated Foundation
             // Models transcript would contaminate a later Codex restoration.
             transcript: transcript,
+            contextProjection: contextProjection,
             steering: steering
         )
 

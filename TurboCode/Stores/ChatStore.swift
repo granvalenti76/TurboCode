@@ -358,12 +358,14 @@ public final class ChatStore {
     private func rebuildSession(
         keepingHistory: Bool = true,
         discardingCapabilityContext: Bool = false,
-        restoringHistory: [FoundationModelsTranscriptEntry]? = nil
+        restoringHistory: [FoundationModelsTranscriptEntry]? = nil,
+        restoringProjection: TranscriptContextProjection? = nil
     ) async {
         await profileSelectionCoordinator.rebuildSession(
             keepingHistory: keepingHistory,
             discardingCapabilityContext: discardingCapabilityContext,
-            restoringHistory: restoringHistory
+            restoringHistory: restoringHistory,
+            restoringProjection: restoringProjection
         )
     }
 
@@ -638,7 +640,10 @@ public final class ChatStore {
                 retainedCharacters: compaction.retainedCharacters
             )
         )
-        await rebuildSession(restoringHistory: compaction.history)
+        await rebuildSession(
+            restoringHistory: compaction.history,
+            restoringProjection: .empty
+        )
 
         await AgentDiagnosticsRecorder.shared.recordLocalCompaction(
             backend: activeBackend,
@@ -651,6 +656,71 @@ public final class ChatStore {
             conversationStore.touchThread(id: threadID)
             await persistSession(for: threadID)
         }
+    }
+
+    /// Builds the read-only sheet model from the canonical transcript. The
+    /// provider session remains encapsulated by the runtime actor and the view
+    /// receives no capability to mutate raw transcript entries directly.
+    func transcriptContextPresentation() async -> TranscriptContextPresentation {
+        guard activeBackend != .codex else {
+            return TranscriptContextProjector.presentation(blocks: blocks)
+        }
+        guard let transcript = await sessionCoordinator
+            .foundationModelsCanonicalTranscript() else {
+            return TranscriptContextProjector.presentation(blocks: blocks)
+        }
+        let projection = await sessionCoordinator.foundationModelsContextProjection()
+        return TranscriptContextProjector.presentation(
+            transcript: transcript,
+            projection: projection
+        )
+    }
+
+    /// Rebuilds one released provider session from canonical history plus a
+    /// reversible context projection. Visible timeline blocks and persisted raw
+    /// history remain unchanged, while prompt cache state after the changed
+    /// boundary may be recreated by the selected backend.
+    @discardableResult
+    func applyTranscriptContextSelection(_ groupIDs: Set<String>) async -> Bool {
+        guard !busy else {
+            error = "Context cannot change while a response is running."
+            return false
+        }
+        guard activeBackend != .codex,
+              let transcript = await sessionCoordinator
+            .foundationModelsCanonicalTranscript() else {
+            error = "This session does not expose an editable transcript."
+            return false
+        }
+
+        let projection = TranscriptContextProjector.projection(
+            selecting: groupIDs,
+            in: transcript
+        )
+        let history = SessionRebuildHistory.prepare(
+            transcript,
+            keepingHistory: true,
+            discardingCapabilityContext: false
+        )
+        await rebuildSession(
+            keepingHistory: false,
+            restoringHistory: history,
+            restoringProjection: projection
+        )
+
+        let applied = await sessionCoordinator.foundationModelsContextProjection()
+            == projection
+        guard applied else {
+            error = "The transcript context could not be updated."
+            return false
+        }
+
+        error = nil
+        if let threadID = activeThreadId {
+            conversationStore.touchThread(id: threadID)
+            await persistSession(for: threadID)
+        }
+        return true
     }
 
     /// Runs `/task <instructions>` through the configured worker directly.
@@ -1075,6 +1145,20 @@ public final class ChatStore {
 
     func dismissEditorialDesk() {
         workbenchStore.dismissEditorialDesk()
+    }
+
+    var transcriptSheetPresentation: TranscriptSheetPresentation? {
+        get { workbenchStore.transcriptSheetPresentation }
+        set { workbenchStore.transcriptSheetPresentation = newValue }
+    }
+
+    func presentTranscript() {
+        guard let activeThreadId else { return }
+        workbenchStore.presentTranscript(threadID: activeThreadId)
+    }
+
+    func dismissTranscript() {
+        workbenchStore.dismissTranscript()
     }
 
     public func toggleLeftSidebar() {

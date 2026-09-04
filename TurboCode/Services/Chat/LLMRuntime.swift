@@ -304,6 +304,18 @@ actor LLMRuntime {
         return await foundationModelsRuntime.transcript
     }
 
+    /// Returns the durable, unprojected transcript. Context exclusions affect
+    /// generation only and therefore never leak into persistence or inspection.
+    func foundationModelsCanonicalTranscript() async -> Transcript? {
+        guard let foundationModelsRuntime else { return nil }
+        return await foundationModelsRuntime.canonicalTranscript()
+    }
+
+    func foundationModelsContextProjection() async -> TranscriptContextProjection? {
+        guard let foundationModelsRuntime else { return nil }
+        return await foundationModelsRuntime.transcriptContextProjection
+    }
+
     /// Replaces Foundation Models session infrastructure only at an
     /// application-controlled transition boundary. History preparation and
     /// relay injection stay beside the concrete session owner rather than in an
@@ -314,6 +326,7 @@ actor LLMRuntime {
         keepingHistory: Bool = true,
         discardingCapabilityContext: Bool = false,
         restoringHistory: [Transcript.Entry]? = nil,
+        restoringProjection: TranscriptContextProjection? = nil,
         events: ModelSessionEvents
     ) async -> Bool {
         // A configuration transition may replace the stored generation only
@@ -325,15 +338,24 @@ actor LLMRuntime {
               let foundationModelsRuntime else {
             return false
         }
-        let transcript = await foundationModelsRuntime.transcript
+        let transcript = await foundationModelsRuntime.canonicalTranscript()
         let history = restoringHistory ?? SessionRebuildHistory.prepare(
             transcript,
             keepingHistory: keepingHistory,
             discardingCapabilityContext: discardingCapabilityContext
         )
+        let projection: TranscriptContextProjection
+        if let restoringProjection {
+            projection = restoringProjection
+        } else if !keepingHistory || discardingCapabilityContext {
+            projection = .empty
+        } else {
+            projection = await foundationModelsRuntime.transcriptContextProjection
+        }
         await foundationModelsRuntime.rebuild(
             configuration: configuration,
-            history: history,
+            canonicalHistory: history,
+            projection: projection,
             events: events
         )
         return true

@@ -336,7 +336,8 @@ final class ProfileSelectionCoordinator {
     func rebuildSession(
         keepingHistory: Bool = true,
         discardingCapabilityContext: Bool = false,
-        restoringHistory: [FoundationModelsTranscriptEntry]? = nil
+        restoringHistory: [FoundationModelsTranscriptEntry]? = nil,
+        restoringProjection: TranscriptContextProjection? = nil
     ) async {
         presentation.setLlamaContextUsage(nil)
         _ = await agentRuntime.apply(
@@ -355,6 +356,7 @@ final class ProfileSelectionCoordinator {
             keepingHistory: keepingHistory,
             discardingCapabilityContext: discardingCapabilityContext,
             restoringHistory: restoringHistory,
+            restoringProjection: restoringProjection,
             events: responseCoordinator.modelSessionEvents
         )
     }

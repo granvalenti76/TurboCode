@@ -11,6 +11,7 @@ struct WorkbenchSplitView: View {
         case editorialDesk
         case delegatedTask
         case terminal
+        case transcript
         case changes
     }
 
@@ -82,6 +83,11 @@ struct WorkbenchSplitView: View {
         // a LazyVStack and may be rebuilt while a response or session changes.
         .sheet(item: diffPatchReviewBinding) { presentation in
             DiffPatchReviewSheet(patch: presentation.patch)
+        }
+        // Transcript inspection belongs to the window-level conversation
+        // document, not to a recycled row inside the lazy message timeline.
+        .sheet(item: transcriptSheetBinding) { presentation in
+            TranscriptSheet(threadID: presentation.id)
         }
         .onChange(of: chatStore.leftSidebarCollapsed, initial: true) { _, collapsed in
             let target: NavigationSplitViewVisibility = collapsed ? .detailOnly : .all
@@ -160,16 +166,32 @@ struct WorkbenchSplitView: View {
             }
 
             ToolbarItem(placement: .primaryAction) {
-                toolbarPillButton(
-                    id: .changes,
-                    icon: "sidebar.right",
-                    label: "Changes",
-                    help: chatStore.rightPanelMode == .changes
-                        ? "Hide changes"
-                        : "Show changes",
-                    isActive: chatStore.rightPanelMode == .changes
-                ) {
-                    chatStore.toggleRightPanel(.changes)
+                HStack(spacing: 4) {
+                    toolbarPillButton(
+                        id: .transcript,
+                        icon: "text.document",
+                        label: "Show transcript",
+                        help: chatStore.activeThreadId == nil
+                            ? "Start a conversation to inspect its transcript"
+                            : "Show transcript",
+                        isActive: chatStore.transcriptSheetPresentation != nil,
+                        isDisabled: chatStore.activeThreadId == nil
+                            || chatStore.route != .chat
+                    ) {
+                        chatStore.presentTranscript()
+                    }
+
+                    toolbarPillButton(
+                        id: .changes,
+                        icon: "sidebar.right",
+                        label: "Changes",
+                        help: chatStore.rightPanelMode == .changes
+                            ? "Hide changes"
+                            : "Show changes",
+                        isActive: chatStore.rightPanelMode == .changes
+                    ) {
+                        chatStore.toggleRightPanel(.changes)
+                    }
                 }
                 .padding(5)
             }
@@ -273,6 +295,19 @@ struct WorkbenchSplitView: View {
                     chatStore.dismissEditorialDesk()
                 } else {
                     chatStore.editorialDeskPresentation = newValue
+                }
+            }
+        )
+    }
+
+    private var transcriptSheetBinding: Binding<TranscriptSheetPresentation?> {
+        Binding(
+            get: { chatStore.transcriptSheetPresentation },
+            set: { newValue in
+                if newValue == nil {
+                    chatStore.dismissTranscript()
+                } else {
+                    chatStore.transcriptSheetPresentation = newValue
                 }
             }
         )
