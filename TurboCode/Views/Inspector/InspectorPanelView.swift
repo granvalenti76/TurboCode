@@ -530,6 +530,7 @@ private struct AgentActivityInspectorView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            AgentActivityMatrixView(activity: activity)
             Divider()
 
             ScrollView {
@@ -1245,6 +1246,101 @@ private enum AgentRouteStatus {
         case .cancelled: .orange
         case .requested: .blue
         case .pending, .notRequested: .secondary
+        }
+    }
+}
+
+/// Decorative motion follows typed runtime activity, never generated prose or
+/// an invented completion percentage. Static text carries the same information.
+private struct AgentActivityMatrixView: View {
+    let activity: AgentActivity
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var status: String {
+        if !activity.phase.isTerminal, let tool = activity.activeTool {
+            return "\(tool.owner == .worker ? "Worker" : "Coordinator") · \(tool.name)"
+        }
+        switch activity.phase {
+        case .preparing: return "Preparing handoff"
+        case .delegating: return "Handing off to worker"
+        case .workerRunning: return "Processing · no active tool"
+        case .verifying: return "Checking result"
+        case .succeeded: return "Finished"
+        case .failed: return "Task failed"
+        case .cancelled: return "Stopped"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Stop frame updates once motion is unnecessary. The clock only
+            // drives decoration; it cannot change the reported execution state.
+            TimelineView(.animation(
+                minimumInterval: 1.0 / 30,
+                paused: reduceMotion || activity.phase.isTerminal
+            )) { context in
+                matrix(at: context.date)
+            }
+            .frame(height: 45)
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(activity.worker.modelName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(status)
+                    .font(AppTypography.metadata)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.accentColor.opacity(0.1), lineWidth: 1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 10)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Subagent \(activity.worker.modelName). \(status)")
+        .help("\(activity.worker.modelName) — \(status)")
+    }
+
+    private func matrix(at date: Date) -> some View {
+        let moving = !reduceMotion && !activity.phase.isTerminal
+        let elapsed = max(0, date.timeIntervalSince(activity.startedAt))
+        let time = moving ? elapsed : 0
+
+        return Canvas { context, size in
+            let side = 9.0
+            let pitch = 12.0
+            let columns = max(1, Int((size.width + 3) / pitch))
+            let inset = max(0, (size.width - (Double(columns) * pitch - 3)) / 2)
+
+            for row in 0..<4 {
+                for column in 0..<columns {
+                    // Fixed per-cell variation gives the contribution-grid
+                    // texture without random flicker. Offset rows and a soft
+                    // trailing wave travel right continuously across the grid;
+                    // this is a liveness signal, not work or token telemetry.
+                    let texture = Double((column * 13 + row * 7) % 11) / 10
+                    let position = Double(column) - time * 7 + Double(row) * 1.4
+                    let wave = pow((cos(position * 0.36) + 1) / 2, 5)
+                    let opacity = moving
+                        ? 0.09 + texture * 0.13 + wave * (0.45 + texture * 0.3)
+                        : 0.1 + texture * 0.24
+                    let square = Path(roundedRect: CGRect(
+                        x: inset + Double(column) * pitch,
+                        y: Double(row) * pitch,
+                        width: side,
+                        height: side
+                    ), cornerRadius: 2)
+                    context.fill(square, with: .color(.accentColor.opacity(opacity)))
+                }
+            }
         }
     }
 }

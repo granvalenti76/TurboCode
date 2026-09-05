@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:">
+<title>Repo Observatory</title>
+<style>
+:root{color-scheme:light dark;--bg:#f6f7f4;--card:#fff;--ink:#20352e;--muted:#728078;--line:#dde4dd;--green:#438e66;--blue:#6d91aa;--red:#bb7268;--gold:#bc9746}
+@media(prefers-color-scheme:dark){:root{--bg:#151d19;--card:#1e2923;--ink:#e3eee5;--muted:#96ac9d;--line:#33473b;--green:#78b38c;--blue:#81abc6;--red:#d99689;--gold:#d4b36b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:13px -apple-system,BlinkMacSystemFont,sans-serif}
+main{padding:26px;max-width:1100px;margin:auto}button,input{font:inherit}button{color:inherit;cursor:pointer}button:focus-visible,input:focus-visible{outline:3px solid var(--blue);outline-offset:3px}
+.eyebrow,.mono,.badge{font:10px ui-monospace,SFMono-Regular,monospace;letter-spacing:.1em}.eyebrow{text-transform:uppercase;color:var(--muted)}
+.top{display:flex;justify-content:space-between;align-items:center;gap:14px}.mark{display:inline-grid;grid-template-columns:repeat(3,4px);gap:2px;margin-right:9px}.mark i{width:4px;height:4px;background:var(--green)}.mark i:nth-child(3n){opacity:.3}
+.badge{border:1px solid var(--line);padding:6px 9px;border-radius:20px;letter-spacing:0;max-width:45%;overflow-wrap:anywhere}
+h1{font-size:30px;letter-spacing:-1.1px;font-weight:550;margin:20px 0 7px;overflow-wrap:anywhere}.sub{color:var(--muted);font-size:12px;margin:0;line-height:1.6}
+.stats{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:16px;margin:24px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:18px 0}
+.stat strong{display:block;font-size:29px;font-weight:500;letter-spacing:-1px;font-variant-numeric:tabular-nums}.stat span{display:block;color:var(--muted);font-size:11px;margin-top:5px}.plus{color:var(--green)}.minus{color:var(--red)}
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+button.pill{border:1px solid var(--line);background:transparent;border-radius:16px;padding:6px 11px;font-size:11px}
+button.pill[aria-pressed=true]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+input{min-width:100px;flex:1;background:var(--card);border:1px solid var(--line);border-radius:7px;padding:7px 9px;color:var(--ink)}
+.crumb{display:flex;gap:6px;align-items:center;margin:15px 0;font-size:12px;flex-wrap:wrap;overflow-wrap:anywhere}.crumb button{border:0;background:none;color:var(--green);padding:3px}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 190px;gap:14px;align-items:start}
+.map{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;min-width:0}
+.group{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px;min-width:0}
+.groupTitle{border:0;background:none;padding:0;display:block;text-align:left;width:100%;font-weight:600;font-size:12px;overflow-wrap:anywhere}.groupTitle:hover{color:var(--green)}
+.group small{display:block;color:var(--muted);font-size:10px;margin-top:5px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,12px);grid-auto-rows:12px;gap:4px;margin-top:16px;align-content:start;min-height:44px}
+.tile{border:0;border-radius:3px;background:var(--blue);padding:0;opacity:.72;transition:opacity .15s,transform .15s}
+.tile:hover,.tile[aria-pressed=true]{opacity:1;transform:translateY(-2px);outline:2px solid var(--ink);outline-offset:2px}
+.tile.add{background:var(--green)}.tile.delete{background:var(--red)}.tile.untracked{background:var(--gold)}.tile.conflict{background:var(--red);box-shadow:inset 0 0 0 2px var(--ink)}
+.detail{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:15px;min-height:170px;overflow-wrap:anywhere}
+.detail h2{font-size:13px;line-height:1.5;margin:13px 0}.detail p{font-size:11px;line-height:1.7;color:var(--muted)}.detail .numbers{font:18px ui-monospace,monospace}
+.legend{display:flex;flex-wrap:wrap;gap:12px;color:var(--muted);font-size:10px;margin:18px 0}.legend i{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:5px}
+footer{border-top:1px solid var(--line);padding-top:14px;margin-top:20px;color:var(--muted);font-size:10px;line-height:1.7;overflow-wrap:anywhere}
+.empty{grid-column:1/-1;text-align:center;border:1px dashed var(--line);border-radius:12px;padding:32px 16px}.empty strong{display:block;font-size:18px;margin-bottom:8px}
+.demo{color:var(--gold);font-size:10px}.reveal{animation:reveal .35s ease-out}@keyframes reveal{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+@media(max-width:480px){main{padding:18px}.layout{grid-template-columns:1fr}.detail{min-height:0}h1{font-size:26px}.map{grid-template-columns:repeat(auto-fit,minmax(120px,1fr))}}
+</style>
+</head>
+<body>
+<main>
+<div class="top"><div class="eyebrow"><span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>Repo Observatory</div><span class="badge" id="branch">Waiting for snapshot</span></div>
+<h1 id="name">Your changes, in focus.</h1><p class="sub" id="subtitle">A read-only atlas of your working tree.</p>
+<div class="stats"><div class="stat"><strong id="count">—</strong><span>changed files</span></div><div class="stat"><strong class="plus" id="added">—</strong><span>lines added *</span></div><div class="stat"><strong class="minus" id="removed">—</strong><span>lines removed *</span></div></div>
+<div class="toolbar" role="group" aria-label="Filter changes"><button class="pill" data-filter="all" aria-pressed="true">All</button><button class="pill" data-filter="staged" aria-pressed="false">Staged</button><button class="pill" data-filter="unstaged" aria-pressed="false">Unstaged</button><input id="search" aria-label="Find a changed file" placeholder="Find a file…"></div>
+<nav class="crumb" id="crumb" aria-label="Folder navigation"></nav>
+<div class="layout"><section class="map" id="map" aria-label="Change mosaic"></section><aside class="detail" id="detail" aria-live="polite"><span class="eyebrow">Inspect a square</span><p>Each square is a file. Larger squares carry more changed lines. Select a folder to explore, or a square for details.</p></aside></div>
+<div class="legend"><span><i style="background:var(--green)"></i>Added</span><span><i style="background:var(--blue)"></i>Modified</span><span><i style="background:var(--red)"></i>Deleted / conflict</span><span><i style="background:var(--gold)"></i>Untracked</span></div>
+<footer id="footer">Waiting for TurboCode. <button class="pill" id="demo">Explore demo data</button></footer>
+</main>
+<script>
+let data=null, folder="", filter="all", selected=null;
+const $=id=>document.getElementById(id);
+const text=(tag,value,cls)=>{const el=document.createElement(tag);el.textContent=value;if(cls)el.className=cls;return el};
+// Repository strings are untrusted. Always use textContent, never HTML interpolation.
+function kind(file){if(file.status.includes("U")||["AA","DD"].includes(file.status))return "conflict";if(file.untracked)return "untracked";if(file.status.includes("D"))return "delete";if(file.status.includes("A"))return "add";return "modified"}
+function label(file){return {conflict:"Merge conflict",untracked:"Untracked",delete:"Deleted",add:"Added",modified:"Modified"}[kind(file)]}
+function inspect(file){
+ selected=file.path;const panel=$("detail");panel.replaceChildren(text("span",label(file),"eyebrow"),text("h2",file.path));
+ const counts=text("div",file.binary?"Binary file":file.untracked?"Not counted":"+"+file.added+" / −"+file.removed,"numbers");panel.append(counts);
+ panel.append(text("p",file.untracked?"Not in the index. Contents were not read.":[file.staged?"Staged changes":"",file.unstaged?"Unstaged changes":""].filter(Boolean).join(" · ")));
+ panel.append(text("p","Git status: "+file.status));
+ document.querySelectorAll(".tile").forEach(el=>el.setAttribute("aria-pressed",String(el.dataset.path===selected)));
+}
+function render(){
+ if(!data)return;
+ $("branch").textContent=data.branch;$("name").textContent=data.name;
+ $("subtitle").textContent=data.demo?"DEMO SNAPSHOT · Illustrative data, not your repository.":data.files.length?"A constellation of work in progress.":"Room for your next idea.";
+ $("count").textContent=data.files.length;
+ $("added").textContent="+"+data.files.reduce((s,f)=>s+f.added,0);
+ $("removed").textContent="−"+data.files.reduce((s,f)=>s+f.removed,0);
+ const crumb=$("crumb");crumb.replaceChildren();const home=text("button","Repository");home.onclick=()=>{folder="";render()};crumb.append(home);
+ let path="";for(const part of folder.split("/").filter(Boolean)){path+=part+"/";const target=path;crumb.append(text("span","/"));const button=text("button",part);button.onclick=()=>{folder=target;render()};crumb.append(button)}
+ const query=$("search").value.toLowerCase();
+ const visible=data.files.filter(f=>f.path.startsWith(folder)&&(filter==="all"||f[filter])&&f.path.toLowerCase().includes(query));
+ const groups=new Map();for(const file of visible){const remaining=file.path.slice(folder.length);const key=remaining.includes("/")?remaining.split("/")[0]:"·";if(!groups.has(key))groups.set(key,[]);groups.get(key).push(file)}
+ const map=$("map");map.replaceChildren();
+ if(!visible.length){const box=text("div","","empty");box.append(text("strong",data.state==="no-repository"?"No Git repository here":data.files.length?"No matching changes":"Working tree is clear"),text("p",data.state==="no-repository"?"Choose a Git workspace and call the tool again.":data.commit?"A quiet moment between commits.":"No commits yet. This is where the story starts.","sub"));map.append(box)}
+ for(const [name,files] of [...groups].sort(([a],[b])=>a.localeCompare(b))){
+ const card=text("div","","group reveal");const title=text("button",name==="·"?"Root files":name+" ↗","groupTitle");
+ title.disabled=name==="·";title.onclick=()=>{folder+=name+"/";render()};card.append(title,text("small",files.length+" file"+(files.length===1?"":"s")));
+ const tiles=text("div","","tiles");
+ for(const file of files){const tile=text("button","","tile "+kind(file));const weight=file.added+file.removed;const span=weight>100?3:weight>15?2:1;tile.style.gridColumn="span "+span;tile.style.gridRow="span "+span;tile.dataset.path=file.path;tile.title=file.path+" · "+label(file);tile.setAttribute("aria-label",tile.title);tile.setAttribute("aria-pressed",String(selected===file.path));tile.onclick=()=>inspect(file);tiles.append(tile)}
+ card.append(tiles);map.append(card)}
+ $("footer").replaceChildren(text("div",data.commit||"No commit recorded"),text("div",(data.demo?"DEMO · ":"")+"Snapshot "+new Date(data.capturedAt).toLocaleString()+" · Read only"),text("div","* Staged + unstaged line edits, not net changes from HEAD. Binary and untracked contents excluded. Square sizes use three bands."),text("div","Call repo_observatory again to refresh. "+data.root));
+ resize();
+}
+function resize(){requestAnimationFrame(()=>window.turbocode?.resize(Math.min(1600,Math.ceil(document.querySelector("main").getBoundingClientRect().height)+1)))}
+document.querySelectorAll("[data-filter]").forEach(button=>button.onclick=()=>{filter=button.dataset.filter;document.querySelectorAll("[data-filter]").forEach(b=>b.setAttribute("aria-pressed",String(b===button)));render()});
+$("search").addEventListener("input",render);
+window.addEventListener("turbocode-props",event=>{const next=event.detail;if(!next||!Array.isArray(next.files))return;data=next;folder="";selected=null;$("detail").replaceChildren(text("span","Inspect a square","eyebrow"),text("p","Select a file to see its changes. Folder names open the next level."));render()});
+window.addEventListener("resize",resize);
+$("demo").onclick=()=>{data={demo:true,name:"TurboCode",root:"Illustrative workspace",state:"repository",branch:"dev",commit:"a71e90c · Shape the next release",capturedAt:new Date().toISOString(),files:Array.from({length:34},(_,i)=>({path:["Sources/Views","Sources/Services","Tests","Documentation","Plugins"][i%5]+"/"+["Activity","Session","Workspace","Profile","Runtime","Widget","Inspector"][i%7]+i+(i%5===3?".md":".swift"),status:i%9===0?"??":i%7===0?" D":i%4===0?"A ":" M",staged:i%4===0,unstaged:i%4!==0,added:i%9===0?0:(i*17)%143,removed:i%9===0?0:(i*7)%40,binary:false,untracked:i%9===0}))};render()};
+resize();
+</script>
+</body></html>

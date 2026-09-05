@@ -1,0 +1,37 @@
+{
+  "manifestVersion": 1,
+  "id": "dependency-reactor",
+  "name": "Dependency Reactor",
+  "version": "0.5.0",
+  "entrypoint": "dist/index.js",
+  "runtime": {
+    "kind": "node",
+    "node": ">=24.0.0"
+  },
+  "tools": [
+    {
+      "name": "dependency_reactor",
+      "description": "Explore an interactive orbital graph of Swift import references grouped by source folder. Not a symbol-level or compiler-resolved dependency graph.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute workspace directory to inspect."
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "widgets": [
+    {
+      "id": "reactor",
+      "title": "Dependency Reactor",
+      "entrypoint": "dist/widget.html"
+    }
+  ]
+}
