@@ -530,7 +530,7 @@ private struct AgentActivityInspectorView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            AgentActivityMatrixView(activity: activity)
+            AgentActivitySignalView(activity: activity)
             Divider()
 
             ScrollView {
@@ -1250,11 +1250,10 @@ private enum AgentRouteStatus {
     }
 }
 
-/// Decorative motion follows typed runtime activity, never generated prose or
-/// an invented completion percentage. Static text carries the same information.
-private struct AgentActivityMatrixView: View {
+/// Ambient motion may continue after completion; only the typed status text
+/// reports execution state. The visual never implies measurable task progress.
+private struct AgentActivitySignalView: View {
     let activity: AgentActivity
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var status: String {
         if !activity.phase.isTerminal, let tool = activity.activeTool {
@@ -1273,15 +1272,13 @@ private struct AgentActivityMatrixView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Stop frame updates once motion is unnecessary. The clock only
-            // drives decoration; it cannot change the reported execution state.
-            TimelineView(.animation(
-                minimumInterval: 1.0 / 30,
-                paused: reduceMotion || activity.phase.isTerminal
-            )) { context in
-                matrix(at: context.date)
-            }
-            .frame(height: 45)
+            AgentActivityCyberdeckView(
+                startedAt: activity.startedAt,
+                isFinished: activity.phase.isTerminal,
+                statusTitle: activity.phase.displayName,
+                statusSymbol: activity.phase.symbolName
+            )
+            .frame(height: 112)
             .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
@@ -1307,41 +1304,6 @@ private struct AgentActivityMatrixView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Subagent \(activity.worker.modelName). \(status)")
         .help("\(activity.worker.modelName) — \(status)")
-    }
-
-    private func matrix(at date: Date) -> some View {
-        let moving = !reduceMotion && !activity.phase.isTerminal
-        let elapsed = max(0, date.timeIntervalSince(activity.startedAt))
-        let time = moving ? elapsed : 0
-
-        return Canvas { context, size in
-            let side = 9.0
-            let pitch = 12.0
-            let columns = max(1, Int((size.width + 3) / pitch))
-            let inset = max(0, (size.width - (Double(columns) * pitch - 3)) / 2)
-
-            for row in 0..<4 {
-                for column in 0..<columns {
-                    // Fixed per-cell variation gives the contribution-grid
-                    // texture without random flicker. Offset rows and a soft
-                    // trailing wave travel right continuously across the grid;
-                    // this is a liveness signal, not work or token telemetry.
-                    let texture = Double((column * 13 + row * 7) % 11) / 10
-                    let position = Double(column) - time * 7 + Double(row) * 1.4
-                    let wave = pow((cos(position * 0.36) + 1) / 2, 5)
-                    let opacity = moving
-                        ? 0.09 + texture * 0.13 + wave * (0.45 + texture * 0.3)
-                        : 0.1 + texture * 0.24
-                    let square = Path(roundedRect: CGRect(
-                        x: inset + Double(column) * pitch,
-                        y: Double(row) * pitch,
-                        width: side,
-                        height: side
-                    ), cornerRadius: 2)
-                    context.fill(square, with: .color(.accentColor.opacity(opacity)))
-                }
-            }
-        }
     }
 }
 
