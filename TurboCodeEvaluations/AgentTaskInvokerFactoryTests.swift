@@ -96,6 +96,30 @@ struct AgentTaskInvokerFactoryTests {
         #expect(pool.invokers[1].context.reasoningLevel == .moderate)
     }
 
+    @Test("Worker transport preserves its own reasoning policy", arguments: [ReasoningEffort.medium, .xhigh, nil])
+    func workerTransportUsesSlotReasoning(effort: ReasoningEffort?) throws {
+        let worker = ModelWorkerConfiguration(
+            id: UUID(),
+            name: "Worker",
+            modelID: .llama,
+            remoteModel: .fallbackLlama,
+            toolIDs: [],
+            reasoningEffort: effort
+        )
+        let invoker = ModelSessionFactory.makeDelegateInvoker(
+            configuration: Self.makeConfiguration(
+                delegateReasoningEffort: .high,
+                delegateWorkers: [worker]
+            ),
+            events: Self.noopEvents
+        )
+        let configured = try #require(invoker as? ConfiguredAgentTaskInvoker)
+        let provider = try #require(configured.context.model as? ProviderLanguageModel)
+        // Check the exact transport level: native options collapse High and
+        // X-High and cannot detect a leaked legacy delegate setting.
+        #expect(provider.executorConfiguration.reasoningEffort == effort)
+    }
+
     private static var noopEvents: ModelSessionEvents {
         ModelSessionEvents(
             toolStarted: { _, _, _ in },

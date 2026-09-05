@@ -49,9 +49,72 @@ struct RemotePromptWireTests {
         #expect(toolNames.contains("list_workspace"))
     }
 
+    @Test("Reasoning-only and empty assistant history keeps a valid wire envelope", arguments: [true, false])
+    func incompleteAssistantHistoryHasContent(reasoningOnly: Bool) async throws {
+        let entry: Transcript.Entry = reasoningOnly
+            ? .reasoning(Transcript.Reasoning(segments: [
+                .text(Transcript.TextSegment(content: "Pending reasoning"))
+            ]))
+            : .response(Transcript.Response(assetIDs: [], segments: []))
+        let capture = try await captureRequest(
+            safariEnabled: false,
+            history: [
+                .prompt(Transcript.Prompt(segments: [
+                    .text(Transcript.TextSegment(content: "Previous task"))
+                ])),
+                entry
+            ]
+        )
+        let messages = try #require(capture.body["messages"] as? [[String: Any]])
+        let assistant = try #require(messages.first { $0["role"] as? String == "assistant" })
+        #expect(assistant["content"] as? String == "")
+        if reasoningOnly {
+            #expect(assistant["reasoning_content"] as? String == "Pending reasoning")
+        }
+    }
+
+    @Test("Reasoning stays attached to tool calls with their matching output")
+    func toolExchangePreservesWireContract() async throws {
+        let call = Transcript.ToolCall(
+            id: "wire-call",
+            toolName: "list_workspace",
+            arguments: GeneratedContent(properties: ["path": "."])
+        )
+        let capture = try await captureRequest(
+            safariEnabled: false,
+            history: [
+                .prompt(Transcript.Prompt(segments: [
+                    .text(Transcript.TextSegment(content: "List the workspace"))
+                ])),
+                .reasoning(Transcript.Reasoning(segments: [
+                    .text(Transcript.TextSegment(content: "Inspect files"))
+                ])),
+                .toolCalls(Transcript.ToolCalls([call])),
+                .toolOutput(Transcript.ToolOutput(
+                    id: call.id,
+                    toolName: call.toolName,
+                    segments: [.text(Transcript.TextSegment(content: "README.md"))]
+                ))
+            ]
+        )
+        let messages = try #require(capture.body["messages"] as? [[String: Any]])
+        let assistant = try #require(messages.first { $0["role"] as? String == "assistant" })
+        let calls = try #require(assistant["tool_calls"] as? [[String: Any]])
+        #expect(calls.count == 1)
+        #expect(calls.first?["id"] as? String == call.id)
+        #expect(assistant["reasoning_content"] as? String == "Inspect files")
+        #expect(assistant["content"] == nil)
+        let output = try #require(messages.first { $0["role"] as? String == "tool" })
+        #expect(output["tool_call_id"] as? String == call.id)
+        #expect(output["content"] as? String == "README.md")
+    }
+
     private static let userPrompt = "WIRE_USER_PROMPT"
 
-    private func captureRequest(safariEnabled: Bool) async throws -> WireCapture {
+    private func captureRequest(
+        safariEnabled: Bool,
+        history: [Transcript.Entry] = []
+    ) async throws -> WireCapture {
         PromptWireURLProtocol.reset()
         defer { PromptWireURLProtocol.reset() }
 
@@ -113,7 +176,8 @@ struct RemotePromptWireTests {
                 safariSkillActivations: safariEnabled ? SkillActivations() : nil,
                 onToolStart: nil,
                 onToolEnd: nil
-            )
+            ),
+            history: history
         )
 
         _ = try await session.respond(to: Self.userPrompt)

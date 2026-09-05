@@ -716,7 +716,9 @@ nonisolated enum ModelSessionFactory {
             ? SystemLanguageModel.default
             : providerModel(
                 for: remoteModel,
-                reasoningEffort: configuration.delegateReasoningEffort
+                // Transport and native context options must use the same
+                // worker slot policy, including an explicitly unset level.
+                reasoningEffort: worker.reasoningEffort
             )
         let workerBackend: ModelBackend = isOnDevice
             ? .foundationApple
