@@ -54,6 +54,14 @@ extension ChatStore {
         agentActivityStore.current
     }
 
+    var agentActivities: [AgentActivity] {
+        agentActivityStore.activities
+    }
+
+    func selectAgentActivity(_ id: String) {
+        agentActivityStore.select(id)
+    }
+
     public var isFirstMessage: Bool {
         timelineStore.isFirstMessage
     }

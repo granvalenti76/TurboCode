@@ -264,6 +264,7 @@ final class BackgroundDelegationCoordinator {
     private let persistence: ConversationPersistenceService
     private let sessions: ConversationSessionCoordinator
     private let profiles: ProfileSelectionCoordinator
+    private var activeTaskIDs: Set<String> = []
 
     init(
         supervisor: DelegatedTaskSupervisor,
@@ -331,7 +332,7 @@ final class BackgroundDelegationCoordinator {
         // and tool context can be retained while transient parent-turn events
         // are replaced. Test invokers have no tool event stream to isolate.
         let retainedInvoker: any AgentTaskInvoking
-        if let configured = invoker as? ConfiguredAgentTaskInvoker {
+        if let configured = invoker as? any BackgroundIsolatableAgentTaskInvoking {
             retainedInvoker = configured.backgroundIsolated { event in
                 await journal.record(event)
             }
@@ -340,20 +341,29 @@ final class BackgroundDelegationCoordinator {
         }
         // Publish busy delegation before crossing to the supervisor so an
         // immediately completing fake or local worker cannot invert true/false.
+        let activityID = "\(envelope.taskID):\(envelope.attemptID)"
+        activeTaskIDs.insert(activityID)
         responseCoordinator.delegationChanged(true)
-        let receipt = try await supervisor.submit(
-            envelope: envelope,
-            invoker: retainedInvoker,
-            parentTurnID: parentTurnID
-        ) { [weak self] result in
-            await self?.finish(
-                result: result,
+        let receipt: DelegatedTaskReceipt
+        do {
+            receipt = try await supervisor.submit(
                 envelope: envelope,
-                threadID: threadID,
-                backend: backend,
-                workspaceName: workspaceName,
-                journal: journal
-            )
+                invoker: retainedInvoker,
+                parentTurnID: parentTurnID
+            ) { [weak self] result in
+                await self?.finish(
+                    result: result,
+                    envelope: envelope,
+                    threadID: threadID,
+                    backend: backend,
+                    workspaceName: workspaceName,
+                    journal: journal
+                )
+            }
+        } catch {
+            activeTaskIDs.remove(activityID)
+            responseCoordinator.delegationChanged(!activeTaskIDs.isEmpty)
+            throw error
         }
         if case .command(let command) = origin {
             let acknowledgement = Self.acknowledgement(for: receipt)
@@ -443,7 +453,12 @@ final class BackgroundDelegationCoordinator {
                 )
             }
         }
-        responseCoordinator.delegationChanged(false)
+        activeTaskIDs.remove("\(envelope.taskID):\(envelope.attemptID)")
+        responseCoordinator.delegationChanged(!activeTaskIDs.isEmpty)
+    }
+
+    func cancel(taskID: String, attemptID: String) async -> Bool {
+        await supervisor.cancel(taskID: taskID, attemptID: attemptID)
     }
 
     private func appendToActiveContext(

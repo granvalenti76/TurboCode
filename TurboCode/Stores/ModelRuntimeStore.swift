@@ -409,6 +409,7 @@ final class ModelRuntimeStore {
             activeTemperature: temperature(for: activeRemoteModel),
             delegateTemperature: temperature(for: delegateModel),
             delegateToolIDs: activeDynamicProfile?.resolvedWorkerToolIDs,
+            delegateWorkers: resolvedDelegateWorkers,
             dropsCompletedToolCalls: shouldDropCompletedToolCalls,
             workspaceInstructions: workspaceInstructions,
             activePluginTools: agentTuning.experimental.thirdPartyPluginsEnabled
@@ -514,6 +515,49 @@ final class ModelRuntimeStore {
         } ?? remoteModels.first(where: {
             $0.enabled
         }) ?? RemoteModelConfig.fallbackLlama
+    }
+
+    /// Resolves profile-owned worker slots without probing endpoint capacity.
+    /// Repeating a remote model is an explicit promise that its configured
+    /// backend can accept the corresponding number of concurrent requests.
+    private var resolvedDelegateWorkers: [ModelWorkerConfiguration] {
+        let fallbackID = agentTuning.orchestrator.delegateModelID
+        let definitions: [ProfileWorkerConfiguration]
+        if let profile = activeDynamicProfile, profile.usesDelegation {
+            definitions = profile.resolvedWorkers(fallback: fallbackID)
+        } else {
+            let modelID = ProfileBaseModelID(rawValue: fallbackID)
+                .flatMap { ProfileBaseModelID.workerCases.contains($0) ? $0 : nil }
+                ?? .llama
+            definitions = [
+                ProfileWorkerConfiguration(
+                    name: "Delegated Worker",
+                    modelID: modelID,
+                    toolIDs: activeDynamicProfile?.workerToolIDs
+                )
+            ]
+        }
+        return definitions.map { worker in
+            let remote = worker.modelID.remoteModelID.flatMap { remoteID in
+                remoteModels.first(where: { $0.id == remoteID && $0.enabled })
+                    ?? RemoteModelConfig.defaults.first(where: {
+                        $0.id == remoteID
+                    })
+            }
+            return ModelWorkerConfiguration(
+                id: worker.id,
+                name: worker.name,
+                modelID: worker.modelID,
+                remoteModel: remote,
+                toolIDs: worker.resolvedToolIDs,
+                reasoningEffort: worker.modelID == .onDevice
+                    ? persistedReasoningEffort
+                    : reasoningEffort(for: remote),
+                temperature: worker.modelID == .onDevice
+                    ? nil
+                    : temperature(for: remote)
+            )
+        }
     }
 
     private func temperature(for model: RemoteModelConfig?) -> Double? {

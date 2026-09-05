@@ -2,6 +2,34 @@ import Foundation
 import FoundationModels
 import FoundationModelsUtilities
 
+nonisolated struct ModelWorkerConfiguration: Sendable, Hashable {
+    let id: UUID
+    let name: String
+    let modelID: ProfileBaseModelID
+    let remoteModel: RemoteModelConfig?
+    let toolIDs: Set<ToolCapabilityID>?
+    let reasoningEffort: ReasoningEffort?
+    let temperature: Double?
+
+    init(
+        id: UUID,
+        name: String,
+        modelID: ProfileBaseModelID,
+        remoteModel: RemoteModelConfig?,
+        toolIDs: Set<ToolCapabilityID>?,
+        reasoningEffort: ReasoningEffort? = nil,
+        temperature: Double? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.modelID = modelID
+        self.remoteModel = remoteModel
+        self.toolIDs = toolIDs
+        self.reasoningEffort = reasoningEffort
+        self.temperature = temperature
+    }
+}
+
 nonisolated struct ModelSessionConfiguration: Sendable {
     let backend: ModelBackend
     let activeRemoteModel: RemoteModelConfig?
@@ -21,6 +49,9 @@ nonisolated struct ModelSessionConfiguration: Sendable {
     /// `nil` keeps the default complete worker catalog; a value is an
     /// explicit profile-owned allowlist, including an intentionally empty one.
     let delegateToolIDs: Set<ToolCapabilityID>?
+    /// Executable worker slots for structured delegation. Empty keeps older
+    /// callers on the single remote delegate projection.
+    let delegateWorkers: [ModelWorkerConfiguration]
     let dropsCompletedToolCalls: Bool
     let workspaceInstructions: WorkspaceInstructions?
     /// Activated external tools are an immutable process-backed snapshot. The
@@ -42,6 +73,7 @@ nonisolated struct ModelSessionConfiguration: Sendable {
         activeTemperature: Double?,
         delegateTemperature: Double?,
         delegateToolIDs: Set<ToolCapabilityID>?,
+        delegateWorkers: [ModelWorkerConfiguration] = [],
         dropsCompletedToolCalls: Bool,
         workspaceInstructions: WorkspaceInstructions?,
         activePluginTools: [TypeScriptPluginToolBinding] = []
@@ -60,6 +92,7 @@ nonisolated struct ModelSessionConfiguration: Sendable {
         self.activeTemperature = activeTemperature
         self.delegateTemperature = delegateTemperature
         self.delegateToolIDs = delegateToolIDs
+        self.delegateWorkers = delegateWorkers
         self.dropsCompletedToolCalls = dropsCompletedToolCalls
         self.workspaceInstructions = workspaceInstructions
         self.activePluginTools = activePluginTools
@@ -643,20 +676,59 @@ nonisolated enum ModelSessionFactory {
         configuration: ModelSessionConfiguration,
         events: ModelSessionEvents,
         runner: (any AgentTaskRunning)? = nil
+    ) -> any AgentTaskInvoking {
+        let workerConfigurations = configuration.delegateWorkers.isEmpty
+            ? [
+                ModelWorkerConfiguration(
+                    id: UUID(),
+                    name: configuration.delegateRemoteModel.name,
+                    modelID: ProfileBaseModelID(
+                        rawValue: configuration.delegateRemoteModel.id
+                    ) ?? .llama,
+                    remoteModel: configuration.delegateRemoteModel,
+                    toolIDs: configuration.delegateToolIDs,
+                    reasoningEffort: configuration.delegateReasoningEffort,
+                    temperature: configuration.delegateTemperature
+                )
+            ]
+            : configuration.delegateWorkers
+        let invokers = workerConfigurations.map { worker in
+            makeConfiguredWorkerInvoker(
+                worker: worker,
+                configuration: configuration,
+                events: events,
+                runner: runner
+            )
+        }
+        guard invokers.count > 1 else { return invokers[0] }
+        return ConfiguredAgentTaskPoolInvoker(invokers: invokers)
+    }
+
+    private static func makeConfiguredWorkerInvoker(
+        worker: ModelWorkerConfiguration,
+        configuration: ModelSessionConfiguration,
+        events: ModelSessionEvents,
+        runner: (any AgentTaskRunning)?
     ) -> ConfiguredAgentTaskInvoker {
-        let delegateModel = providerModel(
-            for: configuration.delegateRemoteModel,
-            reasoningEffort: configuration.delegateReasoningEffort
-        )
-        let delegateBackend = backend(for: configuration.delegateRemoteModel.role)
+        let isOnDevice = worker.modelID == .onDevice
+        let remoteModel = worker.remoteModel ?? configuration.delegateRemoteModel
+        let workerModel: any LanguageModel = isOnDevice
+            ? SystemLanguageModel.default
+            : providerModel(
+                for: remoteModel,
+                reasoningEffort: configuration.delegateReasoningEffort
+            )
+        let workerBackend: ModelBackend = isOnDevice
+            ? .foundationApple
+            : backend(for: remoteModel.role)
         let capabilities = ModelCapabilityPolicy.resolve(
-            for: delegateModel,
+            for: workerModel,
             requestedReasoningLevel: FoundationModelsReasoningLevel.resolve(
-                configuration.delegateReasoningEffort
+                worker.reasoningEffort
             ),
             preferredToolAccess: preferredToolTier(
-                backend: delegateBackend,
-                remoteModel: configuration.delegateRemoteModel
+                backend: workerBackend,
+                remoteModel: isOnDevice ? nil : remoteModel
             )
         )
         let plan = ModelToolCatalog.plan(
@@ -664,9 +736,9 @@ nonisolated enum ModelSessionFactory {
             tier: capabilities.toolAccess,
             context: toolContext(
                 for: configuration,
-                repositoryMap: configuration.delegateRemoteModel.repositoryMap
+                repositoryMap: isOnDevice ? nil : remoteModel.repositoryMap
             ),
-            selectedIDs: configuration.delegateToolIDs
+            selectedIDs: worker.toolIDs
         )
         let resolvedRunner = runner ?? BoundedAgentTaskRunner(
             verifier: XcodeAgentTaskVerifier(
@@ -677,22 +749,25 @@ nonisolated enum ModelSessionFactory {
         return ConfiguredAgentTaskInvoker(
             runner: resolvedRunner,
             context: AgentTaskRunContext(
-                model: delegateModel,
+                model: workerModel,
                 tools: toolInstances(
                     for: plan,
                     configuration: configuration,
                     repositoryMapContextTokens:
-                        configuration.delegateRemoteModel.contextWindowTokens,
+                        isOnDevice ? 32_768 : remoteModel.contextWindowTokens,
                     receiptRegistry: events.toolReceiptRegistry
                 ),
                 workspaceRoot: configuration.workspaceRoot,
                 instructions: systemPrompt(
                     for: configuration,
                     role: .delegate,
-                    backend: delegateBackend,
+                    backend: workerBackend,
                     plan: plan
                 ),
-                temperature: configuration.delegateTemperature,
+                // Sampling belongs to the worker slot. In particular, an
+                // on-device worker must never inherit its coordinator's
+                // remote temperature merely because they share a profile.
+                temperature: worker.temperature,
                 reasoningLevel: capabilities.reasoningLevel
             ),
             events: AgentTaskRunnerEvents(
@@ -709,7 +784,7 @@ nonisolated enum ModelSessionFactory {
                     )
                     await events.toolStarted(
                         event.call,
-                        delegateBackend,
+                        workerBackend,
                         .worker
                     )
                 },
@@ -724,7 +799,7 @@ nonisolated enum ModelSessionFactory {
                     await events.toolFinished(
                         event.call,
                         event.output,
-                        delegateBackend,
+                        workerBackend,
                         .worker
                     )
                 },
@@ -745,8 +820,8 @@ nonisolated enum ModelSessionFactory {
                 role: .powerfulCoordinator
             ),
             worker: AgentActivityAgent(
-                modelName: configuration.delegateRemoteModel.name,
-                role: .codingWorker
+                modelName: worker.name,
+                role: isOnDevice ? .microtaskOnDevice : .codingWorker
             ),
             activityChanged: events.agentActivityChanged
         )

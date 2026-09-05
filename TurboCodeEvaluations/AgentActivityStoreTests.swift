@@ -109,6 +109,26 @@ struct AgentActivityStoreTests {
         }
     }
 
+    @Test("Concurrent workers retain independent activity and selection")
+    func retainsConcurrentWorkers() throws {
+        let store = AgentActivityStore()
+        let first = try makeEnvelope(attemptID: "attempt-a")
+        let second = try makeEnvelope(attemptID: "attempt-b")
+
+        #expect(store.beginTestAttempt(first))
+        #expect(store.beginTestAttempt(second))
+        #expect(store.activities.count == 2)
+        #expect(store.current?.attemptID == second.attemptID)
+
+        #expect(store.advance(first, to: .delegating))
+        #expect(store.advance(first, to: .workerRunning))
+        #expect(store.activities.first?.phase == .workerRunning)
+        #expect(store.activities.last?.phase == .preparing)
+
+        store.select(store.activities[0].id)
+        #expect(store.current?.attemptID == first.attemptID)
+    }
+
     @Test("Out-of-order phases and mismatched attempt events are ignored")
     func ignoresOutOfOrderEvents() throws {
         let store = AgentActivityStore()

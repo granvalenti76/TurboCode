@@ -850,6 +850,21 @@ public final class ChatStore {
         }
     }
 
+    /// Stops one detached worker without cancelling its siblings. A task owned
+    /// by the foreground response still uses the existing response-wide Stop
+    /// path because its provider turn cannot be interrupted independently.
+    func cancelAgentActivity(_ activity: AgentActivity) async {
+        if await assembly.backgroundDelegationCoordinator.cancel(
+            taskID: activity.taskID,
+            attemptID: activity.attemptID
+        ) {
+            return
+        }
+        if busy {
+            await interrupt()
+        }
+    }
+
 #if DEBUG
     public func runActiveEditingBenchmark() async {
         guard !benchmarkRunning, !busy else { return }

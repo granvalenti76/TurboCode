@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import TurboCode
 
@@ -27,7 +28,7 @@ struct AgentTaskInvokerFactoryTests {
     }
 
     @Test("Remote delegate prompt leaves reasoning control to its transport")
-    func remoteDelegatePromptOmitsReasoningPolicy() {
+    func remoteDelegatePromptOmitsReasoningPolicy() throws {
         let factory = AgentTaskInvokerFactory()
         let workerEffort = factory.makeIndependentTaskInvoker(
             configuration: Self.makeConfiguration(
@@ -44,12 +45,55 @@ struct AgentTaskInvokerFactoryTests {
             events: Self.noopEvents
         )
 
-        #expect(!workerEffort.context.instructions.contains("Reasoning policy ("))
+        let worker = try #require(workerEffort as? ConfiguredAgentTaskInvoker)
+        let coordinator = try #require(
+            coordinatorEffort as? ConfiguredAgentTaskInvoker
+        )
+        #expect(!worker.context.instructions.contains("Reasoning policy ("))
         #expect(
-            !coordinatorEffort.context.instructions.contains(
+            !coordinator.context.instructions.contains(
                 "Reasoning policy ("
             )
         )
+    }
+
+    @Test("Mixed worker profiles build native and remote pool slots")
+    func buildsMixedWorkerPool() throws {
+        let workers = [
+            ModelWorkerConfiguration(
+                id: UUID(),
+                name: "Private Scout",
+                modelID: .onDevice,
+                remoteModel: nil,
+                toolIDs: [],
+                reasoningEffort: .high,
+                temperature: nil
+            ),
+            ModelWorkerConfiguration(
+                id: UUID(),
+                name: "Llama Builder",
+                modelID: .llama,
+                remoteModel: .fallbackLlama,
+                toolIDs: [.readFile],
+                reasoningEffort: .medium,
+                temperature: 0.25
+            )
+        ]
+        let invoker = ModelSessionFactory.makeDelegateInvoker(
+            configuration: Self.makeConfiguration(delegateWorkers: workers),
+            events: Self.noopEvents
+        )
+        let pool = try #require(invoker as? ConfiguredAgentTaskPoolInvoker)
+
+        #expect(pool.maximumConcurrentTasks == 2)
+        #expect(pool.invokers[0].worker?.role == .microtaskOnDevice)
+        #expect(pool.invokers[0].context.temperature == nil)
+        // The system model remains the authority: unsupported reasoning
+        // requests are removed rather than leaking a remote worker policy.
+        #expect(pool.invokers[0].context.reasoningLevel == nil)
+        #expect(pool.invokers[1].worker?.modelName == "Llama Builder")
+        #expect(pool.invokers[1].context.temperature == 0.25)
+        #expect(pool.invokers[1].context.reasoningLevel == .moderate)
     }
 
     private static var noopEvents: ModelSessionEvents {
@@ -66,7 +110,8 @@ struct AgentTaskInvokerFactoryTests {
 
     private static func makeConfiguration(
         reasoningEffort: ReasoningEffort? = nil,
-        delegateReasoningEffort: ReasoningEffort? = nil
+        delegateReasoningEffort: ReasoningEffort? = nil,
+        delegateWorkers: [ModelWorkerConfiguration] = []
     ) -> ModelSessionConfiguration {
         ModelSessionConfiguration(
             backend: .llamaServer,
@@ -83,6 +128,7 @@ struct AgentTaskInvokerFactoryTests {
             activeTemperature: nil,
             delegateTemperature: nil,
             delegateToolIDs: nil,
+            delegateWorkers: delegateWorkers,
             dropsCompletedToolCalls: false,
             workspaceInstructions: nil
         )

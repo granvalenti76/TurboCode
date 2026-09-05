@@ -7,11 +7,11 @@ nonisolated enum ProfileLibrarySelection: Hashable, Sendable {
 }
 
 /// Stable selection identity for the profile editor's agent hierarchy.
-/// The first UI slice mirrors the runtime truth: one primary agent and at most
-/// one delegated worker, while leaving the outline extensible for 0.5.
-nonisolated enum ProfileAgentNodeID: String, Hashable, Sendable {
+/// Worker UUIDs keep selection stable while profiles add, remove, or repeat
+/// independently configured subagent slots.
+nonisolated enum ProfileAgentNodeID: Hashable, Sendable {
     case primary
-    case worker
+    case worker(UUID)
 }
 
 nonisolated struct ProfileAgentNode: Identifiable, Hashable, Sendable {
@@ -196,6 +196,9 @@ final class SkillsViewModel {
                     if !value.toolIDs.contains(id.rawValue) {
                         value.toolIDs.append(id.rawValue)
                     }
+                    value.materializeWorkers(
+                        fallback: ProfileBaseModelID.llama.rawValue
+                    )
                 } else {
                     value.toolIDs.removeAll { $0 == id.rawValue }
                 }
@@ -226,21 +229,56 @@ final class SkillsViewModel {
             )
         ]
         guard profile.usesDelegation else { return nodes }
-        let workerID = profile.resolvedWorkerModelID(
-            fallback: fallbackWorkerID
-        )
-        let workerName = ProfileBaseModelID(rawValue: workerID)?.displayName
-            ?? workerID
-        nodes.append(
-            ProfileAgentNode(
-                id: .worker,
-                title: "Delegated Worker",
-                subtitle: "Subagent · \(workerName)",
-                systemImage: "hammer",
-                depth: 1
+        for worker in profile.resolvedWorkers(fallback: fallbackWorkerID) {
+            nodes.append(
+                ProfileAgentNode(
+                    id: .worker(worker.id),
+                    title: worker.name,
+                    subtitle: "Subagent · \(worker.modelID.displayName)",
+                    systemImage: worker.modelID.systemImage,
+                    depth: 1
+                )
             )
-        )
+        }
         return nodes
+    }
+
+    /// Adds one executable slot. Repeating the same remote model intentionally
+    /// declares parallel capacity against that endpoint.
+    @discardableResult
+    func addWorker(fallbackModelID: String) -> UUID? {
+        var addedID: UUID?
+        updateDraft { value in
+            value.materializeWorkers(fallback: fallbackModelID)
+            guard value.workers.count < ProfileWorkerConfiguration.maximumCount else {
+                return
+            }
+            let modelID = ProfileBaseModelID(rawValue: fallbackModelID)
+                .flatMap { ProfileBaseModelID.workerCases.contains($0) ? $0 : nil }
+                ?? .llama
+            let worker = ProfileWorkerConfiguration(
+                name: "\(modelID.displayName) Worker \(value.workers.count + 1)",
+                modelID: modelID
+            )
+            value.workers.append(worker)
+            value.synchronizeLegacyWorkerProjection()
+            addedID = worker.id
+        }
+        return addedID
+    }
+
+    func removeWorker(id: UUID) {
+        updateDraft { value in
+            value.materializeWorkers(fallback: ProfileBaseModelID.llama.rawValue)
+            value.workers.removeAll { $0.id == id }
+            if value.workers.isEmpty {
+                value.toolIDs.removeAll {
+                    $0 == ToolCapabilityID.delegateTask.rawValue
+                }
+            } else {
+                value.synchronizeLegacyWorkerProjection()
+            }
+        }
     }
 
     func containsSkill(_ name: String) -> Bool {
@@ -377,8 +415,14 @@ final class SkillsViewModel {
             baseline = nil
             return
         }
-        draft = profile
-        baseline = profile
+        var editable = profile
+        if editable.usesDelegation {
+            editable.materializeWorkers(
+                fallback: ProfileBaseModelID.llama.rawValue
+            )
+        }
+        draft = editable
+        baseline = editable
     }
 
     private func persist() throws {

@@ -56,7 +56,7 @@ struct SkillsView: View {
             pendingToolHover?.cancel()
         }
         .onChange(of: viewModel.draft?.usesDelegation) { _, usesDelegation in
-            if usesDelegation != true, selectedAgentNode == .worker {
+            if usesDelegation != true, selectedWorkerID != nil {
                 selectedAgentNode = .primary
             }
         }
@@ -159,12 +159,9 @@ struct SkillsView: View {
                             agentNodeRow(node)
                                 .tag(node.id)
                                 .contextMenu {
-                                    if node.id == .worker {
+                                    if case .worker(let workerID) = node.id {
                                         Button("Remove Subagent", role: .destructive) {
-                                            viewModel.setTool(
-                                                .delegateTask,
-                                                included: false
-                                            )
+                                            viewModel.removeWorker(id: workerID)
                                             selectedAgentNode = .primary
                                         }
                                         .disabled(chatStore.busy)
@@ -182,21 +179,42 @@ struct SkillsView: View {
                 if case .custom = viewModel.selection,
                    let draft = viewModel.draft {
                     Button {
-                        viewModel.setTool(.delegateTask, included: true)
-                        selectedAgentNode = .worker
+                        if draft.usesDelegation {
+                            if let workerID = viewModel.addWorker(
+                                fallbackModelID: ProfileBaseModelID.llama.rawValue
+                            ) {
+                                selectedAgentNode = .worker(workerID)
+                            }
+                        } else {
+                            viewModel.setTool(.delegateTask, included: true)
+                            if let workerID = viewModel.draft?.workers.first?.id {
+                                selectedAgentNode = .worker(workerID)
+                            }
+                        }
                     } label: {
                         Label("Add Subagent…", systemImage: "plus")
                     }
-                    .disabled(draft.usesDelegation || chatStore.busy)
+                    .disabled(
+                        draft.workers.count
+                            >= ProfileWorkerConfiguration.maximumCount
+                            || chatStore.busy
+                    )
                     .help(
-                        draft.usesDelegation
-                            ? "This version supports one delegated worker per profile."
-                            : "Add the delegated worker supported by this profile."
+                        "Add an independent worker slot. Repeated Llama workers may run concurrently when llama-server has matching parallel capacity."
                     )
                     if draft.usesDelegation {
-                        Text("One delegated worker per profile in this version.")
+                        Text("Up to \(ProfileWorkerConfiguration.maximumCount) workers. Match repeated Llama slots to the server's parallel capacity.")
                             .font(AppTypography.metadata)
                             .foregroundStyle(.secondary)
+                        if draft.workers.count > 1 {
+                            Text(
+                                settings.agentTuning.orchestrator.runsDelegatedTasksInBackground
+                                    ? "Parallel workers are active. Give them independent file scopes to avoid conflicting edits."
+                                    : "Enable background delegated tasks in Settings > Agents to let these workers run concurrently."
+                            )
+                            .font(AppTypography.metadata)
+                            .foregroundStyle(.secondary)
+                        }
                     }
                 } else {
                     Text("Built-in profiles cannot be edited.")
@@ -215,7 +233,17 @@ struct SkillsView: View {
               let draft = viewModel.draft else {
             return "Built-in configuration"
         }
-        return draft.usesDelegation ? "1 subagent" : "No subagents"
+        let count = draft.usesDelegation
+            ? draft.resolvedWorkers(
+                fallback: settings.agentTuning.orchestrator.delegateModelID
+            ).count
+            : 0
+        return count == 1 ? "1 subagent" : "\(count) subagents"
+    }
+
+    private var selectedWorkerID: UUID? {
+        guard case .worker(let id) = selectedAgentNode else { return nil }
+        return id
     }
 
     private func agentNodeRow(_ node: ProfileAgentNode) -> some View {
@@ -381,8 +409,8 @@ struct SkillsView: View {
             builtInDetail(modelID)
         case .custom:
             if let draft = viewModel.draft {
-                if selectedAgentNode == .worker, draft.usesDelegation {
-                    workerDetail(draft)
+                if let workerID = selectedWorkerID, draft.usesDelegation {
+                    workerDetail(draft, workerID: workerID)
                 } else {
                     customDetail(draft)
                 }
@@ -458,16 +486,17 @@ struct SkillsView: View {
 
     private func customDetail(_ draft: UserDynamicProfile) -> some View {
         let option = viewModel.modelOption(for: draft.baseModelID, settings: settings)
-        let workerOption = viewModel.workerOptions(settings: settings).first {
-            $0.id.rawValue == draft.resolvedWorkerModelID(
-                fallback: ProfileBaseModelID.llama.rawValue
-            )
-        }
+        let workerOptions = viewModel.workerOptions(settings: settings)
+        let unavailableWorkers = draft.usesDelegation
+            ? draft.resolvedWorkers(
+                fallback: settings.agentTuning.orchestrator.delegateModelID
+            ).filter { worker in
+                workerOptions.first(where: { $0.id == worker.modelID })?
+                    .isAvailable != true
+            }
+            : []
         let routeIsAvailable = option.isAvailable
-            && (
-                !draft.usesDelegation
-                    || workerOption?.isAvailable == true
-            )
+            && unavailableWorkers.isEmpty
             && codexConfigurationIsAvailable(for: draft)
         return ScrollView {
             VStack(alignment: .leading, spacing: 22) {
@@ -499,12 +528,11 @@ struct SkillsView: View {
                         title: "Model unavailable",
                         text: "Enable and configure \(draft.baseModelID.displayName) before using this profile."
                     )
-                } else if draft.usesDelegation,
-                          workerOption?.isAvailable != true {
+                } else if let unavailableWorker = unavailableWorkers.first {
                     infoBanner(
                         icon: "exclamationmark.triangle",
                         title: "Worker unavailable",
-                        text: "Enable and configure the selected worker before using this profile."
+                        text: "Enable and configure \(unavailableWorker.name) before using this profile."
                     )
                 } else if !codexConfigurationIsAvailable(for: draft) {
                     infoBanner(
@@ -627,24 +655,35 @@ struct SkillsView: View {
         }
     }
 
-    private func workerDetail(_ draft: UserDynamicProfile) -> some View {
+    private func workerDetail(
+        _ draft: UserDynamicProfile,
+        workerID: UUID
+    ) -> some View {
         let option = viewModel.modelOption(
             for: draft.baseModelID,
             settings: settings
         )
+        let resolvedWorkers = draft.resolvedWorkers(
+            fallback: settings.agentTuning.orchestrator.delegateModelID
+        )
+        let worker = resolvedWorkers.first(where: { $0.id == workerID })
+            ?? resolvedWorkers[0]
         let workerOption = viewModel.workerOptions(settings: settings).first {
-            $0.id.rawValue == draft.resolvedWorkerModelID(
-                fallback: ProfileBaseModelID.llama.rawValue
-            )
+            $0.id == worker.modelID
+        }
+        let allWorkersAvailable = resolvedWorkers.allSatisfy { candidate in
+            viewModel.workerOptions(settings: settings).first(where: {
+                $0.id == candidate.modelID
+            })?.isAvailable == true
         }
         let routeIsAvailable = option.isAvailable
-            && workerOption?.isAvailable == true
+            && allWorkersAvailable
             && codexConfigurationIsAvailable(for: draft)
         return ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 HStack(alignment: .top, spacing: 14) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Label("Delegated Worker", systemImage: "hammer")
+                        Label(worker.name, systemImage: worker.modelID.systemImage)
                             .font(.system(size: 27, weight: .semibold))
                         Text("Subagent of \(draft.name)")
                             .font(.callout)
@@ -675,12 +714,23 @@ struct SkillsView: View {
                         verticalSpacing: 12
                     ) {
                         GridRow {
+                            Text("Name").foregroundStyle(.secondary)
+                            TextField(
+                                "Worker name",
+                                text: workerNameBinding(workerID: worker.id)
+                            )
+                            .textFieldStyle(.roundedBorder)
+                        }
+                        GridRow {
                             Text("Role").foregroundStyle(.secondary)
                             Text("Coding subagent")
                         }
                         GridRow {
                             Text("Model").foregroundStyle(.secondary)
-                            Picker("Worker", selection: workerModelBinding) {
+                            Picker(
+                                "Worker",
+                                selection: workerModelBinding(workerID: worker.id)
+                            ) {
                                 ForEach(
                                     viewModel.workerOptions(settings: settings)
                                 ) { model in
@@ -700,13 +750,18 @@ struct SkillsView: View {
 
                 sectionCard(
                     title: "Worker Capabilities",
-                    subtitle: "Choose the tools available only inside delegated tasks."
+                    subtitle: "Drag tools between Available and Included, just like a profile override."
                 ) {
-                    workerToolDisclosure(draft: draft)
+                    if let workerOption {
+                        workerCapabilityComposer(
+                            worker: worker,
+                            option: workerOption
+                        )
+                    }
                 }
 
                 Button(role: .destructive) {
-                    viewModel.setTool(.delegateTask, included: false)
+                    viewModel.removeWorker(id: worker.id)
                     selectedAgentNode = .primary
                 } label: {
                     Label("Remove Subagent", systemImage: "minus.circle")
@@ -923,151 +978,202 @@ struct SkillsView: View {
         return "Excluded"
     }
 
-    /// Progressive disclosure keeps the common "all worker tools" path quiet,
-    /// while the explicit allowlist remains discoverable beside the worker it
-    /// controls. This avoids mixing coordinator and worker capabilities in the
-    /// main Included Capabilities editor.
+    /// Worker capability editing deliberately shares the override interaction
+    /// model: the selected worker owns an Available/Included composition area,
+    /// including drag targets and the same descriptive hover card.
     @ViewBuilder
-    private func workerToolDisclosure(draft: UserDynamicProfile) -> some View {
-        let workerID = draft.resolvedWorkerModelID(
-            fallback: ProfileBaseModelID.llama.rawValue
-        )
+    private func workerCapabilityComposer(
+        worker: ProfileWorkerConfiguration,
+        option: ProfileModelOption
+    ) -> some View {
         if let plan = viewModel.workerToolPlan(
-            workerModelID: workerID,
+            workerModelID: worker.modelID.rawValue,
             settings: settings
         ) {
             let defaultIDs = plan.registeredIDs
-            let selectedIDs = draft.resolvedWorkerToolIDs ?? defaultIDs
-            // Count only tools currently usable by this worker; unavailable
-            // rows remain visible so the reason is discoverable inline.
-            let selectedCount = selectedIDs.intersection(defaultIDs).count
-            let usesAllTools = draft.workerToolIDs == nil
-
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("By default, the worker receives its complete supported tool set. Customize this only when the task needs a smaller surface.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    Toggle(
-                        "Use all worker tools",
-                        isOn: workerUsesAllToolsBinding(
-                            defaultIDs: defaultIDs
-                        )
+            let selectedIDs = worker.resolvedToolIDs ?? defaultIDs
+            let search = viewModel.capabilitySearch.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+            HStack(alignment: .top, spacing: 12) {
+                capabilityColumn(title: "Available", targeted: availableDropTargeted) {
+                    TextField(
+                        "Filter tools",
+                        text: $viewModel.capabilitySearch
                     )
-                    .toggleStyle(.checkbox)
-
-                    if !usesAllTools {
-                        Divider()
-                        Text("Selected tools")
-                            .font(.subheadline.weight(.semibold))
-
-                        ForEach(ToolCapabilityCategory.allCases, id: \.self) { category in
-                            let assignments = plan.assignments.filter {
-                                ModelToolCatalog.descriptor(for: $0.id).category == category
+                    .textFieldStyle(.roundedBorder)
+                    ScrollView {
+                        LazyVStack(spacing: 4) {
+                            ForEach(plan.assignments.filter { assignment in
+                                !selectedIDs.contains(assignment.id)
+                                    && (search.isEmpty
+                                        || ModelToolCatalog.descriptor(for: assignment.id)
+                                            .name.localizedCaseInsensitiveContains(search)
+                                        || assignment.id.rawValue
+                                            .localizedCaseInsensitiveContains(search))
+                            }) { assignment in
+                                workerCapabilityRow(
+                                    assignment,
+                                    worker: worker,
+                                    option: option,
+                                    included: false,
+                                    defaultIDs: defaultIDs
+                                )
                             }
-                            if !assignments.isEmpty {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(category.rawValue)
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                    ForEach(assignments) { assignment in
-                                        workerToolToggle(
-                                            assignment,
-                                            defaultIDs: defaultIDs
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        if selectedCount == 0 {
-                            Label(
-                                "No tools selected. The worker can return text but cannot inspect or change the workspace.",
-                                systemImage: "info.circle"
-                            )
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                         }
                     }
                 }
-                .padding(.top, 8)
-            } label: {
-                HStack(spacing: 8) {
-                    Label("Worker tools", systemImage: "wrench.and.screwdriver")
-                    Spacer()
-                    Text(usesAllTools ? "All tools" : "\(selectedCount) selected")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                .dropDestination(for: String.self) { values, _ in
+                    setWorkerTools(
+                        values,
+                        included: false,
+                        workerID: worker.id,
+                        defaultIDs: defaultIDs
+                    )
+                    return true
+                } isTargeted: { availableDropTargeted = $0 }
+
+                capabilityColumn(title: "Included", targeted: includedDropTargeted) {
+                    ScrollView {
+                        LazyVStack(spacing: 4) {
+                            ForEach(
+                                ModelToolCatalog.descriptors.filter {
+                                    selectedIDs.contains($0.id)
+                                }
+                            ) { descriptor in
+                                let id = descriptor.id
+                                let assignment = plan.assignment(for: id)
+                                    ?? ModelToolAssignment(
+                                        id: id,
+                                        isRegistered: false,
+                                        unavailableReason: "Unavailable for \(option.id.displayName)"
+                                    )
+                                workerCapabilityRow(
+                                    assignment,
+                                    worker: worker,
+                                    option: option,
+                                    included: true,
+                                    defaultIDs: defaultIDs
+                                )
+                            }
+                            if selectedIDs.isEmpty {
+                                ContentUnavailableView(
+                                    "No Tools",
+                                    systemImage: "arrow.left.arrow.right",
+                                    description: Text(
+                                        "Drag tools here or use the add buttons."
+                                    )
+                                )
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 36)
+                            }
+                        }
+                    }
+                }
+                .dropDestination(for: String.self) { values, _ in
+                    setWorkerTools(
+                        values,
+                        included: true,
+                        workerID: worker.id,
+                        defaultIDs: defaultIDs
+                    )
+                    return true
+                } isTargeted: { includedDropTargeted = $0 }
+            }
+            .frame(height: 350)
+            .overlay {
+                if let hoveredTool {
+                    ToolInformationCard(
+                        tool: hoveredTool.tool,
+                        availability: hoveredTool.availability,
+                        isAvailable: hoveredTool.isAvailable
+                    )
+                    .frame(
+                        maxWidth: .infinity,
+                        maxHeight: .infinity,
+                        alignment: hoveredTool.column == .available
+                            ? .topTrailing
+                            : .topLeading
+                    )
+                    .padding(.horizontal, 14)
+                    .padding(.top, 42)
+                    .transition(
+                        .opacity.combined(
+                            with: .scale(scale: 0.98, anchor: .top)
+                        )
+                    )
+                    .allowsHitTesting(false)
+                    .zIndex(20)
                 }
             }
-            .padding(.top, 10)
+            .animation(.easeOut(duration: 0.12), value: hoveredTool)
         }
     }
 
-    private func workerUsesAllToolsBinding(
-        defaultIDs: Set<ToolCapabilityID>
-    ) -> Binding<Bool> {
-        Binding(
-            get: { viewModel.draft?.workerToolIDs == nil },
-            set: { usesAllTools in
-                viewModel.updateDraft { value in
-                    value.workerToolIDs = usesAllTools
-                        ? nil
-                        : defaultIDs.map(\.rawValue).sorted()
-                }
-            }
-        )
-    }
-
-    @ViewBuilder
-    private func workerToolToggle(
+    private func workerCapabilityRow(
         _ assignment: ModelToolAssignment,
+        worker: ProfileWorkerConfiguration,
+        option: ProfileModelOption,
+        included: Bool,
         defaultIDs: Set<ToolCapabilityID>
     ) -> some View {
         let descriptor = ModelToolCatalog.descriptor(for: assignment.id)
-        Toggle(
-            isOn: workerToolBinding(
-                id: assignment.id,
+        return capabilityRow(
+            icon: assignment.isRegistered
+                ? descriptor.systemImage
+                : "exclamationmark.triangle",
+            title: descriptor.name,
+            subtitle: assignment.isRegistered
+                ? assignment.id.runtimeName
+                : (assignment.unavailableReason ?? "Unavailable"),
+            compatible: assignment.isRegistered,
+            actionIcon: included ? "minus.circle" : "plus.circle"
+        ) {
+            setWorkerTools(
+                [assignment.id.rawValue],
+                included: !included,
+                workerID: worker.id,
                 defaultIDs: defaultIDs
             )
-        ) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(descriptor.name)
-                Text(assignment.unavailableReason ?? descriptor.summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
         }
-        .toggleStyle(.checkbox)
-        .disabled(!assignment.isRegistered)
-        .opacity(assignment.isRegistered ? 1 : 0.58)
+        .draggable(assignment.id.rawValue)
+        .opacity(assignment.isRegistered || included ? 1 : 0.55)
+        .onHover { hovering in
+            updateToolHover(
+                descriptor,
+                availability: assignment.isRegistered
+                    ? "\(included ? "Included" : "Available") for \(option.id.displayName)"
+                    : (assignment.unavailableReason ?? "Unavailable"),
+                isAvailable: assignment.isRegistered,
+                column: included ? .included : .available,
+                hovering: hovering
+            )
+        }
     }
 
-    private func workerToolBinding(
-        id: ToolCapabilityID,
+    private func setWorkerTools(
+        _ rawIDs: [String],
+        included: Bool,
+        workerID: UUID,
         defaultIDs: Set<ToolCapabilityID>
-    ) -> Binding<Bool> {
-        Binding(
-            get: {
-                viewModel.draft?.resolvedWorkerToolIDs?.contains(id)
-                    ?? defaultIDs.contains(id)
-            },
-            set: { included in
-                viewModel.updateDraft { value in
-                    var selected = value.resolvedWorkerToolIDs ?? defaultIDs
-                    if included {
-                        selected.insert(id)
-                    } else {
-                        selected.remove(id)
-                    }
-                    value.workerToolIDs = selected == defaultIDs
-                        ? nil
-                        : selected.map(\.rawValue).sorted()
-                }
+    ) {
+        let ids = Set(rawIDs.compactMap(ToolCapabilityID.init(rawValue:)))
+        viewModel.updateDraft { value in
+            value.materializeWorkers(fallback: ProfileBaseModelID.llama.rawValue)
+            guard let index = value.workers.firstIndex(where: {
+                $0.id == workerID
+            }) else { return }
+            var selected = value.workers[index].resolvedToolIDs ?? defaultIDs
+            if included {
+                selected.formUnion(ids.intersection(defaultIDs))
+            } else {
+                selected.subtract(ids)
             }
-        )
+            value.workers[index].toolIDs = selected == defaultIDs
+                ? nil
+                : selected.map(\.rawValue).sorted()
+            value.synchronizeLegacyWorkerProjection()
+        }
     }
 
     @ViewBuilder
@@ -1208,7 +1314,7 @@ struct SkillsView: View {
             title: tool.name,
             subtitle: compatible
                 ? (tool.id == .delegateTask
-                    ? "Adds a worker picker"
+                    ? "Enables the profile's agent team"
                     : tool.id.runtimeName)
                 : "Unavailable for this model",
             compatible: compatible,
@@ -1485,15 +1591,42 @@ struct SkillsView: View {
         )
     }
 
-    private var workerModelBinding: Binding<String> {
+    private func workerNameBinding(workerID: UUID) -> Binding<String> {
         Binding(
             get: {
-                viewModel.draft?.resolvedWorkerModelID(
-                    fallback: ProfileBaseModelID.llama.rawValue
-                ) ?? ProfileBaseModelID.llama.rawValue
+                viewModel.draft?.workers.first(where: { $0.id == workerID })?
+                    .name ?? ""
             },
             set: { value in
-                viewModel.updateDraft { $0.workerModelID = value }
+                viewModel.updateDraft { profile in
+                    guard let index = profile.workers.firstIndex(where: {
+                        $0.id == workerID
+                    }) else { return }
+                    profile.workers[index].name = value
+                    profile.synchronizeLegacyWorkerProjection()
+                }
+            }
+        )
+    }
+
+    private func workerModelBinding(workerID: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                viewModel.draft?.workers.first(where: { $0.id == workerID })?
+                    .modelID.rawValue ?? ProfileBaseModelID.llama.rawValue
+            },
+            set: { rawValue in
+                guard let modelID = ProfileBaseModelID(rawValue: rawValue),
+                      ProfileBaseModelID.workerCases.contains(modelID) else {
+                    return
+                }
+                viewModel.updateDraft { profile in
+                    guard let index = profile.workers.firstIndex(where: {
+                        $0.id == workerID
+                    }) else { return }
+                    profile.workers[index].modelID = modelID
+                    profile.synchronizeLegacyWorkerProjection()
+                }
             }
         )
     }

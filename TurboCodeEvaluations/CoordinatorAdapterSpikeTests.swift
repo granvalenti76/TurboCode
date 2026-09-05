@@ -75,8 +75,8 @@ struct CoordinatorAdapterSpikeTests {
         #expect(invoker.lastEnvelope == nil)
     }
 
-    @Test("Background supervisor admits only one worker")
-    func backgroundSupervisorIsSingleFlight() async throws {
+    @Test("Background supervisor retains multiple worker lifetimes")
+    func backgroundSupervisorRetainsMultipleWorkers() async throws {
         let supervisor = DelegatedTaskSupervisor()
         let invoker = SuspendingTaskInvoker()
         let first = try await supervisor.submit(
@@ -87,6 +87,14 @@ struct CoordinatorAdapterSpikeTests {
         )
 
         #expect(first.status == "accepted")
+        let second = try await supervisor.submit(
+            envelope: makeArguments().envelope(),
+            invoker: invoker,
+            parentTurnID: nil,
+            completion: { _ in }
+        )
+        #expect(second.status == "accepted")
+        #expect(second.taskID != first.taskID)
         await #expect(throws: DelegatedTaskSupervisorError.self) {
             _ = try await supervisor.submit(
                 envelope: self.makeArguments().envelope(),
@@ -96,6 +104,31 @@ struct CoordinatorAdapterSpikeTests {
             )
         }
         await supervisor.cancel()
+    }
+
+    @Test("Worker pool uses distinct slots concurrently")
+    func workerPoolRunsInParallel() async throws {
+        let probe = WorkerConcurrencyProbe()
+        let invokers = (1...2).map { index in
+            ConfiguredAgentTaskInvoker(
+                runner: ProbedTaskRunner(probe: probe),
+                context: makeContext(),
+                events: .init(),
+                worker: AgentActivityAgent(
+                    modelName: "Llama \(index)",
+                    role: .codingWorker
+                )
+            )
+        }
+        let pool = ConfiguredAgentTaskPoolInvoker(invokers: invokers)
+        let firstEnvelope = try makeArguments().envelope()
+        let secondEnvelope = try makeArguments().envelope()
+
+        async let first = pool.invoke(firstEnvelope)
+        async let second = pool.invoke(secondEnvelope)
+        _ = await (first, second)
+
+        #expect(await probe.maximumConcurrent == 2)
     }
 
     @Test("Shared invocation propagates worker events and cancellation")
@@ -298,6 +331,8 @@ private final class RecordingTaskInvoker: AgentTaskInvoking {
 
 @MainActor
 private final class SuspendingTaskInvoker: AgentTaskInvoking {
+    let maximumConcurrentTasks = 2
+
     func invoke(_ envelope: AgentTaskEnvelope) async -> AgentTaskResult {
         try? await Task.sleep(for: .seconds(60))
         return (try? AgentTaskResult(
@@ -359,6 +394,44 @@ private struct SpikeTaskWorker: AgentTaskWorkerExecuting {
             try await Task.sleep(for: .seconds(60))
             return "Unexpected completion."
         }
+    }
+}
+
+private actor WorkerConcurrencyProbe {
+    private(set) var maximumConcurrent = 0
+    private var active = 0
+
+    func enter() {
+        active += 1
+        maximumConcurrent = max(maximumConcurrent, active)
+    }
+
+    func leave() {
+        active -= 1
+    }
+}
+
+private struct ProbedTaskRunner: AgentTaskRunning {
+    let probe: WorkerConcurrencyProbe
+
+    @MainActor
+    func run(
+        envelope: AgentTaskEnvelope,
+        context: AgentTaskRunContext,
+        events: AgentTaskRunnerEvents
+    ) async -> AgentTaskResult {
+        await probe.enter()
+        try? await Task.sleep(for: .milliseconds(40))
+        await probe.leave()
+        return (try? AgentTaskResult(
+            taskID: envelope.taskID,
+            attemptID: envelope.attemptID,
+            outcome: .completed,
+            technicalSummary: "Worker completed."
+        )) ?? .invalidContractResult(
+            taskID: envelope.taskID,
+            attemptID: envelope.attemptID
+        )
     }
 }
 

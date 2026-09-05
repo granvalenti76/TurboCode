@@ -373,9 +373,48 @@ struct DynamicProfileTests {
 
         #expect(directNodes.map(\.id) == [.primary])
         #expect(directNodes.first?.subtitle == "Agent · On-device")
-        #expect(delegatedNodes.map(\.id) == [.primary, .worker])
+        #expect(delegatedNodes.first?.id == .primary)
+        #expect(delegatedNodes.count == 2)
+        if let lastID = delegatedNodes.last?.id,
+           case .worker = lastID {
+            // The worker identity is profile-owned and remains stable after
+            // the legacy projection is materialized by the editor.
+        } else {
+            Issue.record("Expected a worker node")
+        }
         #expect(delegatedNodes.last?.subtitle == "Subagent · Llama")
         #expect(delegatedNodes.last?.depth == 1)
+    }
+
+    @Test("Profiles persist independent remote and on-device workers")
+    func multipleWorkersRoundTrip() throws {
+        let workers = [
+            ProfileWorkerConfiguration(
+                name: "Llama A",
+                modelID: .llama,
+                toolIDs: [ToolCapabilityID.readFile.rawValue]
+            ),
+            ProfileWorkerConfiguration(
+                name: "Private Scout",
+                modelID: .onDevice,
+                toolIDs: []
+            )
+        ]
+        let profile = UserDynamicProfile(
+            name: "Parallel",
+            baseModelID: .deepseek,
+            workers: workers,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+
+        let decoded = try JSONDecoder().decode(
+            UserDynamicProfile.self,
+            from: JSONEncoder().encode(profile)
+        )
+
+        #expect(decoded.workers == workers)
+        #expect(decoded.resolvedWorkers(fallback: "llama").count == 2)
+        #expect(ProfileBaseModelID.workerCases.contains(.onDevice))
     }
 
     @Test("Profile validation repairs delegated sampling and worker invariants")
@@ -398,10 +437,9 @@ struct DynamicProfileTests {
         let blankResult = try blankWorker.validated()
         let invalidResult = try invalidWorker.validated()
 
-        // Nil remains the compatibility signal for profiles that should use
-        // the global worker preference, while an explicit stale ID is repaired
-        // to the same default used when delegation is newly enabled.
-        #expect(blankResult.workerModelID == nil)
+        // Validation materializes version-3 worker slots and synchronizes the
+        // first-slot compatibility projection for older runtime readers.
+        #expect(blankResult.workerModelID == ProfileBaseModelID.llama.rawValue)
         #expect(invalidResult.workerModelID == ProfileBaseModelID.llama.rawValue)
         #expect(!blankResult.greedyMode)
         #expect(!invalidResult.greedyMode)
@@ -451,7 +489,7 @@ struct DynamicProfileTests {
     func profileOptionFamiliesAreScoped() {
         #expect(ProfileBaseModelID.builtInCases == [.onDevice, .llama, .deepseek])
         #expect(ProfileBaseModelID.coordinatorCases == [.onDevice, .llama, .deepseek, .codex])
-        #expect(ProfileBaseModelID.workerCases == [.llama, .deepseek])
+        #expect(ProfileBaseModelID.workerCases == [.onDevice, .llama, .deepseek])
         #expect(!ProfileBaseModelID.workerCases.contains(.codex))
     }
 

@@ -9,7 +9,7 @@ final class AgentTaskInvokerFactory {
     func makeDelegateInvoker(
         configuration: ModelSessionConfiguration?,
         events: ModelSessionEvents
-    ) -> ConfiguredAgentTaskInvoker? {
+    ) -> (any AgentTaskInvoking)? {
         guard let configuration else { return nil }
         return ModelSessionFactory.makeDelegateInvoker(
             configuration: configuration,
@@ -22,7 +22,7 @@ final class AgentTaskInvokerFactory {
     func makeIndependentTaskInvoker(
         configuration: ModelSessionConfiguration,
         events: ModelSessionEvents
-    ) -> ConfiguredAgentTaskInvoker {
+    ) -> any AgentTaskInvoking {
         ModelSessionFactory.makeDelegateInvoker(
             configuration: configuration,
             events: events

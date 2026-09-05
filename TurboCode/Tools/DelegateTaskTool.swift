@@ -48,8 +48,16 @@ nonisolated enum DelegateTaskAdapterError: LocalizedError, Sendable, Equatable {
 
 /// Provider-neutral worker invocation used by both coordinator adapters.
 nonisolated protocol AgentTaskInvoking: Sendable {
+    /// Admission capacity promised by this invocation graph. Provider
+    /// endpoints are not probed; profile worker slots are the authority.
+    var maximumConcurrentTasks: Int { get }
+
     @MainActor
     func invoke(_ envelope: AgentTaskEnvelope) async -> AgentTaskResult
+}
+
+nonisolated extension AgentTaskInvoking {
+    var maximumConcurrentTasks: Int { 1 }
 }
 
 /// Optional extension of the invocation boundary for adapters that can carry
@@ -61,6 +69,14 @@ nonisolated protocol TurnAwareAgentTaskInvoking: AgentTaskInvoking {
         _ envelope: AgentTaskEnvelope,
         parentTurnID: TurnID?
     ) async -> AgentTaskResult
+}
+
+/// A configured invocation graph that can detach parent-turn callbacks while
+/// retaining its immutable worker sessions for background delivery.
+nonisolated protocol BackgroundIsolatableAgentTaskInvoking: AgentTaskInvoking {
+    func backgroundIsolated(
+        toolFinished: @escaping @Sendable (AgentTaskToolOutputEvent) async -> Void
+    ) -> any AgentTaskInvoking
 }
 
 nonisolated enum AgentTaskInvocation {
@@ -105,26 +121,28 @@ typealias DelegatedTaskBackgroundSubmission = @Sendable (
 
 nonisolated enum DelegatedTaskSupervisorError: LocalizedError, Sendable {
     case workerAlreadyRunning
+    case workerPoolAtCapacity(Int)
     case missingOriginatingConversation
 
     var errorDescription: String? {
         switch self {
         case .workerAlreadyRunning:
-            "A delegated task is already running in the background."
+            "This delegated task is already running in the background."
+        case .workerPoolAtCapacity(let capacity):
+            "All \(capacity) configured worker slots are currently busy."
         case .missingOriginatingConversation:
             "TurboCode could not identify the originating conversation."
         }
     }
 }
 
-/// Retains one background worker independently from the conversational runtime.
-/// Single-flight admission prevents two delegated workers from racing over the
-/// same workspace while the first version of this feature is evaluated.
+/// Retains background work independently from the conversational runtime.
+/// Actual concurrency is bounded by the configured worker pool; this actor
+/// owns lifetimes and cancellation rather than provider capacity.
 actor DelegatedTaskSupervisor {
     typealias Completion = @Sendable (AgentTaskResult) async -> Void
 
-    private var activeIdentity: String?
-    private var operation: Task<Void, Never>?
+    private var operations: [String: Task<Void, Never>] = [:]
 
     func submit(
         envelope: AgentTaskEnvelope,
@@ -132,13 +150,16 @@ actor DelegatedTaskSupervisor {
         parentTurnID: TurnID?,
         completion: @escaping Completion
     ) throws -> DelegatedTaskReceipt {
-        guard activeIdentity == nil else {
+        let identity = "\(envelope.taskID):\(envelope.attemptID)"
+        guard operations[identity] == nil else {
             throw DelegatedTaskSupervisorError.workerAlreadyRunning
         }
+        let capacity = max(1, invoker.maximumConcurrentTasks)
+        guard operations.count < capacity else {
+            throw DelegatedTaskSupervisorError.workerPoolAtCapacity(capacity)
+        }
 
-        let identity = "\(envelope.taskID):\(envelope.attemptID)"
-        activeIdentity = identity
-        operation = Task { [weak self] in
+        operations[identity] = Task { [weak self] in
             let result = await AgentTaskInvocation.invoke(
                 invoker,
                 envelope: envelope,
@@ -151,18 +172,28 @@ actor DelegatedTaskSupervisor {
     }
 
     func cancel() {
-        operation?.cancel()
+        for operation in operations.values {
+            operation.cancel()
+        }
+    }
+
+    @discardableResult
+    func cancel(taskID: String, attemptID: String) -> Bool {
+        guard let operation = operations["\(taskID):\(attemptID)"] else {
+            return false
+        }
+        operation.cancel()
+        return true
     }
 
     private func settle(identity: String) {
-        guard activeIdentity == identity else { return }
-        operation = nil
-        activeIdentity = nil
+        operations[identity] = nil
     }
 }
 
 /// Binds a routed worker context to the bounded task runner.
-nonisolated struct ConfiguredAgentTaskInvoker: TurnAwareAgentTaskInvoking {
+nonisolated struct ConfiguredAgentTaskInvoker: TurnAwareAgentTaskInvoking,
+    BackgroundIsolatableAgentTaskInvoking {
     let runner: any AgentTaskRunning
     let context: AgentTaskRunContext
     let events: AgentTaskRunnerEvents
@@ -195,11 +226,22 @@ nonisolated struct ConfiguredAgentTaskInvoker: TurnAwareAgentTaskInvoking {
         toolFinished: @escaping @Sendable (
             AgentTaskToolOutputEvent
         ) async -> Void
+    ) -> any AgentTaskInvoking {
+        isolatedCopy(toolFinished: toolFinished)
+    }
+
+    func isolatedCopy(
+        toolFinished: @escaping @Sendable (
+            AgentTaskToolOutputEvent
+        ) async -> Void
     ) -> Self {
         Self(
             runner: runner,
             context: context,
-            events: AgentTaskRunnerEvents(toolFinished: toolFinished)
+            events: AgentTaskRunnerEvents(toolFinished: toolFinished),
+            coordinator: coordinator,
+            worker: worker,
+            activityChanged: activityChanged
         )
     }
 
@@ -257,6 +299,119 @@ nonisolated struct ConfiguredAgentTaskInvoker: TurnAwareAgentTaskInvoking {
     }
 }
 
+/// Fair lease manager for independently configured worker slots. A repeated
+/// Llama worker therefore becomes a real concurrent request slot rather than
+/// a decorative profile row; surplus calls wait for the first free slot.
+actor AgentTaskWorkerPool {
+    nonisolated struct Lease: Sendable {
+        let index: Int
+        let invoker: ConfiguredAgentTaskInvoker
+    }
+
+    private let invokers: [ConfiguredAgentTaskInvoker]
+    private var available: [Int]
+    private var waiters: [CheckedContinuation<Lease, Never>] = []
+
+    init(invokers: [ConfiguredAgentTaskInvoker]) {
+        self.invokers = invokers
+        available = Array(invokers.indices)
+    }
+
+    func acquire() async -> Lease {
+        if let index = available.first {
+            available.removeFirst()
+            return Lease(index: index, invoker: invokers[index])
+        }
+        return await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func release(_ lease: Lease) {
+        if waiters.isEmpty {
+            available.append(lease.index)
+        } else {
+            let continuation = waiters.removeFirst()
+            continuation.resume(returning: lease)
+        }
+    }
+}
+
+/// Routes each delegated call to one free configured slot while preserving the
+/// existing provider-neutral invocation contract used by `/task` and tools.
+nonisolated struct ConfiguredAgentTaskPoolInvoker: TurnAwareAgentTaskInvoking,
+    BackgroundIsolatableAgentTaskInvoking {
+    let invokers: [ConfiguredAgentTaskInvoker]
+    private let pool: AgentTaskWorkerPool
+
+    init(invokers: [ConfiguredAgentTaskInvoker]) {
+        precondition(!invokers.isEmpty)
+        self.invokers = invokers
+        pool = AgentTaskWorkerPool(invokers: invokers)
+    }
+
+    var maximumConcurrentTasks: Int { invokers.count }
+
+    @MainActor
+    func invoke(_ envelope: AgentTaskEnvelope) async -> AgentTaskResult {
+        await invoke(envelope, parentTurnID: envelope.parentTurnID)
+    }
+
+    @MainActor
+    func invoke(
+        _ envelope: AgentTaskEnvelope,
+        parentTurnID: TurnID?
+    ) async -> AgentTaskResult {
+        let lease = await pool.acquire()
+        let result = await lease.invoker.invoke(
+            envelope,
+            parentTurnID: parentTurnID
+        )
+        await pool.release(lease)
+        return result
+    }
+
+    func backgroundIsolated(
+        toolFinished: @escaping @Sendable (
+            AgentTaskToolOutputEvent
+        ) async -> Void
+    ) -> any AgentTaskInvoking {
+        BackgroundPooledAgentTaskInvoker(
+            pool: pool,
+            maximumConcurrentTasks: maximumConcurrentTasks,
+            toolFinished: toolFinished
+        )
+    }
+}
+
+/// Per-submission journal wrapper over the shared pool. The lease remains
+/// global to the profile while tool receipts are isolated by originating task.
+nonisolated struct BackgroundPooledAgentTaskInvoker: TurnAwareAgentTaskInvoking {
+    let pool: AgentTaskWorkerPool
+    let maximumConcurrentTasks: Int
+    let toolFinished: @Sendable (AgentTaskToolOutputEvent) async -> Void
+
+    @MainActor
+    func invoke(_ envelope: AgentTaskEnvelope) async -> AgentTaskResult {
+        await invoke(envelope, parentTurnID: envelope.parentTurnID)
+    }
+
+    @MainActor
+    func invoke(
+        _ envelope: AgentTaskEnvelope,
+        parentTurnID: TurnID?
+    ) async -> AgentTaskResult {
+        let lease = await pool.acquire()
+        let isolated = lease.invoker.isolatedCopy(toolFinished: toolFinished)
+        let result = await isolated.invoke(
+            envelope,
+            parentTurnID: parentTurnID
+        )
+        await pool.release(lease)
+        return result
+    }
+}
+
 /// Structured coordinator tool used by production Foundation Models profiles,
 /// including DeepSeek's OpenAI-compatible transport.
 struct DelegateTaskTool: Tool {
@@ -279,11 +434,22 @@ struct DelegateTaskTool: Tool {
 
     var name: String { "delegate_task" }
     var description: String {
-        """
+        let capacityGuidance = if invoker.maximumConcurrentTasks > 1 {
+            """
+            This profile has \(invoker.maximumConcurrentTasks) worker slots. When background
+            delegation is enabled, independent goals may be submitted separately and run
+            concurrently. Keep their file scopes disjoint and never run concurrent Git
+            mutations; overlapping writes can conflict. Calls above capacity are rejected.
+            """
+        } else {
+            "This profile has one worker slot, so only one delegated task may run at a time."
+        }
+        return """
         Delegate one goal to the configured worker. Use coding when the worker
         must inspect or change the workspace: it receives the complete worker
         tool bundle configured by the active profile. Use text when the worker only needs to
         return prose: it receives no tools.
+        \(capacityGuidance)
         TurboCode returns either a JSON AgentTaskResult or an accepted receipt
         when background delegation is enabled. Do not wait or poll after an
         accepted receipt; the harness reports the result when the worker ends.

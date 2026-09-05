@@ -9,8 +9,11 @@ struct InspectorPanelView: View {
     var body: some View {
         Group {
             if chatStore.rightPanelMode == .activity {
-                if let activity = chatStore.currentAgentActivity {
-                    AgentActivityInspectorView(activity: activity)
+                if !chatStore.agentActivities.isEmpty {
+                    AgentActivityCollectionView(
+                        activities: chatStore.agentActivities,
+                        selected: chatStore.currentAgentActivity
+                    )
                 } else {
                     DelegatedActivityEmptyStateView()
                 }
@@ -449,6 +452,71 @@ nonisolated struct AgentRecoveryPresentation: Equatable, Sendable {
 ///
 /// The route renders only reducer state and typed results. It deliberately has
 /// no percentage progress or model transcript because neither is authoritative.
+private struct AgentActivityCollectionView: View {
+    let activities: [AgentActivity]
+    let selected: AgentActivity?
+
+    @Environment(ChatStore.self) private var chatStore
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if activities.count > 1 {
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack {
+                        Text("Tasks")
+                            .font(.system(size: 12, weight: .semibold))
+                        Spacer()
+                        Text("\(runningCount) running")
+                            .font(AppTypography.metadata)
+                            .foregroundStyle(.secondary)
+                    }
+                    ScrollView(.horizontal) {
+                        HStack(spacing: 7) {
+                            ForEach(activities) { activity in
+                                Button {
+                                    chatStore.selectAgentActivity(activity.id)
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: activity.phase.symbolName)
+                                            .foregroundStyle(activity.phase.tint)
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(activity.worker.modelName)
+                                                .font(.system(size: 11.5, weight: .medium))
+                                            Text(activity.phase.displayName)
+                                                .font(AppTypography.metadata)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 7)
+                                    .background(
+                                        activity.id == selected?.id
+                                            ? Color.accentColor.opacity(0.16)
+                                            : Color.secondary.opacity(0.07),
+                                        in: RoundedRectangle(cornerRadius: 8)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .scrollIndicators(.hidden)
+                }
+                .padding(10)
+                Divider()
+            }
+
+            if let selected {
+                AgentActivityInspectorView(activity: selected)
+            }
+        }
+    }
+
+    private var runningCount: Int {
+        activities.count(where: { !$0.phase.isTerminal })
+    }
+}
+
 private struct AgentActivityInspectorView: View {
     let activity: AgentActivity
 
@@ -513,9 +581,9 @@ private struct AgentActivityInspectorView: View {
 
             Spacer(minLength: 8)
 
-            if !activity.phase.isTerminal, chatStore.busy {
+            if !activity.phase.isTerminal {
                 Button {
-                    Task { await chatStore.interrupt() }
+                    Task { await chatStore.cancelAgentActivity(activity) }
                 } label: {
                     Image(systemName: "stop.fill")
                 }

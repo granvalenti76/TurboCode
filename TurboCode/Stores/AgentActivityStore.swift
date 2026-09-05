@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-/// Owns the transient, provider-independent state of one delegated attempt.
+/// Owns transient, provider-independent state for delegated attempts.
 ///
 /// ChatStore remains responsible for the conversation transcript. This store
 /// is the sole authority for Activity phase changes so asynchronous provider
@@ -9,7 +9,22 @@ import Observation
 @MainActor
 @Observable
 final class AgentActivityStore {
-    private(set) var current: AgentActivity?
+    private(set) var activities: [AgentActivity] = []
+    private(set) var selectedActivityID: String?
+
+    /// Compatibility projection used by compact UI and existing integrations.
+    /// Prefer the explicit selection, then the newest running task, then the
+    /// latest terminal task.
+    var current: AgentActivity? {
+        if let selectedActivityID,
+           let selected = activities.first(where: {
+               $0.id == selectedActivityID
+           }) {
+            return selected
+        }
+        return activities.last(where: { !$0.phase.isTerminal })
+            ?? activities.last
+    }
 
     /// Terminal attempt identities are retained for the lifetime of the store.
     /// This small tombstone set makes late callbacks harmless even after a
@@ -20,15 +35,21 @@ final class AgentActivityStore {
     /// that was still active. A late callback from the old conversation can
     /// therefore never recreate Activity after navigation.
     func reset() {
-        if let current {
+        for activity in activities where !activity.phase.isTerminal {
             completedAttempts.insert(
                 AttemptIdentity(
-                    taskID: current.taskID,
-                    attemptID: current.attemptID
+                    taskID: activity.taskID,
+                    attemptID: activity.attemptID
                 )
             )
         }
-        current = nil
+        activities = []
+        selectedActivityID = nil
+    }
+
+    func select(_ id: String) {
+        guard activities.contains(where: { $0.id == id }) else { return }
+        selectedActivityID = id
     }
 
     /// Reduces every provider adapter to the same typed state transitions.
@@ -59,7 +80,7 @@ final class AgentActivityStore {
         }
     }
 
-    /// Starts an attempt only when no other attempt is running.
+    /// Starts an attempt unless that same correlated attempt already exists.
     @discardableResult
     func begin(
         envelope: AgentTaskEnvelope,
@@ -69,11 +90,21 @@ final class AgentActivityStore {
     ) -> Bool {
         let identity = AttemptIdentity(envelope)
         guard !completedAttempts.contains(identity),
-              current?.phase.isTerminal != false else {
+              !activities.contains(where: { $0.id == identity.rawValue }) else {
             return false
         }
 
-        current = AgentActivity(
+        // Activity is a transient operational surface, not a second task
+        // ledger. Retain a compact recent window while never evicting work
+        // that is still running.
+        if activities.count >= 20,
+           let terminalIndex = activities.firstIndex(where: {
+               $0.phase.isTerminal
+           }) {
+            activities.remove(at: terminalIndex)
+        }
+
+        let activity = AgentActivity(
             taskID: envelope.taskID,
             attemptID: envelope.attemptID,
             goal: envelope.goal,
@@ -87,6 +118,8 @@ final class AgentActivityStore {
             completedAt: nil,
             finalResult: nil
         )
+        activities.append(activity)
+        selectedActivityID = activity.id
         return true
     }
 
@@ -101,14 +134,13 @@ final class AgentActivityStore {
         to phase: AgentActivityPhase
     ) -> Bool {
         guard !phase.isTerminal,
-              matchesCurrent(taskID: taskID, attemptID: attemptID),
-              let current,
-              current.phase.canTransition(to: phase) else {
+              let index = index(taskID: taskID, attemptID: attemptID),
+              activities[index].phase.canTransition(to: phase) else {
             return false
         }
 
-        self.current?.phase = phase
-        self.current?.lastOperationalPhase = phase
+        activities[index].phase = phase
+        activities[index].lastOperationalPhase = phase
         return true
     }
 
@@ -120,10 +152,13 @@ final class AgentActivityStore {
         taskID: String,
         attemptID: String
     ) -> Bool {
-        guard matchesActive(taskID: taskID, attemptID: attemptID) else {
+        guard let index = activeIndex(
+            taskID: taskID,
+            attemptID: attemptID
+        ) else {
             return false
         }
-        current?.activeTool = tool
+        activities[index].activeTool = tool
         return true
     }
 
@@ -135,47 +170,53 @@ final class AgentActivityStore {
         taskID: String,
         attemptID: String
     ) -> Bool {
-        guard matchesActive(taskID: taskID, attemptID: attemptID),
-              current?.activeTool?.callID == callID else {
+        guard let index = activeIndex(
+            taskID: taskID,
+            attemptID: attemptID
+        ), activities[index].activeTool?.callID == callID else {
             return false
         }
-        current?.activeTool = nil
+        activities[index].activeTool = nil
         return true
     }
 
     /// Maps the typed task result to exactly one terminal Activity phase.
     @discardableResult
     func complete(with result: AgentTaskResult) -> Bool {
-        guard matchesCurrent(
+        guard let index = index(
             taskID: result.taskID,
             attemptID: result.attemptID
-        ), let current else {
+        ) else {
             return false
         }
 
         let terminalPhase = Self.terminalPhase(for: result.outcome)
-        guard current.phase.canTransition(to: terminalPhase) else {
+        guard activities[index].phase.canTransition(to: terminalPhase) else {
             return false
         }
 
-        self.current?.phase = terminalPhase
-        self.current?.activeTool = nil
-        self.current?.completedAt = .now
-        self.current?.finalResult = result
+        activities[index].phase = terminalPhase
+        activities[index].activeTool = nil
+        activities[index].completedAt = .now
+        activities[index].finalResult = result
         completedAttempts.insert(
             AttemptIdentity(taskID: result.taskID, attemptID: result.attemptID)
         )
         return true
     }
 
-    private func matchesCurrent(taskID: String, attemptID: String) -> Bool {
-        guard let current else { return false }
-        return current.taskID == taskID && current.attemptID == attemptID
+    private func index(taskID: String, attemptID: String) -> Int? {
+        activities.firstIndex {
+            $0.taskID == taskID && $0.attemptID == attemptID
+        }
     }
 
-    private func matchesActive(taskID: String, attemptID: String) -> Bool {
-        matchesCurrent(taskID: taskID, attemptID: attemptID)
-            && current?.phase.isTerminal == false
+    private func activeIndex(taskID: String, attemptID: String) -> Int? {
+        guard let index = index(taskID: taskID, attemptID: attemptID),
+              !activities[index].phase.isTerminal else {
+            return nil
+        }
+        return index
     }
 
     private static func terminalPhase(
@@ -206,4 +247,6 @@ private nonisolated struct AttemptIdentity: Sendable, Hashable {
     init(_ envelope: AgentTaskEnvelope) {
         self.init(taskID: envelope.taskID, attemptID: envelope.attemptID)
     }
+
+    var rawValue: String { "\(taskID):\(attemptID)" }
 }
