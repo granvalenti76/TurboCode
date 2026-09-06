@@ -18,6 +18,8 @@ actor CodexBackendSession: BackendSession {
     private let persistsModelPreference: Bool
     private let delegationInvoker: (any AgentTaskInvoking)?
     private let backgroundTaskSubmission: DelegatedTaskBackgroundSubmission?
+    /// Nil uses built-in tools; an explicit set is the override boundary.
+    private let selectedToolIDs: Set<ToolCapabilityID>?
     private let allowsTools: Bool
     private let runtimeSnapshotChanged: @MainActor @Sendable (
         CodexRuntimeSnapshot,
@@ -46,6 +48,7 @@ actor CodexBackendSession: BackendSession {
         persistsModelPreference: Bool = true,
         delegationInvoker: (any AgentTaskInvoking)? = nil,
         backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil,
+        selectedToolIDs: Set<ToolCapabilityID>? = nil,
         allowsTools: Bool = true,
         runtimeSnapshotChanged: @escaping @MainActor @Sendable (
             CodexRuntimeSnapshot,
@@ -73,6 +76,7 @@ actor CodexBackendSession: BackendSession {
         self.persistsModelPreference = persistsModelPreference
         self.delegationInvoker = delegationInvoker
         self.backgroundTaskSubmission = backgroundTaskSubmission
+        self.selectedToolIDs = selectedToolIDs
         self.allowsTools = allowsTools
         self.runtimeSnapshotChanged = runtimeSnapshotChanged
         self.activityStarted = activityStarted
@@ -96,6 +100,7 @@ actor CodexBackendSession: BackendSession {
         let persistsModelPreference = self.persistsModelPreference
         let delegationInvoker = self.delegationInvoker
         let backgroundTaskSubmission = self.backgroundTaskSubmission
+        let selectedToolIDs = self.selectedToolIDs
         let allowsTools = self.allowsTools
         let runtimeSnapshotChanged = self.runtimeSnapshotChanged
         let activityStarted = self.activityStarted
@@ -131,6 +136,7 @@ actor CodexBackendSession: BackendSession {
                         delegationInvoker: delegationInvoker,
                         backgroundTaskSubmission: backgroundTaskSubmission,
                         pluginTools: pluginTools,
+                        selectedToolIDs: selectedToolIDs,
                         allowsTools: allowsTools
                     ),
                     events: CodexTurnEvents(

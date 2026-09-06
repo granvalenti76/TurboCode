@@ -301,9 +301,7 @@ final class SkillsViewModel {
         }
     }
 
-    /// All models that can be selected by a custom profile. Codex is omitted
-    /// from the built-in library but remains available here for profiles that
-    /// opt into Delegate Task and its App Server settings.
+    /// Custom profiles use the same backends as the built-in library.
     func profileModelOptions(settings: SettingsStore) -> [ProfileModelOption] {
         ProfileBaseModelID.profileCases.map {
             modelOption(for: $0, settings: settings)
@@ -367,16 +365,25 @@ final class SkillsViewModel {
         let context = ToolAccessContext(
             hasWorkspace: true,
             hasSkills: true,
+            safariMCPEnabled: settings.agentTuning.experimental.safariMCPEnabled,
             hasDelegateModel: true,
             repositoryMapDetail: remote?.repositoryMap.detail
         )
-        let defaults = ModelToolCatalog.plan(profile: .standalone, tier: tier, context: context).registeredIDs
+        var defaults = ModelToolCatalog.plan(profile: .standalone, tier: tier, context: context).registeredIDs
         var compatible = ModelToolCatalog.plan(
             profile: .standalone,
             tier: tier,
             context: context,
             selectedIDs: Set(ToolCapabilityID.allCases)
         ).registeredIDs
+        if id == .codex {
+            // Derive the UI surface from the bridge, including its name aliases.
+            defaults = CodexTurboCodeToolBridge.capabilityIDs(
+                agentTuning: settings.agentTuning, includesDelegation: false
+            )
+            if !installedSkills.isEmpty { defaults.insert(.loadSkill) }
+            compatible = defaults.union([.delegateTask])
+        }
         compatible.remove(.callPowerfulModel)
         compatible.remove(.loadSkill)
         if !ProfileBaseModelID.delegationCases.contains(id) {

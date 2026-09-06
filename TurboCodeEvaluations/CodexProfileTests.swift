@@ -4,6 +4,21 @@ import Testing
 
 @Suite("Codex profile")
 struct CodexProfileTests {
+    @Test("Codex overrides expose native delegation and translate edit aliases")
+    func overrideToolSelection() {
+        let specs = CodexTurboCodeToolBridge.specifications(
+            workspaceRoot: "/workspace", agentTuning: .default,
+            includesDelegation: true,
+            selectedToolIDs: [.delegateTask, .editFile]
+        )
+        #expect(Set(specs.map(\.name)) == ["delegate_task", "apply_edits"])
+        let direct = CodexTurboCodeToolBridge.specifications(
+            workspaceRoot: "/workspace", agentTuning: .default,
+            selectedToolIDs: [.delegateTask]
+        )
+        #expect(direct.isEmpty)
+    }
+
     @Test("Thread start uses the App Server workspace sandbox wire value")
     func threadStartUsesWorkspaceSandboxWireValue() {
         #expect(CodexAppServerClient.workspaceSandbox == "workspace-write")

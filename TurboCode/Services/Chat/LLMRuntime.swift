@@ -30,8 +30,9 @@ nonisolated struct CodexLLMExecutionConfiguration: Sendable {
     let reasoningEffort: CodexReasoningEffort?
     let delegationInvoker: (any AgentTaskInvoking)?
     let backgroundTaskSubmission: DelegatedTaskBackgroundSubmission?
-    /// Editorial Desk reuses the runtime gate while opting out of all
-    /// workspace tools and approval flows.
+    /// Nil uses built-in tools; an explicit set is the override boundary.
+    let selectedToolIDs: Set<ToolCapabilityID>?
+    /// Editorial Desk opts out of workspace tools and approval flows.
     let allowsTools: Bool
     let activityStarted: @MainActor @Sendable (
         CodexDynamicToolCall,
@@ -52,6 +53,7 @@ nonisolated struct CodexLLMExecutionConfiguration: Sendable {
         reasoningEffort: CodexReasoningEffort?,
         delegationInvoker: (any AgentTaskInvoking)?,
         backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil,
+        selectedToolIDs: Set<ToolCapabilityID>? = nil,
         allowsTools: Bool = true,
         activityStarted: @escaping @MainActor @Sendable (
             CodexDynamicToolCall,
@@ -71,6 +73,7 @@ nonisolated struct CodexLLMExecutionConfiguration: Sendable {
         self.reasoningEffort = reasoningEffort
         self.delegationInvoker = delegationInvoker
         self.backgroundTaskSubmission = backgroundTaskSubmission
+        self.selectedToolIDs = selectedToolIDs
         self.allowsTools = allowsTools
         self.activityStarted = activityStarted
         self.activityEnded = activityEnded
@@ -156,6 +159,7 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
             persistsModelPreference: persistsModelPreference,
             delegationInvoker: configuration.delegationInvoker,
             backgroundTaskSubmission: configuration.backgroundTaskSubmission,
+            selectedToolIDs: configuration.selectedToolIDs,
             allowsTools: configuration.allowsTools,
             runtimeSnapshotChanged: { [weak codexRuntime] snapshot, persists in
                 codexRuntime?.applyExecutionSnapshot(

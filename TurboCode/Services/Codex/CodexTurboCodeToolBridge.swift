@@ -66,6 +66,24 @@ nonisolated enum CodexToolBridgeError: LocalizedError, Sendable, Equatable {
 /// FoundationModels profiles, preserving path validation, revision checks,
 /// approval gates, execution limits, and existing visual receipts.
 nonisolated enum CodexTurboCodeToolBridge {
+    /// Translate bridge aliases back to stable persisted capability IDs.
+    static func capabilityID(for name: String) -> ToolCapabilityID? {
+        if name == "apply_edits" { return .editFile }
+        return ToolCapabilityID.allCases.first { $0.runtimeName == name }
+    }
+
+    static func capabilityIDs(
+        agentTuning: AgentTuningConfig,
+        includesDelegation: Bool
+    ) -> Set<ToolCapabilityID> {
+        Set(specifications(
+            workspaceRoot: "/workspace",
+            agentTuning: agentTuning,
+            includesDelegation: includesDelegation,
+            safariMCPEnabled: agentTuning.experimental.safariMCPEnabled
+        ).compactMap { capabilityID(for: $0.name) })
+    }
+
     static func developerInstructions(
         workspaceRoot: String,
         agentTuning: AgentTuningConfig,
@@ -81,23 +99,7 @@ nonisolated enum CodexTurboCodeToolBridge {
                 backend: .codex,
                 workspaceRoot: workspaceRoot,
                 agentTuning: agentTuning,
-                toolIDs: [
-                    .listWorkspace,
-                    .swiftWorkspaceMap,
-                    .readFile,
-                    .searchWorkspace,
-                    .editFile,
-                    .swiftPackageManager,
-                    .xcodeProject,
-                    .git,
-                    .bash
-                ] + (availableSkills.isEmpty ? [] : [.loadSkill])
-                + (dynamicTools.contains(where: {
-                    $0.name == ToolCapabilityID.createSkill.rawValue
-                }) ? [.createSkill] : [])
-                + (dynamicTools.contains(where: {
-                    $0.name == ToolCapabilityID.delegateTask.rawValue
-                }) ? [.delegateTask] : []),
+                toolIDs: dynamicTools.compactMap { capabilityID(for: $0.name) },
                 toolNames: dynamicTools.map(\.name),
                 availableSkills: availableSkills,
                 workspaceInstructions: workspaceInstructions
@@ -116,7 +118,8 @@ nonisolated enum CodexTurboCodeToolBridge {
         includesDelegation: Bool = false,
         availableSkills: [TurboCodeSkillDefinition] = [],
         safariMCPEnabled: Bool = false,
-        pluginTools: [TypeScriptPluginToolBinding] = []
+        pluginTools: [TypeScriptPluginToolBinding] = [],
+        selectedToolIDs: Set<ToolCapabilityID>? = nil
     ) -> [CodexDynamicToolSpec] {
         let listTool = ListWorkspaceTool(workspaceRoot: workspaceRoot)
         let mapTool = SwiftWorkspaceMapTool(
@@ -266,6 +269,13 @@ nonisolated enum CodexTurboCodeToolBridge {
         }
         if safariMCPEnabled {
             specifications.append(safariMCPSpecification)
+        }
+        // Filter TurboCode tools only; plugins have their own profile registry.
+        if let selectedToolIDs {
+            specifications.removeAll {
+                guard let id = capabilityID(for: $0.name) else { return true }
+                return !selectedToolIDs.contains(id)
+            }
         }
         specifications.append(contentsOf: pluginTools.map { binding in
             CodexDynamicToolSpec(

@@ -454,7 +454,9 @@ struct SkillsView: View {
 
                 sectionCard(
                     title: "Default Capabilities",
-                    subtitle: "These capabilities are managed by TurboCode and may evolve with the model."
+                    subtitle: modelID == .codex
+                        ? "TurboCode tools added to Codex. Create an override and enable Delegate Task to configure up to four workers. Codex also manages its own built-in tools."
+                        : "These capabilities are managed by TurboCode and may evolve with the model."
                 ) {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 8)], spacing: 8) {
                         ForEach(defaultTools) { tool in

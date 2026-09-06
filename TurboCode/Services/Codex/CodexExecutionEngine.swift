@@ -20,6 +20,8 @@ nonisolated struct CodexTurnRequest: Sendable {
     let delegationInvoker: (any AgentTaskInvoking)?
     let backgroundTaskSubmission: DelegatedTaskBackgroundSubmission?
     let pluginTools: [TypeScriptPluginToolBinding]
+    /// Nil uses built-in tools; an explicit set is the override boundary.
+    let selectedToolIDs: Set<ToolCapabilityID>?
     let allowsTools: Bool
 
     init(
@@ -36,6 +38,7 @@ nonisolated struct CodexTurnRequest: Sendable {
         delegationInvoker: (any AgentTaskInvoking)?,
         backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil,
         pluginTools: [TypeScriptPluginToolBinding] = [],
+        selectedToolIDs: Set<ToolCapabilityID>? = nil,
         allowsTools: Bool = true
     ) {
         self.turnID = turnID
@@ -51,6 +54,7 @@ nonisolated struct CodexTurnRequest: Sendable {
         self.delegationInvoker = delegationInvoker
         self.backgroundTaskSubmission = backgroundTaskSubmission
         self.pluginTools = pluginTools
+        self.selectedToolIDs = selectedToolIDs
         self.allowsTools = allowsTools
     }
 }
@@ -130,6 +134,7 @@ extension CodexAppServerClient: CodexAppServerServing {}
 /// drive the same engine without instantiating TurboCode's interface.
 actor CodexExecutionEngine {
     private struct ThreadConfiguration: Equatable {
+        let selectedToolIDs: Set<ToolCapabilityID>?
         let allowsTools: Bool
         let includesDelegation: Bool
         let safariMCPEnabled: Bool
@@ -251,6 +256,7 @@ actor CodexExecutionEngine {
             ? request.pluginTools
             : []
         let configuration = ThreadConfiguration(
+            selectedToolIDs: request.selectedToolIDs,
             allowsTools: request.allowsTools,
             includesDelegation: includesDelegation,
             safariMCPEnabled: request.allowsTools
@@ -275,7 +281,8 @@ actor CodexExecutionEngine {
                     includesDelegation: includesDelegation,
                     availableSkills: request.availableSkills,
                     safariMCPEnabled: request.agentTuning.experimental.safariMCPEnabled,
-                    pluginTools: pluginTools
+                    pluginTools: pluginTools,
+                    selectedToolIDs: request.selectedToolIDs
                 )
                 let workspaceInstructions = WorkspaceInstructionsLoader.load(
                     from: request.workspaceRoot
@@ -343,6 +350,15 @@ actor CodexExecutionEngine {
                         result: .failure(
                             "Editorial Desk runs without workspace tools."
                         )
+                    )
+                    continue
+                }
+                // Reject stale or unsolicited calls outside the active override.
+                if let selected = request.selectedToolIDs,
+                   let capability = CodexTurboCodeToolBridge.capabilityID(for: call.tool),
+                   !selected.contains(capability) {
+                    try await client.resolveToolCall(
+                        call, result: .failure("Tool excluded by the active profile.")
                     )
                     continue
                 }

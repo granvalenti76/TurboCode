@@ -6,6 +6,40 @@ import Testing
 @MainActor
 @Suite("Dynamic profiles")
 struct DynamicProfileTests {
+    @Test("Codex preserves four mixed worker slots")
+    func codexFourWorkerOverride() throws {
+        let workers = [ProfileBaseModelID.llama, .onDevice, .llama, .onDevice]
+            .enumerated().map { index, model in
+                ProfileWorkerConfiguration(name: "Worker \(index + 1)", modelID: model, toolIDs: [])
+            }
+        let profile = try UserDynamicProfile(
+            name: "Codex team", baseModelID: .codex,
+            workers: workers, toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        ).validated()
+        #expect(profile.usesDelegation)
+        #expect(profile.resolvedWorkers(fallback: "llama").map(\.modelID) ==
+            [.llama, .onDevice, .llama, .onDevice])
+    }
+
+    @Test("Codex default capabilities match the bridge and support delegation overrides")
+    func codexDefaultMatchesBridge() {
+        let settings = SettingsStore()
+        let viewModel = SkillsViewModel()
+        let option = viewModel.modelOption(for: .codex, settings: settings)
+        #expect(viewModel.modelOptions(settings: settings).contains { $0.id == .codex })
+        #expect(option.defaultToolIDs.subtracting([.loadSkill]) ==
+            CodexTurboCodeToolBridge.capabilityIDs(
+                agentTuning: settings.agentTuning, includesDelegation: false
+            ))
+        #expect(option.compatibleToolIDs.contains(.delegateTask))
+        #expect(!option.defaultToolIDs.contains(.delegateTask))
+        for model in ProfileBaseModelID.profileCases {
+            let candidate = viewModel.modelOption(for: model, settings: settings)
+            #expect(candidate.compatibleToolIDs.contains(.safariMCP) ==
+                settings.agentTuning.experimental.safariMCPEnabled)
+        }
+    }
+
     @Test("Persists explicit tools and skills")
     func roundTripsProfile() throws {
         let root = try makeRoot()
@@ -487,7 +521,7 @@ struct DynamicProfileTests {
 
     @Test("Profile option families enforce supported coordinator routes")
     func profileOptionFamiliesAreScoped() {
-        #expect(ProfileBaseModelID.builtInCases == [.onDevice, .llama, .deepseek])
+        #expect(ProfileBaseModelID.builtInCases == [.onDevice, .llama, .deepseek, .codex])
         #expect(ProfileBaseModelID.coordinatorCases == [.onDevice, .llama, .deepseek, .codex])
         #expect(ProfileBaseModelID.workerCases == [.onDevice, .llama, .deepseek])
         #expect(!ProfileBaseModelID.workerCases.contains(.codex))

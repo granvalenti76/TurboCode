@@ -280,6 +280,7 @@ final class ChatResponseCoordinator {
         agentTuning: AgentTuningConfig,
         availableSkills: [TurboCodeSkillDefinition],
         pluginTools: [TypeScriptPluginToolBinding] = [],
+        selectedToolIDs: Set<ToolCapabilityID>? = nil,
         codexModelID: String?,
         codexReasoningEffort: CodexReasoningEffort?,
         delegationInvoker: (any AgentTaskInvoking)?,
@@ -362,6 +363,7 @@ final class ChatResponseCoordinator {
                     .runsDelegatedTasksInBackground
                     ? backgroundTaskSubmission
                     : nil,
+                selectedToolIDs: selectedToolIDs,
                 activityStarted: { [weak self] call, summary in
                     guard let self, await self.ownsTurn(turnID) else { return }
                     self.toolInteractions.beginActivity(

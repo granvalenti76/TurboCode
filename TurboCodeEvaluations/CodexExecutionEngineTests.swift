@@ -4,6 +4,18 @@ import Testing
 
 @Suite("Codex execution engine ownership")
 struct CodexExecutionEngineTests {
+    @Test("Changing an override rebuilds the advertised tool surface")
+    func overrideChangesRebuildThread() async throws {
+        let transport = RecordingCodexTransport()
+        let engine = CodexExecutionEngine(client: transport)
+        _ = try await engine.runTurn(request: request(selectedToolIDs: [.readFile]), events: .none)
+        _ = try await engine.runTurn(request: request(selectedToolIDs: [.readFile]), events: .none)
+        #expect(await transport.threadStartCount == 1)
+        _ = try await engine.runTurn(request: request(selectedToolIDs: []), events: .none)
+        #expect(await transport.threadStartCount == 2)
+        #expect(await transport.dynamicToolCounts == [1, 0])
+    }
+
     @Test("Compatible turns reuse one hidden App Server thread")
     func compatibleTurnsReuseThread() async throws {
         let transport = RecordingCodexTransport()
@@ -78,7 +90,7 @@ struct CodexExecutionEngineTests {
         #expect(await transport.resolvedApprovalIDs == ["codex-7"])
     }
 
-    private func request(allowsTools: Bool = true) -> CodexTurnRequest {
+    private func request(allowsTools: Bool = true, selectedToolIDs: Set<ToolCapabilityID>? = nil) -> CodexTurnRequest {
         CodexTurnRequest(
             turnID: TurnID(rawValue: "engine-turn"),
             turboThreadID: "turbo-thread",
@@ -91,6 +103,7 @@ struct CodexExecutionEngineTests {
             reasoningEffort: .medium,
             persistsModelPreference: true,
             delegationInvoker: nil,
+            selectedToolIDs: selectedToolIDs,
             allowsTools: allowsTools
         )
     }
