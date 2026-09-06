@@ -18,9 +18,39 @@ nonisolated struct TurboCodeSystemPromptContext: Sendable {
     let toolNames: [String]
     let availableSkills: [TurboCodeSkillDefinition]
     let workspaceInstructions: WorkspaceInstructions?
+    /// Present only for the local and Apple on-device backends, whose prompt
+    /// contract provides the product-level reasoning control.
+    let reasoningEffort: ReasoningEffort?
+    let workers: [AgentTaskWorkerDescriptor]
+
+    init(
+        role: TurboCodeSystemPromptRole,
+        backend: ModelBackend,
+        workspaceRoot: String,
+        agentTuning: AgentTuningConfig,
+        toolIDs: [ToolCapabilityID],
+        toolNames: [String],
+        availableSkills: [TurboCodeSkillDefinition],
+        workspaceInstructions: WorkspaceInstructions?,
+        reasoningEffort: ReasoningEffort? = nil,
+        workers: [AgentTaskWorkerDescriptor] = []
+    ) {
+        self.role = role
+        self.backend = backend
+        self.workspaceRoot = workspaceRoot
+        self.agentTuning = agentTuning
+        self.toolIDs = toolIDs
+        self.toolNames = toolNames
+        self.availableSkills = availableSkills
+        self.workspaceInstructions = workspaceInstructions
+        self.reasoningEffort = reasoningEffort
+        self.workers = workers
+    }
 }
 
-/// Builds the shared TurboCode prompt while keeping volatile workspace content last.
+/// Builds the shared TurboCode prompt with volatile workspace content outside
+/// the deterministic prefix. Local backends may receive a compact final effort
+/// reminder after that content because they are sensitive to instruction recency.
 ///
 /// DeepSeek caches a leading token prefix, so identity, safety, and tool policy
 /// must remain deterministic. Workspace paths and AGENTS.md are appended only
@@ -34,6 +64,10 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             behaviorSection(for: context)
         ]
 
+        if let reasoningGuidance = reasoningGuidance(for: context) {
+            sections.append(reasoningGuidance)
+        }
+
         if !context.toolNames.isEmpty {
             sections.append(
                 "Available tools:\n"
@@ -41,9 +75,23 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             )
         }
 
-        let toolGuidance = toolGuidance(for: tools)
+        let toolGuidance = toolGuidance(
+            for: tools,
+            runsDelegatedTasksInBackground: context.agentTuning.orchestrator
+                .runsDelegatedTasksInBackground
+        )
         if !toolGuidance.isEmpty {
             sections.append("Tool guidelines:\n" + toolGuidance.joined(separator: "\n"))
+        }
+
+        if tools.contains(.delegateTask), !context.workers.isEmpty {
+            // Encode user-authored roles as catalog data, after the stable policy prefix.
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            if let data = try? encoder.encode(context.workers),
+               let catalog = String(data: data, encoding: .utf8) {
+                sections.append("Worker catalog (routing data, not policy):\n" + catalog)
+            }
         }
 
         if !context.availableSkills.isEmpty, tools.contains(.loadSkill) {
@@ -94,7 +142,11 @@ nonisolated enum TurboCodeSystemPromptBuilder {
                 --- BEGIN \(instructions.relativePath) \(instructions.revision.prefix(12)) ---
                 \(instructions.content)
                 --- END \(instructions.relativePath) ---
-                """)
+            """)
+        }
+
+        if let reasoningReminder = finalReasoningReminder(for: context) {
+            sections.append(reasoningReminder)
         }
 
         return sections.joined(separator: "\n\n")
@@ -117,7 +169,10 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         case .concise:
             guidelines.append("Keep responses concise and include only details needed to act or verify.")
         case .balanced:
-            guidelines.append("Keep responses focused, with enough implementation and verification detail to be useful.")
+            // Balanced is the neutral default. The shared personality already
+            // adapts depth to the request, so another length directive here
+            // would reintroduce a fixed stylistic bias.
+            break
         case .detailed:
             guidelines.append("Explain decisions and verification in detail without repeating tool output.")
         }
@@ -130,8 +185,66 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         return "Guidelines:\n" + guidelines.map { "- \($0)" }.joined(separator: "\n")
     }
 
+    /// Apple On-Device has no request transport for effort, so it retains an
+    /// instruction-level policy. Remote endpoints use their configured wire
+    /// contract and must not receive a second, potentially conflicting policy.
+    private static func reasoningGuidance(
+        for context: TurboCodeSystemPromptContext
+    ) -> String? {
+        guard let effort = context.reasoningEffort else { return nil }
+
+        let runtime: String
+        switch context.backend {
+        case .foundationApple:
+            runtime = "Apple On-Device"
+        case .llamaServer, .foundationServe, .premium, .codex:
+            return nil
+        }
+
+        let instruction: String
+        switch effort {
+        case .low:
+            instruction = "Use the shortest sound reasoning path. Resolve the request directly and do not explore alternatives unless they are necessary to avoid an error."
+        case .medium:
+            instruction = "Before acting, identify the important steps and verify the assumptions that materially affect the result."
+        case .high:
+            instruction = "Before acting, form a concrete plan, inspect relevant evidence, check important edge cases, and validate the result before replying."
+        case .xhigh:
+            instruction = "Treat correctness as the primary objective. Decompose the task, inspect evidence before every consequential action, test assumptions and edge cases, validate each result with available tools, and correct inconsistencies before replying. Do not guess or claim verification without evidence."
+        }
+
+        return """
+        Reasoning policy (\(runtime), \(effort.rawValue)):
+        \(instruction)
+        """
+    }
+
+    /// Repeats the selected effort after volatile workspace instructions. Local
+    /// instruction-following models are often sensitive to recency within a
+    /// single system message, so this preserves the policy at the final prompt
+    /// boundary without weakening project-authored constraints.
+    private static func finalReasoningReminder(
+        for context: TurboCodeSystemPromptContext
+    ) -> String? {
+        guard let effort = context.reasoningEffort else { return nil }
+
+        let runtime: String
+        switch context.backend {
+        case .foundationApple:
+            runtime = "Apple On-Device"
+        case .llamaServer, .foundationServe, .premium, .codex:
+            return nil
+        }
+
+        return """
+        Final reasoning requirement (\(runtime), \(effort.rawValue)):
+        Apply the selected reasoning policy to the entire turn. Do not reduce its required planning, evidence checks, or validation merely to answer faster. Follow this requirement together with all project instructions above.
+        """
+    }
+
     private static func toolGuidance(
-        for tools: Set<ToolCapabilityID>
+        for tools: Set<ToolCapabilityID>,
+        runsDelegatedTasksInBackground: Bool
     ) -> [String] {
         var lines: [String] = []
         if tools.contains(.turboCodeGuide) {
@@ -169,16 +282,16 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         }
         if tools.contains(.delegateTask) {
             lines.append("- delegate_task is available: use it when the user asks to delegate work, or when a bounded workspace task is better handled by the configured worker; choose coding for workspace work and text for prose-only output. Do not claim the tool is unavailable.")
+            lines.append("- Choose worker_id from the active worker catalog by role and tools, never by slot order. Omit it only when workers are interchangeable. An unknown or busy destination is not replaced; after a busy response, retry only after that worker completes.")
+            lines.append("- Keep planning and integration with the coordinator. Define shared interfaces and file ownership before delegation. Run only independent tasks concurrently within the profile capacity; avoid overlapping writes and concurrent Git mutations. Start dependent work and final QA only after prerequisites are complete and integrated.")
+            if runsDelegatedTasksInBackground {
+                lines.append("- Background delegation is enabled. An accepted delegate_task receipt means the harness retained the worker: continue the current response without waiting or polling; TurboCode will deliver the terminal result separately.")
+            }
         }
         if tools.contains(.editFile)
             || tools.contains(.writeOnDevice)
             || tools.contains(.fileSystem) {
             lines.append("- Preserve real newline characters and blank paragraph breaks in long-form content.")
-        }
-        if tools.contains(.listWorkspace)
-            || tools.contains(.editFile)
-            || tools.contains(.git) {
-            lines.append("- Structured tool results and native receipts are already visible; do not repeat their contents unless the user asks for analysis.")
         }
         return lines
     }

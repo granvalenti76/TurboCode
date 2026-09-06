@@ -6,6 +6,22 @@ nonisolated enum ProfileLibrarySelection: Hashable, Sendable {
     case custom(UUID)
 }
 
+/// Stable selection identity for the profile editor's agent hierarchy.
+/// Worker UUIDs keep selection stable while profiles add, remove, or repeat
+/// independently configured subagent slots.
+nonisolated enum ProfileAgentNodeID: Hashable, Sendable {
+    case primary
+    case worker(UUID)
+}
+
+nonisolated struct ProfileAgentNode: Identifiable, Hashable, Sendable {
+    let id: ProfileAgentNodeID
+    let title: String
+    let subtitle: String
+    let systemImage: String
+    let depth: Int
+}
+
 nonisolated struct ProfileModelOption: Identifiable, Hashable, Sendable {
     let id: ProfileBaseModelID
     let subtitle: String
@@ -180,6 +196,9 @@ final class SkillsViewModel {
                     if !value.toolIDs.contains(id.rawValue) {
                         value.toolIDs.append(id.rawValue)
                     }
+                    value.materializeWorkers(
+                        fallback: ProfileBaseModelID.llama.rawValue
+                    )
                 } else {
                     value.toolIDs.removeAll { $0 == id.rawValue }
                 }
@@ -189,6 +208,75 @@ final class SkillsViewModel {
                 value.toolIDs.append(id.rawValue)
             } else if !included {
                 value.toolIDs.removeAll { $0 == id.rawValue }
+            }
+        }
+    }
+
+    /// Projects the persisted profile into the hierarchy rendered by the
+    /// editor. No extra subagent is advertised until the runtime can execute
+    /// it; enabling delegation creates the single worker already supported.
+    func agentNodes(
+        for profile: UserDynamicProfile,
+        fallbackWorkerID: String
+    ) -> [ProfileAgentNode] {
+        var nodes = [
+            ProfileAgentNode(
+                id: .primary,
+                title: profile.name,
+                subtitle: "\(profile.usesDelegation ? "Coordinator" : "Agent") · \(profile.baseModelID.displayName)",
+                systemImage: "person.crop.rectangle.stack",
+                depth: 0
+            )
+        ]
+        guard profile.usesDelegation else { return nodes }
+        for worker in profile.resolvedWorkers(fallback: fallbackWorkerID) {
+            nodes.append(
+                ProfileAgentNode(
+                    id: .worker(worker.id),
+                    title: worker.name,
+                    subtitle: "Subagent · \(worker.modelID.displayName)",
+                    systemImage: worker.modelID.systemImage,
+                    depth: 1
+                )
+            )
+        }
+        return nodes
+    }
+
+    /// Adds one executable slot. Repeating the same remote model intentionally
+    /// declares parallel capacity against that endpoint.
+    @discardableResult
+    func addWorker(fallbackModelID: String) -> UUID? {
+        var addedID: UUID?
+        updateDraft { value in
+            value.materializeWorkers(fallback: fallbackModelID)
+            guard value.workers.count < ProfileWorkerConfiguration.maximumCount else {
+                return
+            }
+            let modelID = ProfileBaseModelID(rawValue: fallbackModelID)
+                .flatMap { ProfileBaseModelID.workerCases.contains($0) ? $0 : nil }
+                ?? .llama
+            let worker = ProfileWorkerConfiguration(
+                name: "\(modelID.displayName) Worker \(value.workers.count + 1)",
+                modelID: modelID
+            )
+            value.workers.append(worker)
+            value.synchronizeLegacyWorkerProjection()
+            addedID = worker.id
+        }
+        return addedID
+    }
+
+    func removeWorker(id: UUID) {
+        updateDraft { value in
+            value.materializeWorkers(fallback: ProfileBaseModelID.llama.rawValue)
+            value.workers.removeAll { $0.id == id }
+            if value.workers.isEmpty {
+                value.toolIDs.removeAll {
+                    $0 == ToolCapabilityID.delegateTask.rawValue
+                }
+            } else {
+                value.synchronizeLegacyWorkerProjection()
             }
         }
     }
@@ -213,9 +301,7 @@ final class SkillsViewModel {
         }
     }
 
-    /// All models that can be selected by a custom profile. Codex is omitted
-    /// from the built-in library but remains available here for profiles that
-    /// opt into Delegate Task and its App Server settings.
+    /// Custom profiles use the same backends as the built-in library.
     func profileModelOptions(settings: SettingsStore) -> [ProfileModelOption] {
         ProfileBaseModelID.profileCases.map {
             modelOption(for: $0, settings: settings)
@@ -279,16 +365,25 @@ final class SkillsViewModel {
         let context = ToolAccessContext(
             hasWorkspace: true,
             hasSkills: true,
+            safariMCPEnabled: settings.agentTuning.experimental.safariMCPEnabled,
             hasDelegateModel: true,
             repositoryMapDetail: remote?.repositoryMap.detail
         )
-        let defaults = ModelToolCatalog.plan(profile: .standalone, tier: tier, context: context).registeredIDs
+        var defaults = ModelToolCatalog.plan(profile: .standalone, tier: tier, context: context).registeredIDs
         var compatible = ModelToolCatalog.plan(
             profile: .standalone,
             tier: tier,
             context: context,
             selectedIDs: Set(ToolCapabilityID.allCases)
         ).registeredIDs
+        if id == .codex {
+            // Derive the UI surface from the bridge, including its name aliases.
+            defaults = CodexTurboCodeToolBridge.capabilityIDs(
+                agentTuning: settings.agentTuning, includesDelegation: false
+            )
+            if !installedSkills.isEmpty { defaults.insert(.loadSkill) }
+            compatible = defaults.union([.delegateTask])
+        }
         compatible.remove(.callPowerfulModel)
         compatible.remove(.loadSkill)
         if !ProfileBaseModelID.delegationCases.contains(id) {
@@ -327,8 +422,14 @@ final class SkillsViewModel {
             baseline = nil
             return
         }
-        draft = profile
-        baseline = profile
+        var editable = profile
+        if editable.usesDelegation {
+            editable.materializeWorkers(
+                fallback: ProfileBaseModelID.llama.rawValue
+            )
+        }
+        draft = editable
+        baseline = editable
     }
 
     private func persist() throws {

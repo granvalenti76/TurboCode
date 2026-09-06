@@ -4,6 +4,19 @@ import Testing
 
 @Suite("Agent task contract")
 struct AgentTaskContractTests {
+    @Test("Destination survives task ownership and persisted receipts")
+    func destinationRoundTrip() throws {
+        let envelope = try DelegateTaskArguments(goal: "Review", worker_id: "qa").envelope()
+        let owned = try envelope.withParentTurnID(TurnID(rawValue: "parent"))
+        let decoded = try JSONDecoder().decode(AgentTaskEnvelope.self, from: JSONEncoder().encode(owned))
+        #expect(decoded.workerID == "qa")
+        let receipt = DelegatedTaskReceipt(envelope: owned)
+        #expect(receipt.workerID == "qa")
+        let result = try AgentTaskResult(taskID: owned.taskID, attemptID: owned.attemptID,
+            outcome: .completed, technicalSummary: "Reviewed", workerID: "qa", workerName: "QA")
+        #expect(try JSONDecoder().decode(AgentTaskResult.self, from: JSONEncoder().encode(result)) == result)
+    }
+
     @Test("Task and result round-trip without losing typed fields")
     func roundTripsTaskAndResult() throws {
         let envelope = try AgentTaskEnvelope(

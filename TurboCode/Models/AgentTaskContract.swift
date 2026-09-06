@@ -90,7 +90,7 @@ nonisolated enum DelegatedWorkerMode: String, Codable, Sendable, Hashable {
 ///
 /// Detailed fields remain decodable for existing activity and evaluation data.
 /// Production `delegate_task` calls now create them internally and only expose
-/// the goal plus the coarse coding/text mode to coordinator models.
+/// the goal, coarse coding/text mode, and optional worker destination.
 nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
     static let currentSchemaVersion = 2
 
@@ -108,6 +108,8 @@ nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
     /// This is runtime bookkeeping and is never exposed in model-generated
     /// delegate_task arguments.
     let parentTurnID: TurnID?
+    /// Requested destination; nil preserves automatic free-slot routing.
+    let workerID: String?
 
     init(
         schemaVersion: Int = currentSchemaVersion,
@@ -120,7 +122,8 @@ nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
         verificationRequest: VerificationRequest = .none,
         verificationParameters: AgentVerificationParameters? = nil,
         budget: DelegationBudget = .default,
-        parentTurnID: TurnID? = nil
+        parentTurnID: TurnID? = nil,
+        workerID: String? = nil
     ) throws {
         self.schemaVersion = schemaVersion
         self.taskID = taskID
@@ -133,6 +136,7 @@ nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
         self.verificationParameters = verificationParameters
         self.budget = budget
         self.parentTurnID = parentTurnID
+        self.workerID = workerID
         try validate()
     }
 
@@ -162,6 +166,7 @@ nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
         )
         budget = try values.decodeIfPresent(DelegationBudget.self, forKey: .budget) ?? .default
         parentTurnID = try values.decodeIfPresent(TurnID.self, forKey: .parentTurnID)
+        workerID = try values.decodeIfPresent(String.self, forKey: .workerID)
 
         do {
             try validate()
@@ -196,7 +201,8 @@ nonisolated struct AgentTaskEnvelope: Codable, Sendable, Hashable {
             verificationRequest: verificationRequest,
             verificationParameters: verificationParameters,
             budget: budget,
-            parentTurnID: parentTurnID
+            parentTurnID: parentTurnID,
+            workerID: workerID
         )
     }
 
@@ -296,6 +302,8 @@ nonisolated struct AgentTaskResult: Codable, Sendable, Hashable {
     let failureReason: AgentTaskFailureReason?
     let failureDetail: String?
     let unresolvedWork: [String]
+    let workerID: String?
+    let workerName: String?
 
     init(
         schemaVersion: Int = currentSchemaVersion,
@@ -307,7 +315,9 @@ nonisolated struct AgentTaskResult: Codable, Sendable, Hashable {
         verification: AgentVerificationResult = .init(status: .notRequested),
         failureReason: AgentTaskFailureReason? = nil,
         failureDetail: String? = nil,
-        unresolvedWork: [String] = []
+        unresolvedWork: [String] = [],
+        workerID: String? = nil,
+        workerName: String? = nil
     ) throws {
         self.schemaVersion = schemaVersion
         self.taskID = taskID
@@ -319,7 +329,21 @@ nonisolated struct AgentTaskResult: Codable, Sendable, Hashable {
         self.failureReason = failureReason
         self.failureDetail = failureDetail
         self.unresolvedWork = unresolvedWork
+        self.workerID = workerID
+        self.workerName = workerName
         try validate()
+    }
+
+    /// Attribute terminal receipts to the actual executor, including automatic routing.
+    func attributed(to worker: AgentTaskWorkerDescriptor?) -> Self {
+        guard let worker else { return self }
+        return (try? Self(
+            schemaVersion: schemaVersion, taskID: taskID, attemptID: attemptID,
+            outcome: outcome, technicalSummary: technicalSummary,
+            receiptIDs: receiptIDs, verification: verification,
+            failureReason: failureReason, failureDetail: failureDetail,
+            unresolvedWork: unresolvedWork, workerID: worker.id, workerName: worker.name
+        )) ?? self
     }
 
     /// Produces the one emergency result used when a caller bypasses envelope
@@ -343,6 +367,8 @@ nonisolated struct AgentTaskResult: Codable, Sendable, Hashable {
         failureReason = .invalidResult
         failureDetail = "The task contract was invalid."
         unresolvedWork = []
+        workerID = nil
+        workerName = nil
     }
 
     init(from decoder: any Decoder) throws {
@@ -366,6 +392,8 @@ nonisolated struct AgentTaskResult: Codable, Sendable, Hashable {
         )
         failureDetail = try values.decodeIfPresent(String.self, forKey: .failureDetail)
         unresolvedWork = try values.decodeIfPresent([String].self, forKey: .unresolvedWork) ?? []
+        workerID = try values.decodeIfPresent(String.self, forKey: .workerID)
+        workerName = try values.decodeIfPresent(String.self, forKey: .workerName)
 
         do {
             try validate()

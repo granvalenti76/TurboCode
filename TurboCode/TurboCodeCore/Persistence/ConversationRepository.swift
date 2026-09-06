@@ -9,6 +9,26 @@ nonisolated struct ConversationSnapshot: Sendable {
     let modelBackend: String
     let blocks: [ChatBlock]
     let transcript: Transcript?
+    let contextProjection: TranscriptContextProjection
+    /// Steering is persisted with the conversation, but its provider claim is
+    /// never resumed implicitly after a process or context boundary.
+    let steering: SteeringQueueSnapshot
+
+    init(
+        conversation: Conversation,
+        modelBackend: String,
+        blocks: [ChatBlock],
+        transcript: Transcript?,
+        contextProjection: TranscriptContextProjection = .empty,
+        steering: SteeringQueueSnapshot = .empty
+    ) {
+        self.conversation = conversation
+        self.modelBackend = modelBackend
+        self.blocks = blocks
+        self.transcript = transcript
+        self.contextProjection = contextProjection
+        self.steering = steering
+    }
 
     /// Re-encodes the durable session shape without exposing repository paths
     /// to UI code. Export therefore follows the same schema as persistence.
@@ -26,6 +46,29 @@ nonisolated protocol ConversationRepository: Sendable {
     func load(id: String) async throws -> ConversationSnapshot?
     func list() async throws -> [ConversationSnapshot]
     func delete(id: String) async throws
+    func append(
+        id: String,
+        blocks: [ChatBlock],
+        transcriptEntries: [Transcript.Entry]
+    ) async throws
+}
+
+extension ConversationRepository {
+    /// Default composition keeps lightweight test repositories source
+    /// compatible. Disk storage overrides this as one actor-isolated update.
+    func append(
+        id: String,
+        blocks: [ChatBlock],
+        transcriptEntries: [Transcript.Entry]
+    ) async throws {
+        guard let existing = try await load(id: id) else { return }
+        try await save(
+            existing.appending(
+                blocks: blocks,
+                transcriptEntries: transcriptEntries
+            )
+        )
+    }
 }
 
 /// Serializes session-file access away from MainActor presentation state.
@@ -80,6 +123,22 @@ actor DiskConversationRepository: ConversationRepository {
         try FileManager.default.removeItem(at: url)
     }
 
+    /// Load, merge, and atomic replacement stay inside the repository actor so
+    /// an inactive thread cannot lose a completion to an overlapping save.
+    func append(
+        id: String,
+        blocks: [ChatBlock],
+        transcriptEntries: [Transcript.Entry]
+    ) throws {
+        guard let existing = try load(id: id) else { return }
+        try save(
+            existing.appending(
+                blocks: blocks,
+                transcriptEntries: transcriptEntries
+            )
+        )
+    }
+
     private var encoder: JSONEncoder {
         let value = JSONEncoder()
         value.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -110,6 +169,36 @@ actor DiskConversationRepository: ConversationRepository {
     }
 }
 
+private extension ConversationSnapshot {
+    nonisolated func appending(
+        blocks newBlocks: [ChatBlock],
+        transcriptEntries: [Transcript.Entry]
+    ) -> ConversationSnapshot {
+        var updatedConversation = conversation
+        updatedConversation.updatedAt = .now
+        let updatedTranscript: Transcript?
+        if let transcript {
+            updatedTranscript = Transcript(
+                entries: Array(transcript) + transcriptEntries
+            )
+        } else if !transcriptEntries.isEmpty {
+            // A background completion can be the first portable provider
+            // context persisted for a lightweight or migrated conversation.
+            updatedTranscript = Transcript(entries: transcriptEntries)
+        } else {
+            updatedTranscript = nil
+        }
+        return ConversationSnapshot(
+            conversation: updatedConversation,
+            modelBackend: modelBackend,
+            blocks: blocks + newBlocks,
+            transcript: updatedTranscript,
+            contextProjection: contextProjection,
+            steering: steering
+        )
+    }
+}
+
 nonisolated enum ConversationRepositoryError: Error, Equatable, Sendable {
     case invalidSessionID(String)
 }
@@ -129,6 +218,8 @@ private extension ConversationSnapshot {
         modelBackend = stored.modelBackend
         blocks = stored.blocks.map(ChatBlock.init)
         transcript = stored.transcript
+        contextProjection = stored.contextProjection
+        steering = stored.steering
     }
 
     nonisolated var storedSession: StoredSession {
@@ -146,7 +237,9 @@ private extension ConversationSnapshot {
             mode: conversation.mode,
             modelBackend: modelBackend,
             blocks: blocks.map(StoredBlock.init),
-            transcript: transcript
+            transcript: transcript,
+            contextProjection: contextProjection,
+            steering: steering
         )
     }
 }
@@ -168,12 +261,13 @@ private extension ChatBlock {
             pluginWidget: stored.pluginWidget,
             editorialPublication: stored.editorialPublication
         )
+        steeringDelivery = stored.steeringDelivery
     }
 }
 
 private extension StoredBlock {
     nonisolated init(_ block: ChatBlock) {
-        self.init(
+        var stored = StoredBlock(
             id: block.id,
             kind: block.kind.rawValue,
             text: block.text,
@@ -188,5 +282,7 @@ private extension StoredBlock {
             pluginWidget: block.pluginWidget,
             editorialPublication: block.editorialPublication
         )
+        stored.steeringDelivery = block.steeringDelivery
+        self = stored
     }
 }

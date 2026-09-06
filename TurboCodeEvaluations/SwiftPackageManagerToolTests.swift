@@ -20,7 +20,7 @@ struct SwiftPackageManagerToolTests {
 
         #expect(
             result.hasPrefix("SWIFT_PACKAGE_CREATED: TaskCLI (executable)"),
-            Comment(rawValue: result)
+            Comment(rawValue: result.text)
         )
         let manifest = try String(
             contentsOf: workspace.appendingPathComponent("Package.swift"),
@@ -51,7 +51,7 @@ struct SwiftPackageManagerToolTests {
 
         #expect(
             result.contains("would overwrite existing file(s): Package.swift"),
-            Comment(rawValue: result)
+            Comment(rawValue: result.text)
         )
         #expect(try String(contentsOf: manifest, encoding: .utf8) == "Existing manifest\n")
         #expect(!FileManager.default.fileExists(atPath: workspace.appendingPathComponent("Sources").path))
@@ -110,7 +110,7 @@ struct SwiftPackageManagerToolTests {
             contentsOf: workspace.appendingPathComponent("Package.swift"),
             encoding: .utf8
         )
-        #expect(result.hasPrefix("Applied 1 file change(s)"), Comment(rawValue: result))
+        #expect(result.hasPrefix("Applied 1 file change(s)"), Comment(rawValue: result.text))
         #expect(manifest.contains("https://example.com/ExampleKit.git"))
         #expect(manifest.contains("from: \"1.2.0\""))
     }
@@ -151,7 +151,7 @@ struct SwiftPackageManagerToolTests {
             contentsOf: workspace.appendingPathComponent("Package.swift"),
             encoding: .utf8
         )
-        #expect(result.hasPrefix("Applied 1 file change(s)"), Comment(rawValue: result))
+        #expect(result.hasPrefix("Applied 1 file change(s)"), Comment(rawValue: result.text))
         #expect(manifest.contains("path: \"Dependencies/LocalKit\""))
         #expect(!manifest.contains(workspace.path))
     }
@@ -212,8 +212,8 @@ struct SwiftPackageManagerToolTests {
             timeoutSeconds: 50
         ))
 
-        #expect(build.contains("Exit code: 0"), Comment(rawValue: build))
-        #expect(test.contains("Exit code: 0"), Comment(rawValue: test))
+        #expect(build.contains("Exit code: 0"), Comment(rawValue: build.text))
+        #expect(test.contains("Exit code: 0"), Comment(rawValue: test.text))
         #expect(FileManager.default.fileExists(atPath: workspace.appendingPathComponent(".build").path))
         #expect(
             try String(
@@ -291,7 +291,7 @@ struct SwiftPackageManagerToolTests {
             timeoutSeconds: 50
         ))
 
-        #expect(result.contains("Exit code: 0"), Comment(rawValue: result))
+        #expect(result.contains("Exit code: 0"), Comment(rawValue: result.text))
         #expect(
             FileManager.default.fileExists(
                 atPath: workspace.appendingPathComponent("Package.resolved").path
@@ -330,7 +330,7 @@ struct SwiftPackageManagerToolTests {
             action: "build",
             timeoutSeconds: 50
         ))
-        #expect(build.contains("Exit code: 0"), Comment(rawValue: build))
+        #expect(build.contains("Exit code: 0"), Comment(rawValue: build.text))
 
         let startedAt = Date()
         let result = try await tool.call(arguments: SwiftPackageManagerArguments(
@@ -340,7 +340,7 @@ struct SwiftPackageManagerToolTests {
         ))
         let duration = Date().timeIntervalSince(startedAt)
 
-        #expect(result.contains("Command timed out or was cancelled."), Comment(rawValue: result))
+        #expect(result.contains("Command timed out or was cancelled."), Comment(rawValue: result.text))
         #expect(duration < 5, "The timed-out process should never strand the agent loop.")
     }
 

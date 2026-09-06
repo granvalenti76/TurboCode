@@ -54,6 +54,14 @@ extension ChatStore {
         agentActivityStore.current
     }
 
+    var agentActivities: [AgentActivity] {
+        agentActivityStore.activities
+    }
+
+    func selectAgentActivity(_ id: String) {
+        agentActivityStore.select(id)
+    }
+
     public var isFirstMessage: Bool {
         timelineStore.isFirstMessage
     }
@@ -181,6 +189,10 @@ extension ChatStore {
 
     public var activeModelSupportsReasoning: Bool {
         modelRuntimeStore.activeModelSupportsReasoning
+    }
+
+    public var activeModelOffersReasoningControl: Bool {
+        modelRuntimeStore.activeModelOffersReasoningControl
     }
 
     var codexConnectionState: CodexConnectionState {

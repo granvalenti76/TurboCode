@@ -28,6 +28,12 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
     /// Optional so sessions written before transcript persistence remain
     /// decodable and can still open as timeline-only history.
     public var transcript: Transcript?
+    /// A reversible context view over `transcript`. Older sessions decode an
+    /// empty projection and therefore retain their previous runtime behavior.
+    public var contextProjection: TranscriptContextProjection
+    /// Pending steering survives relaunch as recoverable metadata. The runtime
+    /// must explicitly rebind it before any provider delivery is attempted.
+    var steering: SteeringQueueSnapshot
 
     public init(id: String = UUID().uuidString, title: String,
                 projectName: String, workspacePath: String? = nil,
@@ -35,7 +41,9 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
                 isPinned: Bool = false, isArchived: Bool = false,
                 mode: ConversationMode = .agent,
                 modelBackend: String = "Llama-server",
-                blocks: [StoredBlock] = [], transcript: Transcript? = nil) {
+                blocks: [StoredBlock] = [], transcript: Transcript? = nil,
+                contextProjection: TranscriptContextProjection = .empty,
+                steering: SteeringQueueSnapshot = .empty) {
         self.schemaVersion = Self.currentSchemaVersion
         self.id = id; self.title = title; self.projectName = projectName
         self.workspacePath = workspacePath; self.createdAt = createdAt
@@ -43,12 +51,15 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
         self.isPinned = isPinned; self.isArchived = isArchived; self.mode = mode
         self.blocks = blocks
         self.transcript = transcript
+        self.contextProjection = contextProjection
+        self.steering = steering
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, id, title, projectName, workspacePath
         case createdAt, updatedAt, isPinned, isArchived, mode
-        case modelBackend, blocks, transcript
+        case modelBackend, blocks, transcript, contextProjection
+        case steering
     }
 
     public init(from decoder: Decoder) throws {
@@ -67,6 +78,14 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
         modelBackend = try values.decode(String.self, forKey: .modelBackend)
         blocks = try values.decodeIfPresent([StoredBlock].self, forKey: .blocks) ?? []
         transcript = try values.decodeIfPresent(Transcript.self, forKey: .transcript)
+        contextProjection = try values.decodeIfPresent(
+            TranscriptContextProjection.self,
+            forKey: .contextProjection
+        ) ?? .empty
+        steering = try values.decodeIfPresent(
+            SteeringQueueSnapshot.self,
+            forKey: .steering
+        ) ?? .empty
     }
 
     public func hash(into hasher: inout Hasher) {
@@ -94,6 +113,7 @@ nonisolated public struct StoredBlock: Codable, Hashable, Sendable, Identifiable
     public var workspaceListing: WorkspaceListingBlock?
     public var pluginWidget: TypeScriptPluginWidgetReceipt?
     public var editorialPublication: EditorialPublicationBlock?
+    var steeringDelivery: SteeringDeliveryMetadata?
 
     public init(id: String = UUID().uuidString, kind: String, text: String,
                 createdAt: Date = .now, model: String? = nil, providerId: String? = nil,
@@ -112,5 +132,6 @@ nonisolated public struct StoredBlock: Codable, Hashable, Sendable, Identifiable
         self.workspaceListing = workspaceListing
         self.pluginWidget = pluginWidget
         self.editorialPublication = editorialPublication
+        self.steeringDelivery = nil
     }
 }

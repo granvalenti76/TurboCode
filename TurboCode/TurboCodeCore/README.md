@@ -41,8 +41,16 @@ Native Foundation Models structure and Codex dynamic-tool output are converted
 once, at their adapter edges, into the same provider-neutral receipt. The host
 projects that receipt only after `AgentRuntime` accepts its `TurnID`; there is
 no parallel widget callback that can race a cancelled, restored, or newer turn.
-`workspaceListing` is the first receipt case, and its immutable
-`WorkspaceListingBlock` preserves the existing widget and session payload.
+The receipt vocabulary currently covers workspace listings, plugin widgets,
+diff review, Git status and commit summaries, and repository invalidation.
+
+Foundation Models tools return a compact `ToolCommandOutput`: user-facing text
+plus, when needed, an opaque token for a bounded, one-shot host registry. The
+adapter consumes that token while constructing the owning completion, so large
+artifacts do not enter the model transcript and the registry cannot become a
+second presentation channel. The Codex bridge attaches the same typed receipt
+directly to `CodexToolExecution`; both paths therefore converge before the
+runtime admission gate.
 
 `ReasoningEffort` is a provider-neutral domain value. Hosts may persist or
 present that intent, while a provider adapter alone translates it into a wire-

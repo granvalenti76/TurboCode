@@ -44,6 +44,7 @@ struct TurboCodeCoreArchitectureTests {
 
         #expect(relativePaths.contains("Domain/ModelBackend.swift"))
         #expect(relativePaths.contains("Domain/ReasoningEffort.swift"))
+        #expect(relativePaths.contains("Domain/ToolArtifact.swift"))
         #expect(relativePaths.contains("Runtime/RuntimeContracts.swift"))
         #expect(relativePaths.contains("Runtime/AgentRuntime.swift"))
     }
@@ -98,6 +99,68 @@ struct TurboCodeCoreArchitectureTests {
                 #expect(!source.contains(token))
             }
         }
+    }
+
+    /// Tools produce domain results; only the owning runtime completion may
+    /// project them into observable application state. Keeping this tripwire at
+    /// the source boundary prevents a convenience regression to the old global
+    /// facade while the tools still compile in the application target.
+    @Test("Tools do not reach the ChatStore singleton")
+    func toolsDoNotReachChatStoreSingleton() throws {
+        let toolsURL = Self.repositoryRoot
+            .appendingPathComponent("TurboCode/Tools", isDirectory: true)
+        let sourceURLs = try swiftSourceURLs(at: toolsURL)
+        #expect(!sourceURLs.isEmpty)
+
+        for sourceURL in sourceURLs {
+            let source = try String(contentsOf: sourceURL, encoding: .utf8)
+            #expect(!source.contains("ChatStore.shared"))
+        }
+    }
+
+    /// The observable façade should forward its compatibility surface to a
+    /// non-observable composition root instead of rebuilding the dependency
+    /// graph whenever that façade evolves.
+    @Test("ChatStore delegates construction to the application assembly")
+    func chatStoreDelegatesConstructionToAssembly() throws {
+        let chatStoreSource = try source(at: "TurboCode/Stores/ChatStore.swift")
+        let assemblySource = try source(
+            at: "TurboCode/Stores/ChatApplicationAssembly.swift"
+        )
+
+        #expect(chatStoreSource.contains("private let assembly: ChatApplicationAssembly"))
+        #expect(chatStoreSource.contains("self.assembly = ChatApplicationAssembly("))
+        #expect(assemblySource.contains("final class ChatApplicationAssembly"))
+        #expect(!assemblySource.contains("@Observable"))
+    }
+
+    /// Response orchestration keeps one ordered turn, while executor-neutral
+    /// ingress, MainActor projection, and diagnostic persistence remain
+    /// independently testable boundaries.
+    @Test("Response coordination delegates buffering, presentation, and diagnostics")
+    func responseCoordinationUsesNarrowBoundaries() throws {
+        let coordinatorSource = try source(
+            at: "TurboCode/Stores/ChatResponseCoordinator.swift"
+        )
+        let presenterSource = try source(
+            at: "TurboCode/Stores/ChatResponsePresenter.swift"
+        )
+        let diagnosticsSource = try source(
+            at: "TurboCode/Diagnostics/ResponseDiagnostics.swift"
+        )
+        let ingressSource = try source(
+            at: "TurboCode/Services/Chat/BackendEventIngress.swift"
+        )
+
+        #expect(ingressSource.contains("actor BackendEventIngress"))
+        #expect(presenterSource.contains("@MainActor"))
+        #expect(!presenterSource.contains("AgentRuntime"))
+        #expect(!presenterSource.contains("LLMRuntime"))
+        #expect(diagnosticsSource.contains("AgentDiagnosticsRecorder.shared"))
+        #expect(!coordinatorSource.contains("private let timeline:"))
+        #expect(!coordinatorSource.contains("timeline.beginResponse"))
+        #expect(!coordinatorSource.contains("timeline.present"))
+        #expect(!coordinatorSource.contains("AgentDiagnosticsRecorder.shared"))
     }
 
     /// The Xcode target defaults unannotated declarations to MainActor. These
@@ -176,13 +239,16 @@ struct TurboCodeCoreArchitectureTests {
     }
 
     private func coreSwiftSourceURLs() throws -> [URL] {
-        let coreURL = Self.coreURL
+        try swiftSourceURLs(at: Self.coreURL)
+    }
+
+    private func swiftSourceURLs(at directoryURL: URL) throws -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
-            at: coreURL,
+            at: directoryURL,
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else {
-            throw TurboCodeCoreArchitectureTestError.cannotEnumerate(coreURL)
+            throw TurboCodeCoreArchitectureTestError.cannotEnumerate(directoryURL)
         }
 
         var sourceURLs: [URL] = []

@@ -88,24 +88,27 @@ struct SwiftPackageManagerArguments {
 /// directly, never a shell, and can write only SwiftPM state and build artifacts.
 struct SwiftPackageManagerTool: Tool {
     typealias Arguments = SwiftPackageManagerArguments
-    typealias Output = String
+    typealias Output = ToolCommandOutput
 
     let workspaceRoot: String
     let executionPolicy: ExecutionPolicy
     let reportsChanges: Bool
     let taskScope: AgentTaskPathScope?
+    private let receiptRegistry: ToolReceiptRegistry?
     private let service = SwiftPackageManagerService()
 
     init(
         workspaceRoot: String,
         executionPolicy: ExecutionPolicy = ExecutionPolicy(),
         reportsChanges: Bool = true,
-        taskScope: AgentTaskPathScope? = nil
+        taskScope: AgentTaskPathScope? = nil,
+        receiptRegistry: ToolReceiptRegistry? = nil
     ) {
         self.workspaceRoot = workspaceRoot
         self.executionPolicy = executionPolicy
         self.reportsChanges = reportsChanges
         self.taskScope = taskScope
+        self.receiptRegistry = receiptRegistry
     }
 
     func restricted(to scope: AgentTaskPathScope) -> Self {
@@ -113,7 +116,8 @@ struct SwiftPackageManagerTool: Tool {
             workspaceRoot: workspaceRoot,
             executionPolicy: executionPolicy,
             reportsChanges: reportsChanges,
-            taskScope: scope
+            taskScope: scope,
+            receiptRegistry: receiptRegistry
         )
     }
 
@@ -132,7 +136,7 @@ struct SwiftPackageManagerTool: Tool {
     }
     var includesSchemaInInstructions: Bool { true }
 
-    func call(arguments: SwiftPackageManagerArguments) async throws -> String {
+    func call(arguments: SwiftPackageManagerArguments) async throws -> ToolCommandOutput {
         if let taskScope, !taskScope.isWorkspaceWide {
             return "Error: swift_package_manager requires an entire-workspace task scope because package manifests and build state span the package."
         }
@@ -145,13 +149,15 @@ struct SwiftPackageManagerTool: Tool {
             return try await mutateManifest(arguments, operation: .addTargetDependency)
         case "resolve", "update", "build", "test", "run", "clean", "reset",
              "describe", "showDependencies", "dumpPackage":
-            return await execute(arguments)
+            return .plain(await execute(arguments))
         default:
             return "Error: unsupported Swift Package Manager action '\(arguments.action)'."
         }
     }
 
-    private func initialize(_ arguments: SwiftPackageManagerArguments) async throws -> String {
+    private func initialize(
+        _ arguments: SwiftPackageManagerArguments
+    ) async throws -> ToolCommandOutput {
         let packageName = trimmed(arguments.packageName)
         guard let packageName,
               packageName != ".",
@@ -188,7 +194,7 @@ struct SwiftPackageManagerTool: Tool {
             outputLimit: executionPolicy.maximumToolOutputCharacters
         )
         guard result.status == 0 else {
-            return result.formatted(command: "swift package init")
+            return .plain(result.formatted(command: "swift package init"))
         }
 
         let generatedFiles: [(path: String, content: String)]
@@ -225,11 +231,14 @@ struct SwiftPackageManagerTool: Tool {
         }
         let applyResult = try await ApplyEditsTool(
             workspaceRoot: workspaceRoot,
-            reportsChanges: reportsChanges
+            reportsChanges: reportsChanges,
+            receiptRegistry: receiptRegistry
         ).call(arguments: ApplyEditsArguments(files: requests))
         guard applyResult.hasPrefix("Applied ") else { return applyResult }
 
-        return "SWIFT_PACKAGE_CREATED: \(packageName) (\(packageType)); files: \(generatedFiles.map(\.path).joined(separator: ", "))"
+        return applyResult.replacingText(
+            with: "SWIFT_PACKAGE_CREATED: \(packageName) (\(packageType)); files: \(generatedFiles.map(\.path).joined(separator: ", "))"
+        )
     }
 
     private enum ManifestOperation {
@@ -240,7 +249,7 @@ struct SwiftPackageManagerTool: Tool {
     private func mutateManifest(
         _ arguments: SwiftPackageManagerArguments,
         operation: ManifestOperation
-    ) async throws -> String {
+    ) async throws -> ToolCommandOutput {
         let manifestURL: URL
         let original: String
         do {
@@ -339,7 +348,9 @@ struct SwiftPackageManagerTool: Tool {
             outputLimit: executionPolicy.maximumToolOutputCharacters
         )
         guard result.status == 0 else {
-            return result.formatted(command: "swift \(command.joined(separator: " "))")
+            return .plain(
+                result.formatted(command: "swift \(command.joined(separator: " "))")
+            )
         }
 
         let updated: String
@@ -357,7 +368,8 @@ struct SwiftPackageManagerTool: Tool {
 
         return try await ApplyEditsTool(
             workspaceRoot: workspaceRoot,
-            reportsChanges: reportsChanges
+            reportsChanges: reportsChanges,
+            receiptRegistry: receiptRegistry
         ).call(arguments: ApplyEditsArguments(files: [
             FileEditRequest(
                 filePath: "Package.swift",

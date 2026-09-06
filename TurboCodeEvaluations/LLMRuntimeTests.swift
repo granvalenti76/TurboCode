@@ -380,6 +380,10 @@ private actor SuspendedBackendSession: BackendSession {
         complete(with: .cancelled(reason: "Interrupted by test."))
     }
 
+    func steer(input: String) async -> BackendSteeringResult {
+        .unsupported
+    }
+
     func complete(with outcome: TurnOutcome) {
         let continuation = self.continuation
         self.continuation = nil
@@ -406,6 +410,10 @@ nonisolated private final class CompletingBackendSession: BackendSession, Sendab
     }
 
     func interrupt() async {}
+
+    func steer(input: String) async -> BackendSteeringResult {
+        .unsupported
+    }
 }
 
 @MainActor

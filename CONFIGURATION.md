@@ -33,6 +33,42 @@ DeepSeek uses `enhanced`, which adds imports and type relationships to focused
 map queries. Apple on-device never receives the repository-map tool, including
 when it is acting as orchestrator; the configured delegate maps the workspace.
 
+## Remote reasoning control
+
+Reasoning ownership is configured explicitly per compatible remote model under
+**TurboCode > Settings > Reasoning**. TurboCode never infers the request format
+from the model name.
+
+`serverManaged` is the backward-compatible default. It adds no reasoning fields
+to the request, leaving behavior to the endpoint's launch and template setup:
+
+```json
+{
+  "reasoningConfiguration": {
+    "mode": "serverManaged"
+  }
+}
+```
+
+`requestTokenBudget` sends the selected budget and thinking switch with each
+request. A missing `maximumTokenBudget` means unlimited for the highest product
+level:
+
+```json
+{
+  "reasoningConfiguration": {
+    "mode": "requestTokenBudget",
+    "lowTokenBudget": 512,
+    "mediumTokenBudget": 2048,
+    "highTokenBudget": 8192
+  }
+}
+```
+
+Use request-level control only when the endpoint's chat template supports these
+fields. Settings validates finite budgets before atomically updating
+`models.json`; unrelated endpoint metadata is preserved.
+
 ## Xcode build and test execution
 
 Capable standalone and delegated models receive the flat `xcode_project` tool.
@@ -106,8 +142,10 @@ fallback behavior.
 
 ## Agent
 
-`responseStyle` accepts `concise`, `balanced`, or `detailed`. It changes the
-response guidance supplied to every model.
+`responseStyle` accepts `concise`, `balanced`, or `detailed`. `balanced` is the
+default and adds no fixed length or depth constraint: the shared personality
+adapts the response to the request and its actual complexity. `concise` and
+`detailed` remain explicit overrides supplied to every model.
 
 `verifiesChanges` tells the agent to run the most focused available build or test
 after changing source code. It does not bypass execution permissions.

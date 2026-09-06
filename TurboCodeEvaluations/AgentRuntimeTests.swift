@@ -440,6 +440,150 @@ struct AgentRuntimeTests {
         #expect(!store.busy)
         _ = await execution.value
     }
+
+    @Test("Runtime rejects steering for an independent operation")
+    func rejectsSteeringForIndependentOperation() async {
+        let runtime = AgentRuntime(activeThreadID: "conversation")
+        let turnID = TurnID(rawValue: "independent-steering")
+        await runtime.begin(
+            TurnRequest(
+                id: turnID,
+                prompt: "/task inspect",
+                backend: .foundationApple,
+                modelName: "configured-model",
+                workspaceRoot: "/workspace"
+            )
+        )
+        let operation = Task {
+            await runtime.runOperation(
+                turnID: turnID,
+                operationKind: .independent
+            ) {
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+        while !(await runtime.hasActiveOperation) {
+            await Task.yield()
+        }
+        let context = await runtime.steeringContext(for: turnID)
+        guard let context else {
+            Issue.record("Expected the independent operation to retain context identity")
+            return
+        }
+        let result = await runtime.enqueueSteering(
+            text: "Do not steer this worker",
+            context: context
+        )
+        #expect(result == .rejected(.independentOperation))
+        await runtime.cancelAndWaitForOperation()
+        _ = await operation.value
+    }
+
+    @Test("Runtime captures steering and prevents a competing claim")
+    func capturesAndClaimsSteeringAtomically() async {
+        let runtime = AgentRuntime(activeThreadID: "conversation")
+        let turnID = TurnID(rawValue: "conversation-steering")
+        await runtime.begin(
+            TurnRequest(
+                id: turnID,
+                prompt: "Inspect the parser",
+                backend: .foundationApple,
+                modelName: "configured-model",
+                workspaceRoot: "/workspace"
+            )
+        )
+        let execution = Task {
+            await runtime.runOperation(turnID: turnID) {
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+        while !(await runtime.hasActiveOperation) {
+            await Task.yield()
+        }
+        let context = await runtime.steeringContext(for: turnID)!
+
+        let first = await runtime.enqueueSteering(
+            text: "Check tests first",
+            context: context,
+            id: SteeringRequestID(rawValue: "request-a")
+        )
+        let second = await runtime.enqueueSteering(
+            text: "Preserve the public API",
+            context: context,
+            id: SteeringRequestID(rawValue: "request-b")
+        )
+        guard case .accepted(let firstRequest) = first,
+              case .accepted(let secondRequest) = second else {
+            Issue.record("Expected both steering requests to be accepted")
+            return
+        }
+        #expect(firstRequest.sequence < secondRequest.sequence)
+
+        let claims = await withTaskGroup(of: SteeringDeliveryBatch?.self) { group in
+            group.addTask {
+                await runtime.claimSteeringBatch(
+                    for: context,
+                    intent: .automatic,
+                    id: SteeringDeliveryID(rawValue: "claim-a")
+                )
+            }
+            group.addTask {
+                await runtime.claimSteeringBatch(
+                    for: context,
+                    intent: .sendNow,
+                    id: SteeringDeliveryID(rawValue: "claim-b")
+                )
+            }
+            var values: [SteeringDeliveryBatch?] = []
+            for await value in group { values.append(value) }
+            return values
+        }
+
+        #expect(claims.compactMap { $0 }.count == 1)
+        #expect(claims.compactMap { $0 }.first?.requestIDs == [
+            firstRequest.id,
+            secondRequest.id
+        ])
+
+        await runtime.cancelAndWaitForOperation()
+        _ = await execution.value
+    }
+
+    @Test("Successful release permits one automatic steering continuation")
+    func successfulReleasePermitsAutomaticSteering() async {
+        let runtime = AgentRuntime(activeThreadID: "conversation")
+        let turnID = TurnID(rawValue: "completed-steering")
+        await runtime.begin(
+            TurnRequest(
+                id: turnID,
+                prompt: "Inspect the parser",
+                backend: .foundationApple,
+                modelName: "configured-model",
+                workspaceRoot: "/workspace"
+            )
+        )
+        let context = await runtime.steeringContext(for: turnID)
+        guard let context else {
+            Issue.record("Expected a steering context")
+            return
+        }
+        _ = await runtime.enqueueSteering(text: "Now run the focused tests", context: context)
+        #expect(await runtime.advance(to: .preparing, turnID: turnID))
+        #expect(await runtime.advance(to: .streaming, turnID: turnID))
+        #expect(await runtime.advance(to: .settling, turnID: turnID))
+        #expect(
+            await runtime.apply(
+                .completed(turnID: turnID, outcome: .succeeded, at: Date())
+            )
+        )
+
+        let batch = await runtime.claimSteeringBatch(
+            for: context,
+            intent: .automatic,
+            id: SteeringDeliveryID(rawValue: "automatic-release")
+        )
+        #expect(batch?.requestIDs.count == 1)
+    }
 }
 
 /// Keeps the Observation regression isolated from the user's session files;

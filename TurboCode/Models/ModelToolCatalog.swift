@@ -300,14 +300,16 @@ nonisolated enum ModelToolCatalog {
             memberships.append((.createSkill, .workspace))
         }
         // Safari is a global experimental opt-in rather than a default model
-        // capability. Never pass it to delegated workers, which must remain
+        // capability. Explicit overrides still own their selection. Never pass it to delegated workers, which must remain
         // bounded to workspace-scoped operations.
-        if context.safariMCPEnabled,
+        if selectedIDs == nil,
+           context.safariMCPEnabled,
            profile != .delegate,
            !memberships.contains(where: { $0.0 == .safariMCP }) {
             memberships.append((.safariMCP, .safariMCP))
         }
         let assignments = memberships.compactMap { id, requirement -> ModelToolAssignment? in
+            if profile == .delegate, id == .safariMCP { return nil }
             if requirement == .repositoryMap,
                (tier == .onDevice || context.repositoryMapDetail == nil) {
                 return nil

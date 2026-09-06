@@ -155,6 +155,7 @@ struct FirstLaunchBootstrapTests {
             fileURL: config.dynamicProfilesURL
         ).load()
         #expect(migratedTuning.schemaVersion == AgentTuningConfig.currentSchemaVersion)
+        #expect(!migratedTuning.orchestrator.runsDelegatedTasksInBackground)
         #expect(migratedProfilesValue == [legacyProfile])
         let migratedProfiles = try JSONSerialization.jsonObject(
             with: Data(contentsOf: config.dynamicProfilesURL)
@@ -265,7 +266,7 @@ struct FirstLaunchBootstrapTests {
 
         let ids = viewModel.modelOptions(settings: SettingsStore()).map(\.id)
 
-        #expect(ids == [.onDevice, .llama, .deepseek])
+        #expect(ids == [.onDevice, .llama, .deepseek, .codex])
     }
 
     private func makeEmptyHome() throws -> URL {

@@ -5,9 +5,42 @@ import Testing
 @MainActor
 @Suite("Safari MCP")
 struct SafariMCPTests {
+    @Test("Overrides require both Safari opt-in and explicit selection")
+    func overrideSafariSelection() {
+        for enabled in [false, true] {
+            for selected in [false, true] {
+                let plan = ModelToolCatalog.plan(
+                    profile: .standalone, tier: .standard,
+                    context: ToolAccessContext(
+                        hasWorkspace: true, hasSkills: true,
+                        safariMCPEnabled: enabled, hasDelegateModel: true,
+                        repositoryMapDetail: nil
+                    ),
+                    selectedIDs: selected ? [.safariMCP] : []
+                )
+                #expect(plan.registeredIDs.contains(.safariMCP) == (enabled && selected))
+                let specs = CodexTurboCodeToolBridge.specifications(
+                    workspaceRoot: "/workspace", agentTuning: .default,
+                    safariMCPEnabled: enabled,
+                    selectedToolIDs: selected ? [.safariMCP] : []
+                )
+                #expect(specs.contains { $0.name == "safari_mcp" } == (enabled && selected))
+            }
+        }
+    }
+
     @Test("Safari MCP is disabled by default")
     func defaultsToDisabled() {
         #expect(!AgentTuningConfig.default.experimental.safariMCPEnabled)
+    }
+
+    @Test("Safari activation guidance preserves unrelated tool access")
+    func activationGuidanceDoesNotSuppressOtherTools() {
+        let instructions = SafariMCPFeature.activationInstructions
+
+        #expect(instructions.contains("leave this skill inactive and continue normally"))
+        #expect(instructions.contains("does not restrict any other available"))
+        #expect(!instructions.contains("without calling tools"))
     }
 
     @Test("Legacy agent configuration keeps Safari MCP disabled")

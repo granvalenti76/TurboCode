@@ -7,24 +7,22 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
     case deepseek
     case codex
 
-    /// Only provider-backed defaults belong in the profile library. Codex is
-    /// configured contextually for delegated profiles; direct Codex selection
-    /// remains owned by the composer.
-    // PCC-RETIREMENT: remove the legacy enum case after persisted profiles
-    // have been migrated away from Apple's retired `fm serve` model.
-    static let builtInCases: [Self] = [.onDevice, .llama, .deepseek]
+    /// Every selectable conversation backend has a discoverable default.
+    static let builtInCases: [Self] = [.onDevice, .llama, .deepseek, .codex]
     /// These models expose the structured `delegate_task` route when selected
     /// in a custom profile. The built-in on-device profile remains direct;
     /// opting into this capability is an explicit override choice.
     static let delegationCases: [Self] = [.onDevice, .llama, .deepseek, .codex]
-    /// Models available when creating or editing a custom profile. Codex is
-    /// intentionally not a built-in standalone profile, but it is a valid
-    /// override model with its own App Server and reasoning configuration.
+    /// Models available when creating or editing a custom profile. Codex
+    /// also supports overrides with App Server and reasoning configuration.
     static let profileCases: [Self] = [.onDevice, .llama, .deepseek, .codex]
     /// Compatibility alias for integrations that still describe the route as
     /// coordinator/worker. New UI and runtime code should use `delegationCases`.
     static let coordinatorCases: [Self] = delegationCases
-    static let workerCases: [Self] = [.llama, .deepseek]
+    /// Worker routes supported by the bounded task runner. On-device uses a
+    /// native Foundation Models session; remote workers use their configured
+    /// provider endpoint.
+    static let workerCases: [Self] = [.onDevice, .llama, .deepseek]
 
     var id: String { rawValue }
 
@@ -52,6 +50,45 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
         switch self {
         case .onDevice, .codex: nil
         case .llama, .pcc, .deepseek: rawValue
+        }
+    }
+}
+
+/// One executable worker slot owned by a custom profile.
+///
+/// Multiple slots may target the same provider. In that case their count is
+/// the profile's declared concurrency, which must not exceed the capacity of
+/// the configured endpoint (for example llama-server's `--parallel` value).
+nonisolated struct ProfileWorkerConfiguration: Identifiable, Codable, Hashable, Sendable {
+    static let maximumCount = 4
+
+    let id: UUID
+    var name: String
+    /// Optional routing guidance; older profiles remain general-purpose.
+    var roleDescription: String?
+    var modelID: ProfileBaseModelID
+    /// `nil` means the complete compatible worker catalog. An empty array is
+    /// intentionally text-only and therefore differs from the default.
+    var toolIDs: [String]?
+
+    init(
+        id: UUID = UUID(),
+        name: String,
+        modelID: ProfileBaseModelID,
+        toolIDs: [String]? = nil,
+        roleDescription: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.roleDescription = roleDescription
+        self.modelID = modelID
+        self.toolIDs = toolIDs?.uniqued()
+    }
+
+    var resolvedToolIDs: Set<ToolCapabilityID>? {
+        toolIDs.map { ids in
+            Set(ids.compactMap(ToolCapabilityID.init(rawValue:)))
+                .intersection(ModelToolCatalog.delegateToolIDs)
         }
     }
 }
@@ -99,6 +136,10 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     /// default: the selected worker receives its complete delegate tool set.
     /// An empty array is meaningful and represents a text-only worker profile.
     var workerToolIDs: [String]?
+    /// Independently configurable worker slots. Empty preserves the version-2
+    /// single-worker representation until validation or editing materializes
+    /// it, keeping existing profile files source-compatible.
+    var workers: [ProfileWorkerConfiguration]
     var greedyMode: Bool
     var toolIDs: [String]
     /// External tool selections are persisted separately from the closed
@@ -117,6 +158,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         codexModelID: String? = nil,
         codexReasoningEffort: CodexReasoningEffort? = nil,
         workerToolIDs: [String]? = nil,
+        workers: [ProfileWorkerConfiguration] = [],
         greedyMode: Bool = false,
         toolIDs: [String] = [],
         pluginToolIDs: [String] = [],
@@ -132,6 +174,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         self.codexModelID = codexModelID
         self.codexReasoningEffort = codexReasoningEffort
         self.workerToolIDs = workerToolIDs?.uniqued()
+        self.workers = workers
         self.greedyMode = greedyMode
         self.toolIDs = toolIDs.uniqued()
         self.pluginToolIDs = pluginToolIDs.uniqued()
@@ -143,7 +186,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     private enum CodingKeys: String, CodingKey {
         case id, name, summary, baseModelID, workerModelID
         case codexModelID, codexReasoningEffort
-        case workerToolIDs
+        case workerToolIDs, workers
         case greedyMode, toolIDs, pluginToolIDs, skillIDs
         case createdAt, updatedAt
     }
@@ -164,6 +207,10 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
             [String].self,
             forKey: .workerToolIDs
         )?.uniqued()
+        workers = try values.decodeIfPresent(
+            [ProfileWorkerConfiguration].self,
+            forKey: .workers
+        ) ?? []
         greedyMode = try values.decodeIfPresent(Bool.self, forKey: .greedyMode) ?? false
         toolIDs = try values.decodeIfPresent([String].self, forKey: .toolIDs) ?? []
         pluginToolIDs = try values.decodeIfPresent(
@@ -211,10 +258,52 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     /// Returns the explicit worker selection while preserving `nil` as the
     /// backwards-compatible "all worker tools" state.
     var resolvedWorkerToolIDs: Set<ToolCapabilityID>? {
-        workerToolIDs.map { ids in
+        if let first = workers.first {
+            return first.resolvedToolIDs
+        }
+        return workerToolIDs.map { ids in
             Set(ids.compactMap(ToolCapabilityID.init(rawValue:)))
                 .intersection(ModelToolCatalog.delegateToolIDs)
         }
+    }
+
+    /// Resolves the version-3 worker list while projecting a version-2 profile
+    /// into one stable slot. The fallback is consulted only for legacy files
+    /// that intentionally omitted their worker selection.
+    func resolvedWorkers(fallback: String) -> [ProfileWorkerConfiguration] {
+        guard workers.isEmpty else {
+            return Array(workers.prefix(ProfileWorkerConfiguration.maximumCount))
+        }
+        let fallbackID = ProfileBaseModelID(rawValue: fallback)
+        let legacyID = workerModelID.flatMap(ProfileBaseModelID.init(rawValue:))
+        let modelID = [legacyID, fallbackID, .llama]
+            .compactMap { $0 }
+            .first(where: { ProfileBaseModelID.workerCases.contains($0) })
+            ?? .llama
+        return [
+            ProfileWorkerConfiguration(
+                // Legacy profiles need a stable destination before materialization.
+                id: id,
+                name: "Delegated Worker",
+                modelID: modelID,
+                toolIDs: workerToolIDs
+            )
+        ]
+    }
+
+    /// Converts the legacy projection into editable worker slots and keeps the
+    /// first-slot compatibility fields synchronized for older runtime readers.
+    mutating func materializeWorkers(fallback: String) {
+        if workers.isEmpty {
+            workers = resolvedWorkers(fallback: fallback)
+        }
+        synchronizeLegacyWorkerProjection()
+    }
+
+    mutating func synchronizeLegacyWorkerProjection() {
+        guard let first = workers.first else { return }
+        workerModelID = first.modelID.rawValue
+        workerToolIDs = first.toolIDs
     }
 
     /// Compatibility name retained for older callers while the product UI
@@ -259,6 +348,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
             if !toolIDs.contains(ToolCapabilityID.delegateTask.rawValue) {
                 toolIDs.append(ToolCapabilityID.delegateTask.rawValue)
             }
+            materializeWorkers(fallback: ProfileBaseModelID.llama.rawValue)
         }
     }
 
@@ -293,6 +383,10 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
                }) {
                 value.workerModelID = ProfileBaseModelID.llama.rawValue
             }
+            value.materializeWorkers(
+                fallback: value.workerModelID
+                    ?? ProfileBaseModelID.llama.rawValue
+            )
         }
         value.workerToolIDs = workerToolIDs?
             .filter { id in
@@ -302,12 +396,51 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
                 return ModelToolCatalog.delegateToolIDs.contains(capability)
             }
             .uniqued()
+        var seenWorkerIDs: Set<UUID> = []
+        value.workers = Array(value.workers.prefix(ProfileWorkerConfiguration.maximumCount))
+            .enumerated()
+            .map { index, worker in
+                let validID = seenWorkerIDs.insert(worker.id).inserted
+                    ? worker.id
+                    : UUID()
+                seenWorkerIDs.insert(validID)
+                let trimmedName = worker.name.trimmingCharacters(
+                    in: .whitespacesAndNewlines
+                )
+                let modelID = ProfileBaseModelID.workerCases.contains(worker.modelID)
+                    ? worker.modelID
+                    : .llama
+                let toolIDs = worker.toolIDs?.filter { rawID in
+                    guard let capability = ToolCapabilityID(rawValue: rawID) else {
+                        return false
+                    }
+                    return ModelToolCatalog.delegateToolIDs.contains(capability)
+                }.uniqued()
+                return ProfileWorkerConfiguration(
+                    id: validID,
+                    name: trimmedName.isEmpty ? "Worker \(index + 1)" : trimmedName,
+                    modelID: modelID,
+                    toolIDs: toolIDs,
+                    roleDescription: worker.roleDescription?.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+            }
+        if value.usesDelegation, value.workers.isEmpty {
+            value.materializeWorkers(
+                fallback: value.workerModelID
+                    ?? ProfileBaseModelID.llama.rawValue
+            )
+        }
+        value.synchronizeLegacyWorkerProjection()
         return value
     }
 
     /// Resolves legacy profiles through the prior global preference while new
     /// profiles keep the route reproducible in their persisted definition.
     func resolvedWorkerModelID(fallback: String) -> String {
+        if let first = workers.first,
+           ProfileBaseModelID.workerCases.contains(first.modelID) {
+            return first.modelID.rawValue
+        }
         guard let workerModelID,
               ProfileBaseModelID.workerCases.contains(where: {
                   $0.rawValue == workerModelID

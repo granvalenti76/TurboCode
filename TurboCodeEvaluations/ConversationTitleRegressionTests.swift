@@ -22,7 +22,7 @@ struct ConversationTitleRegressionTests {
         #expect(store.threads.first(where: { $0.id == "active" })?.title == "New Chat")
     }
 
-    @Test("Generated title is visible in global and workspace collections")
+    @Test("Generated title stays out of global chats and appears in its workspace")
     func generatedTitlePropagatesThroughSidebarCollections() {
         let store = ChatStore(conversationRepository: EmptyConversationRepository())
         store.conversationStore.threads = [
@@ -30,7 +30,9 @@ struct ConversationTitleRegressionTests {
         ]
 
         store.applyGeneratedTitle("Fix session titles", to: "session")
-        #expect(store.sortedThreads.map(\.title) == ["Fix session titles"])
+        // Project-bound sessions are intentionally excluded from the global
+        // Chats section; the workspace disclosure owns their presentation.
+        #expect(store.sortedThreads.isEmpty)
 
         store.selectedProject = "TurboCode"
         #expect(store.sortedThreads.map(\.title) == ["Fix session titles"])

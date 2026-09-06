@@ -29,8 +29,10 @@ nonisolated struct CodexLLMExecutionConfiguration: Sendable {
     let modelID: String?
     let reasoningEffort: CodexReasoningEffort?
     let delegationInvoker: (any AgentTaskInvoking)?
-    /// Editorial Desk reuses the runtime gate while opting out of all
-    /// workspace tools and approval flows.
+    let backgroundTaskSubmission: DelegatedTaskBackgroundSubmission?
+    /// Nil uses built-in tools; an explicit set is the override boundary.
+    let selectedToolIDs: Set<ToolCapabilityID>?
+    /// Editorial Desk opts out of workspace tools and approval flows.
     let allowsTools: Bool
     let activityStarted: @MainActor @Sendable (
         CodexDynamicToolCall,
@@ -50,6 +52,8 @@ nonisolated struct CodexLLMExecutionConfiguration: Sendable {
         modelID: String?,
         reasoningEffort: CodexReasoningEffort?,
         delegationInvoker: (any AgentTaskInvoking)?,
+        backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil,
+        selectedToolIDs: Set<ToolCapabilityID>? = nil,
         allowsTools: Bool = true,
         activityStarted: @escaping @MainActor @Sendable (
             CodexDynamicToolCall,
@@ -68,6 +72,8 @@ nonisolated struct CodexLLMExecutionConfiguration: Sendable {
         self.modelID = modelID
         self.reasoningEffort = reasoningEffort
         self.delegationInvoker = delegationInvoker
+        self.backgroundTaskSubmission = backgroundTaskSubmission
+        self.selectedToolIDs = selectedToolIDs
         self.allowsTools = allowsTools
         self.activityStarted = activityStarted
         self.activityEnded = activityEnded
@@ -152,6 +158,8 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
                 ?? codexRuntime.reasoningEffort,
             persistsModelPreference: persistsModelPreference,
             delegationInvoker: configuration.delegationInvoker,
+            backgroundTaskSubmission: configuration.backgroundTaskSubmission,
+            selectedToolIDs: configuration.selectedToolIDs,
             allowsTools: configuration.allowsTools,
             runtimeSnapshotChanged: { [weak codexRuntime] snapshot, persists in
                 codexRuntime?.applyExecutionSnapshot(
@@ -304,6 +312,18 @@ actor LLMRuntime {
         return await foundationModelsRuntime.transcript
     }
 
+    /// Returns the durable, unprojected transcript. Context exclusions affect
+    /// generation only and therefore never leak into persistence or inspection.
+    func foundationModelsCanonicalTranscript() async -> Transcript? {
+        guard let foundationModelsRuntime else { return nil }
+        return await foundationModelsRuntime.canonicalTranscript()
+    }
+
+    func foundationModelsContextProjection() async -> TranscriptContextProjection? {
+        guard let foundationModelsRuntime else { return nil }
+        return await foundationModelsRuntime.transcriptContextProjection
+    }
+
     /// Replaces Foundation Models session infrastructure only at an
     /// application-controlled transition boundary. History preparation and
     /// relay injection stay beside the concrete session owner rather than in an
@@ -314,6 +334,7 @@ actor LLMRuntime {
         keepingHistory: Bool = true,
         discardingCapabilityContext: Bool = false,
         restoringHistory: [Transcript.Entry]? = nil,
+        restoringProjection: TranscriptContextProjection? = nil,
         events: ModelSessionEvents
     ) async -> Bool {
         // A configuration transition may replace the stored generation only
@@ -325,15 +346,24 @@ actor LLMRuntime {
               let foundationModelsRuntime else {
             return false
         }
-        let transcript = await foundationModelsRuntime.transcript
+        let transcript = await foundationModelsRuntime.canonicalTranscript()
         let history = restoringHistory ?? SessionRebuildHistory.prepare(
             transcript,
             keepingHistory: keepingHistory,
             discardingCapabilityContext: discardingCapabilityContext
         )
+        let projection: TranscriptContextProjection
+        if let restoringProjection {
+            projection = restoringProjection
+        } else if !keepingHistory || discardingCapabilityContext {
+            projection = .empty
+        } else {
+            projection = await foundationModelsRuntime.transcriptContextProjection
+        }
         await foundationModelsRuntime.rebuild(
             configuration: configuration,
-            history: history,
+            canonicalHistory: history,
+            projection: projection,
             events: events
         )
         return true
@@ -361,7 +391,8 @@ actor LLMRuntime {
             : ProviderLanguageModel(
                 configuration: configuration.remoteModel,
                 credential: configuration.remoteModel.credential,
-                reasoningStreamRelay: nil
+                reasoningStreamRelay: nil,
+                reasoningEffort: reasoningEffort
             )
         let result = await AgentBenchmarkRunner.runSuite(
             backend: configuration.backend,
@@ -419,6 +450,24 @@ actor LLMRuntime {
     func interrupt(turnID: TurnID) async {
         guard ownsSession(for: turnID), let activeSession else { return }
         await activeSession.interrupt()
+    }
+
+    /// Delivers provider-native steering through the session that owns the
+    /// active turn. The runtime never constructs a competing provider run.
+    func steer(
+        turnID: TurnID,
+        input: String
+    ) async -> BackendSteeringResult {
+        guard ownsSession(for: turnID), let activeSession else {
+            return .failed(
+                TurnFailure(
+                    code: "llm_runtime.no_active_session",
+                    message: "The provider turn is no longer active.",
+                    isRecoverable: true
+                )
+            )
+        }
+        return await activeSession.steer(input: input)
     }
 
     private func releaseSession(for turnID: TurnID) {

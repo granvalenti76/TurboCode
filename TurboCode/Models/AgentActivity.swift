@@ -71,7 +71,7 @@ nonisolated struct AgentActivityTool: Sendable, Hashable {
 ///
 /// Tool receipts remain in the chat timeline; this snapshot intentionally
 /// retains only current operational state and the final structured result.
-nonisolated struct AgentActivity: Sendable, Hashable {
+nonisolated struct AgentActivity: Identifiable, Sendable, Hashable {
     let taskID: String
     let attemptID: String
     /// The structured envelope goal is the truthful task header; Activity
@@ -88,6 +88,8 @@ nonisolated struct AgentActivity: Sendable, Hashable {
     let startedAt: Date
     var completedAt: Date?
     var finalResult: AgentTaskResult?
+
+    var id: String { "\(taskID):\(attemptID)" }
 }
 
 /// Provider-neutral events consumed by the Activity state reducer.

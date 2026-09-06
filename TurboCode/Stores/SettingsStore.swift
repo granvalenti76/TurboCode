@@ -152,6 +152,23 @@ public final class SettingsStore {
         remoteModels.removeAll { $0.isRetiredPCC }
     }
 
+    /// Replaces only the reasoning request contract for one configured model.
+    /// Reloading immediately before the atomic write preserves endpoint edits
+    /// made directly in `models.json` while Settings was open.
+    public func updateReasoningConfiguration(
+        _ configuration: RemoteReasoningConfiguration,
+        for modelID: String
+    ) throws {
+        let persistedModels = try TurboCodeConfig.shared.loadRemoteModels()
+        var updatedModels = persistedModels.isEmpty ? remoteModels : persistedModels
+        guard let index = updatedModels.firstIndex(where: { $0.id == modelID }) else {
+            throw SettingsStoreError.remoteModelUnavailable
+        }
+        updatedModels[index].reasoningConfiguration = try configuration.validated()
+        try TurboCodeConfig.shared.saveRemoteModels(updatedModels)
+        remoteModels = updatedModels
+    }
+
     public func isConfigured(_ model: RemoteModelConfig) -> Bool {
         guard let credential = model.credential else { return true }
         return CredentialStore.contains(account: credential)
@@ -237,6 +254,17 @@ public final class SettingsStore {
             return false
         }
         return true
+    }
+}
+
+private enum SettingsStoreError: LocalizedError {
+    case remoteModelUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .remoteModelUnavailable:
+            "The selected remote model is no longer available."
+        }
     }
 }
 

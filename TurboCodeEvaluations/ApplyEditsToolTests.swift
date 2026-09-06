@@ -4,6 +4,46 @@ import Testing
 
 @Suite("Apply edits tool")
 struct ApplyEditsToolTests {
+    @Test("Successful edits emit one terminal typed artifact without ChatStore")
+    func successfulEditEmitsTypedReceipt() async throws {
+        let workspace = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCode Receipt \(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let registry = ToolReceiptRegistry()
+        let tool = ApplyEditsTool(
+            workspaceRoot: workspace.path,
+            receiptRegistry: registry
+        )
+
+        let output = try await tool.call(
+            arguments: ApplyEditsArguments(files: [
+                FileEditRequest(
+                    filePath: "Receipt.swift",
+                    revision: nil,
+                    operations: [
+                        LineEditOperation(
+                            operation: "create",
+                            startLine: nil,
+                            endLine: nil,
+                            content: "let receipt = true\n"
+                        )
+                    ]
+                )
+            ])
+        )
+
+        let token = try #require(output.receiptToken)
+        guard case .diffPatch(let artifact) = await registry.take(token) else {
+            Issue.record("Expected one typed diff artifact")
+            return
+        }
+        #expect(artifact.block.status == .applied)
+        #expect(artifact.block.files.map(\.path) == ["Receipt.swift"])
+        #expect(artifact.block.reviewFiles?.first?.modifiedText == "let receipt = true\n")
+        #expect(await registry.take(token) == nil)
+    }
+
     @Test("Creates a file below directories whose names contain spaces")
     func createsFileInPathContainingSpaces() async throws {
         let workspace = FileManager.default.temporaryDirectory

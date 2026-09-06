@@ -10,6 +10,7 @@ struct FoundationModelsReasoningLevelTests {
         #expect(FoundationModelsReasoningLevel.resolve(.low) == .light)
         #expect(FoundationModelsReasoningLevel.resolve(.medium) == .moderate)
         #expect(FoundationModelsReasoningLevel.resolve(.high) == .deep)
+        #expect(FoundationModelsReasoningLevel.resolve(.xhigh) == .deep)
         #expect(FoundationModelsReasoningLevel.resolve(nil) == nil)
     }
 }

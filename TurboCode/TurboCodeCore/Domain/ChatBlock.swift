@@ -20,6 +20,7 @@ nonisolated public struct ChatBlock: Identifiable, Sendable, Hashable {
     public var workspaceListing: WorkspaceListingBlock?
     public var pluginWidget: TypeScriptPluginWidgetReceipt?
     public var editorialPublication: EditorialPublicationBlock?
+    var steeringDelivery: SteeringDeliveryMetadata?
 
     public init(
         id: String = UUID().uuidString,
@@ -49,6 +50,7 @@ nonisolated public struct ChatBlock: Identifiable, Sendable, Hashable {
         self.workspaceListing = workspaceListing
         self.pluginWidget = pluginWidget
         self.editorialPublication = editorialPublication
+        self.steeringDelivery = nil
     }
 }
 

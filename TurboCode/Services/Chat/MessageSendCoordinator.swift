@@ -6,6 +6,14 @@ import Foundation
 /// UI inputs once and never makes a provider task depend on repaint cadence.
 @MainActor
 final class MessageSendCoordinator {
+    private enum InterruptedHistoryRestore {
+        case pending([FoundationModelsTranscriptEntry])
+        case restoring(
+            entries: [FoundationModelsTranscriptEntry],
+            task: Task<Bool, Never>
+        )
+    }
+
     private let runtime: AgentRuntime
     private let llmRuntime: LLMRuntime
     private let titleGenerator: any ConversationTitleGenerating
@@ -21,6 +29,10 @@ final class MessageSendCoordinator {
     private let sessions: ConversationSessionCoordinator
     private let profiles: ProfileSelectionCoordinator
     private let lifecycle: ConversationLifecycleCoordinator
+    private let steering: SteeringCoordinator
+    /// Captured before runtime ownership is released, then consumed exactly
+    /// once by either the release callback or an immediate steering delivery.
+    private var interruptedHistoryRestores: [TurnID: InterruptedHistoryRestore] = [:]
 
     init(
         runtime: AgentRuntime,
@@ -37,7 +49,8 @@ final class MessageSendCoordinator {
         presentation: ChatPresentationViewModel,
         sessions: ConversationSessionCoordinator,
         profiles: ProfileSelectionCoordinator,
-        lifecycle: ConversationLifecycleCoordinator
+        lifecycle: ConversationLifecycleCoordinator,
+        steering: SteeringCoordinator
     ) {
         self.runtime = runtime
         self.llmRuntime = llmRuntime
@@ -54,6 +67,7 @@ final class MessageSendCoordinator {
         self.sessions = sessions
         self.profiles = profiles
         self.lifecycle = lifecycle
+        self.steering = steering
     }
 
     func preparePrompt(for text: String) async -> String? {
@@ -100,6 +114,7 @@ final class MessageSendCoordinator {
         // Routing is immutable for the accepted turn. A later menu selection
         // cannot redirect this operation after provider execution begins.
         let responseBackend = modelRuntime.activeBackend
+        let steering = self.steering
         await runtime.runOperation(
             turnID: turnID,
             operation: { [weak self] in
@@ -121,8 +136,10 @@ final class MessageSendCoordinator {
                 }
             },
             afterRelease: { [weak self] in
+                guard let self else { return }
+                _ = await reconcileInterruptedTurnIfNeeded(turnID)
+                await steering.deliverAutomatically(after: turnID)
                 guard visibleInTimeline,
-                      let self,
                       let titleThreadID else { return }
                 // Optional title inference starts only after response ownership
                 // is released, so it can never leave the composer on Stop.
@@ -131,6 +148,174 @@ final class MessageSendCoordinator {
             }
         )
         return true
+    }
+
+    /// Runs one native continuation for a claimed steering batch. The batch is
+    /// already owned by `SteeringCoordinator`; this method only starts a new
+    /// operation after the previous provider session has fully unwound.
+    func deliverSteering(
+        batch: SteeringDeliveryBatch,
+        requests: [SteeringRequest]
+    ) async -> SteeringCoordinator.DeliveryResult {
+        let backend = batch.context.providerSelection.backend
+        guard conversations.activeThreadID == batch.context.conversationID,
+              modelRuntime.activeBackend == backend,
+              await runtime.ownsSteeringDelivery(batch) else {
+            return .failed(
+                TurnFailure(
+                    code: "steering.stale_context",
+                    message: "The conversation context changed before delivery.",
+                    isRecoverable: true
+                )
+            )
+        }
+        guard await reconcileInterruptedTurnIfNeeded(
+            batch.context.originTurnID
+        ) else {
+            return .failed(
+                TurnFailure(
+                    code: "steering.history_restore_failed",
+                    message: "The interrupted response could not be restored before steering.",
+                    isRecoverable: true
+                )
+            )
+        }
+
+        let ordered = requests.sorted { $0.sequence < $1.sequence }
+        let displayText = ordered.map(\.text).joined(separator: "\n\n")
+        let promptText = ordered.map { request in
+            "Steering instruction \(request.sequence):\n\(request.text)"
+        }.joined(separator: "\n\n")
+        let turnID = TurnID()
+        let modelName = batch.context.providerSelection.modelName
+            ?? modelRuntime.composerModel
+        let request = TurnRequest(
+            id: turnID,
+            prompt: promptText,
+            backend: backend,
+            modelName: modelName,
+            workspaceRoot: batch.context.workspaceRoot
+        )
+        let metadata = SteeringDeliveryMetadata(
+            requestIDs: batch.requestIDs,
+            deliveryID: batch.id,
+            providerTurnID: turnID.rawValue
+        )
+        timeline.presentSteeringDelivery(
+            displayText: displayText,
+            metadata: metadata
+        )
+        guard await runtime.apply(.started(request)) else {
+            return .failed(
+                TurnFailure(
+                    code: "steering.continuation_not_admitted",
+                    message: "The steering continuation could not be admitted.",
+                    isRecoverable: true
+                )
+            )
+        }
+
+        let responseCoordinator = self.responseCoordinator
+        let timeline = self.timeline
+        let mode = modelRuntime.orchestratorMode
+        let workspaceKind = self.workspaceKind
+        let serverURL = backend == .llamaServer
+            ? modelRuntime.activeRemoteModel?.url
+            : nil
+        let resultBox = SteeringResultBox()
+        let admitted = await runtime.runOperation(
+            turnID: turnID,
+            operationKind: .conversational,
+            operation: { [weak self] in
+                guard let self else { return }
+                let result: ChatResponseCoordinator.Result
+                if backend == .codex {
+                    await self.performCodex(
+                        displayText: displayText,
+                        promptText: promptText,
+                        visibleInTimeline: true,
+                        turnID: turnID
+                    )
+                    switch await self.runtime.currentTurnState?.outcome {
+                    case .succeeded:
+                        result = ChatResponseCoordinator.Result(
+                            errorMessage: nil,
+                            touchedConversation: true
+                        )
+                    case .failed(let failure):
+                        result = ChatResponseCoordinator.Result(
+                            errorMessage: failure.message,
+                            touchedConversation: false
+                        )
+                    case .cancelled:
+                        result = ChatResponseCoordinator.Result(
+                            errorMessage: "The steering continuation was cancelled.",
+                            touchedConversation: false
+                        )
+                    case nil:
+                        result = ChatResponseCoordinator.Result(
+                            errorMessage: "The steering continuation did not settle.",
+                            touchedConversation: false
+                        )
+                    }
+                } else {
+                    let baselineHistory = await self.foundationModelsHistory()
+                    result = await responseCoordinator.performNative(
+                        displayText: displayText,
+                        promptText: promptText,
+                        visibleInTimeline: false,
+                        turnID: turnID,
+                        blocks: timeline.blocks,
+                        backend: backend,
+                        mode: mode,
+                        workspaceKind: workspaceKind,
+                        workspaceRoot: batch.context.workspaceRoot,
+                        modelName: modelName,
+                        serverURL: serverURL,
+                        contextChanged: { usage in
+                            guard backend == .llamaServer else {
+                                return
+                            }
+                            self.presentation.setLlamaContextUsage(usage)
+                        }
+                    )
+                    await self.stageInterruptedTurn(
+                        from: result,
+                        baseline: baselineHistory,
+                        turnID: turnID
+                    )
+                }
+                await resultBox.set(result)
+            },
+            afterRelease: { [weak self] in
+                guard let self else { return }
+                _ = await reconcileInterruptedTurnIfNeeded(turnID)
+                await steering.deliverAutomatically(after: turnID)
+            }
+        )
+        guard admitted, let result = await resultBox.value else {
+            return .failed(
+                TurnFailure(
+                    code: "steering.continuation_not_admitted",
+                    message: "The steering continuation could not start.",
+                    isRecoverable: true
+                )
+            )
+        }
+        guard result.errorMessage == nil, result.touchedConversation else {
+            return .failed(
+                TurnFailure(
+                    code: "steering.continuation_failed",
+                    message: result.errorMessage
+                        ?? "The steering continuation did not complete.",
+                    isRecoverable: true
+                )
+            )
+        }
+        if let conversationID = conversations.activeThreadID {
+            await sessions.persistActiveSession(id: conversationID)
+        }
+        return .accepted(providerTurnID: turnID.rawValue)
     }
 
     func generateTitle(from prompt: String, threadID: String? = nil) async {
@@ -171,7 +356,10 @@ final class MessageSendCoordinator {
               ) else { return }
 
         timeline.presentCompaction(compaction.summary)
-        await profiles.rebuildSession(restoringHistory: compaction.history)
+        await profiles.rebuildSession(
+            restoringHistory: compaction.history,
+            restoringProjection: .empty
+        )
         Task {
             await AgentDiagnosticsRecorder.shared.recordCompaction(
                 turnCount: turnCount,
@@ -215,6 +403,7 @@ final class MessageSendCoordinator {
                 safariMCPEnabled: tuning.experimental.safariMCPEnabled
             ),
             pluginTools: modelRuntime.activePluginTools,
+            selectedToolIDs: profile?.resolvedToolIDs,
             codexModelID: profile?.codexModelID,
             codexReasoningEffort: profile?.codexReasoningEffort,
             delegationInvoker: invokerFactory.makeDelegateInvoker(
@@ -243,6 +432,7 @@ final class MessageSendCoordinator {
         presentation.runtimeStatus = .ready
         presentation.errorMessage = nil
         let backend = modelRuntime.activeBackend
+        let baselineHistory = await foundationModelsHistory()
         let result = await responseCoordinator.performNative(
             displayText: displayText,
             promptText: promptText,
@@ -262,6 +452,11 @@ final class MessageSendCoordinator {
                 presentation.setLlamaContextUsage(usage)
             }
         )
+        await stageInterruptedTurn(
+            from: result,
+            baseline: baselineHistory,
+            turnID: turnID
+        )
         presentation.errorMessage = result.errorMessage
         if result.touchedConversation, let conversationID {
             conversations.touchThread(id: conversationID)
@@ -273,9 +468,90 @@ final class MessageSendCoordinator {
         }
     }
 
+    /// Reads only portable history. Session instructions are rebuilt from the
+    /// current profile and must never be copied into a replacement session.
+    /// The canonical view is required here so interrupted-turn repair cannot
+    /// accidentally make a reversible context exclusion permanent.
+    private func foundationModelsHistory() async -> [FoundationModelsTranscriptEntry] {
+        guard let transcript = await llmRuntime.foundationModelsCanonicalTranscript() else {
+            return []
+        }
+        return SessionRebuildHistory.prepare(
+            transcript,
+            keepingHistory: true,
+            discardingCapabilityContext: false
+        )
+    }
+
+    private func stageInterruptedTurn(
+        from result: ChatResponseCoordinator.Result,
+        baseline: [FoundationModelsTranscriptEntry],
+        turnID: TurnID
+    ) async {
+        guard let interrupted = result.interruptedNativeTurn else { return }
+        let current = await foundationModelsHistory()
+        interruptedHistoryRestores[turnID] = .pending(
+            SessionRebuildHistory.reconcilingInterruptedTurn(
+                baseline: baseline,
+                current: current,
+                prompt: interrupted.prompt,
+                reasoning: interrupted.reasoning,
+                response: interrupted.assistantText
+            )
+        )
+    }
+
+    /// Rebuilds after the provider adapter releases its session. Removing the
+    /// pending value before awaiting would let a concurrent send-now path race
+    /// the rebuild, so both callers join the same retained task instead.
+    private func reconcileInterruptedTurnIfNeeded(_ turnID: TurnID) async -> Bool {
+        guard let restore = interruptedHistoryRestores[turnID] else {
+            return true
+        }
+        let entries: [FoundationModelsTranscriptEntry]
+        let task: Task<Bool, Never>
+        switch restore {
+        case .pending(let pendingEntries):
+            entries = pendingEntries
+            task = Task { [profiles] in
+                await profiles.restoreInterruptedTurnHistory(pendingEntries)
+            }
+            interruptedHistoryRestores[turnID] = .restoring(
+                entries: pendingEntries,
+                task: task
+            )
+        case .restoring(let restoringEntries, let restoringTask):
+            entries = restoringEntries
+            task = restoringTask
+        }
+
+        let restored = await task.value
+        if restored {
+            interruptedHistoryRestores.removeValue(forKey: turnID)
+        } else {
+            interruptedHistoryRestores[turnID] = .pending(entries)
+        }
+        return restored
+    }
+
     private var workspaceKind: String {
         guard !workspace.root.isEmpty else { return "none" }
         let marker = URL(fileURLWithPath: workspace.root).appendingPathComponent(".git")
         return FileManager.default.fileExists(atPath: marker.path) ? "git" : "nonGit"
+    }
+
+}
+
+/// Sendable handoff for the result produced inside the detached runtime
+/// operation. The coordinator remains the only owner of provider execution.
+private actor SteeringResultBox {
+    private var storedResult: ChatResponseCoordinator.Result?
+
+    func set(_ result: ChatResponseCoordinator.Result) {
+        storedResult = result
+    }
+
+    var value: ChatResponseCoordinator.Result? {
+        storedResult
     }
 }

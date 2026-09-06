@@ -4,6 +4,21 @@ import Testing
 
 @Suite("Codex profile")
 struct CodexProfileTests {
+    @Test("Codex overrides expose native delegation and translate edit aliases")
+    func overrideToolSelection() {
+        let specs = CodexTurboCodeToolBridge.specifications(
+            workspaceRoot: "/workspace", agentTuning: .default,
+            includesDelegation: true,
+            selectedToolIDs: [.delegateTask, .editFile]
+        )
+        #expect(Set(specs.map(\.name)) == ["delegate_task", "apply_edits"])
+        let direct = CodexTurboCodeToolBridge.specifications(
+            workspaceRoot: "/workspace", agentTuning: .default,
+            selectedToolIDs: [.delegateTask]
+        )
+        #expect(direct.isEmpty)
+    }
+
     @Test("Thread start uses the App Server workspace sandbox wire value")
     func threadStartUsesWorkspaceSandboxWireValue() {
         #expect(CodexAppServerClient.workspaceSandbox == "workspace-write")
@@ -550,6 +565,15 @@ struct CodexProfileTests {
             availableSkills: [skill]
         )
         #expect(createExecution.result.succeeded)
+        guard case .diffPatch(let artifact) = createExecution.receipt else {
+            Issue.record("Expected the shared editor's typed diff receipt")
+            return
+        }
+        #expect(artifact.block.status == .applied)
+        #expect(
+            artifact.block.files.map(\.path)
+                == [".agents/skills/workspace-review/SKILL.md"]
+        )
         let createdURL = root
             .appendingPathComponent(".agents/skills/workspace-review/SKILL.md")
         #expect(FileManager.default.fileExists(atPath: createdURL.path))

@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 
 /// Application-facing persistence use cases built on the storage port.
 ///
@@ -28,7 +29,8 @@ nonisolated struct ConversationPersistenceService: Sendable {
             conversation: conversation,
             modelBackend: existing?.modelBackend ?? defaultModelBackend,
             blocks: existing?.blocks ?? [],
-            transcript: existing?.transcript
+            transcript: existing?.transcript,
+            steering: existing?.steering ?? .empty
         )
         try await repository.save(snapshot)
     }
@@ -39,6 +41,20 @@ nonisolated struct ConversationPersistenceService: Sendable {
 
     func load(id: String) async throws -> ConversationSnapshot? {
         try await repository.load(id: id)
+    }
+
+    /// Delivers application-owned background work to its durable origin even
+    /// when another conversation currently owns the visible timeline.
+    func append(
+        id: String,
+        blocks: [ChatBlock],
+        transcriptEntries: [Transcript.Entry]
+    ) async throws {
+        try await repository.append(
+            id: id,
+            blocks: blocks,
+            transcriptEntries: transcriptEntries
+        )
     }
 
     /// Loads exportable session JSON through the repository boundary. Missing

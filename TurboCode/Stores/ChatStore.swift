@@ -34,6 +34,12 @@ public final class ChatStore {
             || presentationViewModel.isProfileTransitioning
     }
 
+    /// Value-only steering projection for the composer card. Delivery state is
+    /// owned by `AgentRuntime`; the facade exposes it without a second queue.
+    var steeringRequests: [SteeringRequest] {
+        agentRuntimeProjectionStore.snapshot.steering.requests
+    }
+
     /// Keeps detached plugin surfaces associated with their timeline block.
     /// The receipt is intentionally in-memory only: closing a detached window
     /// can restore the exact widget without adding window state to sessions.
@@ -82,35 +88,65 @@ public final class ChatStore {
         await profileSelectionCoordinator.setOrchestratorMode(mode)
     }
 
-    // Internal only so the compatibility façade can forward legacy view API.
-    let workspaceStore: WorkspaceStore
-    let conversationStore: ConversationStore
-    let toolInteractionStore: ToolInteractionStore
-    let agentActivityStore: AgentActivityStore
-    let agentRuntimeProjectionStore: AgentRuntimeProjectionStore
-    let composerViewModel: ComposerViewModel
-    let presentationViewModel: ChatPresentationViewModel
-    let timelineStore: ChatTimelineStore
-    let workbenchStore: WorkbenchStore
-    let reviewDraftStore: ReviewDraftStore
-    let codexRuntimeStore: CodexRuntimeStore
-    let typeScriptPluginActivationStore: TypeScriptPluginActivationStore
-    let modelRuntimeStore: ModelRuntimeStore
-    let agentRuntime: AgentRuntime
-    private let llmRuntime: LLMRuntime
-    let onDeviceToolCallingSupported: Bool
-    let responseCoordinator: ChatResponseCoordinator
-    private let sessionCoordinator: ConversationSessionCoordinator
-    private let conversationPersistence: ConversationPersistenceService
-    private let profileSelectionCoordinator: ProfileSelectionCoordinator
-    private let conversationLifecycleCoordinator: ConversationLifecycleCoordinator
-    private let workspaceLifecycleCoordinator: WorkspaceLifecycleCoordinator
-    private let independentTaskCoordinator: IndependentTaskCoordinator
-    private let messageSendCoordinator: MessageSendCoordinator
+    /// Compatibility forwarders keep the existing view and intent surface
+    /// stable while construction lives in the non-observable assembly.
+    private let assembly: ChatApplicationAssembly
+    var workspaceStore: WorkspaceStore { assembly.workspaceStore }
+    var conversationStore: ConversationStore { assembly.conversationStore }
+    var toolInteractionStore: ToolInteractionStore { assembly.toolInteractionStore }
+    var agentActivityStore: AgentActivityStore { assembly.agentActivityStore }
+    var agentRuntimeProjectionStore: AgentRuntimeProjectionStore {
+        assembly.agentRuntimeProjectionStore
+    }
+    var composerViewModel: ComposerViewModel { assembly.composerViewModel }
+    var presentationViewModel: ChatPresentationViewModel {
+        assembly.presentationViewModel
+    }
+    var timelineStore: ChatTimelineStore { assembly.timelineStore }
+    var workbenchStore: WorkbenchStore { assembly.workbenchStore }
+    var reviewDraftStore: ReviewDraftStore { assembly.reviewDraftStore }
+    var codexRuntimeStore: CodexRuntimeStore { assembly.codexRuntimeStore }
+    var typeScriptPluginActivationStore: TypeScriptPluginActivationStore {
+        assembly.typeScriptPluginActivationStore
+    }
+    var modelRuntimeStore: ModelRuntimeStore { assembly.modelRuntimeStore }
+    var agentRuntime: AgentRuntime { assembly.agentRuntime }
+    private var llmRuntime: LLMRuntime { assembly.llmRuntime }
+    var onDeviceToolCallingSupported: Bool {
+        assembly.onDeviceToolCallingSupported
+    }
+    var responseCoordinator: ChatResponseCoordinator {
+        assembly.responseCoordinator
+    }
+    private var sessionCoordinator: ConversationSessionCoordinator {
+        assembly.sessionCoordinator
+    }
+    private var conversationPersistence: ConversationPersistenceService {
+        assembly.conversationPersistence
+    }
+    private var profileSelectionCoordinator: ProfileSelectionCoordinator {
+        assembly.profileSelectionCoordinator
+    }
+    private var conversationLifecycleCoordinator: ConversationLifecycleCoordinator {
+        assembly.conversationLifecycleCoordinator
+    }
+    private var workspaceLifecycleCoordinator: WorkspaceLifecycleCoordinator {
+        assembly.workspaceLifecycleCoordinator
+    }
+    private var independentTaskCoordinator: IndependentTaskCoordinator {
+        assembly.independentTaskCoordinator
+    }
+    private var messageSendCoordinator: MessageSendCoordinator {
+        assembly.messageSendCoordinator
+    }
     /// Composition-only bridge for the isolated Editorial Desk. The feature
     /// receives its narrow ports rather than the ChatStore facade itself.
-    let editorialDeskAssembly: EditorialDeskAssembly
-    private let reviewCoordinator: ReviewCoordinator
+    var editorialDeskAssembly: EditorialDeskAssembly {
+        assembly.editorialDeskAssembly
+    }
+    private var reviewCoordinator: ReviewCoordinator {
+        assembly.reviewCoordinator
+    }
 
     /// Composition-only command router. Command parsing and dispatch live in
     /// the composer service; this facade property only wires those actions to
@@ -178,186 +214,11 @@ public final class ChatStore {
         diffPatchService: any DiffPatchApplying = DiffPatchService(),
         workspaceDefaults: UserDefaults = .standard
     ) {
-        let toolInteractions = ToolInteractionStore()
-        let agentActivity = AgentActivityStore()
-        let timeline = ChatTimelineStore()
-        let codexRuntime = CodexRuntimeStore()
-        let nativeRunner = NativeResponseRunner()
-        let reviewDraft = ReviewDraftStore()
-        let modelRuntime = ModelRuntimeStore()
-        let runtimeProjection = AgentRuntimeProjectionStore()
-        let composer = ComposerViewModel()
-        let presentation = ChatPresentationViewModel()
-        let agentRuntime = AgentRuntime { snapshot in
-            await runtimeProjection.apply(snapshot)
-            await timeline.applyRuntimeSnapshot(snapshot)
-        }
-        timeline.applyRuntimeSnapshot(runtimeProjection.snapshot)
-        let llmSessionFactory = LiveLLMBackendSessionFactory(
-            nativeRunner: nativeRunner,
-            codexRuntime: codexRuntime
-        )
-        let llmRuntime = LLMRuntime(
-            sessionFactory: llmSessionFactory,
-            foundationModelsBootstrap:
-                modelRuntime.foundationModelsBootstrapConfiguration
-        )
-        let titleGenerator = FoundationModelsConversationTitleGenerator()
-        let invokerFactory = AgentTaskInvokerFactory()
-        let workspace = WorkspaceStore(
+        self.assembly = ChatApplicationAssembly(
+            conversationRepository: conversationRepository,
             gitService: gitService,
-            reviewDraftStore: reviewDraft,
-            defaults: workspaceDefaults
-        )
-        let workbench = WorkbenchStore()
-        let conversations = ConversationStore()
-        let typeScriptPluginActivation = TypeScriptPluginActivationStore(
-            sdkPackageURL: TurboCodeConfig.shared.sdkDirectoryURL
-                .appendingPathComponent("@granvalenti", isDirectory: true)
-                .appendingPathComponent("turbocode-sdk", isDirectory: true),
-            sessionTranscript: {
-                let thread = conversations.activeThreadID.flatMap {
-                    conversations.conversation(id: $0)
-                }
-                return TypeScriptPluginSessionTranscript(
-                    sessionID: thread?.id,
-                    title: thread?.title,
-                    blocks: timeline.blocks
-                ).jsonValue
-            }
-        )
-        let conversationPersistence = ConversationPersistenceService(
-            repository: conversationRepository
-        )
-        self.conversationStore = conversations
-        let sessionCoordinator = ConversationSessionCoordinator(
-            conversations: conversations,
-            timeline: timeline,
-            modelRuntime: modelRuntime,
-            llmRuntime: llmRuntime,
-            persistence: conversationPersistence
-        )
-        self.sessionCoordinator = sessionCoordinator
-        self.conversationPersistence = conversationPersistence
-        self.workspaceStore = workspace
-        self.toolInteractionStore = toolInteractions
-        self.agentActivityStore = agentActivity
-        self.agentRuntimeProjectionStore = runtimeProjection
-        self.composerViewModel = composer
-        self.presentationViewModel = presentation
-        self.timelineStore = timeline
-        self.workbenchStore = workbench
-        self.reviewDraftStore = reviewDraft
-        self.codexRuntimeStore = codexRuntime
-        self.typeScriptPluginActivationStore = typeScriptPluginActivation
-        self.modelRuntimeStore = modelRuntime
-        self.agentRuntime = agentRuntime
-        self.llmRuntime = llmRuntime
-        self.onDeviceToolCallingSupported =
-            FoundationModelsCapabilities.onDeviceSupportsToolCalling
-        let responseCoordinator = ChatResponseCoordinator(
-            timeline: timeline,
-            toolInteractions: toolInteractions,
-            agentActivity: agentActivity,
-            agentRuntime: agentRuntime,
-            llmRuntime: llmRuntime,
-            workspaceNameProvider: {
-                workspace.label.isEmpty ? nil : workspace.label
-            },
-            activityPresentationRequested: {
-                workbench.rightPanelMode = .activity
-            }
-        )
-        self.responseCoordinator = responseCoordinator
-        let profileSelectionCoordinator = ProfileSelectionCoordinator(
-            modelRuntime: modelRuntime,
-            codexRuntime: codexRuntime,
-            conversations: conversations,
-            timeline: timeline,
-            workspace: workspace,
-            presentation: presentation,
-            agentRuntime: agentRuntime,
-            llmRuntime: llmRuntime,
-            runtimeProjection: runtimeProjection,
-            responseCoordinator: responseCoordinator
-        )
-        self.profileSelectionCoordinator = profileSelectionCoordinator
-        let transitionBarrier = RuntimeTransitionBarrier(
-            runtime: agentRuntime,
-            profiles: profileSelectionCoordinator
-        )
-        let conversationLifecycleCoordinator = ConversationLifecycleCoordinator(
-            conversations: conversations,
-            timeline: timeline,
-            activity: agentActivity,
-            workbench: workbench,
-            workspace: workspace,
-            composer: composer,
-            reviewDrafts: reviewDraft,
-            presentation: presentation,
-            runtime: agentRuntime,
-            profiles: profileSelectionCoordinator,
-            sessions: sessionCoordinator,
-            transitionBarrier: transitionBarrier
-        )
-        self.conversationLifecycleCoordinator = conversationLifecycleCoordinator
-        self.workspaceLifecycleCoordinator = WorkspaceLifecycleCoordinator(
-            workspace: workspace,
-            conversations: conversations,
-            timeline: timeline,
-            activity: agentActivity,
-            workbench: workbench,
-            presentation: presentation,
-            runtime: agentRuntime,
-            profiles: profileSelectionCoordinator,
-            sessions: sessionCoordinator,
-            transitionBarrier: transitionBarrier
-        )
-        self.independentTaskCoordinator = IndependentTaskCoordinator(
-            runtime: agentRuntime,
-            runtimeProjection: runtimeProjection,
-            responseCoordinator: responseCoordinator,
-            invokerFactory: invokerFactory,
-            modelRuntime: modelRuntime,
-            conversations: conversations,
-            timeline: timeline,
-            codexRuntime: codexRuntime,
-            workspace: workspace,
-            presentation: presentation,
-            sessions: sessionCoordinator,
-            profiles: profileSelectionCoordinator,
-            lifecycle: conversationLifecycleCoordinator
-        )
-        let messageSendCoordinator = MessageSendCoordinator(
-            runtime: agentRuntime,
-            llmRuntime: llmRuntime,
-            titleGenerator: titleGenerator,
-            invokerFactory: invokerFactory,
-            runtimeProjection: runtimeProjection,
-            responseCoordinator: responseCoordinator,
-            modelRuntime: modelRuntime,
-            codexRuntime: codexRuntime,
-            conversations: conversations,
-            timeline: timeline,
-            workspace: workspace,
-            presentation: presentation,
-            sessions: sessionCoordinator,
-            profiles: profileSelectionCoordinator,
-            lifecycle: conversationLifecycleCoordinator
-        )
-        self.messageSendCoordinator = messageSendCoordinator
-        self.editorialDeskAssembly = EditorialDeskAssembly(
-            runtime: llmRuntime,
-            modelRuntime: modelRuntime,
-            codexRuntime: codexRuntime,
-            messageSender: messageSendCoordinator
-        )
-        self.reviewCoordinator = ReviewCoordinator(
-            timeline: timeline,
-            workbench: workbench,
-            workspace: workspace,
-            gitService: gitService,
-            diffPatchService: diffPatchService
+            diffPatchService: diffPatchService,
+            workspaceDefaults: workspaceDefaults
         )
     }
 
@@ -497,12 +358,14 @@ public final class ChatStore {
     private func rebuildSession(
         keepingHistory: Bool = true,
         discardingCapabilityContext: Bool = false,
-        restoringHistory: [FoundationModelsTranscriptEntry]? = nil
+        restoringHistory: [FoundationModelsTranscriptEntry]? = nil,
+        restoringProjection: TranscriptContextProjection? = nil
     ) async {
         await profileSelectionCoordinator.rebuildSession(
             keepingHistory: keepingHistory,
             discardingCapabilityContext: discardingCapabilityContext,
-            restoringHistory: restoringHistory
+            restoringHistory: restoringHistory,
+            restoringProjection: restoringProjection
         )
     }
 
@@ -654,6 +517,43 @@ public final class ChatStore {
         await sendMessage(text, promptText: promptText, visibleInTimeline: true)
     }
 
+    /// Captures a correction for the active conversational turn. The runtime
+    /// decides whether the current operation is steerable; `busy` is not used
+    /// as an admission shortcut.
+    func enqueueSteering(
+        _ text: String
+    ) async -> SteeringEnqueueResult {
+        let result = await assembly.steeringCoordinator.enqueue(text: text)
+        if case .rejected(let rejection) = result {
+            presentationViewModel.errorMessage = switch rejection {
+            case .emptyText: "Enter steering text first."
+            case .noActiveConversation: "Steering is unavailable without an active conversation."
+            case .independentOperation: "Steering will be available after the independent operation finishes."
+            case .staleContext: "The conversation changed; keep this draft for the new context."
+            case .quiescing: "Steering is paused while the conversation changes."
+            }
+        }
+        return result
+    }
+
+    func showSteeringUnavailableMessage() {
+        presentationViewModel.errorMessage =
+            "Commands are unavailable while a response is running."
+    }
+
+    /// Requests immediate delivery of the currently queued steering batch.
+    public func sendSteeringNow() async {
+        await assembly.steeringCoordinator.sendNow()
+    }
+
+    func removeSteering(_ id: SteeringRequestID) async {
+        _ = await agentRuntime.removeSteering(id)
+    }
+
+    func recoverSteering(_ id: SteeringRequestID) async {
+        _ = await agentRuntime.recoverSteering(id)
+    }
+
     /// Sends all valid inline annotations as one explicit user request. The
     /// compact timeline text remains readable while the model receives stable
     /// reviewed excerpts and sides through the provider-neutral prompt path.
@@ -740,7 +640,10 @@ public final class ChatStore {
                 retainedCharacters: compaction.retainedCharacters
             )
         )
-        await rebuildSession(restoringHistory: compaction.history)
+        await rebuildSession(
+            restoringHistory: compaction.history,
+            restoringProjection: .empty
+        )
 
         await AgentDiagnosticsRecorder.shared.recordLocalCompaction(
             backend: activeBackend,
@@ -753,6 +656,71 @@ public final class ChatStore {
             conversationStore.touchThread(id: threadID)
             await persistSession(for: threadID)
         }
+    }
+
+    /// Builds the read-only sheet model from the canonical transcript. The
+    /// provider session remains encapsulated by the runtime actor and the view
+    /// receives no capability to mutate raw transcript entries directly.
+    func transcriptContextPresentation() async -> TranscriptContextPresentation {
+        guard activeBackend != .codex else {
+            return TranscriptContextProjector.presentation(blocks: blocks)
+        }
+        guard let transcript = await sessionCoordinator
+            .foundationModelsCanonicalTranscript() else {
+            return TranscriptContextProjector.presentation(blocks: blocks)
+        }
+        let projection = await sessionCoordinator.foundationModelsContextProjection()
+        return TranscriptContextProjector.presentation(
+            transcript: transcript,
+            projection: projection
+        )
+    }
+
+    /// Rebuilds one released provider session from canonical history plus a
+    /// reversible context projection. Visible timeline blocks and persisted raw
+    /// history remain unchanged, while prompt cache state after the changed
+    /// boundary may be recreated by the selected backend.
+    @discardableResult
+    func applyTranscriptContextSelection(_ groupIDs: Set<String>) async -> Bool {
+        guard !busy else {
+            error = "Context cannot change while a response is running."
+            return false
+        }
+        guard activeBackend != .codex,
+              let transcript = await sessionCoordinator
+            .foundationModelsCanonicalTranscript() else {
+            error = "This session does not expose an editable transcript."
+            return false
+        }
+
+        let projection = TranscriptContextProjector.projection(
+            selecting: groupIDs,
+            in: transcript
+        )
+        let history = SessionRebuildHistory.prepare(
+            transcript,
+            keepingHistory: true,
+            discardingCapabilityContext: false
+        )
+        await rebuildSession(
+            keepingHistory: false,
+            restoringHistory: history,
+            restoringProjection: projection
+        )
+
+        let applied = await sessionCoordinator.foundationModelsContextProjection()
+            == projection
+        guard applied else {
+            error = "The transcript context could not be updated."
+            return false
+        }
+
+        error = nil
+        if let threadID = activeThreadId {
+            conversationStore.touchThread(id: threadID)
+            await persistSession(for: threadID)
+        }
+        return true
     }
 
     /// Runs `/task <instructions>` through the configured worker directly.
@@ -851,6 +819,7 @@ public final class ChatStore {
     }
 
     public func interrupt() async {
+        await assembly.steeringCoordinator.pause()
         await agentRuntime.requestOperationCancellation()
         let shouldInterruptCodex = activeBackend == .codex
         let approvals = toolInteractionStore.takeAllApprovals()
@@ -878,6 +847,21 @@ public final class ChatStore {
                 // did not originate from Codex or its turn already ended.
             }
             _ = await ToolApprovalRegistry.shared.reject(id: request.id)
+        }
+    }
+
+    /// Stops one detached worker without cancelling its siblings. A task owned
+    /// by the foreground response still uses the existing response-wide Stop
+    /// path because its provider turn cannot be interrupted independently.
+    func cancelAgentActivity(_ activity: AgentActivity) async {
+        if await assembly.backgroundDelegationCoordinator.cancel(
+            taskID: activity.taskID,
+            attemptID: activity.attemptID
+        ) {
+            return
+        }
+        if busy {
+            await interrupt()
         }
     }
 
@@ -1176,6 +1160,20 @@ public final class ChatStore {
 
     func dismissEditorialDesk() {
         workbenchStore.dismissEditorialDesk()
+    }
+
+    var transcriptSheetPresentation: TranscriptSheetPresentation? {
+        get { workbenchStore.transcriptSheetPresentation }
+        set { workbenchStore.transcriptSheetPresentation = newValue }
+    }
+
+    func presentTranscript() {
+        guard let activeThreadId else { return }
+        workbenchStore.presentTranscript(threadID: activeThreadId)
+    }
+
+    func dismissTranscript() {
+        workbenchStore.dismissTranscript()
     }
 
     public func toggleLeftSidebar() {

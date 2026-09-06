@@ -55,11 +55,12 @@ struct EditFileArguments {
 
 struct ApplyEditsTool: Tool {
     typealias Arguments = ApplyEditsArguments
-    typealias Output = String
+    typealias Output = ToolCommandOutput
 
     let workspaceRoot: String
     let reportsChanges: Bool
     let taskScope: AgentTaskPathScope?
+    private let receiptRegistry: ToolReceiptRegistry?
     private let requestApproval: @Sendable (PendingToolApproval) async -> String
     private let preauthorizedExternalPaths: Set<String>
     private let editService = ApplyEditsService()
@@ -70,6 +71,7 @@ struct ApplyEditsTool: Tool {
         reportsChanges: Bool = true,
         taskScope: AgentTaskPathScope? = nil,
         preauthorizedExternalPaths: Set<String> = [],
+        receiptRegistry: ToolReceiptRegistry? = nil,
         requestApproval: @escaping @Sendable (PendingToolApproval) async -> String = {
             await ToolApprovalRegistry.shared.request($0)
         }
@@ -78,6 +80,7 @@ struct ApplyEditsTool: Tool {
         self.reportsChanges = reportsChanges
         self.taskScope = taskScope
         self.preauthorizedExternalPaths = preauthorizedExternalPaths
+        self.receiptRegistry = receiptRegistry
         self.requestApproval = requestApproval
     }
 
@@ -98,7 +101,7 @@ struct ApplyEditsTool: Tool {
     }
     var includesSchemaInInstructions: Bool { true }
 
-    func call(arguments: ApplyEditsArguments) async throws -> String {
+    func call(arguments: ApplyEditsArguments) async throws -> ToolCommandOutput {
         let targets: [ResolvedWorkspacePath]
         do {
             targets = try arguments.files.map {
@@ -120,20 +123,24 @@ struct ApplyEditsTool: Tool {
             targets: targets
         )
         if !externalTargets.isEmpty {
-            return await WorkspaceAccessGate.shared.performExternalOperation(
+            let relay = ToolCommandOutputRelay()
+            let approvalText = await WorkspaceAccessGate.shared.performExternalOperation(
                 tool: name,
                 operation: .write,
                 workspaceRoot: workspaceRoot,
                 targets: externalTargets,
                 requestApproval: requestApproval,
                 action: { [self] in
-                    await apply(
+                    let output = await apply(
                         arguments: arguments,
                         targets: targets,
                         transactionRoot: transactionRoot
                     )
+                    await relay.store(output)
+                    return output.text
                 }
             )
+            return await relay.take() ?? .plain(approvalText)
         }
         return await apply(
             arguments: arguments,
@@ -146,7 +153,7 @@ struct ApplyEditsTool: Tool {
         arguments: ApplyEditsArguments,
         targets: [ResolvedWorkspacePath],
         transactionRoot: String
-    ) async -> String {
+    ) async -> ToolCommandOutput {
         let transactionID = UUID().uuidString
         let prepared: PreparedChangeTransaction
         do {
@@ -173,42 +180,57 @@ struct ApplyEditsTool: Tool {
             return "Edit transaction rejected: \(error.localizedDescription) Re-read the affected ranges and retry using the new revision."
         }
 
-        if reportsChanges {
-            await MainActor.run {
-                ChatStore.shared?.beginDiffPatchBlock(
-                    id: transactionID,
-                    patch: prepared.patch,
-                    files: prepared.files,
-                    reviewFiles: prepared.reviewFiles,
-                    workspaceRoot: transactionRoot,
-                    status: .running
-                )
-            }
-        }
-
         do {
             try await patchService.apply(
                 patch: prepared.patch,
                 workspaceRoot: transactionRoot
             )
-            if reportsChanges {
-                await MainActor.run {
-                    ChatStore.shared?.updateDiffPatchBlock(id: transactionID, status: .applied)
-                }
-            }
-            return "Applied \(prepared.files.count) file change(s): +\(prepared.additions) -\(prepared.deletions)."
+            return await completionOutput(
+                text: "Applied \(prepared.files.count) file change(s): +\(prepared.additions) -\(prepared.deletions).",
+                transactionID: transactionID,
+                prepared: prepared,
+                transactionRoot: transactionRoot,
+                status: .applied,
+                errorMessage: nil
+            )
         } catch {
-            if reportsChanges {
-                await MainActor.run {
-                    ChatStore.shared?.updateDiffPatchBlock(
-                        id: transactionID,
-                        status: .failed,
-                        errorMessage: error.localizedDescription
-                    )
-                }
-            }
-            return "Edit transaction failed: \(error.localizedDescription)"
+            return await completionOutput(
+                text: "Edit transaction failed: \(error.localizedDescription)",
+                transactionID: transactionID,
+                prepared: prepared,
+                transactionRoot: transactionRoot,
+                status: .failed,
+                errorMessage: error.localizedDescription
+            )
         }
+    }
+
+    /// Tool activity represents the in-flight state. The immutable terminal
+    /// artifact is emitted once so provider completion and UI projection cannot
+    /// race separate MainActor callbacks.
+    private func completionOutput(
+        text: String,
+        transactionID: String,
+        prepared: PreparedChangeTransaction,
+        transactionRoot: String,
+        status: DiffPatchStatus,
+        errorMessage: String?
+    ) async -> ToolCommandOutput {
+        guard reportsChanges else { return .plain(text) }
+        let block = DiffPatchBlock(
+            workspaceRoot: transactionRoot,
+            patch: prepared.patch,
+            patches: nil,
+            files: prepared.files,
+            reviewFiles: prepared.reviewFiles,
+            status: status,
+            errorMessage: errorMessage
+        )
+        return await .recording(
+            .diffPatch(DiffPatchReceipt(transactionID: transactionID, block: block)),
+            text: text,
+            in: receiptRegistry
+        )
     }
 }
 
@@ -216,17 +238,19 @@ struct ApplyEditsTool: Tool {
 /// converges on the same revision checks, patch validation, widget, and Undo.
 struct EditFileTool: Tool {
     typealias Arguments = EditFileArguments
-    typealias Output = String
+    typealias Output = ToolCommandOutput
 
     let workspaceRoot: String
     let reportsChanges: Bool
     let taskScope: AgentTaskPathScope?
+    private let receiptRegistry: ToolReceiptRegistry?
     private let requestApproval: @Sendable (PendingToolApproval) async -> String
 
     init(
         workspaceRoot: String,
         reportsChanges: Bool = true,
         taskScope: AgentTaskPathScope? = nil,
+        receiptRegistry: ToolReceiptRegistry? = nil,
         requestApproval: @escaping @Sendable (PendingToolApproval) async -> String = {
             await ToolApprovalRegistry.shared.request($0)
         }
@@ -234,6 +258,7 @@ struct EditFileTool: Tool {
         self.workspaceRoot = workspaceRoot
         self.reportsChanges = reportsChanges
         self.taskScope = taskScope
+        self.receiptRegistry = receiptRegistry
         self.requestApproval = requestApproval
     }
 
@@ -242,6 +267,7 @@ struct EditFileTool: Tool {
             workspaceRoot: workspaceRoot,
             reportsChanges: reportsChanges,
             taskScope: scope,
+            receiptRegistry: receiptRegistry,
             requestApproval: requestApproval
         )
     }
@@ -265,7 +291,7 @@ struct EditFileTool: Tool {
     }
     var includesSchemaInInstructions: Bool { true }
 
-    func call(arguments: EditFileArguments) async throws -> String {
+    func call(arguments: EditFileArguments) async throws -> ToolCommandOutput {
         let usesLineRange = !["create", "replace_file"].contains(arguments.operation)
         let operation = LineEditOperation(
             operation: arguments.operation,
@@ -282,6 +308,7 @@ struct EditFileTool: Tool {
             workspaceRoot: workspaceRoot,
             reportsChanges: reportsChanges,
             taskScope: taskScope,
+            receiptRegistry: receiptRegistry,
             requestApproval: requestApproval
         ).call(
             arguments: ApplyEditsArguments(files: [request])

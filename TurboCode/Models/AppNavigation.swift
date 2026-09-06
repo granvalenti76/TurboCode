@@ -31,6 +31,7 @@ public enum SettingsSection: String, Sendable, Hashable, CaseIterable {
     case general
     case editorialDesk
     case providers
+    case reasoning
     case agents
     case shortcuts
 }

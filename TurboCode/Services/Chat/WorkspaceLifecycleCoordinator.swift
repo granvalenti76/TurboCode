@@ -47,6 +47,7 @@ final class WorkspaceLifecycleCoordinator {
             _ = profiles.refreshSkills()
             await profiles.rebuildSession(discardingCapabilityContext: true)
             workbench.rightPanelMode = nil
+            workbench.dismissTranscript()
         }
 
         async let diffs: Void = workspace.reloadDiffs()
@@ -63,6 +64,7 @@ final class WorkspaceLifecycleCoordinator {
             _ = profiles.refreshSkills()
             await profiles.rebuildSession(discardingCapabilityContext: true)
             workbench.rightPanelMode = nil
+            workbench.dismissTranscript()
         }
     }
 
@@ -82,6 +84,7 @@ final class WorkspaceLifecycleCoordinator {
                 _ = await runtime.apply(.switchThread(threadID: nil))
                 timeline.reset()
                 resetActivityPresentation()
+                workbench.dismissTranscript()
             }
 
             if removedActiveWorkspace {

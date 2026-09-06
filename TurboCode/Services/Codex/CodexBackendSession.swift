@@ -17,6 +17,9 @@ actor CodexBackendSession: BackendSession {
     private let reasoningEffort: CodexReasoningEffort
     private let persistsModelPreference: Bool
     private let delegationInvoker: (any AgentTaskInvoking)?
+    private let backgroundTaskSubmission: DelegatedTaskBackgroundSubmission?
+    /// Nil uses built-in tools; an explicit set is the override boundary.
+    private let selectedToolIDs: Set<ToolCapabilityID>?
     private let allowsTools: Bool
     private let runtimeSnapshotChanged: @MainActor @Sendable (
         CodexRuntimeSnapshot,
@@ -31,6 +34,7 @@ actor CodexBackendSession: BackendSession {
         ApprovalRequest
     ) async -> Void
     private var activeRun: Task<BackendSessionResult, Never>?
+    private var activeLocalTurnID: TurnID?
 
     init(
         runtime: any CodexTurnRunning,
@@ -43,6 +47,8 @@ actor CodexBackendSession: BackendSession {
         reasoningEffort: CodexReasoningEffort = .medium,
         persistsModelPreference: Bool = true,
         delegationInvoker: (any AgentTaskInvoking)? = nil,
+        backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil,
+        selectedToolIDs: Set<ToolCapabilityID>? = nil,
         allowsTools: Bool = true,
         runtimeSnapshotChanged: @escaping @MainActor @Sendable (
             CodexRuntimeSnapshot,
@@ -69,6 +75,8 @@ actor CodexBackendSession: BackendSession {
         self.reasoningEffort = reasoningEffort
         self.persistsModelPreference = persistsModelPreference
         self.delegationInvoker = delegationInvoker
+        self.backgroundTaskSubmission = backgroundTaskSubmission
+        self.selectedToolIDs = selectedToolIDs
         self.allowsTools = allowsTools
         self.runtimeSnapshotChanged = runtimeSnapshotChanged
         self.activityStarted = activityStarted
@@ -91,12 +99,15 @@ actor CodexBackendSession: BackendSession {
         let reasoningEffort = self.reasoningEffort
         let persistsModelPreference = self.persistsModelPreference
         let delegationInvoker = self.delegationInvoker
+        let backgroundTaskSubmission = self.backgroundTaskSubmission
+        let selectedToolIDs = self.selectedToolIDs
         let allowsTools = self.allowsTools
         let runtimeSnapshotChanged = self.runtimeSnapshotChanged
         let activityStarted = self.activityStarted
         let activityEnded = self.activityEnded
         let approvalRequested = self.approvalRequested
         let toolTimings = CodexToolTimingRegistry()
+        activeLocalTurnID = request.id
 
         let task = Task {
             await events.emit(.started(request))
@@ -123,7 +134,9 @@ actor CodexBackendSession: BackendSession {
                         reasoningEffort: reasoningEffort,
                         persistsModelPreference: persistsModelPreference,
                         delegationInvoker: delegationInvoker,
+                        backgroundTaskSubmission: backgroundTaskSubmission,
                         pluginTools: pluginTools,
+                        selectedToolIDs: selectedToolIDs,
                         allowsTools: allowsTools
                     ),
                     events: CodexTurnEvents(
@@ -248,12 +261,45 @@ actor CodexBackendSession: BackendSession {
         if activeRun != nil {
             activeRun = nil
         }
+        activeLocalTurnID = nil
         return result
     }
 
     func interrupt() async {
         activeRun?.cancel()
         await runtime.interrupt()
+    }
+
+    func steer(input: String) async -> BackendSteeringResult {
+        guard let activeLocalTurnID else { return .unsupported }
+        do {
+            let providerTurnID = try await runtime.steerActiveTurn(
+                turboThreadID: turboThreadID,
+                localTurnID: activeLocalTurnID,
+                input: input
+            )
+            return .accepted(providerTurnID: providerTurnID)
+        } catch CodexAppServerError.requestTimedOut {
+            return .uncertain
+        } catch CodexAppServerError.rpc(let code, _) where code == -32601 {
+            return .unsupported
+        } catch let error as CodexAppServerError {
+            return .failed(
+                TurnFailure(
+                    code: "codex.steer",
+                    message: error.localizedDescription,
+                    isRecoverable: true
+                )
+            )
+        } catch {
+            return .failed(
+                TurnFailure(
+                    code: "codex.steer",
+                    message: error.localizedDescription,
+                    isRecoverable: true
+                )
+            )
+        }
     }
 
     nonisolated private static func toolCall(

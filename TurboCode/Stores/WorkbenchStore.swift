@@ -22,6 +22,13 @@ struct EditorialDeskPresentation: Identifiable, Equatable {
     }
 }
 
+/// Stable request for the active conversation's document-modal transcript.
+/// Binding it to a thread ID prevents an asynchronous sheet load from showing
+/// data that belongs to a conversation replaced underneath it.
+struct TranscriptSheetPresentation: Identifiable, Equatable {
+    let id: String
+}
+
 /// Owns workbench navigation and panel presentation state.
 ///
 /// Keeping shell state separate prevents model and conversation orchestration
@@ -42,6 +49,7 @@ final class WorkbenchStore {
     var inspectedWorkspaceListingID: String?
     var inspectedDiffPatchReview: DiffPatchReviewPresentation?
     var editorialDeskPresentation: EditorialDeskPresentation?
+    var transcriptSheetPresentation: TranscriptSheetPresentation?
 
     var rightPanelVisible: Bool { rightPanelMode != nil }
 
@@ -109,5 +117,13 @@ final class WorkbenchStore {
 
     func dismissEditorialDesk() {
         editorialDeskPresentation = nil
+    }
+
+    func presentTranscript(threadID: String) {
+        transcriptSheetPresentation = TranscriptSheetPresentation(id: threadID)
+    }
+
+    func dismissTranscript() {
+        transcriptSheetPresentation = nil
     }
 }

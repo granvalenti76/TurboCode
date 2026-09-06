@@ -10,6 +10,7 @@ final class ConversationSessionCoordinator {
     private let timeline: ChatTimelineStore
     private let modelRuntime: ModelRuntimeStore
     private let llmRuntime: LLMRuntime
+    private let runtime: AgentRuntime
     private let persistence: ConversationPersistenceService
 
     init(
@@ -17,12 +18,14 @@ final class ConversationSessionCoordinator {
         timeline: ChatTimelineStore,
         modelRuntime: ModelRuntimeStore,
         llmRuntime: LLMRuntime,
+        runtime: AgentRuntime,
         persistence: ConversationPersistenceService
     ) {
         self.conversations = conversations
         self.timeline = timeline
         self.modelRuntime = modelRuntime
         self.llmRuntime = llmRuntime
+        self.runtime = runtime
         self.persistence = persistence
     }
 
@@ -30,6 +33,14 @@ final class ConversationSessionCoordinator {
     /// Foundation Models history without retaining its owning session runtime.
     func foundationModelsTranscript() async -> Transcript? {
         await llmRuntime.foundationModelsTranscript()
+    }
+
+    func foundationModelsCanonicalTranscript() async -> Transcript? {
+        await llmRuntime.foundationModelsCanonicalTranscript()
+    }
+
+    func foundationModelsContextProjection() async -> TranscriptContextProjection {
+        await llmRuntime.foundationModelsContextProjection() ?? .empty
     }
 
     /// Captures all mutable MainActor values before awaiting disk I/O. The
@@ -43,16 +54,22 @@ final class ConversationSessionCoordinator {
             return
         }
         let backend = modelRuntime.activeBackend
+        let steering = await runtime.steeringSnapshot
         let transcript = backend == .codex
             ? nil
-            : await llmRuntime.foundationModelsTranscript()
+            : await llmRuntime.foundationModelsCanonicalTranscript()
+        let contextProjection = backend == .codex
+            ? TranscriptContextProjection.empty
+            : await llmRuntime.foundationModelsContextProjection() ?? .empty
         let snapshot = ConversationSnapshot(
             conversation: conversation,
             modelBackend: modelRuntime.persistedModelIdentifier,
             blocks: timeline.blocks,
             // Codex persists its own rollout. Saving an unrelated Foundation
             // Models transcript would contaminate a later Codex restoration.
-            transcript: transcript
+            transcript: transcript,
+            contextProjection: contextProjection,
+            steering: steering
         )
 
         do {

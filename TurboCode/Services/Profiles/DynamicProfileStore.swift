@@ -1,11 +1,11 @@
 import Foundation
 
 nonisolated struct DynamicProfileStore: Sendable {
-    /// Version 2 records the delegated-worker profile fields introduced in
-    /// M4.3. Version 1 remains readable so existing 0.1.0 profiles can be
-    /// upgraded atomically during onboarding.
-    static let currentSchemaVersion = 2
-    static let legacySchemaVersions: Set<Int> = [1]
+    /// Version 3 records independently configurable worker slots. Versions 1
+    /// and 2 remain readable; saving materializes their single-worker route
+    /// without requiring a destructive migration pass.
+    static let currentSchemaVersion = 3
+    static let legacySchemaVersions: Set<Int> = [1, 2]
 
     private struct FileContents: Codable {
         let version: Int
@@ -35,7 +35,7 @@ nonisolated struct DynamicProfileStore: Sendable {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         let contents = try readContents()
         guard contents.version != Self.currentSchemaVersion else { return }
-        try save(contents.profiles)
+        try save(contents.profiles.map { try $0.validated() })
     }
 
     func save(_ profiles: [UserDynamicProfile]) throws {

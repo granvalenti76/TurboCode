@@ -336,7 +336,8 @@ final class ProfileSelectionCoordinator {
     func rebuildSession(
         keepingHistory: Bool = true,
         discardingCapabilityContext: Bool = false,
-        restoringHistory: [FoundationModelsTranscriptEntry]? = nil
+        restoringHistory: [FoundationModelsTranscriptEntry]? = nil,
+        restoringProjection: TranscriptContextProjection? = nil
     ) async {
         presentation.setLlamaContextUsage(nil)
         _ = await agentRuntime.apply(
@@ -355,6 +356,24 @@ final class ProfileSelectionCoordinator {
             keepingHistory: keepingHistory,
             discardingCapabilityContext: discardingCapabilityContext,
             restoringHistory: restoringHistory,
+            restoringProjection: restoringProjection,
+            events: responseCoordinator.modelSessionEvents
+        )
+    }
+
+    /// Replaces only the released Foundation Models session after an
+    /// interrupted turn. Unlike a profile transition, this must not reset the
+    /// agent runtime because a claimed steering batch still owns its queue.
+    @discardableResult
+    func restoreInterruptedTurnHistory(
+        _ history: [FoundationModelsTranscriptEntry]
+    ) async -> Bool {
+        let configuration = modelRuntime.makeSessionConfiguration(
+            workspaceRoot: workspace.root
+        )
+        return await llmRuntime.rebuildFoundationModelsSession(
+            configuration: configuration,
+            restoringHistory: history,
             events: responseCoordinator.modelSessionEvents
         )
     }

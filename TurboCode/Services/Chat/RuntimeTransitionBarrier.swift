@@ -7,10 +7,16 @@
 final class RuntimeTransitionBarrier {
     private let runtime: AgentRuntime
     private let profiles: ProfileSelectionCoordinator
+    private let checkpoint: @MainActor @Sendable () async -> Void
 
-    init(runtime: AgentRuntime, profiles: ProfileSelectionCoordinator) {
+    init(
+        runtime: AgentRuntime,
+        profiles: ProfileSelectionCoordinator,
+        checkpoint: @escaping @MainActor @Sendable () async -> Void = {}
+    ) {
         self.runtime = runtime
         self.profiles = profiles
+        self.checkpoint = checkpoint
     }
 
     /// Runs one complete context replacement while admission is closed. The
@@ -22,6 +28,7 @@ final class RuntimeTransitionBarrier {
         await runtime.beginQuiescence()
         await profiles.cancelAndWaitForTransitions()
         await runtime.cancelAndWaitForOperation()
+        await checkpoint()
         do {
             let result = try await operation()
             await runtime.endQuiescence()

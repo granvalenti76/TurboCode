@@ -4,6 +4,25 @@ import Testing
 
 @Suite("Model routing policy")
 struct ModelRoutingPolicyTests {
+    @Test("Coordinator catalogs are dynamic and delegation-scoped")
+    func promptWorkerCatalog() {
+        let worker = AgentTaskWorkerDescriptor(id: "visual", name: "Visual",
+            model: "Llama", roleDescription: "Maps and rendering", toolNames: ["read_file"])
+        for role in [TurboCodeSystemPromptRole.standalone, .codex] {
+            let prompt = TurboCodeSystemPromptBuilder.build(.init(role: role, backend: .codex,
+                workspaceRoot: "", agentTuning: .default, toolIDs: [.delegateTask],
+                toolNames: ["delegate_task"], availableSkills: [], workspaceInstructions: nil,
+                workers: [worker]))
+            #expect(prompt.contains("Maps and rendering"))
+            #expect(prompt.contains("worker_id"))
+            #expect(prompt.contains("final QA only after prerequisites"))
+        }
+        let direct = TurboCodeSystemPromptBuilder.build(.init(role: .standalone, backend: .codex,
+            workspaceRoot: "", agentTuning: .default, toolIDs: [], toolNames: [],
+            availableSkills: [], workspaceInstructions: nil, workers: [worker]))
+        #expect(!direct.contains("Worker catalog"))
+    }
+
     @Test("Selected runtime state deterministically assigns model roles")
     func selectedStateAssignsRoles() {
         let coordinator = UserDynamicProfile(
@@ -207,6 +226,94 @@ struct ModelRoutingPolicyTests {
 
         #expect(prompt.contains("delegate_task is available"))
         #expect(prompt.contains("Do not claim the tool is unavailable"))
+    }
+
+    @Test("Prompt explains accepted background delegation receipts")
+    func promptGuidesBackgroundDelegation() {
+        let tuning = AgentTuningConfig(
+            orchestrator: OrchestratorPolicy(
+                runsDelegatedTasksInBackground: true
+            )
+        )
+        let prompt = TurboCodeSystemPromptBuilder.build(
+            TurboCodeSystemPromptContext(
+                role: .standalone,
+                backend: .foundationApple,
+                workspaceRoot: "/workspace",
+                agentTuning: tuning,
+                toolIDs: [.delegateTask],
+                toolNames: ["delegate_task"],
+                availableSkills: [],
+                workspaceInstructions: nil
+            )
+        )
+
+        #expect(prompt.contains("accepted delegate_task receipt"))
+        #expect(prompt.contains("without waiting or polling"))
+        #expect(prompt.contains("deliver the terminal result separately"))
+    }
+
+    @Test("Apple prompts receive their selected instruction-level reasoning policy")
+    func applePromptIncludesReasoningPolicy() {
+        let workspaceInstructions = WorkspaceInstructions(
+            relativePath: "AGENTS.md",
+            content: "Prefer focused tests.",
+            revision: FileRevision.hash("Prefer focused tests.")
+        )
+        for (effort, expected) in [
+            (ReasoningEffort.low, "shortest sound reasoning path"),
+            (.medium, "identify the important steps"),
+            (.high, "form a concrete plan"),
+            (.xhigh, "Treat correctness as the primary objective")
+        ] {
+            let prompt = TurboCodeSystemPromptBuilder.build(
+                TurboCodeSystemPromptContext(
+                    role: .standalone,
+                    backend: .foundationApple,
+                    workspaceRoot: "/workspace",
+                    agentTuning: .default,
+                    toolIDs: [],
+                    toolNames: [],
+                    availableSkills: [],
+                    workspaceInstructions: workspaceInstructions,
+                    reasoningEffort: effort
+                )
+            )
+
+            #expect(prompt.contains(expected))
+            #expect(!prompt.contains("chain-of-thought transcript"))
+            #expect(prompt.hasSuffix(
+                "Follow this requirement together with all project instructions above."
+            ))
+            let projectEnd = prompt.range(of: "--- END AGENTS.md ---")
+            let reminderStart = prompt.range(of: "Final reasoning requirement (")
+            #expect(projectEnd != nil)
+            #expect(reminderStart != nil)
+            if let projectEnd, let reminderStart {
+                #expect(projectEnd.lowerBound < reminderStart.lowerBound)
+            }
+        }
+    }
+
+    @Test("Remote providers do not receive prompt-level reasoning policy")
+    func remotePromptsOmitReasoningPolicy() {
+        for backend in [ModelBackend.llamaServer, .foundationServe, .premium, .codex] {
+            let prompt = TurboCodeSystemPromptBuilder.build(
+                TurboCodeSystemPromptContext(
+                    role: .standalone,
+                    backend: backend,
+                    workspaceRoot: "/workspace",
+                    agentTuning: .default,
+                    toolIDs: [],
+                    toolNames: [],
+                    availableSkills: [],
+                    workspaceInstructions: nil,
+                    reasoningEffort: .xhigh
+                )
+            )
+
+            #expect(!prompt.contains("Reasoning policy ("))
+        }
     }
 
     @Test("Legacy on-device coordinator is visibly experimental")

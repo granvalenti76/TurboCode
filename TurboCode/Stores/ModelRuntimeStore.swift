@@ -47,7 +47,8 @@ final class ModelRuntimeStore {
         FoundationModelsBootstrapConfiguration(
             backend: activeBackend,
             usesSystemModel: activeBackend == .foundationApple,
-            remoteModel: activeRemoteModel ?? RemoteModelConfig.fallbackLlama
+            remoteModel: activeRemoteModel ?? RemoteModelConfig.fallbackLlama,
+            reasoningEffort: reasoningEffort
         )
     }
 
@@ -57,15 +58,31 @@ final class ModelRuntimeStore {
 
     var activeModelSupportsReasoning: Bool {
         activeBackend == .codex
+            || activeBackend == .foundationApple
             || (
-                activeBackend != .foundationApple
-                    && (activeRemoteModel?.supportsReasoning ?? false)
+                activeRemoteModel?.supportsReasoning ?? false
             )
     }
 
+    /// Separates reasoning output capability from user-adjustable effort. A
+    /// server-managed endpoint may stream reasoning while intentionally
+    /// ignoring the composer's effort selector.
+    var activeModelOffersReasoningControl: Bool {
+        if activeBackend == .codex || activeBackend == .foundationApple {
+            return true
+        }
+        guard let model = activeRemoteModel, model.supportsReasoning else {
+            return false
+        }
+        return model.reasoningTransport == .deepseekThinking
+            || model.reasoningConfiguration.mode == .requestTokenBudget
+    }
+
     var reasoningEffort: ReasoningEffort? {
-        guard activeBackend != .foundationApple,
-              activeBackend != .codex else { return nil }
+        guard activeBackend != .codex else { return nil }
+        if activeBackend == .foundationApple {
+            return persistedReasoningEffort
+        }
         return reasoningEffort(for: activeRemoteModel)
     }
 
@@ -392,6 +409,7 @@ final class ModelRuntimeStore {
             activeTemperature: temperature(for: activeRemoteModel),
             delegateTemperature: temperature(for: delegateModel),
             delegateToolIDs: activeDynamicProfile?.resolvedWorkerToolIDs,
+            delegateWorkers: resolvedDelegateWorkers,
             dropsCompletedToolCalls: shouldDropCompletedToolCalls,
             workspaceInstructions: workspaceInstructions,
             activePluginTools: agentTuning.experimental.thirdPartyPluginsEnabled
@@ -471,6 +489,13 @@ final class ModelRuntimeStore {
         for model: RemoteModelConfig?
     ) -> ReasoningEffort? {
         guard let model, model.supportsReasoning else { return nil }
+        return persistedReasoningEffort
+    }
+
+    /// One chooser is shared by the eligible local and on-device sessions so
+    /// switching between them preserves intent. Non-local remote transports
+    /// never receive the prompt-level X-High policy.
+    private var persistedReasoningEffort: ReasoningEffort {
         let raw = UserDefaults.standard.string(forKey: "reasoningEffort")
             ?? ReasoningEffort.medium.rawValue
         return ReasoningEffort(rawValue: raw) ?? .medium
@@ -490,6 +515,50 @@ final class ModelRuntimeStore {
         } ?? remoteModels.first(where: {
             $0.enabled
         }) ?? RemoteModelConfig.fallbackLlama
+    }
+
+    /// Resolves profile-owned worker slots without probing endpoint capacity.
+    /// Repeating a remote model is an explicit promise that its configured
+    /// backend can accept the corresponding number of concurrent requests.
+    private var resolvedDelegateWorkers: [ModelWorkerConfiguration] {
+        let fallbackID = agentTuning.orchestrator.delegateModelID
+        let definitions: [ProfileWorkerConfiguration]
+        if let profile = activeDynamicProfile, profile.usesDelegation {
+            definitions = profile.resolvedWorkers(fallback: fallbackID)
+        } else {
+            let modelID = ProfileBaseModelID(rawValue: fallbackID)
+                .flatMap { ProfileBaseModelID.workerCases.contains($0) ? $0 : nil }
+                ?? .llama
+            definitions = [
+                ProfileWorkerConfiguration(
+                    name: "Delegated Worker",
+                    modelID: modelID,
+                    toolIDs: activeDynamicProfile?.workerToolIDs
+                )
+            ]
+        }
+        return definitions.map { worker in
+            let remote = worker.modelID.remoteModelID.flatMap { remoteID in
+                remoteModels.first(where: { $0.id == remoteID && $0.enabled })
+                    ?? RemoteModelConfig.defaults.first(where: {
+                        $0.id == remoteID
+                    })
+            }
+            return ModelWorkerConfiguration(
+                id: worker.id,
+                name: worker.name,
+                modelID: worker.modelID,
+                remoteModel: remote,
+                toolIDs: worker.resolvedToolIDs,
+                reasoningEffort: worker.modelID == .onDevice
+                    ? persistedReasoningEffort
+                    : reasoningEffort(for: remote),
+                temperature: worker.modelID == .onDevice
+                    ? nil
+                    : temperature(for: remote),
+                roleDescription: worker.roleDescription
+            )
+        }
     }
 
     private func temperature(for model: RemoteModelConfig?) -> Double? {

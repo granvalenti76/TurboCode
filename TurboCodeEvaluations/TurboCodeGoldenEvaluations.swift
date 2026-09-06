@@ -139,7 +139,14 @@ private func canonicalFileContent(_ content: String) -> Substring {
     content.hasSuffix("\n") ? content.dropLast() : content[...]
 }
 
-@Suite("TurboCode agent evaluations", .serialized)
+// These evaluations exercise the Apple on-device model and are intentionally
+// opt-in: provider availability and model behavior are not deterministic
+// prerequisites for the application regression gate.
+@Suite(
+    "TurboCode agent evaluations",
+    .serialized,
+    .disabled("Opt-in on-device golden evaluation; excluded from the regression gate")
+)
 struct TurboCodeAgentEvaluationTests {
     @Test(
         "Read a Swift package",

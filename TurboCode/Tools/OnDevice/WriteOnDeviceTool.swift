@@ -16,27 +16,31 @@ struct WriteOnDeviceArguments {
 /// then uses the same atomic transaction and Review/Undo path as edit_file.
 struct WriteOnDeviceTool: Tool {
     typealias Arguments = WriteOnDeviceArguments
-    typealias Output = String
+    typealias Output = ToolCommandOutput
 
     let workspaceRoot: String
     let reportsChanges: Bool
     let taskScope: AgentTaskPathScope?
+    private let receiptRegistry: ToolReceiptRegistry?
 
     init(
         workspaceRoot: String,
         reportsChanges: Bool = true,
-        taskScope: AgentTaskPathScope? = nil
+        taskScope: AgentTaskPathScope? = nil,
+        receiptRegistry: ToolReceiptRegistry? = nil
     ) {
         self.workspaceRoot = workspaceRoot
         self.reportsChanges = reportsChanges
         self.taskScope = taskScope
+        self.receiptRegistry = receiptRegistry
     }
 
     func restricted(to scope: AgentTaskPathScope) -> Self {
         Self(
             workspaceRoot: workspaceRoot,
             reportsChanges: reportsChanges,
-            taskScope: scope
+            taskScope: scope,
+            receiptRegistry: receiptRegistry
         )
     }
 
@@ -52,7 +56,7 @@ struct WriteOnDeviceTool: Tool {
     }
     var includesSchemaInInstructions: Bool { true }
 
-    func call(arguments: WriteOnDeviceArguments) async throws -> String {
+    func call(arguments: WriteOnDeviceArguments) async throws -> ToolCommandOutput {
         let fileName = arguments.fileName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard isValidRootFileName(fileName) else {
             return "Error: fileName must be one file name in the workspace root, without '/', '\\', or '..'."
@@ -94,7 +98,8 @@ struct WriteOnDeviceTool: Tool {
         let result = try await ApplyEditsTool(
             workspaceRoot: workspaceRoot,
             reportsChanges: reportsChanges,
-            taskScope: taskScope
+            taskScope: taskScope,
+            receiptRegistry: receiptRegistry
         ).call(
             arguments: ApplyEditsArguments(
                 files: [
@@ -114,7 +119,7 @@ struct WriteOnDeviceTool: Tool {
             )
         )
         guard result.hasPrefix("Applied ") else { return result }
-        return "WRITE_COMPLETE: \(fileName)"
+        return result.replacingText(with: "WRITE_COMPLETE: \(fileName)")
     }
 
     private func isValidRootFileName(_ value: String) -> Bool {

@@ -6,6 +6,16 @@ import FoundationModelsUtilities
 nonisolated enum SafariMCPFeature {
     static let skillName = DynamicProfileRuntimeSelection.safariMCPSkillName
 
+    /// Overrides the utility package's generic skill guidance, whose fallback
+    /// can be read as a ban on every tool. Safari activation must never narrow
+    /// the rest of the profile's independently resolved capability surface.
+    static let activationInstructions = """
+    Activate the Safari MCP skill only when the user's request requires browser work
+    through Safari. Otherwise leave this skill inactive and continue normally.
+    This activation decision does not restrict any other available tool; use those
+    tools whenever the task requires them.
+    """
+
     static let prompt = """
     Safari MCP is enabled for this session. Use safari_mcp with operation
     list_tools before the first browser action, then operation call with the

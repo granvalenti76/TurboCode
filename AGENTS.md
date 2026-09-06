@@ -171,6 +171,13 @@ handoff record when conversational context is unavailable.
 
 Follow Swift API design: four-space indentation, `UpperCamelCase` for types, and `lowerCamelCase` for methods, properties, and enum cases. Match filenames to their primary type, such as `SessionSearchViewModel.swift`. Prefer focused SwiftUI views and keep workspace, Git, Xcode, and provider behavior behind existing service/tool boundaries. Use `@MainActor` for UI-owned mutable state and preserve explicit concurrency annotations. No separate formatter or linter is configured; use Xcode formatting and keep warnings clean.
 
+`ChatStore` is the established application facade for SwiftUI views and
+UI-facing view models. Its broad use by the UI is intentional and must not be
+treated as a defect based only on file size or reference count. Keep executable
+tools and low-level services independent from `ChatStore`; route them through
+narrow stores, services, coordinators, or output ports. Refactor the facade only
+when ownership, coupling, or testability measurably improves.
+
 ## Code Comments & Documentation
 
 Comments are part of the implementation deliverable, not optional polish. Every code change must add or update the nearby comment when the modified behavior has non-obvious intent, an invariant, a provider-specific workaround, a concurrency or safety constraint, or an important tradeoff. Before finishing, inspect the diff and explicitly check that the changed behavior is explainable to the next maintainer without reconstructing the entire investigation. Keep public types and APIs documented with concise Swift documentation comments where their purpose is not already self-evident. When behavior changes, update nearby comments so they remain accurate. Prefer comments that explain why the code exists and what must remain true; avoid comments that merely repeat the syntax or narrate an obvious statement.

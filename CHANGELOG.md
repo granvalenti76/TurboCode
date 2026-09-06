@@ -5,6 +5,47 @@ All notable changes to TurboCode are documented in this file.
 The project follows Semantic Versioning while its public API and persisted
 formats continue to evolve before 1.0.
 
+## [0.5.0] - Unreleased
+
+TurboCode 0.5 focuses on controllable agent workflows: steering an active
+turn, delegating work asynchronously, inspecting context and agent activity,
+and making custom profiles easier to configure. The release also strengthens
+the runtime boundary between providers, tools, receipts, and the UI.
+
+### Features
+
+- Added a runtime-owned steering queue and composer workflow so users can
+  redirect, correct, or narrow an active turn without losing its context.
+- Added opt-in asynchronous delegation for `/task` and `delegate_task`, with
+  independently configured worker slots, profile capacity, terminal results,
+  and typed tool receipts delivered back to the originating conversation.
+- Redesigned custom profiles as a native Profiles / Agent Team / Inspector
+  workspace, including configurable subagent workers and concurrent activity
+  inspection.
+- Added transcript context projection controls with semantic entries,
+  approximate token sizing, and reversible exclusion of complete tool
+  exchanges from future model requests.
+- Added local reasoning prompt policy support and refined the remote reasoning
+  and assistant prompt contract.
+- Added an animated, Metal-backed cyberdeck-style agent activity inspector and
+  restored native workbench toolbar proportions.
+- Added TypeScript plugin observatory examples for dependency and repository
+  inspection workflows.
+- Strengthened the provider-neutral runtime with executor-independent streaming
+  publication, typed tool receipt contracts, runtime-gated artifacts, and a
+  dedicated application composition boundary.
+
+### Fixes
+
+- Fixed worker reasoning and assistant wire payloads so streamed and completed
+  responses preserve the expected provider contract.
+- Fixed local reasoning policy consistency across runtime paths.
+- Preserved interrupted turns correctly while steering an active conversation.
+- Fixed toolbar click-through behavior and multiline composer return-key
+  handling.
+- Prevented tool artifacts from bypassing the runtime ownership and receipt
+  boundary during publication.
+
 ## [0.4.0] - 2026-08-30
 
 TurboCode 0.4 turns the application into a broader native agent harness. The

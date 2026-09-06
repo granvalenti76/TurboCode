@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:">
+<title>Dependency Reactor</title><style>
+:root{color-scheme:dark;--bg:#090d17;--panel:#101827;--line:#233348;--text:#e0ebf4;--muted:#859bb0;--cyan:#6ee7e0;--violet:#b3a0ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:12px -apple-system,BlinkMacSystemFont,sans-serif}button,input{font:inherit;color:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}button{background:none;border:1px solid var(--line);border-radius:6px;padding:7px 10px}button:hover{border-color:var(--cyan);background:#6ee7e010}button:disabled{opacity:.4;cursor:default}
+header{padding:22px 24px 17px;display:flex;align-items:center;justify-content:space-between;gap:16px;border-bottom:1px solid var(--line)}.kicker{font:9px ui-monospace,monospace;letter-spacing:2.5px;color:var(--cyan)}h1{margin:6px 0 0;font-size:23px;font-weight:550;letter-spacing:-.7px}h1 span{color:var(--muted);font-weight:300}.badge{font:9px ui-monospace,monospace;color:var(--cyan);border:1px solid #6ee7e035;padding:7px 10px;border-radius:20px;white-space:nowrap}
+.toolbar{display:flex;gap:7px;padding:12px 18px;align-items:center;flex-wrap:wrap}.toolbar input{flex:1;min-width:110px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px 10px}.toolbar button{font-size:10px}.toolbar button[aria-pressed=true]{border-color:var(--cyan);color:var(--cyan)}
+.workspace{display:grid;grid-template-columns:minmax(0,1fr) 220px;border-block:1px solid var(--line);min-height:460px}
+.stage{height:460px;position:relative;overflow:hidden;background:radial-gradient(ellipse at 50% 48%,#152a3938,transparent 65%),radial-gradient(#42546850 .65px,transparent .65px);background-size:auto,20px 20px;touch-action:none}
+.galaxy{position:absolute;inset:0;width:100%;height:100%;opacity:.52;pointer-events:none}
+.stage:after{content:"";position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 70px #090d17}
+svg{width:100%;height:100%;display:block;position:relative;z-index:1;user-select:none}
+.orbit{fill:none;stroke:#7398aa22;stroke-width:.7}.orbit.dashed{stroke-dasharray:2 7}.axis{stroke:#65859818;stroke-width:1}
+.link{fill:none;stroke:#6ee7e0;stroke-width:1;opacity:.16;transition:opacity .2s}.link.hot{opacity:.72;stroke-width:1.4}.link.dim{opacity:.035}.flow{fill:none;stroke:var(--cyan);stroke-width:2;stroke-dasharray:2 28;opacity:.7;animation:flow 9s linear infinite;pointer-events:none}
+@keyframes flow{to{stroke-dashoffset:-240}}
+.node{cursor:pointer;outline:none;transition:opacity .2s}.node.dim{opacity:.15}.node circle.rim{fill:#0d1723;stroke:var(--cyan);stroke-width:1.2}.node.module circle.rim{stroke:var(--violet);fill:#181629}.node text{fill:var(--text);font:9px -apple-system,sans-serif;paint-order:stroke;stroke:#090d17;stroke-width:3px;stroke-linejoin:round}.node .dot{fill:var(--cyan)}.node.module .dot{fill:var(--violet)}.node:hover circle.rim,.node:focus circle.rim{stroke-width:3}.node.active .halo{fill:none;stroke:var(--cyan);opacity:.3;stroke-width:6}
+.core{fill:#101e2a;stroke:#6ee7e07a;stroke-width:1}.coreText{fill:#d9fff8;font:10px ui-monospace,monospace;text-anchor:middle;letter-spacing:1px}
+.paused .flow{animation-play-state:paused}
+.stageNote{position:absolute;bottom:15px;left:17px;z-index:2;color:var(--muted);font:9px ui-monospace,monospace;pointer-events:none}.zoom{position:absolute;right:13px;bottom:12px;display:flex;gap:4px;z-index:3}.zoom button{background:#101827dc;padding:5px 9px}
+aside{border-left:1px solid var(--line);padding:18px 15px;background:linear-gradient(135deg,#111c2b,#0b111e);max-height:460px;overflow:auto}.label{font:9px ui-monospace,monospace;letter-spacing:1.6px;color:var(--muted);text-transform:uppercase}h2{font-size:18px;line-height:1.3;font-weight:500;overflow-wrap:anywhere;margin:12px 0}aside p{font-size:11px;line-height:1.65;color:var(--muted)}.metric{font:32px ui-monospace,monospace;color:var(--cyan);margin:18px 0 3px}.connections{display:flex;flex-direction:column;gap:6px;margin-top:13px}.connections button{text-align:left;font-size:11px;overflow-wrap:anywhere;line-height:1.5}.connections small{display:block;color:var(--muted);font-size:9px}
+.evidence{margin-top:15px;border-top:1px solid var(--line);padding-top:12px}.evidence code{display:block;font:10px ui-monospace,monospace;line-height:1.65;margin:9px 0;color:#a1c6d5;overflow-wrap:anywhere;white-space:pre-wrap}.summary{padding:15px 22px;display:flex;gap:25px;flex-wrap:wrap}.summary strong{font:19px ui-monospace,monospace;margin-right:6px}.summary span{color:var(--muted);font-size:10px}
+footer{padding:0 22px 17px;color:var(--muted);font:9px/1.7 ui-monospace,monospace}.legend{color:var(--muted);font:9px ui-monospace,monospace;display:flex;gap:14px;padding:0 22px 13px}.legend b{color:var(--cyan)}.legend i{color:var(--violet);font-style:normal}
+.empty{position:absolute;inset:80px 30px;text-align:center;z-index:4;display:grid;place-content:center}.empty p{color:var(--muted);line-height:1.6}.empty button{margin:10px auto;color:var(--cyan)}
+@media(max-width:600px){header{padding:16px}.badge{font-size:8px}.workspace{grid-template-columns:1fr}.stage{height:390px}aside{border-left:0;border-top:1px solid var(--line);max-height:260px}.summary{gap:14px}h1{font-size:21px}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+</style></head>
+<body>
+<header><div><div class="kicker">TURBOCODE / LAB 05</div><h1>Dependency <span>Reactor</span></h1></div><div class="badge" id="badge">AWAITING SIGNAL</div></header>
+<div class="toolbar"><input id="search" placeholder="Locate a folder or module…" aria-label="Search nodes"><button id="isolate" aria-pressed="false">Isolate links</button><button id="motion" aria-pressed="false">Pause motion</button><button id="reset">Reset view</button></div>
+<div class="legend"><span><b>●</b> Source folders</span><span><i>●</i> Imported modules</span><span>Folder → import</span></div>
+<div class="workspace"><div class="stage" id="stage">
+<canvas class="galaxy" id="galaxy" width="960" height="675" aria-hidden="true"></canvas>
+<svg viewBox="0 0 640 450" id="graph" role="group" aria-label="Interactive Swift import graph"><g id="camera"><g id="scene"></g></g></svg>
+<div class="empty" id="empty"><div class="kicker">ARCHITECTURE, IN ORBIT</div><h2>Trace the connections.</h2><p>Select a node. Pull its dependencies into focus.<br>Explore the evidence behind every link.</p><button id="demo">Launch demo reactor ↗</button></div>
+<div class="stageNote">DRAG TO PAN · SCROLL TO ZOOM</div><div class="zoom"><button id="minus" aria-label="Zoom out">−</button><button id="plus" aria-label="Zoom in">+</button></div>
+</div><aside id="inspector" aria-live="polite"><div class="label">Signal inspector</div><h2>Choose your center.</h2><p>Select a folder or imported module to illuminate its connections. Double-click a node to bring it to the center.</p><p>Every connection is backed by a Swift import location, not an inferred call graph.</p></aside></div>
+<div class="summary" id="summary"><div><strong>—</strong><span>Swift files</span></div></div>
+<footer id="footer">Read-only import atlas · no network · no repository writes</footer>
+<script>
+const $=id=>document.getElementById(id),NS="http://www.w3.org/2000/svg";
+let data=null,selected=null,center=null,isolated=false,paused=false,scale=1,panX=0,panY=0,drag=null,moved=false;
+const reduced=matchMedia("(prefers-reduced-motion: reduce)");
+let inViewport=true;
+// Only bounded link trails animate. Hover/focus must not freeze these trails:
+// inspecting a stationary node should leave its connections visibly flowing.
+function syncMotion(){
+ $("stage").classList.toggle("paused",!data||paused||reduced.matches||document.hidden||!inViewport);
+}
+new IntersectionObserver(entries=>{inViewport=entries[0].isIntersecting;syncMotion()}).observe($("stage"));
+// Procedural galaxy: no remote image, asset download or animation timer.
+// The low-opacity canvas is decorative and excluded from accessibility.
+function paintGalaxy(){
+ const ctx=$("galaxy").getContext("2d"),w=960,h=675;
+ let seed=51;const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296};
+ ctx.clearRect(0,0,w,h);
+ for(const [x,y,r,color]of [[480,330,310,"104,91,177"],[370,365,230,"52,153,160"],[590,300,210,"97,113,168"]]){
+  const glow=ctx.createRadialGradient(x,y,0,x,y,r);glow.addColorStop(0,"rgba("+color+",.24)");glow.addColorStop(1,"rgba("+color+",0)");ctx.fillStyle=glow;ctx.fillRect(0,0,w,h);
+ }
+ for(let i=0;i<700;i++){
+  const arm=i%3,r=20+Math.pow(random(),.7)*380,angle=r*.012+arm*Math.PI*2/3+(random()-.5)*.6;
+  const a=Math.cos(angle)*r,b=Math.sin(angle)*r*.42;
+  const x=480+a*.93-b*.37,y=335+a*.37+b*.93;
+  ctx.fillStyle="rgba(184,204,240,"+(.1+random()*.55)+")";ctx.beginPath();ctx.arc(x,y,.35+random()*.8,0,Math.PI*2);ctx.fill();
+ }
+ for(let i=0;i<90;i++){ctx.fillStyle="rgba(200,220,240,"+(.15+random()*.35)+")";ctx.fillRect(random()*w,random()*h,1,1)}
+}
+paintGalaxy();
+reduced.addEventListener("change",syncMotion);document.addEventListener("visibilitychange",syncMotion);
+const html=(tag,value,cls)=>{const el=document.createElement(tag);el.textContent=value;if(cls)el.className=cls;return el};
+const svg=(tag,attrs={})=>{const el=document.createElementNS(NS,tag);for(const[k,v]of Object.entries(attrs))el.setAttribute(k,String(v));return el};
+const name=id=>data.nodes.find(n=>n.id===id)?.name||id;
+const links=id=>data.edges.filter(e=>e.source===id||e.target===id);
+function camera(){$("camera").setAttribute("transform","translate("+(320+panX)+" "+(225+panY)+") scale("+scale+") translate(-320 -225)")}
+function select(id){selected=id;draw();inspect(id)}
+function focus(id){center=id;selected=id;scale=1;panX=panY=0;camera();draw();inspect(id)}
+function inspect(id){
+ const node=data.nodes.find(n=>n.id===id),related=links(id),panel=$("inspector");panel.replaceChildren(html("div",node.kind==="group"?"Source folder":"Imported module","label"),html("h2",node.name),html("div",related.length,"metric"),html("p",node.kind==="group"?"imported modules · "+node.files+" Swift files":"source folders reference this module"));
+ const focusButton=html("button","Bring to center ↗");focusButton.onclick=()=>focus(id);panel.append(focusButton,html("p","Select a connection below for source evidence."));
+ const list=html("div","","connections");for(const edge of related.sort((a,b)=>b.count-a.count)){
+ const other=edge.source===id?edge.target:edge.source,button=html("button",(edge.source===id?"→ ":"← ")+name(other));
+ button.append(html("small",edge.count+" import reference"+(edge.count===1?"":"s")));button.onclick=()=>evidence(edge);list.append(button)}
+ panel.append(list);
+}
+function evidence(edge){
+ const panel=$("inspector");panel.querySelector(".evidence")?.remove();const box=html("div","","evidence");
+ box.append(html("div","Import evidence","label"),html("p",name(edge.source)+" → "+name(edge.target)));
+ for(const item of edge.evidence)box.append(html("code",item.path+":"+item.line));
+ if(edge.count>edge.evidence.length)box.append(html("p","Showing "+edge.evidence.length+" of "+edge.count+" references."));
+ const jump=html("button","Focus "+name(edge.target));jump.onclick=()=>focus(edge.target);box.append(jump);panel.append(box);box.scrollIntoView({block:"nearest",behavior:"auto"});
+}
+function draw(){
+ if(!data)return;const scene=$("scene");scene.replaceChildren();let flowCount=0;
+ const connected=new Set(selected?[selected,...links(selected).flatMap(e=>[e.source,e.target])]:[]);
+ const query=$("search").value.toLowerCase();
+ const nodes=data.nodes.filter(n=>!isolated||!selected||connected.has(n.id));
+ const shown=[...nodes].sort((a,b)=>Number(b.id===center)-Number(a.id===center)).slice(0,100),positions=new Map();
+ // Deterministic orbits preserve spatial orientation; centering is a user
+ // operation, never a claim that the chosen node is architecturally central.
+ for(const radius of [66,129,190])scene.append(svg("circle",{cx:320,cy:225,r:radius,class:"orbit"+(radius===129?" dashed":"")}));
+ const ring=svg("circle",{cx:320,cy:225,r:205,class:"orbit","stroke-dasharray":"35 10 1 40"});scene.append(ring);
+ scene.append(svg("path",{d:"M95 225H545 M320 15V435",class:"axis"}));
+ const ringNodes=shown.filter(n=>n.id!==center);
+ ringNodes.forEach((node,index)=>{
+ const orbit=index%2,items=ringNodes.filter((_,i)=>i%2===orbit),slot=Math.floor(index/2);
+ const angle=slot/items.length*Math.PI*2-Math.PI/2+(orbit?.16:0),radius=orbit?190:129;
+ positions.set(node.id,{x:320+Math.cos(angle)*radius,y:225+Math.sin(angle)*radius});
+ });
+ if(center&&shown.some(n=>n.id===center))positions.set(center,{x:320,y:225});
+ for(const edge of data.edges){const a=positions.get(edge.source),b=positions.get(edge.target);if(!a||!b)continue;
+ const active=selected&&(edge.source===selected||edge.target===selected);
+ const d="M"+a.x+" "+a.y+" Q320 225 "+b.x+" "+b.y;
+ const path=svg("path",{d,class:"link"+(active?" hot":selected?" dim":"")});scene.append(path);
+ // Dashed SVG paths repaint during animation; keep the ambient signal bounded
+ // even when a shared framework connects to dozens of source folders.
+ if((!selected||active)&&flowCount++<3)scene.append(svg("path",{d,class:"flow"}));
+ }
+ if(!center){scene.append(svg("circle",{cx:320,cy:225,r:40,class:"core"}));const t=svg("text",{x:320,y:222,class:"coreText"});t.textContent="REACTOR";scene.append(t);const sub=svg("text",{x:320,y:240,class:"coreText",style:"font-size:8px;fill:#6ee7e0"});sub.textContent=data.demo?"DEMO / 05":"IMPORT ATLAS";scene.append(sub)}
+ for(const node of shown){const p=positions.get(node.id);if(!p)continue;const active=node.id===selected;const dim=(selected&&!connected.has(node.id))||(query&&!node.name.toLowerCase().includes(query));
+ const group=svg("g",{class:"node "+node.kind+(active?" active":"")+(dim?" dim":""),transform:"translate("+p.x+" "+p.y+")",tabindex:0,role:"button","aria-label":node.name+", "+(node.kind==="group"?"source folder":"imported module"),"aria-pressed":active});
+ const radius=node.id===center?22:Math.min(13,7+Math.sqrt(links(node.id).length));
+ if(active)group.append(svg("circle",{r:radius+6,class:"halo"}));
+ group.append(svg("circle",{r:radius,class:"rim"}),svg("circle",{r:2.3,class:"dot"}));
+ const label=svg("text",{x:0,y:radius+16,"text-anchor":"middle"});label.textContent=node.name.length>23?"…"+node.name.slice(-22):node.name;group.append(label);
+ const title=svg("title");title.textContent=node.name;group.append(title);
+ group.onclick=()=>{if(!moved)select(node.id)};group.ondblclick=()=>focus(node.id);group.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();select(node.id)}};
+ scene.append(group);
+ }
+ syncMotion();
+ if(nodes.length>100)$("stage").setAttribute("aria-label","Showing first 100 nodes. Use isolate to narrow connections.");
+}
+function receive(next){
+ if(!next||!Array.isArray(next.nodes)||!Array.isArray(next.edges))return;
+ data=next;selected=center=null;scale=1;panX=panY=0;camera();
+ $("empty").hidden=!!data.nodes.length;$("empty").style.display=data.nodes.length?"none":"grid";
+ if(!data.nodes.length)$("empty").replaceChildren(html("h2","No Swift sources found"),html("p","Choose a workspace containing Swift files and call dependency_reactor again."));
+ $("badge").textContent=data.demo?"DEMO DATA":"SNAPSHOT / "+data.name;
+ $("summary").replaceChildren();for(const[value,label]of [[data.fileCount,"Swift files"],[data.nodes.filter(n=>n.kind==="group").length,"source folders"],[data.nodes.filter(n=>n.kind==="module").length,"imported modules"],[data.edges.length,"connections"]]){
+ const cell=html("div","");cell.append(html("strong",value),html("span",label));$("summary").append(cell)}
+ $("footer").textContent=(data.demo?"Illustrative data · ":"")+"Snapshot "+new Date(data.capturedAt).toLocaleString()+" · "+data.notes.join(" ")+" · Up to 100 nodes shown. Motion is decorative. Call the tool again to refresh.";
+ draw();
+}
+$("search").oninput=draw;
+$("search").onkeydown=e=>{if(e.key==="Enter"&&data){const match=data.nodes.find(n=>n.name.toLowerCase().includes(e.target.value.toLowerCase()));if(match)focus(match.id)}};
+$("isolate").onclick=()=>{isolated=!isolated;$("isolate").setAttribute("aria-pressed",isolated);draw()};
+$("motion").onclick=()=>{paused=!paused;$("stage").classList.toggle("paused",paused);$("motion").setAttribute("aria-pressed",paused);$("motion").textContent=paused?"Resume motion":"Pause motion";syncMotion()};
+$("reset").onclick=()=>{center=selected=null;isolated=false;$("isolate").setAttribute("aria-pressed",false);$("search").value="";scale=1;panX=panY=0;camera();draw();$("inspector").replaceChildren(html("div","Signal inspector","label"),html("h2","Choose your center."),html("p","Select a node to inspect its import relationships."))};
+function zoom(amount){scale=Math.min(2.8,Math.max(.55,scale*amount));camera()}
+$("plus").onclick=()=>zoom(1.2);$("minus").onclick=()=>zoom(1/1.2);
+$("stage").addEventListener("wheel",e=>{e.preventDefault();zoom(e.deltaY<0?1.06:1/1.06)},{passive:false});
+$("graph").onpointerdown=e=>{moved=false;drag={x:e.clientX,y:e.clientY,px:panX,py:panY};};
+$("graph").onpointermove=e=>{if(!drag)return;const rect=$("graph").getBoundingClientRect(),factor=Math.max(640/rect.width,450/rect.height);if(Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>4)moved=true;panX=drag.px+(e.clientX-drag.x)*factor;panY=drag.py+(e.clientY-drag.y)*factor;camera()};
+window.addEventListener("pointerup",()=>{drag=null;syncMotion()});window.addEventListener("pointercancel",()=>{drag=null;syncMotion()});
+window.addEventListener("turbocode-props",e=>receive(e.detail));
+$("demo").onclick=()=>{
+ const folders=["App/Views","App/Stores","App/Services","App/Tools","App/Models","Tests","Packages/Renderer","Packages/Transport"];
+ const modules=["SwiftUI","Foundation","WebKit","Combine","Testing","Network","Metal","OSLog"];
+ const nodes=[...folders.map((name,i)=>({id:"g"+i,name,kind:"group",files:8+i*3})),...modules.map((name,i)=>({id:"m"+i,name,kind:"module",files:0}))];
+ const edges=[];folders.forEach((f,i)=>modules.forEach((m,j)=>{if(j===1||j===i||((i*3+j)%5===0))edges.push({source:"g"+i,target:"m"+j,count:2+(i+j)%8,evidence:[{path:f+"/Example.swift",line:1+j}]})}));
+ receive({demo:true,name:"Orbital Studio",fileCount:148,nodes,edges,capturedAt:new Date().toISOString(),notes:["Demo references only, not your workspace."]});
+ select("m1");
+};
+// Do not send duplicate layout messages across the WebKit/native bridge.
+let lastHeight=0;
+const resize=()=>{const height=Math.ceil(document.body.getBoundingClientRect().height);if(height!==lastHeight){lastHeight=height;window.turbocode?.resize(height)}};
+new ResizeObserver(resize).observe(document.body);resize();
+</script></body></html>

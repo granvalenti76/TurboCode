@@ -10,7 +10,10 @@ nonisolated enum FoundationModelsReasoningLevel {
         switch effort {
         case .low: .light
         case .medium: .moderate
-        case .high: .deep
+        // Foundation Models has no level above `.deep`; X-High adds prompt
+        // guidance for local and on-device models while retaining the deepest
+        // native level where one is available.
+        case .high, .xhigh: .deep
         case nil: nil
         }
     }

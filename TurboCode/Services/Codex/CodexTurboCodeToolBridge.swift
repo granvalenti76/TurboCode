@@ -66,12 +66,31 @@ nonisolated enum CodexToolBridgeError: LocalizedError, Sendable, Equatable {
 /// FoundationModels profiles, preserving path validation, revision checks,
 /// approval gates, execution limits, and existing visual receipts.
 nonisolated enum CodexTurboCodeToolBridge {
+    /// Translate bridge aliases back to stable persisted capability IDs.
+    static func capabilityID(for name: String) -> ToolCapabilityID? {
+        if name == "apply_edits" { return .editFile }
+        return ToolCapabilityID.allCases.first { $0.runtimeName == name }
+    }
+
+    static func capabilityIDs(
+        agentTuning: AgentTuningConfig,
+        includesDelegation: Bool
+    ) -> Set<ToolCapabilityID> {
+        Set(specifications(
+            workspaceRoot: "/workspace",
+            agentTuning: agentTuning,
+            includesDelegation: includesDelegation,
+            safariMCPEnabled: agentTuning.experimental.safariMCPEnabled
+        ).compactMap { capabilityID(for: $0.name) })
+    }
+
     static func developerInstructions(
         workspaceRoot: String,
         agentTuning: AgentTuningConfig,
         dynamicTools: [CodexDynamicToolSpec],
         availableSkills: [TurboCodeSkillDefinition],
-        workspaceInstructions: WorkspaceInstructions?
+        workspaceInstructions: WorkspaceInstructions?,
+        workers: [AgentTaskWorkerDescriptor] = []
     ) -> String {
         // Codex owns its agent loop, but receives the same product identity,
         // safety rules, and optional project instructions as native sessions.
@@ -81,26 +100,11 @@ nonisolated enum CodexTurboCodeToolBridge {
                 backend: .codex,
                 workspaceRoot: workspaceRoot,
                 agentTuning: agentTuning,
-                toolIDs: [
-                    .listWorkspace,
-                    .swiftWorkspaceMap,
-                    .readFile,
-                    .searchWorkspace,
-                    .editFile,
-                    .swiftPackageManager,
-                    .xcodeProject,
-                    .git,
-                    .bash
-                ] + (availableSkills.isEmpty ? [] : [.loadSkill])
-                + (dynamicTools.contains(where: {
-                    $0.name == ToolCapabilityID.createSkill.rawValue
-                }) ? [.createSkill] : [])
-                + (dynamicTools.contains(where: {
-                    $0.name == ToolCapabilityID.delegateTask.rawValue
-                }) ? [.delegateTask] : []),
+                toolIDs: dynamicTools.compactMap { capabilityID(for: $0.name) },
                 toolNames: dynamicTools.map(\.name),
                 availableSkills: availableSkills,
-                workspaceInstructions: workspaceInstructions
+                workspaceInstructions: workspaceInstructions,
+                workers: workers
             )
         )
         return dynamicTools.contains(where: {
@@ -116,7 +120,8 @@ nonisolated enum CodexTurboCodeToolBridge {
         includesDelegation: Bool = false,
         availableSkills: [TurboCodeSkillDefinition] = [],
         safariMCPEnabled: Bool = false,
-        pluginTools: [TypeScriptPluginToolBinding] = []
+        pluginTools: [TypeScriptPluginToolBinding] = [],
+        selectedToolIDs: Set<ToolCapabilityID>? = nil
     ) -> [CodexDynamicToolSpec] {
         let listTool = ListWorkspaceTool(workspaceRoot: workspaceRoot)
         let mapTool = SwiftWorkspaceMapTool(
@@ -267,6 +272,13 @@ nonisolated enum CodexTurboCodeToolBridge {
         if safariMCPEnabled {
             specifications.append(safariMCPSpecification)
         }
+        // Filter TurboCode tools only; plugins have their own profile registry.
+        if let selectedToolIDs {
+            specifications.removeAll {
+                guard let id = capabilityID(for: $0.name) else { return true }
+                return !selectedToolIDs.contains(id)
+            }
+        }
         specifications.append(contentsOf: pluginTools.map { binding in
             CodexDynamicToolSpec(
                 name: binding.snapshot.id.codexName,
@@ -316,6 +328,7 @@ nonisolated enum CodexTurboCodeToolBridge {
         availableSkills: [TurboCodeSkillDefinition] = [],
         pluginTools: [TypeScriptPluginToolBinding] = [],
         delegationInvoker: (any AgentTaskInvoking)? = nil,
+        backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil,
         parentTurnID: TurnID? = nil
     ) async throws -> CodexToolExecution {
         if let plugin = pluginTools.first(where: {
@@ -331,6 +344,10 @@ nonisolated enum CodexTurboCodeToolBridge {
                 receipt: pluginResult.widget.map(ToolReceipt.pluginWidget)
             )
         }
+        // Codex already carries receipts beside model-facing text, so a
+        // call-scoped registry is enough to reuse the exact native tool path
+        // without exposing the opaque token to App Server.
+        let receiptRegistry = ToolReceiptRegistry()
         switch call.tool {
         case "list_workspace":
             let output = try await ListWorkspaceTool(
@@ -399,13 +416,17 @@ nonisolated enum CodexTurboCodeToolBridge {
             ))
             return .init(result: .success(text), receipt: nil)
         case "apply_edits":
-            let text = try await ApplyEditsTool(workspaceRoot: workspaceRoot)
-                .call(arguments: try applyEditsArguments(call))
-            return .init(result: .success(text), receipt: nil)
-        case "swift_package_manager":
-            let text = try await SwiftPackageManagerTool(
+            let output = try await ApplyEditsTool(
                 workspaceRoot: workspaceRoot,
-                executionPolicy: agentTuning.execution
+                receiptRegistry: receiptRegistry
+            )
+                .call(arguments: try applyEditsArguments(call))
+            return await execution(from: output, registry: receiptRegistry)
+        case "swift_package_manager":
+            let output = try await SwiftPackageManagerTool(
+                workspaceRoot: workspaceRoot,
+                executionPolicy: agentTuning.execution,
+                receiptRegistry: receiptRegistry
             ).call(arguments: SwiftPackageManagerArguments(
                 action: try requiredString("action", in: call),
                 packageName: optionalString("packageName", in: call),
@@ -422,7 +443,7 @@ nonisolated enum CodexTurboCodeToolBridge {
                 filter: optionalString("filter", in: call),
                 timeoutSeconds: optionalInteger("timeoutSeconds", in: call)
             ))
-            return .init(result: .success(text), receipt: nil)
+            return await execution(from: output, registry: receiptRegistry)
         case "xcode_project":
             let text = try await XcodeProjectTool(
                 workspaceRoot: workspaceRoot,
@@ -438,10 +459,11 @@ nonisolated enum CodexTurboCodeToolBridge {
             ))
             return .init(result: .success(text), receipt: nil)
         case "git":
-            let text = try await GitTool(
+            let output = try await GitTool(
                 workspaceRoot: workspaceRoot,
                 policy: agentTuning.git,
-                executionPolicy: agentTuning.execution
+                executionPolicy: agentTuning.execution,
+                receiptRegistry: receiptRegistry
             ).call(arguments: GitArguments(
                 operation: try requiredString("operation", in: call),
                 paths: call.arguments["paths"]?.arrayValue?.compactMap(\.stringValue),
@@ -450,15 +472,29 @@ nonisolated enum CodexTurboCodeToolBridge {
                 remote: optionalString("remote", in: call),
                 limit: optionalInteger("limit", in: call)
             ))
-            return .init(result: .success(text), receipt: nil)
+            return await execution(from: output, registry: receiptRegistry)
         case "delegate_task":
             guard let delegationInvoker else {
                 throw CodexToolBridgeError.unsupportedTool(call.tool)
             }
             let arguments = try delegateTaskArguments(call)
+            let envelope = try arguments.envelope()
+            try delegationInvoker.validateDestination(envelope.workerID)
+            if let backgroundTaskSubmission {
+                let receipt = try await backgroundTaskSubmission(
+                    envelope,
+                    delegationInvoker,
+                    parentTurnID
+                )
+                let data = try JSONEncoder().encode(receipt)
+                guard let json = String(data: data, encoding: .utf8) else {
+                    throw AgentTaskWorkerError.invalidEnvelopeEncoding
+                }
+                return .init(result: .success(json), receipt: nil)
+            }
             let result = await AgentTaskInvocation.invoke(
                 delegationInvoker,
-                envelope: try arguments.envelope(),
+                envelope: envelope,
                 parentTurnID: parentTurnID
             )
             let data = try JSONEncoder().encode(result)
@@ -474,14 +510,17 @@ nonisolated enum CodexTurboCodeToolBridge {
             )
             return .init(result: .success(text), receipt: nil)
         case "create_skill":
-            let text = try await CreateSkillTool(workspaceRoot: workspaceRoot).call(
+            let output = try await CreateSkillTool(
+                workspaceRoot: workspaceRoot,
+                receiptRegistry: receiptRegistry
+            ).call(
                 arguments: CreateSkillArguments(
                     name: try requiredString("name", in: call),
                     description: try requiredString("description", in: call),
                     instructions: try requiredString("instructions", in: call)
                 )
             )
-            return .init(result: .success(text), receipt: nil)
+            return await execution(from: output, registry: receiptRegistry)
         case "safari_mcp":
             guard agentTuning.experimental.safariMCPEnabled else {
                 return .init(
@@ -495,6 +534,21 @@ nonisolated enum CodexTurboCodeToolBridge {
         default:
             throw CodexToolBridgeError.unsupportedTool(call.tool)
         }
+    }
+
+    private static func execution(
+        from output: ToolCommandOutput,
+        registry: ToolReceiptRegistry
+    ) async -> CodexToolExecution {
+        let receipt: ToolReceipt? = if let token = output.receiptToken {
+            await registry.take(token)
+        } else {
+            nil
+        }
+        return CodexToolExecution(
+            result: .success(output.text),
+            receipt: receipt
+        )
     }
 
     private static func executeSafariMCP(
@@ -582,7 +636,8 @@ nonisolated enum CodexTurboCodeToolBridge {
     ) throws -> DelegateTaskArguments {
         return DelegateTaskArguments(
             mode: optionalString("mode", in: call) ?? "coding",
-            goal: try requiredString("goal", in: call)
+            goal: try requiredString("goal", in: call),
+            worker_id: optionalString("worker_id", in: call)
         )
     }
 
@@ -800,11 +855,12 @@ nonisolated enum CodexTurboCodeToolBridge {
     /// text-only worker. Runtime policy remains application-owned.
     private static let delegateTaskSpecification = CodexDynamicToolSpec(
         name: "delegate_task",
-        description: "Delegate one goal to the configured worker. Use coding for workspace work with the profile-configured worker tools, or text for a tool-free prose response.",
+        description: "Delegate one goal. Set worker_id to an exact worker catalog ID, or omit it for automatic routing. Busy targets are not replaced. The result is either terminal or an accepted background receipt; after acceptance, do not wait or poll because TurboCode reports completion through its harness.",
         inputSchema: objectSchema(
             properties: [
                 "mode": enumSchema(["coding", "text"]),
-                "goal": stringSchema("Complete task to send to the worker.")
+                "goal": stringSchema("Complete task to send to the worker."),
+                "worker_id": nullableStringSchema()
             ],
             required: ["mode", "goal"]
         )

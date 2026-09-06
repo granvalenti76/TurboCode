@@ -111,7 +111,7 @@ struct AgentActivityRuntimeIntegrationTests {
             mode: .standalone,
             workspaceKind: "test"
         )
-        var received: [AgentRuntimeEvent] = []
+        let capture = RuntimeEventCapture()
         let result = await adapter.run(
             request: TurnRequest(
                 id: turnID,
@@ -121,9 +121,10 @@ struct AgentActivityRuntimeIntegrationTests {
                 workspaceRoot: "/tmp"
             ),
             events: BackendSessionEvents { event in
-                received.append(event)
+                await capture.append(event)
             }
         )
+        let received = await capture.events
 
         #expect(result.assistantText == "Native result.")
         #expect(result.reasoningText == "Native reasoning.")
@@ -143,15 +144,14 @@ struct AgentActivityRuntimeIntegrationTests {
         #expect(lifecycle == ["started", "streaming", "completed"])
     }
 
-    @Test("Native adapter preserves the lifecycle across the provider matrix")
+    @Test("Native adapter preserves lifecycle for Apple, Llama, and DeepSeek")
     func nativeBackendAdapterCoversProviderMatrix() async {
         // These doubles exercise the harness boundary without requiring a live
-        // Llama/PCC endpoint or DeepSeek credentials. Transport-specific
+        // Llama endpoint or DeepSeek credentials. Transport-specific
         // behavior remains covered by the provider runner tests.
         let backends: [ModelBackend] = [
             .foundationApple,
             .llamaServer,
-            .foundationServe,
             .premium
         ]
 
@@ -169,7 +169,7 @@ struct AgentActivityRuntimeIntegrationTests {
                 mode: .standalone,
                 workspaceKind: backend.rawValue
             )
-            var received: [AgentRuntimeEvent] = []
+            let capture = RuntimeEventCapture()
             let result = await adapter.run(
                 request: TurnRequest(
                     id: turnID,
@@ -179,9 +179,10 @@ struct AgentActivityRuntimeIntegrationTests {
                     workspaceRoot: "/tmp"
                 ),
                 events: BackendSessionEvents { event in
-                    received.append(event)
+                    await capture.append(event)
                 }
             )
+            let received = await capture.events
 
             #expect(result.assistantText == "Result for \(backend.rawValue).")
             #expect(result.reasoningText == "Reasoning for \(backend.rawValue).")
@@ -209,7 +210,7 @@ struct AgentActivityRuntimeIntegrationTests {
             turboThreadID: "thread-test",
             agentTuning: AgentTuningConfig()
         )
-        var received: [AgentRuntimeEvent] = []
+        let capture = RuntimeEventCapture()
         let result = await adapter.run(
             request: TurnRequest(
                 id: turnID,
@@ -219,9 +220,10 @@ struct AgentActivityRuntimeIntegrationTests {
                 workspaceRoot: "/tmp"
             ),
             events: BackendSessionEvents { event in
-                received.append(event)
+                await capture.append(event)
             }
         )
+        let received = await capture.events
 
         #expect(result.assistantText == "Codex result.")
         #expect(result.reasoningText == "Codex reasoning.")
@@ -261,7 +263,7 @@ struct AgentActivityRuntimeIntegrationTests {
             turboThreadID: "thread-tool-failure",
             agentTuning: AgentTuningConfig()
         )
-        var received: [AgentRuntimeEvent] = []
+        let capture = RuntimeEventCapture()
 
         _ = await adapter.run(
             request: TurnRequest(
@@ -271,9 +273,10 @@ struct AgentActivityRuntimeIntegrationTests {
                 workspaceRoot: "/tmp"
             ),
             events: BackendSessionEvents { event in
-                received.append(event)
+                await capture.append(event)
             }
         )
+        let received = await capture.events
 
         let toolResult = received.compactMap { event -> ToolResult? in
             guard case .toolFinished(let result) = event else { return nil }
@@ -457,6 +460,18 @@ struct AgentActivityRuntimeIntegrationTests {
     }
 }
 
+private actor RuntimeEventCapture {
+    private var storedEvents: [AgentRuntimeEvent] = []
+
+    func append(_ event: AgentRuntimeEvent) {
+        storedEvents.append(event)
+    }
+
+    var events: [AgentRuntimeEvent] {
+        storedEvents
+    }
+}
+
 private actor ParentTurnRecorder {
     private(set) var value: TurnID?
 
@@ -538,6 +553,14 @@ nonisolated private final class AdapterCodexRuntime: CodexTurnRunning, Sendable 
     }
 
     func interrupt() async {}
+
+    func steerActiveTurn(
+        turboThreadID: String,
+        localTurnID: TurnID,
+        input: String
+    ) async throws -> String {
+        "server-turn"
+    }
 }
 
 /// Provider doubles for terminal error and cancellation paths. The blocking
@@ -558,6 +581,14 @@ private actor FailingAdapterCodexRuntime: CodexTurnRunning {
     }
 
     func interrupt() async {}
+
+    func steerActiveTurn(
+        turboThreadID: String,
+        localTurnID: TurnID,
+        input: String
+    ) async throws -> String {
+        "server-turn"
+    }
 }
 
 private actor BlockingAdapterCodexRuntime: CodexTurnRunning {
@@ -593,6 +624,14 @@ private actor BlockingAdapterCodexRuntime: CodexTurnRunning {
         interrupted = true
         continuation?.resume(throwing: CancellationError())
         continuation = nil
+    }
+
+    func steerActiveTurn(
+        turboThreadID: String,
+        localTurnID: TurnID,
+        input: String
+    ) async throws -> String {
+        "server-turn"
     }
 }
 

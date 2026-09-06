@@ -7,20 +7,25 @@ In Standalone mode, the selected profile determines the route. Apple on-device i
 For the structured route, delegation is a capability rather than a separate
 profile type. When a custom profile includes `delegate_task`, its selected
 model sends a goal to the configured worker and remains responsible for the
-final answer. The coordinator chooses only between a coding worker with the
+final answer. The coordinator chooses a destination from the profile worker
+catalog by role and tools, using its stable `worker_id`. Each call chooses
+between a coding worker with the
 worker tool bundle configured by the profile and a text-only worker with no
 tools; TurboCode owns runtime identifiers, workspace safety, approval,
 cancellation, and verification when applicable. Custom on-device profiles can
 also include `delegate_task`; the built-in On-device profile remains direct by
 default. DeepSeek, Codex, and Llama support this capability; Llama or DeepSeek
-can be selected as the worker.
+and on-device models can be selected as workers.
 
 The menu item **On-Device (Experimental)** preserves the older compatibility
 path. In that mode Apple on-device may send a free-text task through
 `call_powerful_model`; it is not the primary 0.3.0 structured delegation path.
 
 In **Custom Profiles**, add **Delegate Task** under **Included Capabilities**.
-Only then does the **Delegation** section appear, revealing the worker picker;
+The **Agent Team** editor supports up to four worker slots with independent
+models, tools, names, and role descriptions. The coordinator receives this
+catalog dynamically; role descriptions guide routing and do not grant tools.
+Only then does the worker configuration become available;
 this keeps the common profile editor compact through progressive disclosure.
 Codex profiles additionally reveal **Codex model** and **Reasoning**. Provider
 availability still comes from `~/.turbocode/models.json`; secrets remain in the

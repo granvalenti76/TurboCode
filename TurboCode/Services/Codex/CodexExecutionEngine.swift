@@ -18,7 +18,10 @@ nonisolated struct CodexTurnRequest: Sendable {
     let reasoningEffort: CodexReasoningEffort
     let persistsModelPreference: Bool
     let delegationInvoker: (any AgentTaskInvoking)?
+    let backgroundTaskSubmission: DelegatedTaskBackgroundSubmission?
     let pluginTools: [TypeScriptPluginToolBinding]
+    /// Nil uses built-in tools; an explicit set is the override boundary.
+    let selectedToolIDs: Set<ToolCapabilityID>?
     let allowsTools: Bool
 
     init(
@@ -33,7 +36,9 @@ nonisolated struct CodexTurnRequest: Sendable {
         reasoningEffort: CodexReasoningEffort,
         persistsModelPreference: Bool,
         delegationInvoker: (any AgentTaskInvoking)?,
+        backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil,
         pluginTools: [TypeScriptPluginToolBinding] = [],
+        selectedToolIDs: Set<ToolCapabilityID>? = nil,
         allowsTools: Bool = true
     ) {
         self.turnID = turnID
@@ -47,7 +52,9 @@ nonisolated struct CodexTurnRequest: Sendable {
         self.reasoningEffort = reasoningEffort
         self.persistsModelPreference = persistsModelPreference
         self.delegationInvoker = delegationInvoker
+        self.backgroundTaskSubmission = backgroundTaskSubmission
         self.pluginTools = pluginTools
+        self.selectedToolIDs = selectedToolIDs
         self.allowsTools = allowsTools
     }
 }
@@ -106,6 +113,7 @@ nonisolated protocol CodexAppServerServing: Sendable {
         additionalApplicationContext: String?
     ) async throws -> AsyncThrowingStream<CodexTurnEvent, any Error>
     func interruptActiveTurn() async
+    func steerActiveTurn(input: String) async throws -> String
     func resolveApproval(
         _ request: CodexApprovalRequest,
         approved: Bool
@@ -126,12 +134,14 @@ extension CodexAppServerClient: CodexAppServerServing {}
 /// drive the same engine without instantiating TurboCode's interface.
 actor CodexExecutionEngine {
     private struct ThreadConfiguration: Equatable {
+        let selectedToolIDs: Set<ToolCapabilityID>?
         let allowsTools: Bool
         let includesDelegation: Bool
         let safariMCPEnabled: Bool
         let modelID: String
         let skillNames: [String]
         let pluginToolNames: [String]
+        let workers: [AgentTaskWorkerDescriptor]
     }
 
     private let client: any CodexAppServerServing
@@ -141,6 +151,7 @@ actor CodexExecutionEngine {
     private var importedContexts: [String: String] = [:]
     private var handoffBoundaryBlockIDs: [String: String] = [:]
     private var approvals: [String: CodexApprovalRequest] = [:]
+    private var activeTurnIDs: [String: TurnID] = [:]
 
     init(client: any CodexAppServerServing = CodexAppServerClient()) {
         self.client = client
@@ -246,6 +257,7 @@ actor CodexExecutionEngine {
             ? request.pluginTools
             : []
         let configuration = ThreadConfiguration(
+            selectedToolIDs: request.selectedToolIDs,
             allowsTools: request.allowsTools,
             includesDelegation: includesDelegation,
             safariMCPEnabled: request.allowsTools
@@ -254,7 +266,8 @@ actor CodexExecutionEngine {
             skillNames: request.allowsTools
                 ? request.availableSkills.map(\.name)
                 : [],
-            pluginToolNames: pluginTools.map { $0.snapshot.id.codexName }
+            pluginToolNames: pluginTools.map { $0.snapshot.id.codexName },
+            workers: includesDelegation ? request.delegationInvoker?.workerCatalog ?? [] : []
         )
         let threadID: String
         if let existing = threadIDs[request.turboThreadID],
@@ -270,7 +283,8 @@ actor CodexExecutionEngine {
                     includesDelegation: includesDelegation,
                     availableSkills: request.availableSkills,
                     safariMCPEnabled: request.agentTuning.experimental.safariMCPEnabled,
-                    pluginTools: pluginTools
+                    pluginTools: pluginTools,
+                    selectedToolIDs: request.selectedToolIDs
                 )
                 let workspaceInstructions = WorkspaceInstructionsLoader.load(
                     from: request.workspaceRoot
@@ -280,7 +294,8 @@ actor CodexExecutionEngine {
                     agentTuning: request.agentTuning,
                     dynamicTools: dynamicTools,
                     availableSkills: request.availableSkills,
-                    workspaceInstructions: workspaceInstructions
+                    workspaceInstructions: workspaceInstructions,
+                    workers: configuration.workers
                 )
             } else {
                 dynamicTools = []
@@ -316,6 +331,8 @@ actor CodexExecutionEngine {
             effort: effectiveEffort,
             additionalApplicationContext: importedContexts[request.turboThreadID]
         )
+        activeTurnIDs[request.turboThreadID] = request.turnID
+        defer { activeTurnIDs.removeValue(forKey: request.turboThreadID) }
         var assistantText = ""
         var reasoningText = ""
         for try await event in stream {
@@ -339,6 +356,15 @@ actor CodexExecutionEngine {
                     )
                     continue
                 }
+                // Reject stale or unsolicited calls outside the active override.
+                if let selected = request.selectedToolIDs,
+                   let capability = CodexTurboCodeToolBridge.capabilityID(for: call.tool),
+                   !selected.contains(capability) {
+                    try await client.resolveToolCall(
+                        call, result: .failure("Tool excluded by the active profile.")
+                    )
+                    continue
+                }
                 await events.activityStarted(
                     call,
                     CodexTurboCodeToolBridge.activitySummary(for: call)
@@ -354,6 +380,11 @@ actor CodexExecutionEngine {
                         availableSkills: request.availableSkills,
                         pluginTools: pluginTools,
                         delegationInvoker: request.delegationInvoker,
+                        backgroundTaskSubmission:
+                            request.agentTuning.orchestrator
+                                .runsDelegatedTasksInBackground
+                                ? request.backgroundTaskSubmission
+                                : nil,
                         parentTurnID: request.turnID
                     )
                     result = execution.result
@@ -402,6 +433,19 @@ actor CodexExecutionEngine {
 
     func interrupt() async {
         await client.interruptActiveTurn()
+    }
+
+    func steerActiveTurn(
+        turboThreadID: String,
+        localTurnID: TurnID,
+        input: String
+    ) async throws -> String {
+        guard activeTurnIDs[turboThreadID] == localTurnID else {
+            throw CodexAppServerError.invalidResponse(
+                "the local Codex turn identity is stale"
+            )
+        }
+        return try await client.steerActiveTurn(input: input)
     }
 
     /// Hidden compaction turns cannot execute tools or approve mutations.
@@ -469,6 +513,12 @@ nonisolated protocol CodexTurnRunning: AnyObject, Sendable {
     ) async throws -> CodexTurnResult
 
     func interrupt() async
+
+    func steerActiveTurn(
+        turboThreadID: String,
+        localTurnID: TurnID,
+        input: String
+    ) async throws -> String
 }
 
 extension CodexExecutionEngine: CodexTurnRunning {}

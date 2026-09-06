@@ -54,6 +54,7 @@ final class ConversationLifecycleCoordinator {
             if id != conversations.activeThreadID {
                 workbench.dismissWorkspaceListingInspector()
                 workbench.dismissDiffPatchReview()
+                workbench.dismissTranscript()
                 reviewDrafts.discardAll()
             }
             conversations.activeThreadID = id
@@ -82,6 +83,7 @@ final class ConversationLifecycleCoordinator {
         await transitionBarrier.performContextChange {
             workbench.dismissWorkspaceListingInspector()
             workbench.dismissDiffPatchReview()
+            workbench.dismissTranscript()
             reviewDrafts.discardAll()
             let thread = conversations.createThread(
                 title: title,
@@ -113,6 +115,7 @@ final class ConversationLifecycleCoordinator {
 
         workbench.dismissWorkspaceListingInspector()
         workbench.dismissDiffPatchReview()
+        workbench.dismissTranscript()
         reviewDrafts.discardAll()
         conversations.activeThreadID = id
         _ = await runtime.apply(.restore(threadID: id))
@@ -136,8 +139,10 @@ final class ConversationLifecycleCoordinator {
         } ?? SessionRebuildHistory.fromVisibleBlocks(snapshot.blocks)
         await profiles.rebuildSession(
             keepingHistory: false,
-            restoringHistory: restoredHistory
+            restoringHistory: restoredHistory,
+            restoringProjection: snapshot.contextProjection
         )
+        await runtime.restoreSteering(snapshot.steering)
         await AgentDiagnosticsRecorder.shared.recordBoundary(
             RuntimeBoundaryMetric(
                 boundary: .restore,
@@ -187,6 +192,7 @@ final class ConversationLifecycleCoordinator {
         _ = await runtime.apply(.switchThread(threadID: nil))
         timeline.reset()
         resetActivityPresentation()
+        workbench.dismissTranscript()
         reviewDrafts.discardAll()
 
         if let nextThreadID {

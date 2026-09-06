@@ -385,6 +385,39 @@ actor CodexAppServerClient {
         )
     }
 
+    /// Sends `turn/steer` to the exact server turn tracked by this client.
+    /// The returned server turn ID must match the expected active turn; an ACK
+    /// for another turn is rejected before it can reach the timeline.
+    func steerActiveTurn(input: String) async throws -> String {
+        guard let activeThreadID, let activeTurnID else {
+            throw CodexAppServerError.invalidResponse(
+                "no active Codex turn to steer"
+            )
+        }
+        let result = try await request(
+            method: "turn/steer",
+            params: [
+                "threadId": .string(activeThreadID),
+                "input": .array([
+                    .object([
+                        "type": .string("text"),
+                        "text": .string(input)
+                    ])
+                ]),
+                "expectedTurnId": .string(activeTurnID)
+            ]
+        )
+        let acceptedTurnID = result["turnId"]?.stringValue
+            ?? result["turn"]?["id"]?.stringValue
+        guard let acceptedTurnID,
+              acceptedTurnID == activeTurnID else {
+            throw CodexAppServerError.invalidResponse(
+                "turn/steer acknowledged an unexpected turn"
+            )
+        }
+        return acceptedTurnID
+    }
+
     /// Completes the exact JSON-RPC request that produced the visible approval
     /// banner. Responses are intentionally one-shot and scoped to this turn.
     func resolveApproval(

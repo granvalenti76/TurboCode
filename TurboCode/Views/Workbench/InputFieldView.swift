@@ -9,6 +9,7 @@ struct InputFieldView: View {
     @Environment(ChatPresentationViewModel.self) private var presentation
     @Environment(\.chatFontSize) private var chatFontSize
     @FocusState private var isFocused: Bool
+    @State private var composerSelection: TextSelection?
     @State private var selectedSlashCommandIndex = 0
     @State private var isLlamaContextHovering = false
 
@@ -23,6 +24,7 @@ struct InputFieldView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            SteeringQueueView()
             composerCard
                 .background(
                     Color(nsColor: .textBackgroundColor),
@@ -52,7 +54,12 @@ struct InputFieldView: View {
                     Spacer()
 
                     backendMenu
-                    sendButton
+                    if chatStore.busy {
+                        queueButton
+                        stopButton
+                    } else {
+                        sendButton
+                    }
                 }
             }
             .padding(16)
@@ -76,18 +83,17 @@ struct InputFieldView: View {
                     get: { composer.messageText },
                     set: { composer.messageText = $0 }
                 ),
+                selection: $composerSelection,
                 axis: .vertical
             )
                 .textFieldStyle(.plain)
                 .font(AppTypography.chatBody(size: chatFontSize))
                 .lineLimit(1...10)
                 .focused($isFocused)
-                .disabled(chatStore.busy)
                 .padding(.bottom, compact ? 12 : 18)
                 .contentShape(Rectangle())
                 .simultaneousGesture(
                     TapGesture().onEnded {
-                        guard !chatStore.busy else { return }
                         isFocused = true
                     }
                 )
@@ -95,6 +101,9 @@ struct InputFieldView: View {
                     // A changed query describes a new result set; keeping the
                     // previous row selected could execute the wrong command.
                     selectedSlashCommandIndex = 0
+                    if newValue.isEmpty {
+                        composerSelection = nil
+                    }
                     // Inspector recovery actions prepare a reviewable draft
                     // rather than executing work immediately. Focus only when
                     // text is inserted externally, not while the user types.
@@ -172,6 +181,23 @@ struct InputFieldView: View {
     }
 
     private func handleComposerKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        if press.key == .return,
+           press.modifiers.contains(.shift),
+           press.modifiers.intersection([.command, .control, .option]).isEmpty {
+            insertComposerNewline()
+            return .handled
+        }
+
+        if press.key == .return,
+           press.modifiers.intersection([.command, .control, .option]).isEmpty {
+            if !chatStore.busy, !slashSuggestions.isEmpty {
+                executeSelectedSlashCommand()
+                return .handled
+            }
+            sendComposerInput()
+            return .handled
+        }
+
         guard !slashSuggestions.isEmpty, !chatStore.busy else { return .ignored }
 
         switch press.key {
@@ -187,6 +213,41 @@ struct InputFieldView: View {
         default:
             return .ignored
         }
+    }
+
+    private func insertComposerNewline() {
+        let currentText = composer.messageText
+        let replacementRange: Range<String.Index>
+
+        switch composerSelection?.indices {
+        case .selection(let range):
+            replacementRange = range
+        case .multiSelection(let ranges):
+            // A plain composer normally has one selection. If SwiftUI exposes
+            // multiple ranges, use the first instead of losing the key press.
+            replacementRange = ranges.ranges.first
+                ?? currentText.endIndex..<currentText.endIndex
+        case nil:
+            replacementRange = currentText.endIndex..<currentText.endIndex
+        @unknown default:
+            // Future SwiftUI selection forms must degrade to insertion at the
+            // end instead of making the composer uncompilable after an SDK bump.
+            replacementRange = currentText.endIndex..<currentText.endIndex
+        }
+
+        let insertionOffset = currentText.distance(
+            from: currentText.startIndex,
+            to: replacementRange.lowerBound
+        )
+        var updatedText = currentText
+        updatedText.replaceSubrange(replacementRange, with: "\n")
+        let insertionPoint = updatedText.index(
+            updatedText.startIndex,
+            offsetBy: insertionOffset + 1
+        )
+
+        composer.messageText = updatedText
+        composerSelection = TextSelection(insertionPoint: insertionPoint)
     }
 
     private func moveSlashSelection(by offset: Int) {
@@ -348,16 +409,16 @@ struct InputFieldView: View {
                         }
                     }
 
-                    if chatStore.activeModelSupportsReasoning,
+                    if chatStore.activeModelOffersReasoningControl,
                        chatStore.activeBackend != .codex {
                         Divider()
                         Section("Reasoning") {
-                            ForEach(ReasoningEffort.allCases, id: \.self) { effort in
+                            ForEach(reasoningEffortOptions, id: \.self) { effort in
                                 Button {
                                     reasoningEffort = effort
                                     Task { await chatStore.setReasoningEffort(effort) }
                                 } label: {
-                                    if reasoningEffort == effort {
+                                    if effectiveReasoningEffort == effort {
                                         Label(
                                             effort.rawValue,
                                             systemImage: "checkmark"
@@ -370,7 +431,7 @@ struct InputFieldView: View {
                         }
                     }
                 } label: {
-                    if chatStore.activeModelSupportsReasoning {
+                    if chatStore.activeModelOffersReasoningControl {
                         Text(
                             "\(chatStore.composerModel) · \(activeReasoningLabel)"
                         )
@@ -467,7 +528,31 @@ struct InputFieldView: View {
         if chatStore.activeBackend == .codex {
             return chatStore.codexReasoningEffort.displayName
         }
-        return reasoningEffort.rawValue
+        return effectiveReasoningEffort.rawValue
+    }
+
+    /// Preserve the local X-High preference while presenting the equivalent
+    /// native High selection when the user temporarily switches providers.
+    private var effectiveReasoningEffort: ReasoningEffort {
+        guard reasoningEffort == .xhigh else { return reasoningEffort }
+        switch chatStore.activeBackend {
+        case .llamaServer, .foundationApple:
+            return .xhigh
+        case .foundationServe, .premium, .codex:
+            return .high
+        }
+    }
+
+    /// X-High is a local prompt policy, not a value sent to remote providers.
+    /// Keep their existing Low/Medium/High menu stable even after the shared
+    /// preference was previously selected for Llama or Apple On-Device.
+    private var reasoningEffortOptions: [ReasoningEffort] {
+        switch chatStore.activeBackend {
+        case .llamaServer, .foundationApple:
+            ReasoningEffort.allCases
+        case .foundationServe, .premium, .codex:
+            ReasoningEffort.allCases.filter { $0 != .xhigh }
+        }
     }
 
     // MARK: - Send Button
@@ -476,32 +561,37 @@ struct InputFieldView: View {
         Button {
             sendComposerInput()
         } label: {
-            Image(systemName: chatStore.busy ? "stop.fill" : "arrow.up")
+            Image(systemName: "arrow.up")
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.regular)
         .clipShape(Circle())
         .disabled(
-            !chatStore.busy
-                && (
-                    composer.messageText
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                        .isEmpty
-                    || commandRouter.isIncompleteSkillCommand(composer.messageText)
+            composer.messageText
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+                || (
+                    commandRouter.isIncompleteSkillCommand(composer.messageText)
                     || commandRouter.isIncompleteTaskCommand(composer.messageText)
                     || (
                         !chatStore.activeProfileCanSend
                             && !commandRouter.isLocalCommand(composer.messageText)
                     )
                 )
-        )
-        .keyboardShortcut(.return, modifiers: [])
+            )
         .help(sendButtonHelp)
     }
 
     private func sendComposerInput() {
         if chatStore.busy {
-            Task { await chatStore.interrupt() }
+            let text = composer.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !commandRouter.isLocalCommand(text),
+                  !commandRouter.isIncompleteSkillCommand(text),
+                  !commandRouter.isIncompleteTaskCommand(text) else {
+                chatStore.showSteeringUnavailableMessage()
+                return
+            }
+            enqueueComposerSteering()
             return
         }
         let text = composer.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -526,8 +616,45 @@ struct InputFieldView: View {
         }
     }
 
+    private func enqueueComposerSteering() {
+        let text = composer.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        let generation = composer.editGeneration
+        Task {
+            let result = await chatStore.enqueueSteering(text)
+            guard case .accepted = result,
+                  composer.editGeneration == generation else { return }
+            composer.reset()
+        }
+    }
+
+    private var stopButton: some View {
+        Button {
+            Task { await chatStore.interrupt() }
+        } label: {
+            Image(systemName: "stop.fill")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+        .clipShape(Circle())
+        .help("Stop response")
+    }
+
+    private var queueButton: some View {
+        Button("Queue") {
+            enqueueComposerSteering()
+        }
+        .buttonStyle(.borderless)
+        .disabled(
+            composer.messageText
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+        )
+        .help("Queue steering for the next controlled step")
+    }
+
     private var sendButtonHelp: String {
-        if chatStore.busy { return "Stop response" }
+        if chatStore.busy { return "Queue steering" }
         if !chatStore.activeProfileCanSend
             && !commandRouter.isLocalCommand(composer.messageText) {
             return "Wait for Codex to connect or sign in first"

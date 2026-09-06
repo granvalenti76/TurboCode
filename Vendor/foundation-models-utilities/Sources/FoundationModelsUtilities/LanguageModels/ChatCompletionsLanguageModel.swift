@@ -787,6 +787,11 @@ private struct ChatCompletionsClient {
         try container.encode(compactText, forKey: .content)
       } else if !hasToolCalls && !content.isEmpty {
         try container.encode(content, forKey: .content)
+      } else if role == .assistant && !hasToolCalls {
+        // Reasoning-only and empty transcript entries still need a content
+        // field: compatible servers reject assistant messages containing
+        // neither content nor tool calls. Preserve reasoning separately.
+        try container.encode("", forKey: .content)
       }
 
       try container.encodeIfPresent(toolCalls, forKey: .toolCalls)

@@ -6,6 +6,61 @@ import Testing
 @MainActor
 @Suite("Dynamic profiles")
 struct DynamicProfileTests {
+    @Test("Worker roles persist and legacy profiles keep stable destinations")
+    func workerRoleMigration() throws {
+        let worker = ProfileWorkerConfiguration(name: "Visual", modelID: .llama,
+            roleDescription: "Maps and rendering")
+        let decoded = try JSONDecoder().decode(ProfileWorkerConfiguration.self,
+            from: JSONEncoder().encode(worker))
+        #expect(decoded.roleDescription == "Maps and rendering")
+        var legacy = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(worker)) as? [String: Any])
+        legacy.removeValue(forKey: "roleDescription")
+        let old = try JSONDecoder().decode(ProfileWorkerConfiguration.self,
+            from: JSONSerialization.data(withJSONObject: legacy))
+        #expect(old.roleDescription == nil)
+        let profile = UserDynamicProfile(name: "Legacy", baseModelID: .codex,
+            toolIDs: ["delegate_task"])
+        #expect(profile.resolvedWorkers(fallback: "llama").first?.id ==
+            profile.resolvedWorkers(fallback: "llama").first?.id)
+        let validated = try UserDynamicProfile(name: "Team", baseModelID: .codex,
+            workers: [worker], toolIDs: ["delegate_task"]).validated()
+        #expect(validated.workers.first?.roleDescription == "Maps and rendering")
+    }
+
+    @Test("Codex preserves four mixed worker slots")
+    func codexFourWorkerOverride() throws {
+        let workers = [ProfileBaseModelID.llama, .onDevice, .llama, .onDevice]
+            .enumerated().map { index, model in
+                ProfileWorkerConfiguration(name: "Worker \(index + 1)", modelID: model, toolIDs: [])
+            }
+        let profile = try UserDynamicProfile(
+            name: "Codex team", baseModelID: .codex,
+            workers: workers, toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        ).validated()
+        #expect(profile.usesDelegation)
+        #expect(profile.resolvedWorkers(fallback: "llama").map(\.modelID) ==
+            [.llama, .onDevice, .llama, .onDevice])
+    }
+
+    @Test("Codex default capabilities match the bridge and support delegation overrides")
+    func codexDefaultMatchesBridge() {
+        let settings = SettingsStore()
+        let viewModel = SkillsViewModel()
+        let option = viewModel.modelOption(for: .codex, settings: settings)
+        #expect(viewModel.modelOptions(settings: settings).contains { $0.id == .codex })
+        #expect(option.defaultToolIDs.subtracting([.loadSkill]) ==
+            CodexTurboCodeToolBridge.capabilityIDs(
+                agentTuning: settings.agentTuning, includesDelegation: false
+            ))
+        #expect(option.compatibleToolIDs.contains(.delegateTask))
+        #expect(!option.defaultToolIDs.contains(.delegateTask))
+        for model in ProfileBaseModelID.profileCases {
+            let candidate = viewModel.modelOption(for: model, settings: settings)
+            #expect(candidate.compatibleToolIDs.contains(.safariMCP) ==
+                settings.agentTuning.experimental.safariMCPEnabled)
+        }
+    }
+
     @Test("Persists explicit tools and skills")
     func roundTripsProfile() throws {
         let root = try makeRoot()
@@ -348,6 +403,75 @@ struct DynamicProfileTests {
         #expect(viewModel.draft?.toolIDs.contains(ToolCapabilityID.readFile.rawValue) == true)
     }
 
+    @Test("Agent outline exposes only executable profile roles")
+    func agentOutlineMirrorsDelegationRuntime() {
+        let viewModel = SkillsViewModel()
+        let direct = UserDynamicProfile(
+            name: "Direct",
+            baseModelID: .onDevice
+        )
+        let delegated = UserDynamicProfile(
+            name: "Coordinator",
+            baseModelID: .deepseek,
+            workerModelID: ProfileBaseModelID.llama.rawValue,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+
+        let directNodes = viewModel.agentNodes(
+            for: direct,
+            fallbackWorkerID: ProfileBaseModelID.deepseek.rawValue
+        )
+        let delegatedNodes = viewModel.agentNodes(
+            for: delegated,
+            fallbackWorkerID: ProfileBaseModelID.deepseek.rawValue
+        )
+
+        #expect(directNodes.map(\.id) == [.primary])
+        #expect(directNodes.first?.subtitle == "Agent · On-device")
+        #expect(delegatedNodes.first?.id == .primary)
+        #expect(delegatedNodes.count == 2)
+        if let lastID = delegatedNodes.last?.id,
+           case .worker = lastID {
+            // The worker identity is profile-owned and remains stable after
+            // the legacy projection is materialized by the editor.
+        } else {
+            Issue.record("Expected a worker node")
+        }
+        #expect(delegatedNodes.last?.subtitle == "Subagent · Llama")
+        #expect(delegatedNodes.last?.depth == 1)
+    }
+
+    @Test("Profiles persist independent remote and on-device workers")
+    func multipleWorkersRoundTrip() throws {
+        let workers = [
+            ProfileWorkerConfiguration(
+                name: "Llama A",
+                modelID: .llama,
+                toolIDs: [ToolCapabilityID.readFile.rawValue]
+            ),
+            ProfileWorkerConfiguration(
+                name: "Private Scout",
+                modelID: .onDevice,
+                toolIDs: []
+            )
+        ]
+        let profile = UserDynamicProfile(
+            name: "Parallel",
+            baseModelID: .deepseek,
+            workers: workers,
+            toolIDs: [ToolCapabilityID.delegateTask.rawValue]
+        )
+
+        let decoded = try JSONDecoder().decode(
+            UserDynamicProfile.self,
+            from: JSONEncoder().encode(profile)
+        )
+
+        #expect(decoded.workers == workers)
+        #expect(decoded.resolvedWorkers(fallback: "llama").count == 2)
+        #expect(ProfileBaseModelID.workerCases.contains(.onDevice))
+    }
+
     @Test("Profile validation repairs delegated sampling and worker invariants")
     func validationRepairsDelegatedProfileInvariants() throws {
         let blankWorker = UserDynamicProfile(
@@ -368,10 +492,9 @@ struct DynamicProfileTests {
         let blankResult = try blankWorker.validated()
         let invalidResult = try invalidWorker.validated()
 
-        // Nil remains the compatibility signal for profiles that should use
-        // the global worker preference, while an explicit stale ID is repaired
-        // to the same default used when delegation is newly enabled.
-        #expect(blankResult.workerModelID == nil)
+        // Validation materializes version-3 worker slots and synchronizes the
+        // first-slot compatibility projection for older runtime readers.
+        #expect(blankResult.workerModelID == ProfileBaseModelID.llama.rawValue)
         #expect(invalidResult.workerModelID == ProfileBaseModelID.llama.rawValue)
         #expect(!blankResult.greedyMode)
         #expect(!invalidResult.greedyMode)
@@ -419,9 +542,9 @@ struct DynamicProfileTests {
 
     @Test("Profile option families enforce supported coordinator routes")
     func profileOptionFamiliesAreScoped() {
-        #expect(ProfileBaseModelID.builtInCases == [.onDevice, .llama, .deepseek])
+        #expect(ProfileBaseModelID.builtInCases == [.onDevice, .llama, .deepseek, .codex])
         #expect(ProfileBaseModelID.coordinatorCases == [.onDevice, .llama, .deepseek, .codex])
-        #expect(ProfileBaseModelID.workerCases == [.llama, .deepseek])
+        #expect(ProfileBaseModelID.workerCases == [.onDevice, .llama, .deepseek])
         #expect(!ProfileBaseModelID.workerCases.contains(.codex))
     }
 
@@ -611,7 +734,9 @@ struct DynamicProfileTests {
         }
         let names = instructions.toolDefinitions.map { $0.name }
         #expect(names.contains("file_system"))
-        #expect(names.contains("ripgrep"))
+        // Search is an explicit opt-in capability for the standalone profile;
+        // its absence here proves the direct tool surface remains bounded.
+        #expect(!names.contains("ripgrep"))
         #expect(names.contains("swift_package_manager"))
         #expect(!names.contains("toggle_skill"))
         // DeepSeek depends on a fixed direct tool surface so otherwise equal

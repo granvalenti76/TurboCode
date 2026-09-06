@@ -5,14 +5,6 @@ import SwiftUI
 struct WorkbenchSplitView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
-    @State private var hoveredToolbarButton: ToolbarButtonID?
-
-    private enum ToolbarButtonID: Hashable {
-        case editorialDesk
-        case delegatedTask
-        case terminal
-        case changes
-    }
 
     private let sidebarWidth: Double = 268
     private let mainMinWidth: Double = 520
@@ -83,6 +75,11 @@ struct WorkbenchSplitView: View {
         .sheet(item: diffPatchReviewBinding) { presentation in
             DiffPatchReviewSheet(patch: presentation.patch)
         }
+        // Transcript inspection belongs to the window-level conversation
+        // document, not to a recycled row inside the lazy message timeline.
+        .sheet(item: transcriptSheetBinding) { presentation in
+            TranscriptSheet(threadID: presentation.id)
+        }
         .onChange(of: chatStore.leftSidebarCollapsed, initial: true) { _, collapsed in
             let target: NavigationSplitViewVisibility = collapsed ? .detailOnly : .all
             guard columnVisibility != target else { return }
@@ -106,72 +103,91 @@ struct WorkbenchSplitView: View {
             }
         }
         .toolbar {
-            // Keep the three workbench surfaces together like Notes' centered
-            // mode control. Native Liquid Glass owns the translucency and
-            // edge treatment; each action still delegates to existing state.
-            ToolbarItem(placement: .principal) {
-                HStack(spacing: 4) {
-                    toolbarPillButton(
-                        id: .editorialDesk,
-                        icon: "newspaper",
-                        label: "Editorial desk",
-                        help: chatStore.workspaceRoot.isEmpty
-                            ? "Choose a workspace to open the editorial desk"
-                            : "Open editorial desk",
-                        isActive: chatStore.editorialDeskPresentation != nil,
-                        isDisabled: chatStore.workspaceRoot.isEmpty
-                    ) {
-                        chatStore.presentEditorialDesk()
-                    }
+            // Expose each control to the native toolbar so macOS owns symbol
+            // sizing, spacing, and Liquid Glass grouping. Fixed label frames
+            // and outer padding inflate the group inside the unified title bar.
+            ToolbarItemGroup(placement: .principal) {
+                Button {
+                    chatStore.presentEditorialDesk()
+                } label: {
+                    Label("Editorial desk", systemImage: "doc.richtext")
+                }
+                .labelStyle(.iconOnly)
+                .disabled(chatStore.workspaceRoot.isEmpty)
+                .help(chatStore.workspaceRoot.isEmpty
+                    ? "Choose a workspace to open the editorial desk"
+                    : "Open editorial desk")
 
-                    toolbarPillButton(
-                        id: .delegatedTask,
-                        icon: "person.2",
-                        label: "Delegated task activity",
-                        help: chatStore.rightPanelMode == .activity
-                            ? "Hide delegated task activity"
-                            : "Show delegated task activity",
-                        isActive: chatStore.rightPanelMode == .activity
-                    ) {
-                        chatStore.toggleRightPanel(.activity)
-                    }
-
-                    toolbarPillButton(
-                        id: .terminal,
-                        icon: chatStore.terminalPresented ? "terminal.fill" : "terminal",
-                        label: chatStore.terminalPresented
-                            ? "Close project terminal"
-                            : "Open project terminal",
-                        help: chatStore.workspaceRoot.isEmpty
-                            ? "Choose a workspace to open its terminal"
-                            : chatStore.terminalPresented
-                                ? "Close project terminal"
-                                : "Open project terminal",
-                        isActive: chatStore.terminalPresented,
-                        isDisabled: chatStore.workspaceRoot.isEmpty || chatStore.route != .chat
-                    ) {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            chatStore.toggleTerminal()
+                // These surfaces can remain open independently. Native toggles
+                // express their state without a custom selection background or
+                // the mutually exclusive behavior of a segmented picker.
+                Toggle(isOn: Binding(
+                    get: { chatStore.rightPanelMode == .activity },
+                    set: { isPresented in
+                        if isPresented != (chatStore.rightPanelMode == .activity) {
+                            chatStore.toggleRightPanel(.activity)
                         }
                     }
+                )) {
+                    Label("Delegated task activity", systemImage: "point.3.connected.trianglepath.dotted")
                 }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 5)
+                .toggleStyle(.button)
+                .labelStyle(.iconOnly)
+                .help(chatStore.rightPanelMode == .activity
+                    ? "Hide delegated task activity"
+                    : "Show delegated task activity")
+
+                Toggle(isOn: Binding(
+                    get: { chatStore.terminalPresented },
+                    set: { isPresented in
+                        if isPresented != chatStore.terminalPresented {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                chatStore.toggleTerminal()
+                            }
+                        }
+                    }
+                )) {
+                    Label("Project terminal", systemImage: "terminal")
+                }
+                .toggleStyle(.button)
+                .labelStyle(.iconOnly)
+                .disabled(chatStore.workspaceRoot.isEmpty || chatStore.route != .chat)
+                .help(chatStore.workspaceRoot.isEmpty
+                    ? "Choose a workspace to open its terminal"
+                    : chatStore.terminalPresented
+                        ? "Close project terminal"
+                        : "Open project terminal")
             }
 
-            ToolbarItem(placement: .primaryAction) {
-                toolbarPillButton(
-                    id: .changes,
-                    icon: "sidebar.right",
-                    label: "Changes",
-                    help: chatStore.rightPanelMode == .changes
-                        ? "Hide changes"
-                        : "Show changes",
-                    isActive: chatStore.rightPanelMode == .changes
-                ) {
-                    chatStore.toggleRightPanel(.changes)
+            // Match the central group with native sizing and glass. Transcript
+            // opens a sheet; Changes is a persistent inspector visibility state.
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    chatStore.presentTranscript()
+                } label: {
+                    Label("Show transcript", systemImage: "text.document")
                 }
-                .padding(5)
+                .labelStyle(.iconOnly)
+                .disabled(chatStore.activeThreadId == nil || chatStore.route != .chat)
+                .help(chatStore.activeThreadId == nil
+                    ? "Start a conversation to inspect its transcript"
+                    : "Show transcript")
+
+                Toggle(isOn: Binding(
+                    get: { chatStore.rightPanelMode == .changes },
+                    set: { isPresented in
+                        if isPresented != (chatStore.rightPanelMode == .changes) {
+                            chatStore.toggleRightPanel(.changes)
+                        }
+                    }
+                )) {
+                    Label("Changes", systemImage: "sidebar.right")
+                }
+                .toggleStyle(.button)
+                .labelStyle(.iconOnly)
+                .help(chatStore.rightPanelMode == .changes
+                    ? "Hide changes"
+                    : "Show changes")
             }
         }
         // The workbench is the reusable UI composition boundary used by the
@@ -216,42 +232,6 @@ struct WorkbenchSplitView: View {
         )
     }
 
-    private func toolbarPillButton(
-        id: ToolbarButtonID,
-        icon: String,
-        label: String,
-        help: String,
-        isActive: Bool,
-        isDisabled: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        let isHovered = hoveredToolbarButton == id && !isDisabled
-
-        return Button(action: action) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
-                .frame(width: 34, height: 34)
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(isActive ? Color.primary : Color.secondary)
-        .background(
-            isActive
-                ? Color.accentColor.opacity(0.14)
-                : isHovered
-                    ? Color.primary.opacity(0.10)
-                    : .clear,
-            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-        )
-        .animation(.easeOut(duration: 0.12), value: isHovered)
-        .disabled(isDisabled)
-        .onHover { hovering in
-            hoveredToolbarButton = hovering && !isDisabled ? id : nil
-        }
-        .help(help)
-        .accessibilityLabel(label)
-        .accessibilityAddTraits(isActive ? .isSelected : [])
-    }
-
     private var diffPatchReviewBinding: Binding<DiffPatchReviewPresentation?> {
         Binding(
             get: { chatStore.diffPatchReviewPresentation },
@@ -278,6 +258,19 @@ struct WorkbenchSplitView: View {
         )
     }
 
+    private var transcriptSheetBinding: Binding<TranscriptSheetPresentation?> {
+        Binding(
+            get: { chatStore.transcriptSheetPresentation },
+            set: { newValue in
+                if newValue == nil {
+                    chatStore.dismissTranscript()
+                } else {
+                    chatStore.transcriptSheetPresentation = newValue
+                }
+            }
+        )
+    }
+
 }
 
 private struct CustomProfilesSheet: View {
@@ -299,6 +292,11 @@ private struct CustomProfilesSheet: View {
             Divider()
             SkillsView()
         }
-        .frame(minWidth: 960, idealWidth: 1080, minHeight: 580, idealHeight: 680)
+        .frame(
+            minWidth: 1_160,
+            idealWidth: 1_280,
+            minHeight: 640,
+            idealHeight: 760
+        )
     }
 }
