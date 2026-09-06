@@ -555,7 +555,8 @@ final class ModelRuntimeStore {
                     : reasoningEffort(for: remote),
                 temperature: worker.modelID == .onDevice
                     ? nil
-                    : temperature(for: remote)
+                    : temperature(for: remote),
+                roleDescription: worker.roleDescription
             )
         }
     }

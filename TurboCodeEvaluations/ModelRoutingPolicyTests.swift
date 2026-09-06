@@ -4,6 +4,25 @@ import Testing
 
 @Suite("Model routing policy")
 struct ModelRoutingPolicyTests {
+    @Test("Coordinator catalogs are dynamic and delegation-scoped")
+    func promptWorkerCatalog() {
+        let worker = AgentTaskWorkerDescriptor(id: "visual", name: "Visual",
+            model: "Llama", roleDescription: "Maps and rendering", toolNames: ["read_file"])
+        for role in [TurboCodeSystemPromptRole.standalone, .codex] {
+            let prompt = TurboCodeSystemPromptBuilder.build(.init(role: role, backend: .codex,
+                workspaceRoot: "", agentTuning: .default, toolIDs: [.delegateTask],
+                toolNames: ["delegate_task"], availableSkills: [], workspaceInstructions: nil,
+                workers: [worker]))
+            #expect(prompt.contains("Maps and rendering"))
+            #expect(prompt.contains("worker_id"))
+            #expect(prompt.contains("final QA only after prerequisites"))
+        }
+        let direct = TurboCodeSystemPromptBuilder.build(.init(role: .standalone, backend: .codex,
+            workspaceRoot: "", agentTuning: .default, toolIDs: [], toolNames: [],
+            availableSkills: [], workspaceInstructions: nil, workers: [worker]))
+        #expect(!direct.contains("Worker catalog"))
+    }
+
     @Test("Selected runtime state deterministically assigns model roles")
     func selectedStateAssignsRoles() {
         let coordinator = UserDynamicProfile(

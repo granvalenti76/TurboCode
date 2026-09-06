@@ -6,6 +6,27 @@ import Testing
 @MainActor
 @Suite("Dynamic profiles")
 struct DynamicProfileTests {
+    @Test("Worker roles persist and legacy profiles keep stable destinations")
+    func workerRoleMigration() throws {
+        let worker = ProfileWorkerConfiguration(name: "Visual", modelID: .llama,
+            roleDescription: "Maps and rendering")
+        let decoded = try JSONDecoder().decode(ProfileWorkerConfiguration.self,
+            from: JSONEncoder().encode(worker))
+        #expect(decoded.roleDescription == "Maps and rendering")
+        var legacy = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(worker)) as? [String: Any])
+        legacy.removeValue(forKey: "roleDescription")
+        let old = try JSONDecoder().decode(ProfileWorkerConfiguration.self,
+            from: JSONSerialization.data(withJSONObject: legacy))
+        #expect(old.roleDescription == nil)
+        let profile = UserDynamicProfile(name: "Legacy", baseModelID: .codex,
+            toolIDs: ["delegate_task"])
+        #expect(profile.resolvedWorkers(fallback: "llama").first?.id ==
+            profile.resolvedWorkers(fallback: "llama").first?.id)
+        let validated = try UserDynamicProfile(name: "Team", baseModelID: .codex,
+            workers: [worker], toolIDs: ["delegate_task"]).validated()
+        #expect(validated.workers.first?.roleDescription == "Maps and rendering")
+    }
+
     @Test("Codex preserves four mixed worker slots")
     func codexFourWorkerOverride() throws {
         let workers = [ProfileBaseModelID.llama, .onDevice, .llama, .onDevice]

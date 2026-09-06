@@ -725,7 +725,13 @@ struct SkillsView: View {
                         }
                         GridRow {
                             Text("Role").foregroundStyle(.secondary)
-                            Text("Coding subagent")
+                            TextField(
+                                "Responsibilities and when to choose this worker",
+                                text: workerRoleBinding(workerID: worker.id),
+                                axis: .vertical
+                            )
+                            .lineLimit(2...4)
+                            .textFieldStyle(.roundedBorder)
                         }
                         GridRow {
                             Text("Model").foregroundStyle(.secondary)
@@ -1590,6 +1596,18 @@ struct SkillsView: View {
         Binding(
             get: { viewModel.draft?.greedyMode ?? false },
             set: { value in viewModel.updateDraft { $0.greedyMode = value } }
+        )
+    }
+
+    private func workerRoleBinding(workerID: UUID) -> Binding<String> {
+        Binding(
+            get: { viewModel.draft?.workers.first { $0.id == workerID }?.roleDescription ?? "" },
+            set: { value in
+                viewModel.updateDraft { profile in
+                    guard let index = profile.workers.firstIndex(where: { $0.id == workerID }) else { return }
+                    profile.workers[index].roleDescription = value.isEmpty ? nil : value
+                }
+            }
         )
     }
 

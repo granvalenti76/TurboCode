@@ -76,7 +76,8 @@ struct AgentTaskInvokerFactoryTests {
                 remoteModel: .fallbackLlama,
                 toolIDs: [.readFile],
                 reasoningEffort: .medium,
-                temperature: 0.25
+                temperature: 0.25,
+                roleDescription: "Implement data contracts"
             )
         ]
         let invoker = ModelSessionFactory.makeDelegateInvoker(
@@ -86,6 +87,10 @@ struct AgentTaskInvokerFactoryTests {
         let pool = try #require(invoker as? ConfiguredAgentTaskPoolInvoker)
 
         #expect(pool.maximumConcurrentTasks == 2)
+        #expect(pool.workerCatalog.map(\.id) == workers.map { $0.id.uuidString })
+        #expect(pool.workerCatalog[0].toolNames.isEmpty)
+        #expect(pool.workerCatalog[1].toolNames == ["read_file"])
+        #expect(pool.workerCatalog[1].roleDescription == "Implement data contracts")
         #expect(pool.invokers[0].worker?.role == .microtaskOnDevice)
         #expect(pool.invokers[0].context.temperature == nil)
         // The system model remains the authority: unsupported reasoning

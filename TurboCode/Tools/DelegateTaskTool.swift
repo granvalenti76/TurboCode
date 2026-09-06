@@ -13,6 +13,8 @@ struct DelegateTaskArguments {
     var mode: String = "coding"
     /// Concrete outcome the worker must produce.
     var goal: String
+    /// Exact ID from the worker catalog; omit for automatic routing.
+    var worker_id: String? = nil
 
     func envelope() throws -> AgentTaskEnvelope {
         guard let workerMode = DelegatedWorkerMode(rawValue: mode) else {
@@ -30,7 +32,8 @@ struct DelegateTaskArguments {
             // coordinator-authored prose masquerading as policy.
             suggestedScope: [],
             verificationRequest: .none,
-            budget: .default
+            budget: .default,
+            workerID: worker_id
         )
     }
 }
@@ -46,11 +49,42 @@ nonisolated enum DelegateTaskAdapterError: LocalizedError, Sendable, Equatable {
     }
 }
 
+/// Profile-owned routing facts shared by native and Codex coordinators.
+nonisolated struct AgentTaskWorkerDescriptor: Codable, Sendable, Hashable {
+    let id: String
+    let name: String
+    let model: String
+    let roleDescription: String?
+    let toolNames: [String]
+}
+
+nonisolated enum AgentTaskRoutingError: LocalizedError, Sendable {
+    case unknownWorker(String)
+    case workerBusy(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unknownWorker(let id): "Unknown worker_id '\(id)'. Choose an ID from the worker catalog."
+        case .workerBusy(let id): "Worker '\(id)' is busy. No other worker was substituted. Retry after its completion."
+        }
+    }
+
+    func result(for envelope: AgentTaskEnvelope) -> AgentTaskResult {
+        (try? AgentTaskResult(
+            taskID: envelope.taskID, attemptID: envelope.attemptID,
+            outcome: .failed, technicalSummary: errorDescription ?? "Worker routing failed.",
+            failureReason: .workerFailed, failureDetail: errorDescription,
+            workerID: envelope.workerID
+        )) ?? .invalidContractResult(taskID: envelope.taskID, attemptID: envelope.attemptID)
+    }
+}
+
 /// Provider-neutral worker invocation used by both coordinator adapters.
 nonisolated protocol AgentTaskInvoking: Sendable {
     /// Admission capacity promised by this invocation graph. Provider
     /// endpoints are not probed; profile worker slots are the authority.
     var maximumConcurrentTasks: Int { get }
+    var workerCatalog: [AgentTaskWorkerDescriptor] { get }
 
     @MainActor
     func invoke(_ envelope: AgentTaskEnvelope) async -> AgentTaskResult
@@ -58,6 +92,13 @@ nonisolated protocol AgentTaskInvoking: Sendable {
 
 nonisolated extension AgentTaskInvoking {
     var maximumConcurrentTasks: Int { 1 }
+    var workerCatalog: [AgentTaskWorkerDescriptor] { [] }
+
+    func validateDestination(_ workerID: String?) throws {
+        if let workerID, !workerCatalog.contains(where: { $0.id == workerID }) {
+            throw AgentTaskRoutingError.unknownWorker(workerID)
+        }
+    }
 }
 
 /// Optional extension of the invocation boundary for adapters that can carry
@@ -102,11 +143,14 @@ nonisolated struct DelegatedTaskReceipt: Codable, Sendable, Hashable {
     let status: String
     let taskID: String
     let attemptID: String
+    /// Requested destination; actual executor is included in the terminal result.
+    let workerID: String?
 
     init(envelope: AgentTaskEnvelope) {
         status = "accepted"
         taskID = envelope.taskID
         attemptID = envelope.attemptID
+        workerID = envelope.workerID
     }
 }
 
@@ -199,6 +243,8 @@ nonisolated struct ConfiguredAgentTaskInvoker: TurnAwareAgentTaskInvoking,
     let events: AgentTaskRunnerEvents
     let coordinator: AgentActivityAgent?
     let worker: AgentActivityAgent?
+    let descriptor: AgentTaskWorkerDescriptor?
+    var workerCatalog: [AgentTaskWorkerDescriptor] { descriptor.map { [$0] } ?? [] }
     let activityChanged: @Sendable (AgentActivityRuntimeEvent) async -> Void
 
     init(
@@ -207,6 +253,7 @@ nonisolated struct ConfiguredAgentTaskInvoker: TurnAwareAgentTaskInvoking,
         events: AgentTaskRunnerEvents,
         coordinator: AgentActivityAgent? = nil,
         worker: AgentActivityAgent? = nil,
+        descriptor: AgentTaskWorkerDescriptor? = nil,
         activityChanged: @escaping @Sendable (
             AgentActivityRuntimeEvent
         ) async -> Void = { _ in }
@@ -216,6 +263,7 @@ nonisolated struct ConfiguredAgentTaskInvoker: TurnAwareAgentTaskInvoking,
         self.events = events
         self.coordinator = coordinator
         self.worker = worker
+        self.descriptor = descriptor
         self.activityChanged = activityChanged
     }
 
@@ -241,6 +289,7 @@ nonisolated struct ConfiguredAgentTaskInvoker: TurnAwareAgentTaskInvoking,
             events: AgentTaskRunnerEvents(toolFinished: toolFinished),
             coordinator: coordinator,
             worker: worker,
+            descriptor: descriptor,
             activityChanged: activityChanged
         )
     }
@@ -255,6 +304,9 @@ nonisolated struct ConfiguredAgentTaskInvoker: TurnAwareAgentTaskInvoking,
         _ envelope: AgentTaskEnvelope,
         parentTurnID: TurnID?
     ) async -> AgentTaskResult {
+        if let workerID = envelope.workerID, descriptor?.id != workerID {
+            return AgentTaskRoutingError.unknownWorker(workerID).result(for: envelope)
+        }
         let scopedEnvelope = (try? envelope.withParentTurnID(
             parentTurnID ?? envelope.parentTurnID
         )) ?? envelope
@@ -289,7 +341,7 @@ nonisolated struct ConfiguredAgentTaskInvoker: TurnAwareAgentTaskInvoking,
             envelope: scopedEnvelope,
             context: context,
             events: events
-        )
+        ).attributed(to: descriptor)
         if coordinator != nil, worker != nil {
             // Every runner path returns a typed terminal result, including
             // timeout and cancellation, which also closes any active tool.
@@ -301,7 +353,8 @@ nonisolated struct ConfiguredAgentTaskInvoker: TurnAwareAgentTaskInvoking,
 
 /// Fair lease manager for independently configured worker slots. A repeated
 /// Llama worker therefore becomes a real concurrent request slot rather than
-/// a decorative profile row; surplus calls wait for the first free slot.
+/// a decorative profile row. Automatic calls wait for a free slot; explicit
+/// destinations fail when busy, preserving the coordinator's routing choice.
 actor AgentTaskWorkerPool {
     nonisolated struct Lease: Sendable {
         let index: Int
@@ -317,7 +370,17 @@ actor AgentTaskWorkerPool {
         available = Array(invokers.indices)
     }
 
-    func acquire() async -> Lease {
+    func acquire(workerID: String? = nil) async throws -> Lease {
+        if let workerID {
+            guard let index = invokers.firstIndex(where: { $0.descriptor?.id == workerID }) else {
+                throw AgentTaskRoutingError.unknownWorker(workerID)
+            }
+            guard let position = available.firstIndex(of: index) else {
+                throw AgentTaskRoutingError.workerBusy(workerID)
+            }
+            available.remove(at: position)
+            return Lease(index: index, invoker: invokers[index])
+        }
         if let index = available.first {
             available.removeFirst()
             return Lease(index: index, invoker: invokers[index])
@@ -351,6 +414,7 @@ nonisolated struct ConfiguredAgentTaskPoolInvoker: TurnAwareAgentTaskInvoking,
     }
 
     var maximumConcurrentTasks: Int { invokers.count }
+    var workerCatalog: [AgentTaskWorkerDescriptor] { invokers.flatMap(\.workerCatalog) }
 
     @MainActor
     func invoke(_ envelope: AgentTaskEnvelope) async -> AgentTaskResult {
@@ -362,7 +426,14 @@ nonisolated struct ConfiguredAgentTaskPoolInvoker: TurnAwareAgentTaskInvoking,
         _ envelope: AgentTaskEnvelope,
         parentTurnID: TurnID?
     ) async -> AgentTaskResult {
-        let lease = await pool.acquire()
+        let lease: AgentTaskWorkerPool.Lease
+        do {
+            lease = try await pool.acquire(workerID: envelope.workerID)
+        } catch let error as AgentTaskRoutingError {
+            return error.result(for: envelope)
+        } catch {
+            return .invalidContractResult(taskID: envelope.taskID, attemptID: envelope.attemptID)
+        }
         let result = await lease.invoker.invoke(
             envelope,
             parentTurnID: parentTurnID
@@ -379,6 +450,7 @@ nonisolated struct ConfiguredAgentTaskPoolInvoker: TurnAwareAgentTaskInvoking,
         BackgroundPooledAgentTaskInvoker(
             pool: pool,
             maximumConcurrentTasks: maximumConcurrentTasks,
+            workerCatalog: workerCatalog,
             toolFinished: toolFinished
         )
     }
@@ -389,6 +461,7 @@ nonisolated struct ConfiguredAgentTaskPoolInvoker: TurnAwareAgentTaskInvoking,
 nonisolated struct BackgroundPooledAgentTaskInvoker: TurnAwareAgentTaskInvoking {
     let pool: AgentTaskWorkerPool
     let maximumConcurrentTasks: Int
+    let workerCatalog: [AgentTaskWorkerDescriptor]
     let toolFinished: @Sendable (AgentTaskToolOutputEvent) async -> Void
 
     @MainActor
@@ -401,7 +474,14 @@ nonisolated struct BackgroundPooledAgentTaskInvoker: TurnAwareAgentTaskInvoking 
         _ envelope: AgentTaskEnvelope,
         parentTurnID: TurnID?
     ) async -> AgentTaskResult {
-        let lease = await pool.acquire()
+        let lease: AgentTaskWorkerPool.Lease
+        do {
+            lease = try await pool.acquire(workerID: envelope.workerID)
+        } catch let error as AgentTaskRoutingError {
+            return error.result(for: envelope)
+        } catch {
+            return .invalidContractResult(taskID: envelope.taskID, attemptID: envelope.attemptID)
+        }
         let isolated = lease.invoker.isolatedCopy(toolFinished: toolFinished)
         let result = await isolated.invoke(
             envelope,
@@ -445,7 +525,8 @@ struct DelegateTaskTool: Tool {
             "This profile has one worker slot, so only one delegated task may run at a time."
         }
         return """
-        Delegate one goal to the configured worker. Use coding when the worker
+        Delegate one goal. Set worker_id to an exact catalog ID to select a worker,
+        or omit it for the first free slot. A busy target is not replaced. Use coding when the worker
         must inspect or change the workspace: it receives the complete worker
         tool bundle configured by the active profile. Use text when the worker only needs to
         return prose: it receives no tools.
@@ -459,6 +540,7 @@ struct DelegateTaskTool: Tool {
 
     func call(arguments: DelegateTaskArguments) async throws -> String {
         let envelope = try arguments.envelope()
+        try invoker.validateDestination(envelope.workerID)
         let parentTurnID = await currentTurnID()
         if let backgroundSubmission {
             let receipt = try await backgroundSubmission(

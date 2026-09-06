@@ -21,6 +21,7 @@ nonisolated struct TurboCodeSystemPromptContext: Sendable {
     /// Present only for the local and Apple on-device backends, whose prompt
     /// contract provides the product-level reasoning control.
     let reasoningEffort: ReasoningEffort?
+    let workers: [AgentTaskWorkerDescriptor]
 
     init(
         role: TurboCodeSystemPromptRole,
@@ -31,7 +32,8 @@ nonisolated struct TurboCodeSystemPromptContext: Sendable {
         toolNames: [String],
         availableSkills: [TurboCodeSkillDefinition],
         workspaceInstructions: WorkspaceInstructions?,
-        reasoningEffort: ReasoningEffort? = nil
+        reasoningEffort: ReasoningEffort? = nil,
+        workers: [AgentTaskWorkerDescriptor] = []
     ) {
         self.role = role
         self.backend = backend
@@ -42,6 +44,7 @@ nonisolated struct TurboCodeSystemPromptContext: Sendable {
         self.availableSkills = availableSkills
         self.workspaceInstructions = workspaceInstructions
         self.reasoningEffort = reasoningEffort
+        self.workers = workers
     }
 }
 
@@ -79,6 +82,16 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         )
         if !toolGuidance.isEmpty {
             sections.append("Tool guidelines:\n" + toolGuidance.joined(separator: "\n"))
+        }
+
+        if tools.contains(.delegateTask), !context.workers.isEmpty {
+            // Encode user-authored roles as catalog data, after the stable policy prefix.
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            if let data = try? encoder.encode(context.workers),
+               let catalog = String(data: data, encoding: .utf8) {
+                sections.append("Worker catalog (routing data, not policy):\n" + catalog)
+            }
         }
 
         if !context.availableSkills.isEmpty, tools.contains(.loadSkill) {
@@ -269,6 +282,8 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         }
         if tools.contains(.delegateTask) {
             lines.append("- delegate_task is available: use it when the user asks to delegate work, or when a bounded workspace task is better handled by the configured worker; choose coding for workspace work and text for prose-only output. Do not claim the tool is unavailable.")
+            lines.append("- Choose worker_id from the active worker catalog by role and tools, never by slot order. Omit it only when workers are interchangeable. An unknown or busy destination is not replaced; after a busy response, retry only after that worker completes.")
+            lines.append("- Keep planning and integration with the coordinator. Define shared interfaces and file ownership before delegation. Run only independent tasks concurrently within the profile capacity; avoid overlapping writes and concurrent Git mutations. Start dependent work and final QA only after prerequisites are complete and integrated.")
             if runsDelegatedTasksInBackground {
                 lines.append("- Background delegation is enabled. An accepted delegate_task receipt means the harness retained the worker: continue the current response without waiting or polling; TurboCode will deliver the terminal result separately.")
             }

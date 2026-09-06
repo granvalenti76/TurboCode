@@ -89,7 +89,8 @@ nonisolated enum CodexTurboCodeToolBridge {
         agentTuning: AgentTuningConfig,
         dynamicTools: [CodexDynamicToolSpec],
         availableSkills: [TurboCodeSkillDefinition],
-        workspaceInstructions: WorkspaceInstructions?
+        workspaceInstructions: WorkspaceInstructions?,
+        workers: [AgentTaskWorkerDescriptor] = []
     ) -> String {
         // Codex owns its agent loop, but receives the same product identity,
         // safety rules, and optional project instructions as native sessions.
@@ -102,7 +103,8 @@ nonisolated enum CodexTurboCodeToolBridge {
                 toolIDs: dynamicTools.compactMap { capabilityID(for: $0.name) },
                 toolNames: dynamicTools.map(\.name),
                 availableSkills: availableSkills,
-                workspaceInstructions: workspaceInstructions
+                workspaceInstructions: workspaceInstructions,
+                workers: workers
             )
         )
         return dynamicTools.contains(where: {
@@ -477,6 +479,7 @@ nonisolated enum CodexTurboCodeToolBridge {
             }
             let arguments = try delegateTaskArguments(call)
             let envelope = try arguments.envelope()
+            try delegationInvoker.validateDestination(envelope.workerID)
             if let backgroundTaskSubmission {
                 let receipt = try await backgroundTaskSubmission(
                     envelope,
@@ -633,7 +636,8 @@ nonisolated enum CodexTurboCodeToolBridge {
     ) throws -> DelegateTaskArguments {
         return DelegateTaskArguments(
             mode: optionalString("mode", in: call) ?? "coding",
-            goal: try requiredString("goal", in: call)
+            goal: try requiredString("goal", in: call),
+            worker_id: optionalString("worker_id", in: call)
         )
     }
 
@@ -851,11 +855,12 @@ nonisolated enum CodexTurboCodeToolBridge {
     /// text-only worker. Runtime policy remains application-owned.
     private static let delegateTaskSpecification = CodexDynamicToolSpec(
         name: "delegate_task",
-        description: "Delegate one goal to the configured worker. The result is either terminal or an accepted background receipt; after acceptance, do not wait or poll because TurboCode reports completion through its harness.",
+        description: "Delegate one goal. Set worker_id to an exact worker catalog ID, or omit it for automatic routing. Busy targets are not replaced. The result is either terminal or an accepted background receipt; after acceptance, do not wait or poll because TurboCode reports completion through its harness.",
         inputSchema: objectSchema(
             properties: [
                 "mode": enumSchema(["coding", "text"]),
-                "goal": stringSchema("Complete task to send to the worker.")
+                "goal": stringSchema("Complete task to send to the worker."),
+                "worker_id": nullableStringSchema()
             ],
             required: ["mode", "goal"]
         )

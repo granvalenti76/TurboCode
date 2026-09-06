@@ -177,7 +177,7 @@ Undo.
 
 ### `delegate_task`
 
-Sends one goal to the configured worker with a coarse execution mode:
+Sends one goal to a worker with optional `worker_id` and a coarse execution mode:
 `coding` or `text`. Coding workers receive the complete worker tool bundle
 configured by the active profile and can use those tools throughout the active
 workspace. Text workers receive no session tools and return prose to the
@@ -189,7 +189,15 @@ user-facing response.
 The coordinator does not invent per-file scopes, per-tool allowlists, tool-call
 budgets, or verification policies during a model turn. Any future granular
 worker restrictions must be explicit profile configuration, while the current
-contract stays intentionally limited to the coding/text choice.
+contract exposes only the goal, coding/text choice, and optional destination.
+
+Use the exact `worker_id` from the active profile catalog to select a worker
+by role and tools. Without it, the harness chooses a free slot. Unknown or busy
+targets are reported without substituting another worker. Retry a busy target
+after completion, without polling. Background acceptance records the requested
+destination; terminal results include the actual worker ID and name. Keep
+planning and integration with the coordinator, parallelize independent file
+scopes within profile capacity, and run final QA after integration.
 
 ### `call_powerful_model`
 

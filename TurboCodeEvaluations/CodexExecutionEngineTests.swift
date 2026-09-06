@@ -4,6 +4,22 @@ import Testing
 
 @Suite("Codex execution engine ownership")
 struct CodexExecutionEngineTests {
+    @Test("Worker role changes refresh the Codex catalog")
+    func workerCatalogChangesRebuildThread() async throws {
+        let transport = RecordingCodexTransport()
+        let engine = CodexExecutionEngine(client: transport)
+        let first = CatalogTaskInvoker(role: "Visual maps")
+        let second = CatalogTaskInvoker(role: "Final review")
+        _ = try await engine.runTurn(request: request(invoker: first), events: .none)
+        _ = try await engine.runTurn(request: request(invoker: first), events: .none)
+        #expect(await transport.threadStartCount == 1)
+        _ = try await engine.runTurn(request: request(invoker: second), events: .none)
+        #expect(await transport.threadStartCount == 2)
+        let instructions = await transport.developerInstructions
+        #expect(instructions.first?.contains("Visual maps") == true)
+        #expect(instructions.last?.contains("Final review") == true)
+    }
+
     @Test("Changing an override rebuilds the advertised tool surface")
     func overrideChangesRebuildThread() async throws {
         let transport = RecordingCodexTransport()
@@ -90,7 +106,7 @@ struct CodexExecutionEngineTests {
         #expect(await transport.resolvedApprovalIDs == ["codex-7"])
     }
 
-    private func request(allowsTools: Bool = true, selectedToolIDs: Set<ToolCapabilityID>? = nil) -> CodexTurnRequest {
+    private func request(allowsTools: Bool = true, selectedToolIDs: Set<ToolCapabilityID>? = nil, invoker: (any AgentTaskInvoking)? = nil) -> CodexTurnRequest {
         CodexTurnRequest(
             turnID: TurnID(rawValue: "engine-turn"),
             turboThreadID: "turbo-thread",
@@ -102,7 +118,7 @@ struct CodexExecutionEngineTests {
             modelID: CodexAppServerClient.lunaModelID,
             reasoningEffort: .medium,
             persistsModelPreference: true,
-            delegationInvoker: nil,
+            delegationInvoker: invoker,
             selectedToolIDs: selectedToolIDs,
             allowsTools: allowsTools
         )
@@ -219,4 +235,16 @@ private actor RecordingCodexTransport: CodexAppServerServing {
         _ call: CodexDynamicToolCall,
         result: CodexDynamicToolResult
     ) async throws {}
+}
+
+private struct CatalogTaskInvoker: AgentTaskInvoking {
+    let role: String
+    var workerCatalog: [AgentTaskWorkerDescriptor] {
+        [.init(id: "worker", name: "Worker", model: "Llama", roleDescription: role, toolNames: [])]
+    }
+
+    @MainActor
+    func invoke(_ envelope: AgentTaskEnvelope) async -> AgentTaskResult {
+        .invalidContractResult(taskID: envelope.taskID, attemptID: envelope.attemptID)
+    }
 }

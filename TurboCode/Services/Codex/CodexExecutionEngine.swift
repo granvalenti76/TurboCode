@@ -141,6 +141,7 @@ actor CodexExecutionEngine {
         let modelID: String
         let skillNames: [String]
         let pluginToolNames: [String]
+        let workers: [AgentTaskWorkerDescriptor]
     }
 
     private let client: any CodexAppServerServing
@@ -265,7 +266,8 @@ actor CodexExecutionEngine {
             skillNames: request.allowsTools
                 ? request.availableSkills.map(\.name)
                 : [],
-            pluginToolNames: pluginTools.map { $0.snapshot.id.codexName }
+            pluginToolNames: pluginTools.map { $0.snapshot.id.codexName },
+            workers: includesDelegation ? request.delegationInvoker?.workerCatalog ?? [] : []
         )
         let threadID: String
         if let existing = threadIDs[request.turboThreadID],
@@ -292,7 +294,8 @@ actor CodexExecutionEngine {
                     agentTuning: request.agentTuning,
                     dynamicTools: dynamicTools,
                     availableSkills: request.availableSkills,
-                    workspaceInstructions: workspaceInstructions
+                    workspaceInstructions: workspaceInstructions,
+                    workers: configuration.workers
                 )
             } else {
                 dynamicTools = []

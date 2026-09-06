@@ -5,6 +5,7 @@ import FoundationModelsUtilities
 nonisolated struct ModelWorkerConfiguration: Sendable, Hashable {
     let id: UUID
     let name: String
+    let roleDescription: String?
     let modelID: ProfileBaseModelID
     let remoteModel: RemoteModelConfig?
     let toolIDs: Set<ToolCapabilityID>?
@@ -18,10 +19,12 @@ nonisolated struct ModelWorkerConfiguration: Sendable, Hashable {
         remoteModel: RemoteModelConfig?,
         toolIDs: Set<ToolCapabilityID>?,
         reasoningEffort: ReasoningEffort? = nil,
-        temperature: Double? = nil
+        temperature: Double? = nil,
+        roleDescription: String? = nil
     ) {
         self.id = id
         self.name = name
+        self.roleDescription = roleDescription
         self.modelID = modelID
         self.remoteModel = remoteModel
         self.toolIDs = toolIDs
@@ -330,11 +333,15 @@ nonisolated enum ModelSessionFactory {
             selectedIDs: configuration.activeDynamicProfile?.resolvedToolIDs
         )
         let usesExclusiveToolSelection = configuration.activeDynamicProfile != nil
+        let delegateInvoker = standalonePlan.contains(.delegateTask)
+            ? makeDelegateInvoker(configuration: configuration, events: events)
+            : nil
         let instructions = systemPrompt(
             for: configuration,
             role: routing.role == .microtaskOnDevice ? .microtask : .standalone,
             backend: configuration.backend,
-            plan: standalonePlan
+            plan: standalonePlan,
+            workers: delegateInvoker?.workerCatalog ?? []
         )
         var standaloneTools = toolInstances(
             for: standalonePlan,
@@ -351,15 +358,12 @@ nonisolated enum ModelSessionFactory {
                 ?? 32_768,
             receiptRegistry: events.toolReceiptRegistry
         )
-        if standalonePlan.contains(.delegateTask) {
+        if let delegateInvoker {
             // Profiles that explicitly include delegate_task receive the
             // production structured coordinator adapter; direct profiles do not.
             standaloneTools.append(
                 DelegateTaskTool(
-                    invoker: makeDelegateInvoker(
-                        configuration: configuration,
-                        events: events
-                    ),
+                    invoker: delegateInvoker,
                     currentTurnID: events.currentTurnID,
                     backgroundSubmission: configuration.agentTuning.orchestrator
                         .runsDelegatedTasksInBackground
@@ -825,6 +829,12 @@ nonisolated enum ModelSessionFactory {
                 modelName: worker.name,
                 role: isOnDevice ? .microtaskOnDevice : .codingWorker
             ),
+            descriptor: AgentTaskWorkerDescriptor(
+                id: worker.id.uuidString, name: worker.name,
+                model: worker.modelID.displayName,
+                roleDescription: worker.roleDescription,
+                toolNames: plan.registeredIDs.map(\.runtimeName).sorted()
+            ),
             activityChanged: events.agentActivityChanged
         )
     }
@@ -899,7 +909,8 @@ nonisolated enum ModelSessionFactory {
         for configuration: ModelSessionConfiguration,
         role: TurboCodeSystemPromptRole,
         backend: ModelBackend,
-        plan: ModelToolPlan?
+        plan: ModelToolPlan?,
+        workers: [AgentTaskWorkerDescriptor] = []
     ) -> String {
         // Consume the resolved plan rather than the requested profile so the
         // prompt never advertises a capability rejected by the model's tier.
@@ -921,7 +932,8 @@ nonisolated enum ModelSessionFactory {
                 reasoningEffort: promptReasoningEffort(
                     for: configuration,
                     backend: backend
-                )
+                ),
+                workers: workers
             )
         )
     }

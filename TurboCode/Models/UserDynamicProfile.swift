@@ -13,7 +13,7 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
     /// in a custom profile. The built-in on-device profile remains direct;
     /// opting into this capability is an explicit override choice.
     static let delegationCases: [Self] = [.onDevice, .llama, .deepseek, .codex]
-    /// Models available when creating or editing a custom profile. Codex is
+    /// Models available when creating or editing a custom profile. Codex
     /// also supports overrides with App Server and reasoning configuration.
     static let profileCases: [Self] = [.onDevice, .llama, .deepseek, .codex]
     /// Compatibility alias for integrations that still describe the route as
@@ -64,6 +64,8 @@ nonisolated struct ProfileWorkerConfiguration: Identifiable, Codable, Hashable, 
 
     let id: UUID
     var name: String
+    /// Optional routing guidance; older profiles remain general-purpose.
+    var roleDescription: String?
     var modelID: ProfileBaseModelID
     /// `nil` means the complete compatible worker catalog. An empty array is
     /// intentionally text-only and therefore differs from the default.
@@ -73,10 +75,12 @@ nonisolated struct ProfileWorkerConfiguration: Identifiable, Codable, Hashable, 
         id: UUID = UUID(),
         name: String,
         modelID: ProfileBaseModelID,
-        toolIDs: [String]? = nil
+        toolIDs: [String]? = nil,
+        roleDescription: String? = nil
     ) {
         self.id = id
         self.name = name
+        self.roleDescription = roleDescription
         self.modelID = modelID
         self.toolIDs = toolIDs?.uniqued()
     }
@@ -278,6 +282,8 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
             ?? .llama
         return [
             ProfileWorkerConfiguration(
+                // Legacy profiles need a stable destination before materialization.
+                id: id,
                 name: "Delegated Worker",
                 modelID: modelID,
                 toolIDs: workerToolIDs
@@ -414,7 +420,8 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
                     id: validID,
                     name: trimmedName.isEmpty ? "Worker \(index + 1)" : trimmedName,
                     modelID: modelID,
-                    toolIDs: toolIDs
+                    toolIDs: toolIDs,
+                    roleDescription: worker.roleDescription?.trimmingCharacters(in: .whitespacesAndNewlines)
                 )
             }
         if value.usesDelegation, value.workers.isEmpty {

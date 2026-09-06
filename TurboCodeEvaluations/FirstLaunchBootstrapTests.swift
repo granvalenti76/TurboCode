@@ -266,7 +266,7 @@ struct FirstLaunchBootstrapTests {
 
         let ids = viewModel.modelOptions(settings: SettingsStore()).map(\.id)
 
-        #expect(ids == [.onDevice, .llama, .deepseek])
+        #expect(ids == [.onDevice, .llama, .deepseek, .codex])
     }
 
     private func makeEmptyHome() throws -> URL {

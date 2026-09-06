@@ -6,6 +6,76 @@ import Testing
 @MainActor
 @Suite("Coordinator adapter spikes")
 struct CoordinatorAdapterSpikeTests {
+    @Test("Explicit destinations preserve affinity in foreground and background")
+    func explicitWorkerAffinity() async throws {
+        let probe = WorkerConcurrencyProbe()
+        let descriptors = (1...4).map {
+            AgentTaskWorkerDescriptor(id: "worker-\($0)", name: "Worker \($0)",
+                model: "Llama", roleDescription: "Role \($0)", toolNames: [])
+        }
+        let invokers = descriptors.map {
+            ConfiguredAgentTaskInvoker(runner: ProbedTaskRunner(probe: probe),
+                context: makeContext(), events: .init(), descriptor: $0)
+        }
+        let pool = ConfiguredAgentTaskPoolInvoker(invokers: invokers)
+        let envelope = try DelegateTaskArguments(goal: "Review the result", worker_id: "worker-4").envelope()
+        let result = await pool.invoke(envelope)
+        #expect(result.workerID == "worker-4")
+        #expect(result.workerName == "Worker 4")
+        let background = pool.backgroundIsolated(toolFinished: { _ in })
+        #expect(background.workerCatalog == descriptors)
+        let detached = await background.invoke(envelope)
+        #expect(detached.workerID == "worker-4")
+        let automatic = await pool.invoke(try makeArguments().envelope())
+        #expect(automatic.workerID == "worker-1")
+    }
+
+    @Test("Busy or unknown targets never borrow another free slot")
+    func targetedPoolRejectsSubstitution() async throws {
+        let probe = WorkerConcurrencyProbe()
+        let invokers = (1...2).map { index in
+            ConfiguredAgentTaskInvoker(runner: ProbedTaskRunner(probe: probe),
+                context: makeContext(), events: .init(),
+                descriptor: .init(id: "worker-\(index)", name: "Worker \(index)",
+                    model: "Llama", roleDescription: nil, toolNames: []))
+        }
+        let pool = AgentTaskWorkerPool(invokers: invokers)
+        let targeted = try await pool.acquire(workerID: "worker-2")
+        #expect(targeted.index == 1)
+        await #expect(throws: AgentTaskRoutingError.self) {
+            _ = try await pool.acquire(workerID: "worker-2")
+        }
+        await #expect(throws: AgentTaskRoutingError.self) {
+            _ = try await pool.acquire(workerID: "missing")
+        }
+        let automatic = try await pool.acquire()
+        #expect(automatic.index == 0)
+        await pool.release(targeted)
+        let retry = try await pool.acquire(workerID: "worker-2")
+        #expect(retry.index == 1)
+        await pool.release(retry)
+        await pool.release(automatic)
+    }
+
+    @Test("Both coordinator adapters forward the same explicit destination")
+    func adaptersForwardDestination() async throws {
+        let invoker = RecordingTaskInvoker()
+        let tool = DelegateTaskTool(invoker: invoker)
+        _ = try await tool.call(arguments: DelegateTaskArguments(goal: "Review", worker_id: "qa"))
+        #expect(invoker.lastEnvelope?.workerID == "qa")
+        let call = CodexDynamicToolCall(rpcID: .integer(77), callID: "route",
+            tool: "delegate_task", arguments: .object([
+                "mode": .string("coding"), "goal": .string("Review"),
+                "worker_id": .string("qa")
+            ]))
+        _ = try await CodexTurboCodeToolBridge.execute(call, workspaceRoot: "/workspace", workspaceName: nil,
+            agentTuning: .default, delegationInvoker: invoker)
+        #expect(invoker.lastEnvelope?.workerID == "qa")
+        await #expect(throws: AgentTaskRoutingError.self) {
+            _ = try await tool.call(arguments: DelegateTaskArguments(goal: "Review", worker_id: "missing"))
+        }
+    }
+
     @Test("DeepSeek custom profiles expose only explicitly selected delegation")
     func deepSeekProfileSelectsStructuredDelegation() {
         let profile = UserDynamicProfile(
@@ -313,6 +383,9 @@ struct CoordinatorAdapterSpikeTests {
 
 @MainActor
 private final class RecordingTaskInvoker: AgentTaskInvoking {
+    let workerCatalog = [AgentTaskWorkerDescriptor(
+        id: "qa", name: "QA", model: "Llama", roleDescription: "Review", toolNames: []
+    )]
     private(set) var lastEnvelope: AgentTaskEnvelope?
 
     func invoke(_ envelope: AgentTaskEnvelope) async -> AgentTaskResult {
