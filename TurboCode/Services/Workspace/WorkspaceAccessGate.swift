@@ -74,7 +74,9 @@ actor WorkspaceAccessGate {
         }
     ) async -> Bool {
         let workspace = Self.canonical(URL(fileURLWithPath: workspaceRoot)).path
-        let summary = "Allow \(tool) to access paths outside the active workspace?\nWorkspace: \(workspace)\nTarget: \(targetDescription)"
+        let summary = command == nil
+            ? "Allow \(tool) to access paths outside the active workspace?\nWorkspace: \(workspace)\nTarget: \(targetDescription)"
+            : "Allow \(tool) to rerun this complete command with external filesystem access?\nWorkspace: \(workspace)\nAccess denied: \(targetDescription)"
         let request = PendingToolApproval(
             id: UUID().uuidString,
             operation: "workspace.external.\(tool)",

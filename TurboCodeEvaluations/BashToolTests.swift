@@ -11,7 +11,11 @@ struct BashToolTests {
         let sdkRoot = workspace.appendingPathComponent("sdk", isDirectory: true)
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: workspace) }
-        let tool = BashTool(workspaceRoot: workspace.path, sdkRoot: sdkRoot.path)
+        let tool = BashTool(
+            workspaceRoot: workspace.path,
+            sdkRoot: sdkRoot.path,
+            sandboxViolationMonitor: TestBashSandboxMonitor()
+        )
 
         let output = try await tool.call(
             arguments: BashArguments(
@@ -33,7 +37,10 @@ struct BashToolTests {
             .appendingPathComponent("TurboCode-BashPWD-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: workspace, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: workspace) }
-        let tool = BashTool(workspaceRoot: workspace.path)
+        let tool = BashTool(
+            workspaceRoot: workspace.path,
+            sandboxViolationMonitor: TestBashSandboxMonitor()
+        )
 
         let output = try await tool.call(
             arguments: BashArguments(
@@ -82,7 +89,8 @@ struct BashToolTests {
         let tool = BashTool(
             workspaceRoot: workspace.path,
             sdkRoot: workspace.path,
-            homeDirectory: shellHome.path
+            homeDirectory: shellHome.path,
+            sandboxViolationMonitor: TestBashSandboxMonitor()
         )
         let output = try await tool.call(
             // The test requests SwiftPM's own sandbox policy explicitly; Bash
@@ -134,6 +142,18 @@ struct BashToolTests {
             workspaceRoot: root.appendingPathComponent("deleted-workspace", isDirectory: true).path,
             sdkRoot: root.appendingPathComponent("sdk", isDirectory: true).path,
             homeDirectory: shellHome.path,
+            sandboxViolationMonitor: TestBashSandboxMonitor(observations: [
+                .complete,
+                BashSandboxMonitorObservation(
+                    violations: [BashSandboxViolation(
+                        operation: "file-write-data",
+                        path: pluginRoot.appendingPathComponent("reportistica").path
+                    )],
+                    isComplete: true,
+                    diagnostic: nil
+                ),
+                .complete
+            ]),
             requestApproval: { request in
                 await approvals.increment()
                 return await request.action()
@@ -167,7 +187,7 @@ struct BashToolTests {
         ) == "plugin")
     }
 
-    @Test("Bash asks the host before accessing an external path")
+    @Test("Bash asks the host before reading an external path with hidden stderr")
     func bashRequiresHostApprovalOutsideAllowedRoots() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("TurboCode-BashApproval-\(UUID().uuidString)", isDirectory: true)
@@ -176,6 +196,7 @@ struct BashToolTests {
         let shellHome = root.appendingPathComponent("home", isDirectory: true)
 
         let externalFile = URL(fileURLWithPath: "/private/tmp/TurboCode-BashApproval-\(UUID().uuidString).txt")
+        try "approved".write(to: externalFile, atomically: true, encoding: .utf8)
         defer {
             try? FileManager.default.removeItem(at: root)
             try? FileManager.default.removeItem(at: externalFile)
@@ -193,15 +214,16 @@ struct BashToolTests {
         )
         let output = try await tool.call(
             arguments: BashArguments(
-                command: "printf approved > \(externalFile.path)",
+                command: "cat \(externalFile.path) 2>/dev/null; echo \"exit: $?\"",
                 timeoutSeconds: 10,
                 maxOutputCharacters: 4_000
             )
         )
 
-        #expect(output.contains("Exit code: 0"))
+        #expect(output.contains("First attempt:"))
+        #expect(output.contains("Approved complete rerun:"))
+        #expect(output.contains("approved"))
         #expect(await approvals.value == 1)
-        #expect(try String(contentsOf: externalFile, encoding: .utf8) == "approved")
     }
 }
 

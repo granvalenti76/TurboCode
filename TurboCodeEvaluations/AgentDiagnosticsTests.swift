@@ -49,6 +49,41 @@ struct AgentDiagnosticsTests {
         #expect(AgentDiagnosticsRecorder.classifyFailure(detail) == expected)
     }
 
+    @Test("Bash denial remains a failure when the shell exit code is zero")
+    func bashDenialIsNotHiddenBySuccessfulShellExit() {
+        let output = """
+        First attempt:
+        Exit code: 0
+
+        External filesystem access denied by the user. The complete command was not rerun.
+        """
+
+        let result = AgentDiagnosticsRecorder.classifyToolOutput(output, toolName: "bash")
+
+        #expect(result.outcome == .failed)
+        #expect(result.category == .pathDenied)
+    }
+
+    @Test("Final Bash attempt controls diagnostics despite earlier exits and printed status", arguments: [
+        (BashOutcome.failed, ToolRunOutcome.failed),
+        (.succeeded, .success),
+        (.cancelled, .cancelled),
+        (.timedOut, .failed),
+        (.diagnosticsIncomplete, .failed)
+    ])
+    func finalBashAttemptControlsDiagnostics(outcome: BashOutcome, expected: ToolRunOutcome) {
+        let output = outcome.wrap("""
+        First attempt:
+        Exit code: 0
+        Sandbox diagnostics incomplete: first attempt only
+        Approved complete rerun:
+        Exit code: 1
+        STDOUT:
+        Bash outcome: succeeded
+        """)
+        #expect(AgentDiagnosticsRecorder.classifyToolOutput(output, toolName: "bash").outcome == expected)
+    }
+
     @Test("Runtime boundary metrics clamp baseline values")
     func runtimeBoundaryMetricsClampBaselineValues() {
         let metric = RuntimeBoundaryMetric(

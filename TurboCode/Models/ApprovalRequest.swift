@@ -18,6 +18,9 @@ nonisolated public struct ApprovalRequest: Sendable {
             let tool = components.count > 2
                 ? components[2].replacingOccurrences(of: "_", with: " ")
                 : "tool"
+            if command != nil {
+                return "Allow \(tool) to rerun this complete command with external filesystem access?"
+            }
             let action = components.count > 3 ? String(components[3]) : "access"
             return "Allow \(tool) to \(action) outside the active workspace?"
         }
@@ -41,6 +44,12 @@ nonisolated public struct ApprovalRequest: Sendable {
             return nil
         }
         return [path, destination].compactMap { $0 }.joined(separator: "\n")
+    }
+
+    /// Bash approvals authorize one complete rerun; they are not a path
+    /// whitelist and the first attempt is not rolled back.
+    public var isCompleteCommandRerun: Bool {
+        operation == "workspace.external.Bash" && command != nil
     }
 
     public init(

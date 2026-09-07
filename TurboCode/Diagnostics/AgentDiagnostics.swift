@@ -748,6 +748,19 @@ actor AgentDiagnosticsRecorder {
         _ text: String,
         toolName: String
     ) -> (outcome: ToolRunOutcome, category: AgentFailureCategory?) {
+        // Bash's host-authored header describes the final attempt. Earlier
+        // errors, zero exits and strings printed by the command are evidence,
+        // not the source of truth for whether an approved recovery succeeded.
+        if toolName == "bash", let outcome = BashOutcome.read(from: text) {
+            switch outcome {
+            case .succeeded: return (.success, nil)
+            case .failed: return (.failed, .commandFailed)
+            case .cancelled: return (.cancelled, .interrupted)
+            case .timedOut: return (.failed, .timeout)
+            case .pathDenied: return (.failed, .pathDenied)
+            case .diagnosticsIncomplete: return (.failed, .toolExecution)
+            }
+        }
         let lower = text.lowercased()
         if lower.contains("turbocode_approval_required") {
             return (.approvalRequired, nil)
@@ -758,7 +771,12 @@ actor AgentDiagnosticsRecorder {
             || lower.hasPrefix("edit transaction failed:")
             || (lower.contains("\"errormessage\":")
                 && !lower.contains("\"errormessage\":null"))
-            || (toolName == "bash" && !lower.contains("exit code: 0"))
+            || (toolName == "bash" && (
+                !lower.contains("exit code: 0")
+                || lower.contains("external filesystem access denied")
+                || lower.contains("complete command was not rerun")
+                || lower.contains("sandbox diagnostics incomplete")
+            ))
         guard explicitFailure else { return (.success, nil) }
         return (.failed, classifyFailure(text))
     }
