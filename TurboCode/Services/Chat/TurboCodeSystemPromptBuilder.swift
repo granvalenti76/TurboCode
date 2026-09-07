@@ -124,7 +124,7 @@ nonisolated enum TurboCodeSystemPromptBuilder {
                 \(context.workspaceRoot)
                 This workspace is the default working directory.
                 You can create and maintain TurboCode TypeScript plugins autonomously.
-                The SDK, documentation, and examples are installed in ~/.turbocode/sdk;
+                The SDK, documentation, and examples are installed in ~/.turbocode/sdk/@granvalenti/turbocode-sdk;
                 inspect them to learn the current plugin contract.
                 TypeScript plugins are installed in ~/.turbocode/plugins.
                 """)

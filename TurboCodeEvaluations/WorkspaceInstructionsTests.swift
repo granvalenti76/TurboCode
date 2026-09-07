@@ -131,7 +131,7 @@ struct WorkspaceInstructionsTests {
         )
 
         #expect(prompt.contains("create and maintain TurboCode TypeScript plugins autonomously"))
-        #expect(prompt.contains("documentation, and examples are installed in ~/.turbocode/sdk"))
+        #expect(prompt.contains("documentation, and examples are installed in ~/.turbocode/sdk/@granvalenti/turbocode-sdk;"))
         #expect(prompt.contains("inspect them to learn the current plugin contract"))
         #expect(prompt.contains("plugins are installed in ~/.turbocode/plugins"))
         #expect(!prompt.contains("TURBOCODE_"))
