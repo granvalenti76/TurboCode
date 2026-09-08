@@ -119,6 +119,14 @@ TurboCode/ (macOS 27, Swift 6, ~18k LOC)
 
 Treat `PRODUCT.md` as the contract. Preserve safety and reviewability while minimizing latency and context. Follow Apple's macOS Human Interface Guidelines with native, accessible SwiftUI or AppKit conventions. Avoid desktop automation, broad multi-language IDE features, and unrestricted shell behavior.
 
+### Commercial CyberDeck boundary
+
+CyberDeck is a commercial/private product package. CyberDeck-only source, assets,
+documentation, and evaluations must stay on the `cyberdeck` branch and must not be
+published to GitHub or copied into the public `dev` branch. Keep the public branch
+buildable without relying on CyberDeck files; when work crosses the boundary, check
+the current branch before staging or sharing changes.
+
 ## Build, Test, and Development Commands
 
 - `open TurboCode.xcodeproj` opens the project in Xcode. Select the `TurboCode` scheme to run the app.
