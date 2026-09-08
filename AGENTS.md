@@ -121,11 +121,13 @@ Treat `PRODUCT.md` as the contract. Preserve safety and reviewability while mini
 
 ### Commercial CyberDeck boundary
 
-CyberDeck is a commercial/private product package. CyberDeck-only source, assets,
-documentation, and evaluations must stay on the `cyberdeck` branch and must not be
-published to GitHub or copied into the public `dev` branch. Keep the public branch
-buildable without relying on CyberDeck files; when work crosses the boundary, check
-the current branch before staging or sharing changes.
+The composer-based CyberDeck Experience is a commercial/private product package.
+Its source, assets, documentation, and evaluations must stay on the `cyberdeck`
+branch and must not be published to GitHub or copied into the public `dev` branch.
+The existing `AgentActivityCyberdeckView` and `AgentCyberdeck.metal` inspector are
+different: they are an intentional public teaser for open-source customers and
+must remain on `dev`. Keep `dev` buildable without relying on the commercial
+package; check the current branch before staging or sharing changes.
 
 ## Build, Test, and Development Commands
 
