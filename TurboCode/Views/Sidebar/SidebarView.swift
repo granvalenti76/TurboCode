@@ -1,4 +1,20 @@
+import AppKit
 import SwiftUI
+
+/// Samples the desktop behind this column instead of the window's chat surface.
+private struct SidebarWindowBackdrop: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .sidebar
+        view.blendingMode = .behindWindow
+        // Let AppKit adapt to window activation, appearance, and accessibility
+        // preferences. Only the backdrop blends; labels retain their contrast.
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
 
 // MARK: - SidebarView
 
@@ -23,12 +39,18 @@ struct SidebarView: View {
                 utilitiesSection
             }
             .listStyle(.sidebar)
+            // Let the behind-window backdrop remain visible through the list.
             .scrollContentBackground(.hidden)
             .frame(maxHeight: .infinity)
         }
-        // Keep the material scoped to the navigation column so the chat stage
-        // retains its existing dark-mode surface and contrast.
-        .background(.thinMaterial)
+        // Explicit desktop blending replaces the automatic sidebar backdrop
+        // to favor the colors outside the window, including under the titlebar.
+        .background {
+            SidebarWindowBackdrop()
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
         .frame(minWidth: 240)
         .alert("Remove Workspace?", isPresented: workspaceRemovalPresented) {
             Button("Cancel", role: .cancel) {
