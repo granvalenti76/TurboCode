@@ -799,7 +799,9 @@ enum FileSystemError: LocalizedError {
     }
 }
 
-private struct FileSnapshot: Sendable, Equatable {
+/// Captured filesystem metadata is compared inside concurrent approval
+/// closures, so it must not inherit the application's main-actor isolation.
+nonisolated private struct FileSnapshot: Sendable, Equatable {
     let type: String
     let size: UInt64?
     let creationDate: Date?
