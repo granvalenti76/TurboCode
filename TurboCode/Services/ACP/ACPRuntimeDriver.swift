@@ -63,6 +63,24 @@ nonisolated final class ACPRuntimeDriver: ACPAgentDriver, @unchecked Sendable {
         await runtime.cancel(sessionID: sessionID)
     }
 
+    nonisolated func configurationOptions(
+        sessionID: String
+    ) async throws -> [ACPConfigOption] {
+        try await runtime.configurationOptions(sessionID: sessionID)
+    }
+
+    nonisolated func setConfigurationOption(
+        sessionID: String,
+        configID: String,
+        value: MCPJSONValue
+    ) async throws -> [ACPConfigOption] {
+        try await runtime.setConfigurationOption(
+            sessionID: sessionID,
+            configID: configID,
+            value: value
+        )
+    }
+
     private actor State {
         private var sessions: [String: String] = [:]
 
@@ -79,13 +97,16 @@ nonisolated final class ACPRuntimeDriver: ACPAgentDriver, @unchecked Sendable {
 nonisolated enum ACPApplicationRuntimeError: LocalizedError, Equatable, Sendable {
     case sessionNotFound(String)
     case invalidPrompt(String)
+    case invalidConfiguration(String)
     case executionFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .sessionNotFound(let sessionID):
             "ACP session '\(sessionID)' does not exist."
-        case .invalidPrompt(let message), .executionFailed(let message):
+        case .invalidPrompt(let message),
+             .invalidConfiguration(let message),
+             .executionFailed(let message):
             message
         }
     }

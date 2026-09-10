@@ -76,6 +76,17 @@ nonisolated protocol ACPAgentDriver: Sendable {
     ) async throws -> ACPStopReason
 
     func cancel(sessionID: String) async
+
+    func configurationOptions(
+        sessionID: String
+    ) async throws -> [ACPConfigOption]
+
+    func setConfigurationOption(
+        sessionID: String,
+        configID: String,
+        value: MCPJSONValue
+    ) async throws -> [ACPConfigOption]
+
 }
 
 nonisolated extension ACPAgentDriver {
@@ -86,6 +97,22 @@ nonisolated extension ACPAgentDriver {
         requestPermission: @escaping ACPPermissionHandler
     ) async throws -> ACPStopReason {
         try await self.prompt(sessionID: sessionID, prompt: prompt, updates: updates)
+    }
+
+    func configurationOptions(
+        sessionID: String
+    ) async throws -> [ACPConfigOption] {
+        []
+    }
+
+    func setConfigurationOption(
+        sessionID: String,
+        configID: String,
+        value: MCPJSONValue
+    ) async throws -> [ACPConfigOption] {
+        throw ACPProtocolError.invalidParams(
+            "This ACP driver does not expose configuration options."
+        )
     }
 }
 
@@ -111,6 +138,16 @@ nonisolated protocol ACPApplicationRuntime: Sendable {
     ) async throws -> ACPStopReason
 
     func cancel(sessionID: String) async
+
+    func configurationOptions(
+        sessionID: String
+    ) async throws -> [ACPConfigOption]
+
+    func setConfigurationOption(
+        sessionID: String,
+        configID: String,
+        value: MCPJSONValue
+    ) async throws -> [ACPConfigOption]
 }
 
 nonisolated extension ACPApplicationRuntime {
@@ -120,6 +157,22 @@ nonisolated extension ACPApplicationRuntime {
         requestPermission: ACPPermissionHandler
     ) async throws -> ACPStopReason {
         try await run(turn: turn, updates: updates)
+    }
+
+    func configurationOptions(
+        sessionID: String
+    ) async throws -> [ACPConfigOption] {
+        []
+    }
+
+    func setConfigurationOption(
+        sessionID: String,
+        configID: String,
+        value: MCPJSONValue
+    ) async throws -> [ACPConfigOption] {
+        throw ACPProtocolError.invalidParams(
+            "This ACP runtime does not expose configuration options."
+        )
     }
 }
 
@@ -193,4 +246,38 @@ nonisolated enum ACPStopReason: String, Codable, Equatable, Sendable {
     case maxTokens = "max_tokens"
     case maxTurnRequests = "max_turn_requests"
     case refusal
+}
+
+/// A session-level selector exposed through ACP. TurboCode currently exposes
+/// only string-valued `select` options; keeping the wire shape explicit avoids
+/// leaking provider credentials or transport URLs to the client.
+nonisolated struct ACPConfigOptionValue: Sendable, Equatable {
+    let value: String
+    let name: String
+
+    var jsonValue: MCPJSONValue {
+        .object([
+            "value": .string(value),
+            "name": .string(name)
+        ])
+    }
+}
+
+nonisolated struct ACPConfigOption: Sendable, Equatable {
+    let id: String
+    let name: String
+    let category: String
+    let currentValue: String
+    let options: [ACPConfigOptionValue]
+
+    var jsonValue: MCPJSONValue {
+        .object([
+            "id": .string(id),
+            "name": .string(name),
+            "category": .string(category),
+            "type": .string("select"),
+            "currentValue": .string(currentValue),
+            "options": .array(options.map(\.jsonValue))
+        ])
+    }
 }

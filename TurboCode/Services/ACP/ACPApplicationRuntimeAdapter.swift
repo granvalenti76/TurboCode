@@ -13,6 +13,71 @@ nonisolated struct ACPHostSessionConfiguration: Sendable {
     let serverURL: String?
     let codexModelID: String?
     let codexReasoningEffort: CodexReasoningEffort?
+    let selectedModelID: String
+    let availableModels: [ACPModelSelection]
+
+    init(
+        modelConfiguration: ModelSessionConfiguration,
+        modelName: String,
+        workspaceName: String?,
+        serverURL: String?,
+        codexModelID: String?,
+        codexReasoningEffort: CodexReasoningEffort?,
+        selectedModelID: String? = nil,
+        availableModels: [ACPModelSelection] = []
+    ) {
+        self.modelConfiguration = modelConfiguration
+        self.modelName = modelName
+        self.workspaceName = workspaceName
+        self.serverURL = serverURL
+        self.codexModelID = codexModelID
+        self.codexReasoningEffort = codexReasoningEffort
+        self.selectedModelID = selectedModelID
+            ?? modelConfiguration.activeRemoteModel?.id
+            ?? modelConfiguration.backend.rawValue
+        self.availableModels = availableModels
+    }
+
+    var configOptions: [ACPConfigOption] {
+        guard !availableModels.isEmpty else { return [] }
+        return [
+            ACPConfigOption(
+                id: "model",
+                name: "Modello",
+                category: "model",
+                currentValue: selectedModelID,
+                options: availableModels.map {
+                    ACPConfigOptionValue(value: $0.id, name: $0.name)
+                }
+            )
+        ]
+    }
+
+    func applying(model: ACPModelSelection) -> Self {
+        Self(
+            modelConfiguration: model.modelConfiguration,
+            modelName: model.modelName,
+            workspaceName: model.workspaceName,
+            serverURL: model.serverURL,
+            codexModelID: model.codexModelID,
+            codexReasoningEffort: model.codexReasoningEffort,
+            selectedModelID: model.id,
+            availableModels: availableModels
+        )
+    }
+}
+
+/// Complete immutable provider snapshot for one ACP model selector value.
+/// The provider-facing model name is kept separate from the stable ACP ID.
+nonisolated struct ACPModelSelection: Sendable {
+    let id: String
+    let name: String
+    let modelConfiguration: ModelSessionConfiguration
+    let modelName: String
+    let workspaceName: String?
+    let serverURL: String?
+    let codexModelID: String?
+    let codexReasoningEffort: CodexReasoningEffort?
 }
 
 /// Bridges the ACP session driver to TurboCode's existing runtime boundary.
@@ -23,7 +88,9 @@ nonisolated struct ACPHostSessionConfiguration: Sendable {
 /// projection layer.
 nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @unchecked Sendable {
     private let agentRuntime: AgentRuntime
-    private let llmRuntime: LLMRuntime
+    private let makeLLMRuntime: @MainActor @Sendable (
+        ACPHostSessionConfiguration
+    ) -> LLMRuntime
     private let makeConfiguration: @MainActor @Sendable (
         String
     ) -> ACPHostSessionConfiguration
@@ -39,7 +106,23 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
         projector: ACPEventProjector = ACPEventProjector()
     ) {
         self.agentRuntime = agentRuntime
-        self.llmRuntime = llmRuntime
+        self.makeLLMRuntime = { _ in llmRuntime }
+        self.makeConfiguration = makeConfiguration
+        self.projector = projector
+    }
+
+    init(
+        agentRuntime: AgentRuntime,
+        makeLLMRuntime: @escaping @MainActor @Sendable (
+            ACPHostSessionConfiguration
+        ) -> LLMRuntime,
+        makeConfiguration: @escaping @MainActor @Sendable (
+            String
+        ) -> ACPHostSessionConfiguration,
+        projector: ACPEventProjector = ACPEventProjector()
+    ) {
+        self.agentRuntime = agentRuntime
+        self.makeLLMRuntime = makeLLMRuntime
         self.makeConfiguration = makeConfiguration
         self.projector = projector
     }
@@ -50,10 +133,14 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
         mcpServers: [MCPJSONValue]
     ) async throws {
         let configuration = await makeConfiguration(cwd)
+        let llmRuntime = await makeLLMRuntime(configuration)
+        let eventRouter = ACPSessionEventRouter(sessionID: sessionID)
         await state.insert(
             sessionID: sessionID,
             cwd: cwd,
-            configuration: configuration
+            configuration: configuration,
+            llmRuntime: llmRuntime,
+            eventRouter: eventRouter
         )
     }
 
@@ -73,12 +160,42 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
         updates: ACPUpdateChannel,
         requestPermission: @escaping ACPPermissionHandler
     ) async throws -> ACPStopReason {
-        guard let configuration = await state.begin(
+        guard await state.contains(sessionID: turn.sessionID) else {
+            throw ACPApplicationRuntimeError.sessionNotFound(turn.sessionID)
+        }
+        guard let context = await state.begin(
             sessionID: turn.sessionID,
             turnID: turn.turnID
         ) else {
-            throw ACPApplicationRuntimeError.sessionNotFound(turn.sessionID)
+            throw ACPApplicationRuntimeError.executionFailed(
+                "The ACP session already has an active turn."
+            )
         }
+        let configuration = context.configuration
+        let llmRuntime = context.llmRuntime
+        await context.eventRouter.install(
+            turnID: turn.turnID,
+            events: BackendSessionEvents { [agentRuntime, projector] event in
+                // Backend adapters emit `.completed` as a provider lifecycle
+                // notification, but ACP owns terminal settlement after
+                // `LLMRuntime` has released the provider operation. Applying
+                // that event here would try to jump from `.streaming` directly
+                // to `.completed` and would let a stale callback close a newer
+                // turn.
+                guard case .completed = event else {
+                    guard await agentRuntime.apply(event) else { return }
+                    if let update = await projector.update(
+                        for: event,
+                        sessionID: turn.sessionID
+                    ) {
+                        updates.emit(update)
+                    }
+                    return
+                }
+            },
+            requestPermission: requestPermission
+        )
+        var runtimeStarted = false
         do {
             let prompt = try Self.promptText(from: turn.prompt)
             let request = TurnRequest(
@@ -93,28 +210,27 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
                     "The runtime rejected the ACP turn."
                 )
             }
+            guard await agentRuntime.advance(
+                to: .preparing,
+                turnID: turn.turnID
+            ) else {
+                throw ACPApplicationRuntimeError.executionFailed(
+                    "The runtime could not prepare the ACP turn."
+                )
+            }
+            runtimeStarted = true
 
             let resultBox = ResultBox()
-            let events = BackendSessionEvents { [agentRuntime, projector] event in
-                _ = await agentRuntime.apply(event)
-                if let update = await projector.update(
-                    for: event,
-                    sessionID: turn.sessionID
-                ) {
-                    updates.emit(update)
-                }
-            }
+            let events = context.eventRouter.backendEvents
             let modelEvents = Self.modelSessionEvents(
                 sessionID: turn.sessionID,
-                turnID: turn.turnID,
-                events: events,
-                requestPermission: requestPermission
+                eventRouter: context.eventRouter
             )
             let admitted = await agentRuntime.runOperation(turnID: turn.turnID) {
                 let result: BackendSessionResult
                 switch configuration.modelConfiguration.backend {
                 case .codex:
-                    result = await self.llmRuntime.executeCodex(
+                    result = await llmRuntime.executeCodex(
                         request: request,
                         configuration: Self.codexConfiguration(
                             sessionID: turn.sessionID,
@@ -123,24 +239,31 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
                         events: events
                     )
                 default:
-                    let rebuilt = await self.llmRuntime.rebuildFoundationModelsSession(
-                        configuration: configuration.modelConfiguration,
-                        events: modelEvents
-                    )
-                    guard rebuilt else {
-                        await resultBox.store(
-                            BackendSessionResult(
-                                outcome: .failed(
-                                    TurnFailure(
-                                        code: "acp.runtime.busy",
-                                        message: "The provider session is busy."
+                    if context.needsRebuild {
+                        let rebuilt = await llmRuntime.rebuildFoundationModelsSession(
+                            configuration: configuration.modelConfiguration,
+                            events: modelEvents
+                        )
+                        guard rebuilt else {
+                            await resultBox.store(
+                                BackendSessionResult(
+                                    outcome: .failed(
+                                        TurnFailure(
+                                            code: "acp.runtime.busy",
+                                            message: "The provider session is busy."
+                                        )
                                     )
                                 )
                             )
+                            return
+                        }
+                        await self.state.markRuntimeConfiguration(
+                            sessionID: turn.sessionID,
+                            turnID: turn.turnID,
+                            selectedModelID: configuration.selectedModelID
                         )
-                        return
                     }
-                    result = await self.llmRuntime.executeNative(
+                    result = await llmRuntime.executeNative(
                         request: request,
                         configuration: Self.nativeConfiguration(
                             sessionID: turn.sessionID,
@@ -159,8 +282,19 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
                 )
             }
 
-            await finish(turn: turn)
-            switch result.outcome {
+            // Cancellation may be requested while the provider is unwinding.
+            // Prefer the terminal outcome already recorded for this turn so a
+            // late successful result cannot resurrect it.
+            let currentState = await agentRuntime.currentTurnState
+            let outcome = currentState?.id == turn.turnID
+                ? currentState?.outcome ?? result.outcome
+                : result.outcome
+            try await finish(
+                turn: turn,
+                outcome: outcome,
+                eventRouter: context.eventRouter
+            )
+            switch outcome {
             case .succeeded:
                 return .endTurn
             case .cancelled:
@@ -169,96 +303,127 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
                 throw ACPApplicationRuntimeError.executionFailed(failure.message)
             }
         } catch {
-            await finish(turn: turn)
+            if runtimeStarted {
+                _ = await agentRuntime.finish(
+                    with: .failed(
+                        TurnFailure(
+                            code: "acp.runtime.lifecycle",
+                            message: error.localizedDescription,
+                            isRecoverable: true
+                        )
+                    ),
+                    turnID: turn.turnID
+                )
+            }
+            await release(turn: turn, eventRouter: context.eventRouter)
             throw error
         }
     }
 
-    private func finish(turn: ACPApplicationTurn) async {
-        await state.finish(sessionID: turn.sessionID)
+    private func finish(
+        turn: ACPApplicationTurn,
+        outcome: TurnOutcome,
+        eventRouter: ACPSessionEventRouter
+    ) async throws {
+        if let current = await agentRuntime.currentTurnState,
+           current.id == turn.turnID,
+           let currentOutcome = current.outcome {
+            guard currentOutcome == outcome else {
+                throw ACPApplicationRuntimeError.executionFailed(
+                    "The ACP turn has already finished with another outcome."
+                )
+            }
+            await release(turn: turn, eventRouter: eventRouter)
+            return
+        }
+        if case .succeeded = outcome {
+            guard await agentRuntime.advance(
+                to: .settling,
+                turnID: turn.turnID
+            ) else {
+                throw ACPApplicationRuntimeError.executionFailed(
+                    "The runtime could not settle the ACP turn."
+                )
+            }
+        }
+        guard await agentRuntime.finish(with: outcome, turnID: turn.turnID) else {
+            throw ACPApplicationRuntimeError.executionFailed(
+                "The runtime rejected terminal settlement for the ACP turn."
+            )
+        }
+        await release(turn: turn, eventRouter: eventRouter)
+    }
+
+    /// Releases only the session turn captured by this request. The identity
+    /// guard is essential when cancellation or a late provider callback races
+    /// with the next prompt on the same ACP session.
+    private func release(
+        turn: ACPApplicationTurn,
+        eventRouter: ACPSessionEventRouter
+    ) async {
+        await eventRouter.clear(turnID: turn.turnID)
+        await state.finish(
+            sessionID: turn.sessionID,
+            turnID: turn.turnID
+        )
         await projector.finish(turnID: turn.turnID)
     }
 
     func cancel(sessionID: String) async {
-        guard let turnID = await state.turnID(for: sessionID) else { return }
-        await llmRuntime.interrupt(turnID: turnID)
-        _ = await agentRuntime.apply(.cancel(turnID: turnID))
+        guard let active = await state.activeTurn(for: sessionID) else { return }
+        await active.llmRuntime.interrupt(turnID: active.turnID)
         await agentRuntime.cancelAndWaitForOperation()
-        await state.finish(sessionID: sessionID)
+        _ = await agentRuntime.apply(.cancel(turnID: active.turnID))
+        await active.eventRouter.clear(turnID: active.turnID)
+        await state.finish(sessionID: sessionID, turnID: active.turnID)
+        await projector.finish(turnID: active.turnID)
+    }
+
+    func configurationOptions(
+        sessionID: String
+    ) async throws -> [ACPConfigOption] {
+        try await state.configurationOptions(sessionID: sessionID)
+    }
+
+    func setConfigurationOption(
+        sessionID: String,
+        configID: String,
+        value: MCPJSONValue
+    ) async throws -> [ACPConfigOption] {
+        try await state.setConfigurationOption(
+            sessionID: sessionID,
+            configID: configID,
+            value: value
+        )
     }
 
     private static func modelSessionEvents(
         sessionID: String,
-        turnID: TurnID,
-        events: BackendSessionEvents,
-        requestPermission: @escaping ACPPermissionHandler
+        eventRouter: ACPSessionEventRouter
     ) -> ModelSessionEvents {
-        let tools = ToolEventState()
         return ModelSessionEvents(
-            currentTurnID: { turnID },
-            toolStarted: { call, _, _ in
-                await tools.started(call.id)
-                await events.emit(
-                    .toolStarted(
-                        ToolCall(
-                            id: call.id,
-                            turnID: turnID,
-                            name: call.toolName
-                        )
-                    )
+            currentTurnID: {
+                await eventRouter.currentTurnID()
+            },
+            toolStarted: { call, backend, owner in
+                await eventRouter.toolStarted(
+                    call,
+                    backend: backend,
+                    owner: owner
                 )
             },
-            toolFinished: { call, output, _, _ in
-                let startedAt = await tools.take(call.id)
-                let outputText = Self.outputText(from: output)
-                await events.emit(
-                    .toolFinished(
-                        ToolResult(
-                            id: call.id,
-                            turnID: turnID,
-                            status: .succeeded,
-                            output: outputText,
-                            durationMilliseconds: startedAt.map {
-                                max(0, Int(Date().timeIntervalSince($0) * 1_000))
-                            }
-                        )
-                    )
+            toolFinished: { call, output, backend, owner in
+                await eventRouter.toolFinished(
+                    call,
+                    output: output,
+                    backend: backend,
+                    owner: owner
                 )
             },
             delegationChanged: { _ in },
             agentActivityChanged: { _ in },
             requestApproval: { pending in
-                await events.emit(
-                    .approvalRequested(
-                        Approval(
-                            id: pending.id,
-                            turnID: turnID,
-                            toolCallID: pending.id,
-                            operation: pending.operation,
-                            path: pending.path,
-                            destination: pending.destination,
-                            summary: pending.summary
-                        )
-                    )
-                )
-                await ToolApprovalRegistry.shared.registerForExternalHost(pending)
-                let outcome = await requestPermission(
-                    ACPPermissionRequest(
-                        sessionID: sessionID,
-                        toolCallID: pending.id,
-                        title: pending.summary,
-                        kind: pending.operation,
-                        operation: pending.operation,
-                        path: pending.path,
-                        destination: pending.destination
-                    )
-                )
-                switch outcome {
-                case .allow:
-                    return (await ToolApprovalRegistry.shared.approve(id: pending.id)).result
-                case .reject, .cancelled:
-                    return (await ToolApprovalRegistry.shared.reject(id: pending.id)).result
-                }
+                await eventRouter.requestApproval(pending)
             }
         )
     }
@@ -367,28 +532,6 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
         return parts.joined(separator: "\n\n")
     }
 
-    private static func outputText(from output: Transcript.ToolOutput) -> String {
-        output.segments.compactMap { segment -> String? in
-            switch segment {
-            case .text(let value): value.content
-            case .structure(let value): value.content.jsonString
-            default: nil
-            }
-        }.joined()
-    }
-
-    private actor ToolEventState {
-        private var startedAt: [String: Date] = [:]
-
-        func started(_ id: String) {
-            startedAt[id] = Date()
-        }
-
-        func take(_ id: String) -> Date? {
-            startedAt.removeValue(forKey: id)
-        }
-    }
-
     private actor ResultBox {
         private var result: BackendSessionResult?
 
@@ -399,10 +542,160 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
         var value: BackendSessionResult? { result }
     }
 
+    /// Keeps the callbacks embedded in a persistent Foundation Models session
+    /// pointed at the currently admitted ACP turn. Rebuilding a session just
+    /// to refresh a request-scoped closure would discard the provider cache.
+    private actor ACPSessionEventRouter {
+        private struct Route: Sendable {
+            let turnID: TurnID
+            let events: BackendSessionEvents
+            let requestPermission: ACPPermissionHandler
+        }
+
+        private let sessionID: String
+        private var route: Route?
+        private var startedAt: [String: Date] = [:]
+
+        init(sessionID: String) {
+            self.sessionID = sessionID
+        }
+
+        nonisolated var backendEvents: BackendSessionEvents {
+            BackendSessionEvents { [self] event in
+                await self.emit(event)
+            }
+        }
+
+        func install(
+            turnID: TurnID,
+            events: BackendSessionEvents,
+            requestPermission: @escaping ACPPermissionHandler
+        ) {
+            route = Route(
+                turnID: turnID,
+                events: events,
+                requestPermission: requestPermission
+            )
+        }
+
+        func clear(turnID: TurnID) {
+            guard route?.turnID == turnID else { return }
+            route = nil
+            startedAt.removeAll(keepingCapacity: true)
+        }
+
+        func currentTurnID() -> TurnID? {
+            route?.turnID
+        }
+
+        func emit(_ event: AgentRuntimeEvent) async {
+            guard let route else { return }
+            await route.events.emit(event)
+        }
+
+        func toolStarted(
+            _ call: Transcript.ToolCall,
+            backend: ModelBackend,
+            owner: AgentActivityToolOwner
+        ) async {
+            guard let route else { return }
+            startedAt[call.id] = Date()
+            await route.events.emit(
+                .toolStarted(
+                    ToolCall(
+                        id: call.id,
+                        turnID: route.turnID,
+                        name: call.toolName
+                    )
+                )
+            )
+        }
+
+        func toolFinished(
+            _ call: Transcript.ToolCall,
+            output: Transcript.ToolOutput,
+            backend: ModelBackend,
+            owner: AgentActivityToolOwner
+        ) async {
+            guard let route else { return }
+            let started = startedAt.removeValue(forKey: call.id)
+            await route.events.emit(
+                .toolFinished(
+                    ToolResult(
+                        id: call.id,
+                        turnID: route.turnID,
+                        status: .succeeded,
+                        output: Self.outputText(from: output),
+                        durationMilliseconds: started.map {
+                            max(0, Int(Date().timeIntervalSince($0) * 1_000))
+                        }
+                    )
+                )
+            )
+        }
+
+        func requestApproval(_ pending: PendingToolApproval) async -> String {
+            guard let route else {
+                return "Action cancelled."
+            }
+            await route.events.emit(
+                .approvalRequested(
+                    Approval(
+                        id: pending.id,
+                        turnID: route.turnID,
+                        toolCallID: pending.id,
+                        operation: pending.operation,
+                        path: pending.path,
+                        destination: pending.destination,
+                        summary: pending.summary
+                    )
+                )
+            )
+            await ToolApprovalRegistry.shared.registerForExternalHost(pending)
+            let outcome = await route.requestPermission(
+                ACPPermissionRequest(
+                    sessionID: sessionID,
+                    toolCallID: pending.id,
+                    title: pending.summary,
+                    kind: pending.operation,
+                    operation: pending.operation,
+                    path: pending.path,
+                    destination: pending.destination
+                )
+            )
+            switch outcome {
+            case .allow:
+                return (await ToolApprovalRegistry.shared.approve(id: pending.id)).result
+            case .reject, .cancelled:
+                return (await ToolApprovalRegistry.shared.reject(id: pending.id)).result
+            }
+        }
+
+        private static func outputText(from output: Transcript.ToolOutput) -> String {
+            output.segments.compactMap { segment -> String? in
+                switch segment {
+                case .text(let value): value.content
+                case .structure(let value): value.content.jsonString
+                default: nil
+                }
+            }.joined()
+        }
+    }
+
     private actor SessionState {
+        struct TurnContext: Sendable {
+            let configuration: ACPHostSessionConfiguration
+            let llmRuntime: LLMRuntime
+            let eventRouter: ACPSessionEventRouter
+            let needsRebuild: Bool
+        }
+
         private struct Session: Sendable {
             let cwd: String
-            let configuration: ACPHostSessionConfiguration
+            var configuration: ACPHostSessionConfiguration
+            let llmRuntime: LLMRuntime
+            let eventRouter: ACPSessionEventRouter
+            var runtimeModelID: String?
             var turnID: TurnID?
         }
 
@@ -411,30 +704,103 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
         func insert(
             sessionID: String,
             cwd: String,
-            configuration: ACPHostSessionConfiguration
+            configuration: ACPHostSessionConfiguration,
+            llmRuntime: LLMRuntime,
+            eventRouter: ACPSessionEventRouter
         ) {
             sessions[sessionID] = Session(
                 cwd: cwd,
                 configuration: configuration,
+                llmRuntime: llmRuntime,
+                eventRouter: eventRouter,
+                runtimeModelID: nil,
                 turnID: nil
             )
         }
 
-        func begin(sessionID: String, turnID: TurnID) -> ACPHostSessionConfiguration? {
+        func begin(sessionID: String, turnID: TurnID) -> TurnContext? {
             guard var session = sessions[sessionID], session.turnID == nil else {
                 return nil
             }
             session.turnID = turnID
             sessions[sessionID] = session
-            return session.configuration
+            return TurnContext(
+                configuration: session.configuration,
+                llmRuntime: session.llmRuntime,
+                eventRouter: session.eventRouter,
+                needsRebuild: session.configuration.modelConfiguration.backend != .codex
+                    && session.runtimeModelID != session.configuration.selectedModelID
+            )
         }
 
-        func turnID(for sessionID: String) -> TurnID? {
-            sessions[sessionID]?.turnID
+        func contains(sessionID: String) -> Bool {
+            sessions[sessionID] != nil
         }
 
-        func finish(sessionID: String) {
+        func activeTurn(
+            for sessionID: String
+        ) -> (turnID: TurnID, llmRuntime: LLMRuntime, eventRouter: ACPSessionEventRouter)? {
+            guard let session = sessions[sessionID], let turnID = session.turnID else {
+                return nil
+            }
+            return (turnID, session.llmRuntime, session.eventRouter)
+        }
+
+        func markRuntimeConfiguration(
+            sessionID: String,
+            turnID: TurnID,
+            selectedModelID: String
+        ) {
+            guard var session = sessions[sessionID], session.turnID == turnID else {
+                return
+            }
+            guard session.configuration.selectedModelID == selectedModelID else {
+                // The selector changed while this turn was unwinding. Leave
+                // the old marker in place so the next turn rebuilds safely.
+                return
+            }
+            session.runtimeModelID = selectedModelID
+            sessions[sessionID] = session
+        }
+
+        func configurationOptions(
+            sessionID: String
+        ) throws -> [ACPConfigOption] {
+            guard let session = sessions[sessionID] else {
+                throw ACPApplicationRuntimeError.sessionNotFound(sessionID)
+            }
+            return session.configuration.configOptions
+        }
+
+        func setConfigurationOption(
+            sessionID: String,
+            configID: String,
+            value: MCPJSONValue
+        ) throws -> [ACPConfigOption] {
+            guard var session = sessions[sessionID] else {
+                throw ACPApplicationRuntimeError.sessionNotFound(sessionID)
+            }
+            guard configID == "model" else {
+                throw ACPApplicationRuntimeError.invalidConfiguration(
+                    "Unknown ACP configuration option '\(configID)'."
+                )
+            }
+            guard case .string(let modelID) = value,
+                  let model = session.configuration.availableModels.first(
+                      where: { $0.id == modelID }
+                  ) else {
+                throw ACPApplicationRuntimeError.invalidConfiguration(
+                    "The selected ACP model is not available for this session."
+                )
+            }
+            session.configuration = session.configuration.applying(model: model)
+            sessions[sessionID] = session
+            return session.configuration.configOptions
+        }
+
+        func finish(sessionID: String, turnID: TurnID) {
             guard var session = sessions[sessionID] else { return }
+            guard session.turnID == turnID else { return }
             session.turnID = nil
             sessions[sessionID] = session
         }
@@ -454,16 +820,18 @@ extension ACPApplicationRuntimeAdapter {
             nativeRunner: nativeRunner,
             codexRuntime: codexRuntime
         )
-        let llmRuntime = LLMRuntime(
-            sessionFactory: sessionFactory,
-            foundationModelsBootstrap:
-                modelRuntime.foundationModelsBootstrapConfiguration
-        )
         let agentRuntime = AgentRuntime(backend: modelRuntime.activeBackend)
 
         return ACPApplicationRuntimeAdapter(
             agentRuntime: agentRuntime,
-            llmRuntime: llmRuntime,
+            makeLLMRuntime: { configuration in
+                LLMRuntime(
+                    sessionFactory: sessionFactory,
+                    foundationModelsBootstrap: Self.bootstrapConfiguration(
+                        for: configuration
+                    )
+                )
+            },
             makeConfiguration: { root in
                 _ = modelRuntime.refreshSkills(
                     force: true,
@@ -472,15 +840,109 @@ extension ACPApplicationRuntimeAdapter {
                 let modelConfiguration = modelRuntime.makeSessionConfiguration(
                     workspaceRoot: root
                 )
-                return ACPHostSessionConfiguration(
+                let workspaceName = URL(fileURLWithPath: root).lastPathComponent
+                let currentModelID = modelConfiguration.activeRemoteModel?.id
+                    ?? modelConfiguration.backend.rawValue
+                let currentSelection = ACPModelSelection(
+                    id: currentModelID,
+                    name: modelRuntime.composerModel,
                     modelConfiguration: modelConfiguration,
                     modelName: modelRuntime.composerModel,
-                    workspaceName: URL(fileURLWithPath: root).lastPathComponent,
+                    workspaceName: workspaceName,
                     serverURL: modelRuntime.activeRemoteModel?.url,
                     codexModelID: codexRuntime.preferredExecutionModelID,
                     codexReasoningEffort: codexRuntime.reasoningEffort
                 )
+                var selections = [currentSelection]
+                if modelRuntime.orchestratorMode == .standalone,
+                   modelRuntime.activeDynamicProfile == nil {
+                    for model in modelRuntime.enabledRemoteModels
+                        where modelRuntime.isConfigured(model)
+                    {
+                        guard model.id != currentModelID else { continue }
+                        selections.append(
+                            ACPModelSelection(
+                                id: model.id,
+                                name: model.name,
+                                modelConfiguration: Self.configuration(
+                                    from: modelConfiguration,
+                                    model: model
+                                ),
+                                modelName: model.name,
+                                workspaceName: workspaceName,
+                                serverURL: model.url,
+                                codexModelID: nil,
+                                codexReasoningEffort: nil
+                            )
+                        )
+                    }
+                }
+                return ACPHostSessionConfiguration(
+                    modelConfiguration: modelConfiguration,
+                    modelName: modelRuntime.composerModel,
+                    workspaceName: workspaceName,
+                    serverURL: modelRuntime.activeRemoteModel?.url,
+                    codexModelID: codexRuntime.preferredExecutionModelID,
+                    codexReasoningEffort: codexRuntime.reasoningEffort,
+                    selectedModelID: currentModelID,
+                    availableModels: selections
+                )
             }
         )
+    }
+
+    @MainActor
+    private static func bootstrapConfiguration(
+        for configuration: ACPHostSessionConfiguration
+    ) -> FoundationModelsBootstrapConfiguration? {
+        guard configuration.modelConfiguration.backend != .codex else {
+            return nil
+        }
+        return FoundationModelsBootstrapConfiguration(
+            backend: configuration.modelConfiguration.backend,
+            usesSystemModel: configuration.modelConfiguration.backend == .foundationApple,
+            remoteModel: configuration.modelConfiguration.activeRemoteModel
+                ?? .fallbackLlama,
+            reasoningEffort: configuration.modelConfiguration.reasoningEffort
+        )
+    }
+
+    /// Reuses the session's immutable profile/tool snapshot while replacing
+    /// only the active configured provider. ACP never mutates ModelRuntimeStore
+    /// or its persisted global selection when a session changes model.
+    private static func configuration(
+        from base: ModelSessionConfiguration,
+        model: RemoteModelConfig
+    ) -> ModelSessionConfiguration {
+        ModelSessionConfiguration(
+            backend: backend(for: model.role),
+            activeRemoteModel: model,
+            delegateRemoteModel: base.delegateRemoteModel,
+            orchestratorMode: base.orchestratorMode,
+            workspaceRoot: base.workspaceRoot,
+            agentTuning: base.agentTuning,
+            availableSkills: base.availableSkills,
+            documentationStore: base.documentationStore,
+            activeDynamicProfile: base.activeDynamicProfile,
+            reasoningEffort: model.supportsReasoning
+                ? base.reasoningEffort
+                : nil,
+            delegateReasoningEffort: base.delegateReasoningEffort,
+            activeTemperature: model.temperature,
+            delegateTemperature: base.delegateTemperature,
+            delegateToolIDs: base.delegateToolIDs,
+            delegateWorkers: base.delegateWorkers,
+            dropsCompletedToolCalls: base.dropsCompletedToolCalls,
+            workspaceInstructions: base.workspaceInstructions,
+            activePluginTools: base.activePluginTools
+        )
+    }
+
+    private static func backend(for role: RemoteModelRole) -> ModelBackend {
+        switch role {
+        case .local: .llamaServer
+        case .pcc: .foundationServe
+        case .premium: .premium
+        }
     }
 }

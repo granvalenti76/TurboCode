@@ -518,8 +518,8 @@
 		000000000000000150000000 /* Helpers */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
-			dstPath = "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers";
-			dstSubfolderSpec = 0;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
 			files = (
 				B000000000000000000000a1 /* turbocode-acp in Helpers */,
 			);
@@ -991,6 +991,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = art.granvalenti.turbocode.acp;
 				PRODUCT_NAME = "turbocode-acp";
 				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
 				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_VERSION = 6.0;
@@ -1010,6 +1011,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = art.granvalenti.turbocode.acp;
 				PRODUCT_NAME = "turbocode-acp";
 				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
 				SUPPORTED_PLATFORMS = macosx;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_VERSION = 6.0;

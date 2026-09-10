@@ -49,8 +49,9 @@ il permesso Intelligence di Xcode e l'uso reale di ciascun tool richiede ancora
 una sessione interattiva autorizzata; non è stata dichiarata completata dai
 mock.
 
-È iniziata anche la parte ACP. Il branch contiene il dispatcher JSON-RPC stdio
-con `initialize`, `session/new`, `session/prompt`, `session/cancel`, update
+È stata completata la prima slice lifecycle della parte ACP. Il branch contiene
+il dispatcher JSON-RPC stdio con `initialize`, `session/new`,
+`session/set_config_option`, `session/prompt`, `session/cancel`, update
 streaming e gestione degli errori con ID correlato. `ACPRuntimeDriver` separa
 identità/sessione/workspace dal runtime applicativo e riceve il motore condiviso
 tramite `ACPApplicationRuntime`. `ACPApplicationRuntimeAdapter` collega ora
@@ -60,7 +61,14 @@ delle approvazioni è iniettata nei tool: il processo headless invia
 `session/request_permission` al client e risolve il registro esistente senza
 bloccare il dispatcher. Il target `turbocode-acp` è ora embeddato dall'app in
 `Contents/Helpers/turbocode-acp`, con firma on-copy e documentazione per la
-registrazione manuale in Xcode.
+registrazione manuale in Xcode. Il lifecycle ACP porta ogni turno da
+`accepted` a `preparing`, ignora i callback terminali obsoleti del provider e
+chiude dopo `settling` e il rilascio dell'operazione. Sono coperte tre
+generazioni consecutive, recupero da errore/cancellazione e selezione modello
+isolata per sessione. Il catalogo usa gli ID configurati esternamente, senza
+scrivere preferenze globali o includere credenziali. Ogni sessione ACP mantiene
+il proprio `LLMRuntime`: i turni consecutivi riusano la sessione e la cache del
+provider, mentre un rebuild avviene solo al primo turno o dopo un cambio modello.
 Le suite ACP focalizzate verificano protocollo, isolamento delle sessioni e
 cancellazione, incluse permission e packaging; non attestano ancora l'avvio
 reale da Xcode o l'esecuzione di un provider reale.

@@ -102,8 +102,14 @@ The `TurboCode` app target embeds the native ACP helper at
 `TurboCode.app/Contents/Helpers/turbocode-acp`. Register that absolute path in
 Xcode's **Add an ACP Agent** screen with the name `TurboCode` and no
 interpreter. The helper receives the session workspace from Xcode and keeps
-provider/model selection in the external `~/.turbocode/models.json` file; the
-registration does not accept or store credentials.
+provider configuration in the external `~/.turbocode/models.json` file; the
+registration does not accept or store credentials. During `session/new`, the
+helper exposes enabled, credential-ready configurations through the ACP
+`configOptions` model selector. `session/set_config_option` changes only that
+ACP session and is snapshotted when the next turn is admitted; an in-flight
+provider operation is never switched underneath. Consecutive turns with the
+same selection keep the session and provider cache alive; changing the model
+rebuilds only that ACP session before its next turn.
 
 See [ACP_AGENT_SETUP.md](ACP_AGENT_SETUP.md) for the complete registration and
 smoke-check procedure.

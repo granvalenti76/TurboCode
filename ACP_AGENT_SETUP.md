@@ -24,12 +24,24 @@ require command-line arguments, and it reads the configured provider/model from
 the existing external TurboCode configuration. Do not put credentials in the
 agent registration fields.
 
+When Xcode creates a session, TurboCode returns an ACP `configOptions` model
+selector built from enabled, credential-ready entries in `~/.turbocode/models.json`.
+The option value is the stable TurboCode configuration ID; the provider model
+name remains internal to the selected execution snapshot. A model change is
+session-local and affects the next prompt, so a generation already in progress
+cannot be moved to another provider. With the selection unchanged, consecutive
+prompts reuse the same provider session and its cache; a rebuild is reserved for
+an actual model change.
+
 ## First connection check
 
-After saving the agent, open a project in Xcode and start a coding request. A
-working registration performs the ACP `initialize` handshake, creates a
-session, streams `session/update` messages, and asks Xcode for permission before
-an operation that requires approval. Rejection and cancellation fail closed.
+After saving the agent, open a project in Xcode and send at least three prompts
+in the same session. A working registration performs the ACP `initialize`
+handshake, creates a session, streams `session/update` messages, and asks Xcode
+for permission before an operation that requires approval. Rejection,
+cancellation, and provider errors release the active turn so a later prompt
+can run. If Xcode renders the model selector, changing it must affect the next
+prompt while preserving the session's workspace and transcript.
 
 If Xcode cannot start the agent, verify that the app was rebuilt after an
 update and that this path exists:

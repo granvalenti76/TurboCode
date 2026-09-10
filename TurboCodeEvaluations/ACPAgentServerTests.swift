@@ -4,6 +4,44 @@ import Testing
 
 @Suite("ACP agent server")
 struct ACPAgentServerTests {
+    @Test("stdio responds and runs prompts while the client keeps stdin open")
+    func persistentStdin() async throws {
+        let pipe = Pipe()
+        let output = ACPTestOutput()
+        let server = ACPAgentServer(driver: ACPTestDriver()) { data in
+            await output.append(data)
+        }
+        let reader = Task {
+            await ACPStdioServer(server: server).run(input: pipe.fileHandleForReading)
+        }
+        // A partial message followed by multiple lines exercises framing on
+        // the actual pipe, rather than bypassing stdin via server.receive.
+        try pipe.fileHandleForWriting.write(contentsOf: Data("{\"jsonrpc\":\"2.0\",\"id\":1,".utf8))
+        try pipe.fileHandleForWriting.write(contentsOf: Data("""
+        "method":"initialize","params":{"protocolVersion":1}}
+        {"jsonrpc":"2.0","id":2,"method":"session/prompt","params":{"sessionId":"session-1","prompt":[{"type":"text","text":"caffè"}]}}
+
+        """.utf8))
+
+        // Bound the regression: the old reader only responds after EOF. Close
+        // the writer after observing the result so failure cannot hang tests.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while await output.messageCount() < 3, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let countBeforeEOF = await output.messageCount()
+        try pipe.fileHandleForWriting.close()
+        await reader.value
+        try pipe.fileHandleForReading.close()
+        #expect(countBeforeEOF == 3)
+        if countBeforeEOF == 3 {
+            let messages = try await output.nextObjects(count: 3)
+            #expect(messages[0]["id"] == .number(1))
+            #expect(messages[1]["method"] == .string("session/update"))
+            #expect(messages[2]["result"]?.objectValue?["stopReason"] == .string("end_turn"))
+        }
+    }
+
     @Test("initialization advertises only implemented capabilities")
     func initializationContract() async throws {
         let driver = ACPTestDriver()
@@ -41,6 +79,40 @@ struct ACPAgentServerTests {
         let created = await driver.createdSessionValue()
         #expect(created?.cwd == "/tmp/project")
         #expect(created?.mcpServers == [.object(["name": .string("xcode")])])
+    }
+
+    @Test("session config options advertise and validate per-session model selection")
+    func sessionConfigOptions() async throws {
+        let driver = ACPTestDriver()
+        let output = ACPTestOutput()
+        let server = ACPAgentServer(driver: driver) { data in
+            await output.append(data)
+        }
+        await server.receive(line("""
+        {"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"/tmp/project"}}
+        """))
+        let created = try await output.nextObject()
+        let initialOption = try #require(
+            created["result"]?.objectValue?["configOptions"]?.arrayValue?.first?.objectValue
+        )
+        #expect(initialOption["id"] == .string("model"))
+        #expect(initialOption["currentValue"] == .string("model-a"))
+        #expect(initialOption["options"]?.arrayValue?.count == 2)
+
+        await server.receive(line("""
+        {"jsonrpc":"2.0","id":2,"method":"session/set_config_option","params":{"sessionId":"session-1","configId":"model","value":"model-b"}}
+        """))
+        let changed = try await output.nextObject()
+        #expect(
+            changed["result"]?.objectValue?["configOptions"]?.arrayValue?.first?
+                .objectValue?["currentValue"] == .string("model-b")
+        )
+
+        await server.receive(line("""
+        {"jsonrpc":"2.0","id":3,"method":"session/set_config_option","params":{"sessionId":"session-1","configId":"model","value":"missing"}}
+        """))
+        let rejected = try await output.nextObject()
+        #expect(rejected["error"]?.objectValue?["code"] == .number(-32000))
     }
 
     @Test("prompt emits session updates before its stop response")
@@ -136,6 +208,8 @@ private actor ACPTestOutput {
         let continuation: CheckedContinuation<[[String: MCPJSONValue]], Error>
     }
     private var waiters: [Waiter] = []
+
+    func messageCount() -> Int { messages.count }
 
     func append(_ data: Data) {
         guard let message = try? JSONDecoder().decode(MCPJSONValue.self, from: data),
@@ -265,6 +339,40 @@ private final class ACPTestDriver: ACPAgentDriver, @unchecked Sendable {
 
     nonisolated func cancel(sessionID: String) async {
         await state.recordCancellation(sessionID: sessionID)
+    }
+
+    nonisolated func configurationOptions(
+        sessionID: String
+    ) async throws -> [ACPConfigOption] {
+        Self.options(currentValue: "model-a")
+    }
+
+    nonisolated func setConfigurationOption(
+        sessionID: String,
+        configID: String,
+        value: MCPJSONValue
+    ) async throws -> [ACPConfigOption] {
+        guard configID == "model",
+              case .string(let modelID) = value,
+              ["model-a", "model-b"].contains(modelID) else {
+            throw ACPProtocolError.invalidParams("Unknown model selection.")
+        }
+        return Self.options(currentValue: modelID)
+    }
+
+    private static func options(currentValue: String) -> [ACPConfigOption] {
+        [
+            ACPConfigOption(
+                id: "model",
+                name: "Model",
+                category: "model",
+                currentValue: currentValue,
+                options: [
+                    ACPConfigOptionValue(value: "model-a", name: "Fixture A"),
+                    ACPConfigOptionValue(value: "model-b", name: "Fixture B")
+                ]
+            )
+        ]
     }
 
     nonisolated func createdSessionValue() async -> ACPTestDriverState.CreatedSession? {

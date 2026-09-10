@@ -66,6 +66,8 @@ actor ACPAgentServer {
                 try await initialize(id: message.id, params: message.params)
             case "session/new":
                 try await createSession(id: message.id, params: message.params)
+            case "session/set_config_option":
+                try await setConfigurationOption(id: message.id, params: message.params)
             case "session/prompt":
                 try await startPrompt(id: message.id, params: message.params)
             case "session/cancel":
@@ -135,9 +137,44 @@ actor ACPAgentServer {
                 cwd: cwd,
                 mcpServers: mcpServers
             )
+            let configOptions = try await driver.configurationOptions(
+                sessionID: sessionID
+            )
             await respond(
                 to: id,
-                result: .object(["sessionId": .string(sessionID)])
+                result: .object([
+                    "sessionId": .string(sessionID),
+                    "configOptions": .array(configOptions.map(\.jsonValue))
+                ])
+            )
+        } catch {
+            await respond(to: id, errorCode: -32000, message: error.localizedDescription)
+        }
+    }
+
+    private func setConfigurationOption(
+        id: ACPRequestID?,
+        params: MCPJSONValue?
+    ) async throws {
+        guard let object = params?.objectValue,
+              let sessionID = object["sessionId"]?.stringValue,
+              let configID = object["configId"]?.stringValue,
+              let value = object["value"] else {
+            throw ACPProtocolError.invalidParams(
+                "session/set_config_option requires sessionId, configId, and value."
+            )
+        }
+        do {
+            let configOptions = try await driver.setConfigurationOption(
+                sessionID: sessionID,
+                configID: configID,
+                value: value
+            )
+            await respond(
+                to: id,
+                result: .object([
+                    "configOptions": .array(configOptions.map(\.jsonValue))
+                ])
             )
         } catch {
             await respond(to: id, errorCode: -32000, message: error.localizedDescription)
@@ -410,29 +447,35 @@ actor ACPAgentServer {
     }
 }
 
-/// Keeps blocking FileHandle reads outside the actor and feeds complete lines
-/// to the same server used by tests and the future `turbocode-acp` executable.
-struct ACPStdioServer: Sendable {
+/// Reads ACP lines without waiting for EOF or occupying the main actor while
+/// Xcode keeps stdin open. Provider tasks must progress even between messages.
+nonisolated struct ACPStdioServer: Sendable {
     private let server: ACPAgentServer
 
     init(server: ACPAgentServer) {
         self.server = server
     }
 
-    func run() async {
+    func run(input: FileHandle = .standardInput) async {
         var buffer = Data()
-        while let chunk = try? FileHandle.standardInput.read(upToCount: 64 * 1024),
-              !chunk.isEmpty {
-            buffer.append(chunk)
-            while let newline = buffer.firstIndex(of: 0x0A) {
-                let line = buffer.prefix(upTo: newline)
-                buffer.removeSubrange(...newline)
-                guard !line.isEmpty else { continue }
-                await server.receive(Data(line))
+        do {
+            // Keep bytes intact until the newline so a split UTF-8 scalar is
+            // decoded only after the complete JSON-RPC message has arrived.
+            for try await byte in input.bytes {
+                if byte == 0x0A {
+                    guard !buffer.isEmpty else { continue }
+                    let line = buffer
+                    buffer.removeAll(keepingCapacity: true)
+                    await server.receive(line)
+                } else {
+                    buffer.append(byte)
+                }
             }
-        }
-        if !buffer.isEmpty {
-            await server.receive(buffer)
+            if !buffer.isEmpty {
+                await server.receive(buffer)
+            }
+        } catch {
+            FileHandle.standardError.write(Data("ACP stdin read failed: \(error.localizedDescription)\n".utf8))
         }
     }
 }

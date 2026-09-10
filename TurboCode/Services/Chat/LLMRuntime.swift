@@ -205,6 +205,9 @@ actor LLMRuntime {
     private let foundationModelsRuntime: FoundationModelsSessionRuntime?
     private var activeTurnID: TurnID?
     private var activeSession: (any BackendSession)?
+    /// Focused ACP tests use this counter to prove that ordinary follow-up
+    /// turns reuse the provider session instead of rebuilding its cache.
+    private(set) var foundationModelsRebuildCount = 0
 #if DEBUG
     /// Developer diagnostics use a separate ephemeral model, but still share
     /// the runtime's single-execution gate with production adapters.
@@ -366,6 +369,7 @@ actor LLMRuntime {
             projection: projection,
             events: events
         )
+        foundationModelsRebuildCount += 1
         return true
     }
 
