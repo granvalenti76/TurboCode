@@ -63,11 +63,15 @@ nonisolated final class ACPRuntimeDriver: ACPAgentDriver, @unchecked Sendable {
 
 nonisolated enum ACPApplicationRuntimeError: LocalizedError, Equatable, Sendable {
     case sessionNotFound(String)
+    case invalidPrompt(String)
+    case executionFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .sessionNotFound(let sessionID):
-            "ACP session '(sessionID)' does not exist."
+            "ACP session '\(sessionID)' does not exist."
+        case .invalidPrompt(let message), .executionFailed(let message):
+            message
         }
     }
 }

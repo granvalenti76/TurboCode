@@ -53,10 +53,15 @@ mock.
 con `initialize`, `session/new`, `session/prompt`, `session/cancel`, update
 streaming e gestione degli errori con ID correlato. `ACPRuntimeDriver` separa
 identità/sessione/workspace dal runtime applicativo e riceve il motore condiviso
-tramite `ACPApplicationRuntime`; il collegamento concreto a `AgentRuntime` e
-`LLMRuntime`, l'helper `turbocode-acp` e il packaging restano ancora da fare.
+tramite `ACPApplicationRuntime`. `ACPApplicationRuntimeAdapter` collega ora
+`AgentRuntime` e `LLMRuntime`, ricostruisce la sessione Foundation Models con il
+profilo/workspace ACP e proietta testo, tool e usage verso ACP. La destinazione
+delle approvazioni è iniettata nei tool: il processo headless rifiuta in modo
+esplicito finché non sarà implementato `session/request_permission`.
+L'helper `turbocode-acp` e il packaging restano ancora da fare.
 Le suite ACP focalizzate verificano protocollo, isolamento delle sessioni e
-cancellazione; non attestano ancora l'avvio reale da Xcode.
+cancellazione e il nuovo adapter compila contro il runtime esistente; non
+attestano ancora l'avvio reale da Xcode o l'esecuzione di un provider reale.
 
 Questo documento è il deliverable di pianificazione richiesto dall'utente.
 Non attesta che le integrazioni siano già completamente implementate o

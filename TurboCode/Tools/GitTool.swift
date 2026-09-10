@@ -34,6 +34,9 @@ struct GitTool: Tool {
     let executionPolicy: ExecutionPolicy
     let taskScope: AgentTaskPathScope?
     private let receiptRegistry: ToolReceiptRegistry?
+    private let requestApprovalHandler: @Sendable (
+        PendingToolApproval
+    ) async -> String
     private let service = StructuredGitService()
     private let statusService = GitDiffService()
 
@@ -42,13 +45,19 @@ struct GitTool: Tool {
         policy: GitPolicy,
         executionPolicy: ExecutionPolicy,
         taskScope: AgentTaskPathScope? = nil,
-        receiptRegistry: ToolReceiptRegistry? = nil
+        receiptRegistry: ToolReceiptRegistry? = nil,
+        requestApproval: @escaping @Sendable (
+            PendingToolApproval
+        ) async -> String = {
+            await ToolApprovalRegistry.shared.request($0)
+        }
     ) {
         self.workspaceRoot = workspaceRoot
         self.policy = policy
         self.executionPolicy = executionPolicy
         self.taskScope = taskScope
         self.receiptRegistry = receiptRegistry
+        self.requestApprovalHandler = requestApproval
     }
 
     func restricted(to scope: AgentTaskPathScope) -> Self {
@@ -57,7 +66,8 @@ struct GitTool: Tool {
             policy: policy,
             executionPolicy: executionPolicy,
             taskScope: scope,
-            receiptRegistry: receiptRegistry
+            receiptRegistry: receiptRegistry,
+            requestApproval: requestApprovalHandler
         )
     }
 
@@ -298,7 +308,7 @@ struct GitTool: Tool {
         )
         // Keep the tool call suspended until the host-owned approval resolves;
         // the model receives only the final Git result or an explicit denial.
-        let approvalText = await ToolApprovalRegistry.shared.request(request)
+        let approvalText = await requestApprovalHandler(request)
         guard let result = await relay.take() else {
             return .plain(approvalText)
         }
