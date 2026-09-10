@@ -86,6 +86,44 @@ struct ACPAgentServerTests {
         #expect(await driver.cancelledSessionValue() == "session-1")
     }
 
+    @Test("permission requests use an ACP client response without blocking the dispatcher")
+    func permissionRequest() async throws {
+        let driver = ACPTestDriver(requestPermission: true)
+        let output = ACPTestOutput()
+        let server = ACPAgentServer(driver: driver) { data in
+            await output.append(data)
+        }
+        await server.receive(line("""
+        {"jsonrpc":"2.0","id":11,"method":"session/prompt","params":{"sessionId":"session-1","prompt":[]}}
+        """))
+
+        let permission = try await output.nextObject()
+        #expect(permission["method"] == .string("session/request_permission"))
+        #expect(
+            permission["params"]?.objectValue?["toolCall"]?.objectValue?["toolCallId"]
+                == .string("call-1")
+        )
+        let permissionID = try #require(permission["id"])
+        await server.receive(try JSONEncoder().encode(MCPJSONValue.object([
+            "jsonrpc": .string("2.0"),
+            "id": permissionID,
+            "result": .object([
+                "outcome": .object([
+                    "outcome": .string("selected"),
+                    "optionId": .string("allow-once")
+                ])
+            ])
+        ])))
+
+        let completion = try await output.nextObject()
+        #expect(completion["id"] == .number(11))
+        #expect(
+            completion["result"]?.objectValue?["stopReason"]
+                == .string(ACPStopReason.endTurn.rawValue)
+        )
+        #expect(await driver.permissionOutcomeValue() == .allow)
+    }
+
     private func line(_ string: String) -> Data {
         Data(string.utf8)
     }
@@ -145,6 +183,7 @@ private actor ACPTestDriverState {
 
     private(set) var createdSession: CreatedSession?
     private(set) var cancelledSession: String?
+    private(set) var permissionOutcome: ACPPermissionOutcome?
     private var promptStarted = false
 
     func recordCreatedSession(cwd: String, mcpServers: [MCPJSONValue]) {
@@ -159,6 +198,10 @@ private actor ACPTestDriverState {
         cancelledSession = sessionID
     }
 
+    func recordPermissionOutcome(_ outcome: ACPPermissionOutcome) {
+        permissionOutcome = outcome
+    }
+
     func isPromptStarted() -> Bool {
         promptStarted
     }
@@ -166,10 +209,12 @@ private actor ACPTestDriverState {
 
 private final class ACPTestDriver: ACPAgentDriver, @unchecked Sendable {
     private let blockPrompt: Bool
+    private let requestPermission: Bool
     private let state = ACPTestDriverState()
 
-    nonisolated init(blockPrompt: Bool = false) {
+    nonisolated init(blockPrompt: Bool = false, requestPermission: Bool = false) {
         self.blockPrompt = blockPrompt
+        self.requestPermission = requestPermission
     }
 
     nonisolated func createSession(cwd: String, mcpServers: [MCPJSONValue]) async throws -> String {
@@ -196,6 +241,28 @@ private final class ACPTestDriver: ACPAgentDriver, @unchecked Sendable {
         return .endTurn
     }
 
+    nonisolated func prompt(
+        sessionID: String,
+        prompt: [MCPJSONValue],
+        updates: ACPUpdateChannel,
+        requestPermission: @escaping ACPPermissionHandler
+    ) async throws -> ACPStopReason {
+        guard self.requestPermission else {
+            return try await self.prompt(sessionID: sessionID, prompt: prompt, updates: updates)
+        }
+        let outcome = await requestPermission(ACPPermissionRequest(
+            sessionID: sessionID,
+            toolCallID: "call-1",
+            title: "Write file",
+            kind: "edit",
+            operation: "write",
+            path: "README.md",
+            destination: nil
+        ))
+        await state.recordPermissionOutcome(outcome)
+        return outcome == .allow ? .endTurn : .refusal
+    }
+
     nonisolated func cancel(sessionID: String) async {
         await state.recordCancellation(sessionID: sessionID)
     }
@@ -206,6 +273,10 @@ private final class ACPTestDriver: ACPAgentDriver, @unchecked Sendable {
 
     nonisolated func cancelledSessionValue() async -> String? {
         await state.cancelledSession
+    }
+
+    nonisolated func permissionOutcomeValue() async -> ACPPermissionOutcome? {
+        await state.permissionOutcome
     }
 
     nonisolated func waitUntilPromptStarted() async {

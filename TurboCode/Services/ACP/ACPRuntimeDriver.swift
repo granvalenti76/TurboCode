@@ -30,6 +30,20 @@ nonisolated final class ACPRuntimeDriver: ACPAgentDriver, @unchecked Sendable {
         prompt: [MCPJSONValue],
         updates: ACPUpdateChannel
     ) async throws -> ACPStopReason {
+        try await self.prompt(
+            sessionID: sessionID,
+            prompt: prompt,
+            updates: updates,
+            requestPermission: { _ in ACPPermissionOutcome.reject }
+        )
+    }
+
+    nonisolated func prompt(
+        sessionID: String,
+        prompt: [MCPJSONValue],
+        updates: ACPUpdateChannel,
+        requestPermission: @escaping ACPPermissionHandler
+    ) async throws -> ACPStopReason {
         guard let cwd = await state.cwd(for: sessionID) else {
             throw ACPApplicationRuntimeError.sessionNotFound(sessionID)
         }
@@ -40,7 +54,8 @@ nonisolated final class ACPRuntimeDriver: ACPAgentDriver, @unchecked Sendable {
                 cwd: cwd,
                 prompt: prompt
             ),
-            updates: updates
+            updates: updates,
+            requestPermission: requestPermission
         )
     }
 

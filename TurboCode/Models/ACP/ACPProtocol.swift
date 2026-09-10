@@ -68,7 +68,25 @@ nonisolated protocol ACPAgentDriver: Sendable {
         updates: ACPUpdateChannel
     ) async throws -> ACPStopReason
 
+    func prompt(
+        sessionID: String,
+        prompt: [MCPJSONValue],
+        updates: ACPUpdateChannel,
+        requestPermission: @escaping ACPPermissionHandler
+    ) async throws -> ACPStopReason
+
     func cancel(sessionID: String) async
+}
+
+nonisolated extension ACPAgentDriver {
+    func prompt(
+        sessionID: String,
+        prompt: [MCPJSONValue],
+        updates: ACPUpdateChannel,
+        requestPermission: @escaping ACPPermissionHandler
+    ) async throws -> ACPStopReason {
+        try await self.prompt(sessionID: sessionID, prompt: prompt, updates: updates)
+    }
 }
 
 /// Runtime port consumed by the ACP session adapter. The concrete application
@@ -86,7 +104,23 @@ nonisolated protocol ACPApplicationRuntime: Sendable {
         updates: ACPUpdateChannel
     ) async throws -> ACPStopReason
 
+    func run(
+        turn: ACPApplicationTurn,
+        updates: ACPUpdateChannel,
+        requestPermission: @escaping ACPPermissionHandler
+    ) async throws -> ACPStopReason
+
     func cancel(sessionID: String) async
+}
+
+nonisolated extension ACPApplicationRuntime {
+    func run(
+        turn: ACPApplicationTurn,
+        updates: ACPUpdateChannel,
+        requestPermission: ACPPermissionHandler
+    ) async throws -> ACPStopReason {
+        try await run(turn: turn, updates: updates)
+    }
 }
 
 nonisolated struct ACPApplicationTurn: Sendable, Equatable {
@@ -95,6 +129,29 @@ nonisolated struct ACPApplicationTurn: Sendable, Equatable {
     let cwd: String
     let prompt: [MCPJSONValue]
 }
+
+/// The approval payload shared by the runtime and ACP transport. The action
+/// remains registered in `ToolApprovalRegistry`; this value carries only the
+/// metadata needed for the client decision and never the executable closure.
+nonisolated struct ACPPermissionRequest: Sendable, Equatable {
+    let sessionID: String
+    let toolCallID: String
+    let title: String
+    let kind: String
+    let operation: String
+    let path: String
+    let destination: String?
+}
+
+nonisolated enum ACPPermissionOutcome: Sendable, Equatable {
+    case allow
+    case reject
+    case cancelled
+}
+
+typealias ACPPermissionHandler = @Sendable (
+    ACPPermissionRequest
+) async -> ACPPermissionOutcome
 
 /// One agent-to-client `session/update` payload. The driver emits the exact
 /// ACP update params so rich content and future protocol fields are retained.

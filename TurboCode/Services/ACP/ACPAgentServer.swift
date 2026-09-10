@@ -11,6 +11,7 @@ actor ACPAgentServer {
     private let agentName: String
     private let agentVersion: String
     private var activePrompts: [String: Task<Void, Never>] = [:]
+    private var pendingPermissions: [ACPRequestID: PendingPermission] = [:]
 
     init(
         driver: any ACPAgentDriver,
@@ -42,6 +43,19 @@ actor ACPAgentServer {
         }
 
         do {
+            if message.method == nil {
+                guard let responseID = message.id else {
+                    throw ACPProtocolError.invalidRequest(
+                        "A JSON-RPC response must contain an ID."
+                    )
+                }
+                resolvePermission(
+                    id: responseID,
+                    result: message.result,
+                    error: message.error
+                )
+                return
+            }
             guard let method = message.method else {
                 throw ACPProtocolError.invalidRequest(
                     "ACP messages from the client must contain a method."
@@ -168,7 +182,14 @@ actor ACPAgentServer {
                 let stopReason = try await driver.prompt(
                     sessionID: sessionID,
                     prompt: prompt,
-                    updates: channel
+                    updates: channel,
+                    requestPermission: { [weak self] request in
+                        guard let self else { return .cancelled }
+                        return await self.requestPermission(
+                            sessionID: sessionID,
+                            request: request
+                        )
+                    }
                 )
                 channel.finish()
                 await updateTask.value
@@ -206,8 +227,111 @@ actor ACPAgentServer {
             throw ACPProtocolError.invalidParams("session/cancel requires sessionId.")
         }
         activePrompts[sessionID]?.cancel()
+        resolvePermissions(for: sessionID, with: .cancelled)
         await driver.cancel(sessionID: sessionID)
         await respond(to: id, result: .null)
+    }
+
+    /// Sends the client request while the prompt task remains suspended. The
+    /// stdio reader continues calling `receive`, so the matching response can
+    /// settle this continuation without blocking the dispatcher actor.
+    private func requestPermission(
+        sessionID: String,
+        request: ACPPermissionRequest
+    ) async -> ACPPermissionOutcome {
+        let requestID = ACPRequestID.string("permission-\(UUID().uuidString)")
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                pendingPermissions[requestID] = PendingPermission(
+                    sessionID: sessionID,
+                    continuation: continuation
+                )
+                Task { [weak self] in
+                    await self?.sendPermissionRequest(id: requestID, request: request)
+                }
+            }
+        } onCancel: {
+            Task { [weak self] in
+                await self?.resolvePermission(id: requestID, outcome: .cancelled)
+            }
+        }
+    }
+
+    private func sendPermissionRequest(
+        id: ACPRequestID,
+        request: ACPPermissionRequest
+    ) async {
+        await send(.object([
+            "jsonrpc": .string("2.0"),
+            "id": id.jsonValue,
+            "method": .string("session/request_permission"),
+            "params": .object([
+                "sessionId": .string(request.sessionID),
+                "toolCall": .object([
+                    "toolCallId": .string(request.toolCallID),
+                    "title": .string(request.title),
+                    "kind": .string(request.kind)
+                ]),
+                "options": .array([
+                    .object([
+                        "optionId": .string("allow-once"),
+                        "name": .string("Allow once"),
+                        "kind": .string("allow_once")
+                    ]),
+                    .object([
+                        "optionId": .string("reject-once"),
+                        "name": .string("Reject"),
+                        "kind": .string("reject_once")
+                    ])
+                ])
+            ])
+        ]))
+    }
+
+    private func resolvePermission(
+        id: ACPRequestID,
+        result: MCPJSONValue?,
+        error: MCPJSONValue?
+    ) {
+        if error != nil {
+            resolvePermission(id: id, outcome: .reject)
+            return
+        }
+        let outcome = result?.objectValue?["outcome"]?.objectValue
+        if outcome?["outcome"]?.stringValue == "cancelled" {
+            resolvePermission(id: id, outcome: .cancelled)
+            return
+        }
+        guard outcome?["outcome"]?.stringValue == "selected",
+              let optionID = outcome?["optionId"]?.stringValue else {
+            resolvePermission(id: id, outcome: .reject)
+            return
+        }
+        switch optionID {
+        case "allow-once", "allow-always":
+            resolvePermission(id: id, outcome: .allow)
+        default:
+            resolvePermission(id: id, outcome: .reject)
+        }
+    }
+
+    private func resolvePermission(
+        id: ACPRequestID,
+        outcome: ACPPermissionOutcome
+    ) {
+        pendingPermissions.removeValue(forKey: id)?.continuation.resume(returning: outcome)
+    }
+
+    private func resolvePermissions(
+        for sessionID: String,
+        with outcome: ACPPermissionOutcome
+    ) {
+        let ids = pendingPermissions.compactMap { id, permission in
+            permission.sessionID == sessionID ? id : nil
+        }
+        for id in ids {
+            resolvePermission(id: id, outcome: outcome)
+        }
     }
 
     private func sendUpdate(_ update: ACPAgentUpdate) async {
@@ -228,6 +352,7 @@ actor ACPAgentServer {
         errorMessage: String? = nil
     ) async {
         activePrompts.removeValue(forKey: sessionID)
+        resolvePermissions(for: sessionID, with: .cancelled)
         if let errorMessage {
             await respond(to: requestID, errorCode: -32000, message: errorMessage)
         } else {
@@ -316,6 +441,8 @@ private struct ACPInboundRequest: Sendable {
     let id: ACPRequestID?
     let method: String?
     let params: MCPJSONValue?
+    let result: MCPJSONValue?
+    let error: MCPJSONValue?
 }
 
 nonisolated private func decodeRequest(_ data: Data) throws -> ACPInboundRequest {
@@ -344,8 +471,15 @@ nonisolated private func decodeRequest(_ data: Data) throws -> ACPInboundRequest
     return ACPInboundRequest(
         id: id,
         method: object["method"]?.stringValue,
-        params: object["params"]
+        params: object["params"],
+        result: object["result"],
+        error: object["error"]
     )
+}
+
+private struct PendingPermission: Sendable {
+    let sessionID: String
+    let continuation: CheckedContinuation<ACPPermissionOutcome, Never>
 }
 
 private extension ACPProtocolError {

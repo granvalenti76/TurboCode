@@ -709,6 +709,13 @@ public actor ToolApprovalRegistry {
         await present(request)
     }
 
+    /// Registers an approval owned by a non-UI host. The transport presents
+    /// the request itself, so publishing a desktop notification here would
+    /// create a second unresolved approval surface.
+    public func registerForExternalHost(_ request: PendingToolApproval) {
+        requests[request.id] = RegisteredApproval(request: request, continuation: nil)
+    }
+
     /// Suspends a tool call until the user explicitly approves or rejects it.
     /// The model receives only the final result returned by this method.
     public func request(_ request: PendingToolApproval) async -> String {

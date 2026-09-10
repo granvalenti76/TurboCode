@@ -61,6 +61,18 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
         turn: ACPApplicationTurn,
         updates: ACPUpdateChannel
     ) async throws -> ACPStopReason {
+        try await run(
+            turn: turn,
+            updates: updates,
+            requestPermission: { _ in .reject }
+        )
+    }
+
+    func run(
+        turn: ACPApplicationTurn,
+        updates: ACPUpdateChannel,
+        requestPermission: @escaping ACPPermissionHandler
+    ) async throws -> ACPStopReason {
         guard let configuration = await state.begin(
             sessionID: turn.sessionID,
             turnID: turn.turnID
@@ -93,8 +105,10 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
                 }
             }
             let modelEvents = Self.modelSessionEvents(
+                sessionID: turn.sessionID,
                 turnID: turn.turnID,
-                events: events
+                events: events,
+                requestPermission: requestPermission
             )
             let admitted = await agentRuntime.runOperation(turnID: turn.turnID) {
                 let result: BackendSessionResult
@@ -174,8 +188,10 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
     }
 
     private static func modelSessionEvents(
+        sessionID: String,
         turnID: TurnID,
-        events: BackendSessionEvents
+        events: BackendSessionEvents,
+        requestPermission: @escaping ACPPermissionHandler
     ) -> ModelSessionEvents {
         let tools = ToolEventState()
         return ModelSessionEvents(
@@ -225,10 +241,24 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
                         )
                     )
                 )
-                // ACP permission negotiation is a later protocol slice. A
-                // headless process must fail closed instead of waiting on the
-                // desktop approval registry, which would never be resolved.
-                return "Action denied: ACP permission negotiation is unavailable."
+                await ToolApprovalRegistry.shared.registerForExternalHost(pending)
+                let outcome = await requestPermission(
+                    ACPPermissionRequest(
+                        sessionID: sessionID,
+                        toolCallID: pending.id,
+                        title: pending.summary,
+                        kind: pending.operation,
+                        operation: pending.operation,
+                        path: pending.path,
+                        destination: pending.destination
+                    )
+                )
+                switch outcome {
+                case .allow:
+                    return (await ToolApprovalRegistry.shared.approve(id: pending.id)).result
+                case .reject, .cancelled:
+                    return (await ToolApprovalRegistry.shared.reject(id: pending.id)).result
+                }
             }
         )
     }
