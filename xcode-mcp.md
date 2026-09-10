@@ -47,11 +47,20 @@ Il client usa il contratto MCP osservato (`initialize`,
 catalogo Xcode. La verifica di compatibilità end-to-end con un progetto aperto,
 il permesso Intelligence di Xcode e l'uso reale di ciascun tool richiede ancora
 una sessione interattiva autorizzata; non è stata dichiarata completata dai
-mock. Le slice ACP restano fuori da questo incremento.
+mock.
+
+È iniziata anche la parte ACP. Il branch contiene il dispatcher JSON-RPC stdio
+con `initialize`, `session/new`, `session/prompt`, `session/cancel`, update
+streaming e gestione degli errori con ID correlato. `ACPRuntimeDriver` separa
+identità/sessione/workspace dal runtime applicativo e riceve il motore condiviso
+tramite `ACPApplicationRuntime`; il collegamento concreto a `AgentRuntime` e
+`LLMRuntime`, l'helper `turbocode-acp` e il packaging restano ancora da fare.
+Le suite ACP focalizzate verificano protocollo, isolamento delle sessioni e
+cancellazione; non attestano ancora l'avvio reale da Xcode.
 
 Questo documento è il deliverable di pianificazione richiesto dall'utente.
-Non attesta che le integrazioni siano già implementate o validate. L'incarico
-di implementazione verrà affidato separatamente a Luna.
+Non attesta che le integrazioni siano già completamente implementate o
+validate. Il lavoro ACP prosegue per incrementi verificabili.
 
 La richiesta di scrivere questo file non autorizza registrazioni in Xcode,
 modifiche alla configurazione locale, Git mutation, installazioni o esecuzioni
