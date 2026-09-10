@@ -350,6 +350,7 @@ nonisolated enum ModelSessionFactory {
                     .listWorkspace,
                     .swiftWorkspaceMap,
                     .xcodeProject,
+                    .xcodeMCP,
                     .writeOnDevice,
                     .createSkill,
                     .safariMCP
@@ -643,6 +644,11 @@ nonisolated enum ModelSessionFactory {
                     client: .shared,
                     enabled: configuration.agentTuning.experimental.safariMCPEnabled
                 )
+            case .xcodeMCP:
+                return XcodeMCPTool(
+                    client: .shared,
+                    enabled: configuration.agentTuning.experimental.xcodeMCPEnabled
+                )
             case .loadSkill:
                 guard !configuration.availableSkills.isEmpty else { return nil }
                 return LoadSkillTool(skills: configuration.availableSkills)
@@ -847,6 +853,7 @@ nonisolated enum ModelSessionFactory {
             hasWorkspace: !configuration.workspaceRoot.isEmpty,
             hasSkills: !configuration.availableSkills.isEmpty,
             safariMCPEnabled: configuration.agentTuning.experimental.safariMCPEnabled,
+            xcodeMCPEnabled: configuration.agentTuning.experimental.xcodeMCPEnabled,
             hasDelegateModel: configuration.delegateRemoteModel.enabled,
             repositoryMapDetail: repositoryMap?.detail
         )

@@ -118,6 +118,16 @@ Safari MCP is a coordinator-only capability. It is never passed to delegated
 workers, whose tool surface remains restricted to the configured workspace and
 worker profile boundaries.
 
+### `xcode_mcp`
+
+Discovers and calls the tools exposed by Xcode's official MCP service through
+`xcrun mcpbridge`. It is disabled by default and requires **Agents >
+Experimental > Xcode MCP**, plus Xcode's **Allow external agents to use Xcode
+tools** permission. Use `list_tools` first, then `call` with an exact advertised
+tool name and a JSON object. This gateway is distinct from `xcode_project`:
+the latter is TurboCode's local compact build/test wrapper, while this tool
+uses Xcode's live MCP service. It is coordinator-only and is never delegated.
+
 ## Build, test, packages, and Git
 
 ### `xcode_project`

@@ -268,6 +268,9 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         if tools.contains(.xcodeProject) {
             lines.append("- xcode_project provides Xcode discovery, builds, tests, and compact diagnostics.")
         }
+        if tools.contains(.xcodeMCP) {
+            lines.append("- xcode_mcp discovers the tools published by Xcode. Call list_tools first, then call an exact advertised tool name with a JSON object; this is distinct from TurboCode's local xcode_project wrapper.")
+        }
         if tools.contains(.bash) {
             lines.append("- bash runs arbitrary zsh commands. It discovers the supported Node runtime. Relative paths start at the reported Working directory and cd does not persist between calls; external filesystem access pauses for host approval.")
         }

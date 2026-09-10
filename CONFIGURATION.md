@@ -83,6 +83,19 @@ Individual result bundles are created in temporary storage and removed after
 TurboCode extracts diagnostics. Xcode operations use
 `execution.maximumCommandTimeoutSeconds`, up to the supported 600-second limit.
 
+## Xcode MCP
+
+`experimental.xcodeMCPEnabled` enables the opt-in `xcode_mcp` gateway. It
+connects to the Xcode-provided service through `xcrun mcpbridge` over stdio,
+discovers advertised tools with `tools/list`, and forwards calls with
+`tools/call`. Xcode must be open on the intended project and **Allow external
+agents to use Xcode tools** must be enabled in Xcode Intelligence settings.
+
+The gateway preserves MCP JSON schemas and rich result content, including
+`isError`, structured content, images, and resource references. It is separate
+from TurboCode's local `xcode_project` wrapper and is never added to delegated
+worker profiles.
+
 ## Agent Tuning Schema Version 1
 
 ```json

@@ -80,7 +80,8 @@ nonisolated enum CodexTurboCodeToolBridge {
             workspaceRoot: "/workspace",
             agentTuning: agentTuning,
             includesDelegation: includesDelegation,
-            safariMCPEnabled: agentTuning.experimental.safariMCPEnabled
+            safariMCPEnabled: agentTuning.experimental.safariMCPEnabled,
+            xcodeMCPEnabled: agentTuning.experimental.xcodeMCPEnabled
         ).compactMap { capabilityID(for: $0.name) })
     }
 
@@ -120,6 +121,7 @@ nonisolated enum CodexTurboCodeToolBridge {
         includesDelegation: Bool = false,
         availableSkills: [TurboCodeSkillDefinition] = [],
         safariMCPEnabled: Bool = false,
+        xcodeMCPEnabled: Bool = false,
         pluginTools: [TypeScriptPluginToolBinding] = [],
         selectedToolIDs: Set<ToolCapabilityID>? = nil
     ) -> [CodexDynamicToolSpec] {
@@ -272,6 +274,9 @@ nonisolated enum CodexTurboCodeToolBridge {
         if safariMCPEnabled {
             specifications.append(safariMCPSpecification)
         }
+        if xcodeMCPEnabled {
+            specifications.append(xcodeMCPSpecification)
+        }
         // Filter TurboCode tools only; plugins have their own profile registry.
         if let selectedToolIDs {
             specifications.removeAll {
@@ -316,6 +321,7 @@ nonisolated enum CodexTurboCodeToolBridge {
         case "delegate_task": "Delegating task to worker"
         case "create_skill": "Creating workspace skill"
         case "safari_mcp": "Browsing Safari"
+        case "xcode_mcp": "Working with Xcode MCP"
         default: "Running \(call.tool)"
         }
     }
@@ -531,6 +537,16 @@ nonisolated enum CodexTurboCodeToolBridge {
                 )
             }
             return try await executeSafariMCP(call)
+        case "xcode_mcp":
+            guard agentTuning.experimental.xcodeMCPEnabled else {
+                return .init(
+                    result: .failure(
+                        "Xcode MCP is disabled in Settings > Agents > Experimental."
+                    ),
+                    receipt: nil
+                )
+            }
+            return try await executeXcodeMCP(call)
         default:
             throw CodexToolBridgeError.unsupportedTool(call.tool)
         }
@@ -583,6 +599,52 @@ nonisolated enum CodexTurboCodeToolBridge {
             }
             let text = try await SafariMCPClient.shared.call(tool: name, arguments: value)
             return .init(result: .success(text), receipt: nil)
+        default:
+            throw CodexToolBridgeError.invalidArguments(
+                tool: call.tool,
+                detail: "operation must be list_tools or call"
+            )
+        }
+    }
+
+    private static func executeXcodeMCP(
+        _ call: CodexDynamicToolCall
+    ) async throws -> CodexToolExecution {
+        let operation = try requiredString("operation", in: call).lowercased()
+        switch operation {
+        case "list_tools", "list", "discover":
+            let tools = try await XcodeMCPClient.shared.listTools()
+            let text = tools.map { tool in
+                "- \(tool.name): \(tool.description ?? "No description provided.")\n  input: \(tool.inputSchema?.jsonString ?? "{}")"
+            }.joined(separator: "\n")
+            return .init(
+                result: .success(text.isEmpty ? "Xcode MCP advertised no tools." : text),
+                receipt: nil
+            )
+        case "call":
+            let name = try requiredString("toolName", in: call)
+            let source = optionalString("argumentsJSON", in: call) ?? "{}"
+            guard let data = source.data(using: .utf8),
+                  let value = try? JSONDecoder().decode(
+                      MCPJSONValue.self,
+                      from: data
+                  ),
+                  value.objectValue != nil else {
+                throw CodexToolBridgeError.invalidArguments(
+                    tool: call.tool,
+                    detail: "argumentsJSON must be a valid JSON object"
+                )
+            }
+            let result = try await XcodeMCPClient.shared.call(
+                tool: name,
+                arguments: value
+            )
+            return .init(
+                result: result.isError
+                    ? .failure(result.renderedForModel)
+                    : .success(result.renderedForModel),
+                receipt: nil
+            )
         default:
             throw CodexToolBridgeError.invalidArguments(
                 tool: call.tool,
@@ -840,6 +902,19 @@ nonisolated enum CodexTurboCodeToolBridge {
     private static let safariMCPSpecification = CodexDynamicToolSpec(
         name: ToolCapabilityID.safariMCP.rawValue,
         description: "Discover and call the explicitly enabled safaridriver MCP browser tools.",
+        inputSchema: objectSchema(
+            properties: [
+                "operation": enumSchema(["list_tools", "call"]),
+                "toolName": nullableStringSchema(),
+                "argumentsJSON": nullableStringSchema()
+            ],
+            required: ["operation"]
+        )
+    )
+
+    private static let xcodeMCPSpecification = CodexDynamicToolSpec(
+        name: ToolCapabilityID.xcodeMCP.rawValue,
+        description: "Discover and call the tools published by Xcode's MCP service.",
         inputSchema: objectSchema(
             properties: [
                 "operation": enumSchema(["list_tools", "call"]),

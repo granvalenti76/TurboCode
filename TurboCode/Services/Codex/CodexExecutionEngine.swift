@@ -138,6 +138,7 @@ actor CodexExecutionEngine {
         let allowsTools: Bool
         let includesDelegation: Bool
         let safariMCPEnabled: Bool
+        let xcodeMCPEnabled: Bool
         let modelID: String
         let skillNames: [String]
         let pluginToolNames: [String]
@@ -262,6 +263,8 @@ actor CodexExecutionEngine {
             includesDelegation: includesDelegation,
             safariMCPEnabled: request.allowsTools
                 && request.agentTuning.experimental.safariMCPEnabled,
+            xcodeMCPEnabled: request.allowsTools
+                && request.agentTuning.experimental.xcodeMCPEnabled,
             modelID: snapshot.selectedModel.id,
             skillNames: request.allowsTools
                 ? request.availableSkills.map(\.name)
@@ -283,6 +286,7 @@ actor CodexExecutionEngine {
                     includesDelegation: includesDelegation,
                     availableSkills: request.availableSkills,
                     safariMCPEnabled: request.agentTuning.experimental.safariMCPEnabled,
+                    xcodeMCPEnabled: request.agentTuning.experimental.xcodeMCPEnabled,
                     pluginTools: pluginTools,
                     selectedToolIDs: request.selectedToolIDs
                 )

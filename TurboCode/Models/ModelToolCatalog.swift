@@ -29,6 +29,7 @@ nonisolated enum ToolCapabilityID: String, CaseIterable, Codable, Sendable, Hash
     case writeOnDevice = "write_ondevice"
     case removeFile = "remove_file"
     case safariMCP = "safari_mcp"
+    case xcodeMCP = "xcode_mcp"
     case loadSkill = "load_skill"
     case createSkill = "create_skill"
     case delegateTask = "delegate_task"
@@ -69,12 +70,14 @@ nonisolated enum ToolAvailabilityRequirement: Sendable, Hashable {
     case delegateModel
     case repositoryMap
     case capableWorkspace
+    case xcodeMCP
 }
 
 nonisolated struct ToolAccessContext: Sendable, Hashable {
     let hasWorkspace: Bool
     let hasSkills: Bool
     let safariMCPEnabled: Bool
+    let xcodeMCPEnabled: Bool
     let hasDelegateModel: Bool
     let repositoryMapDetail: RepositoryMapDetail?
 
@@ -82,12 +85,14 @@ nonisolated struct ToolAccessContext: Sendable, Hashable {
         hasWorkspace: Bool,
         hasSkills: Bool,
         safariMCPEnabled: Bool = false,
+        xcodeMCPEnabled: Bool = false,
         hasDelegateModel: Bool,
         repositoryMapDetail: RepositoryMapDetail?
     ) {
         self.hasWorkspace = hasWorkspace
         self.hasSkills = hasSkills
         self.safariMCPEnabled = safariMCPEnabled
+        self.xcodeMCPEnabled = xcodeMCPEnabled
         self.hasDelegateModel = hasDelegateModel
         self.repositoryMapDetail = repositoryMapDetail
     }
@@ -235,6 +240,14 @@ nonisolated enum ModelToolCatalog {
             hasNativePresentation: false
         ),
         .init(
+            id: .xcodeMCP,
+            name: "Xcode MCP",
+            summary: "Discover and call the tools published by Xcode's MCP service.",
+            category: .execution,
+            systemImage: "hammer.circle",
+            hasNativePresentation: false
+        ),
+        .init(
             id: .loadSkill,
             name: "Load Skill",
             summary: "Load a matching workspace skill on demand.",
@@ -308,8 +321,15 @@ nonisolated enum ModelToolCatalog {
            !memberships.contains(where: { $0.0 == .safariMCP }) {
             memberships.append((.safariMCP, .safariMCP))
         }
+        if selectedIDs == nil,
+           context.xcodeMCPEnabled,
+           profile != .delegate,
+           !memberships.contains(where: { $0.0 == .xcodeMCP }) {
+            memberships.append((.xcodeMCP, .xcodeMCP))
+        }
         let assignments = memberships.compactMap { id, requirement -> ModelToolAssignment? in
             if profile == .delegate, id == .safariMCP { return nil }
+            if profile == .delegate, id == .xcodeMCP { return nil }
             if requirement == .repositoryMap,
                (tier == .onDevice || context.repositoryMapDetail == nil) {
                 return nil
@@ -332,6 +352,7 @@ nonisolated enum ModelToolCatalog {
         case .xcodeProject: .capableWorkspace
         case .loadSkill: .skills
         case .safariMCP: .safariMCP
+        case .xcodeMCP: .xcodeMCP
         case .delegateTask, .callPowerfulModel: .delegateModel
         }
     }
@@ -421,6 +442,12 @@ nonisolated enum ModelToolCatalog {
                 id: id,
                 isRegistered: false,
                 unavailableReason: "Enable Safari MCP in Settings > Agents > Experimental"
+            )
+        case .xcodeMCP where !context.xcodeMCPEnabled:
+            return .init(
+                id: id,
+                isRegistered: false,
+                unavailableReason: "Enable Xcode MCP in Settings > Agents > Experimental"
             )
         case .delegateModel where !context.hasDelegateModel:
             return .init(id: id, isRegistered: false, unavailableReason: "Configure a delegate model")
