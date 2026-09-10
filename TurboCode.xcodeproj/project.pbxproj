@@ -137,6 +137,7 @@
 		B0000000000000000000009e /* TurboCode/ViewModels/GitDiffViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000009e /* TurboCode/ViewModels/GitDiffViewModel.swift */; };
 		B0000000000000000000009f /* TurboCode/Diagnostics/AgentBenchmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000009f /* TurboCode/Diagnostics/AgentBenchmark.swift */; };
 		B000000000000000000000a0 /* TurboCode/Stores/TypeScriptPluginRuntimeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a0 /* TurboCode/Stores/TypeScriptPluginRuntimeStore.swift */; };
+		B000000000000000000000a1 /* turbocode-acp in Helpers */ = {isa = PBXBuildFile; fileRef = 000000000000000000000320 /* turbocode-acp */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		C10000000000000000000000 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 		5E37CA94303816A70024A2E8 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 		5E5203BF3004E70900C554D4 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203BE3004E70900C554D4 /* MarkdownUI */; };
@@ -154,6 +155,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 000000000000000100000000;
 			remoteInfo = TurboCode;
+		};
+		000000000000000270000000 /* turbocode-acp target proxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 000000000000000300000000;
+			remoteInfo = "turbocode-acp";
 		};
 /* End PBXContainerItemProxy section */
 
@@ -373,8 +381,12 @@
 				000000000000000120000000 /* Sources */,
 				000000000000000130000000 /* Frameworks */,
 				000000000000000140000000 /* Resources */,
+				000000000000000150000000 /* Helpers */,
 			);
 			buildRules = (
+			);
+			dependencies = (
+				000000000000000160000000 /* turbocode-acp */,
 			);
 			fileSystemSynchronizedGroups = (
 				000000000000000000000010 /* TurboCode */,
@@ -501,6 +513,20 @@
 			);
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		000000000000000150000000 /* Helpers */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers";
+			dstSubfolderSpec = 0;
+			files = (
+				B000000000000000000000a1 /* turbocode-acp in Helpers */,
+			);
+			name = Helpers;
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		000000000000000120000000 /* Sources */ = {
@@ -661,6 +687,11 @@
 			isa = PBXTargetDependency;
 			target = 000000000000000100000000 /* TurboCode */;
 			targetProxy = 000000000000000260000000 /* PBXContainerItemProxy */;
+		};
+		000000000000000160000000 /* turbocode-acp */ = {
+			isa = PBXTargetDependency;
+			target = 000000000000000300000000 /* turbocode-acp */;
+			targetProxy = 000000000000000270000000 /* turbocode-acp target proxy */;
 		};
 /* End PBXTargetDependency section */
 

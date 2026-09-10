@@ -56,12 +56,14 @@ identità/sessione/workspace dal runtime applicativo e riceve il motore condivis
 tramite `ACPApplicationRuntime`. `ACPApplicationRuntimeAdapter` collega ora
 `AgentRuntime` e `LLMRuntime`, ricostruisce la sessione Foundation Models con il
 profilo/workspace ACP e proietta testo, tool e usage verso ACP. La destinazione
-delle approvazioni è iniettata nei tool: il processo headless rifiuta in modo
-esplicito finché non sarà implementato `session/request_permission`.
-L'helper `turbocode-acp` e il packaging restano ancora da fare.
+delle approvazioni è iniettata nei tool: il processo headless invia
+`session/request_permission` al client e risolve il registro esistente senza
+bloccare il dispatcher. Il target `turbocode-acp` è ora embeddato dall'app in
+`Contents/Helpers/turbocode-acp`, con firma on-copy e documentazione per la
+registrazione manuale in Xcode.
 Le suite ACP focalizzate verificano protocollo, isolamento delle sessioni e
-cancellazione e il nuovo adapter compila contro il runtime esistente; non
-attestano ancora l'avvio reale da Xcode o l'esecuzione di un provider reale.
+cancellazione, incluse permission e packaging; non attestano ancora l'avvio
+reale da Xcode o l'esecuzione di un provider reale.
 
 Questo documento è il deliverable di pianificazione richiesto dall'utente.
 Non attesta che le integrazioni siano già completamente implementate o
