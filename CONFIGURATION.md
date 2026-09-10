@@ -96,6 +96,18 @@ The gateway preserves MCP JSON schemas and rich result content, including
 from TurboCode's local `xcode_project` wrapper and is never added to delegated
 worker profiles.
 
+## Xcode ACP agent
+
+The `TurboCode` app target embeds the native ACP helper at
+`TurboCode.app/Contents/Helpers/turbocode-acp`. Register that absolute path in
+Xcode's **Add an ACP Agent** screen with the name `TurboCode` and no
+interpreter. The helper receives the session workspace from Xcode and keeps
+provider/model selection in the external `~/.turbocode/models.json` file; the
+registration does not accept or store credentials.
+
+See [ACP_AGENT_SETUP.md](ACP_AGENT_SETUP.md) for the complete registration and
+smoke-check procedure.
+
 ## Agent Tuning Schema Version 1
 
 ```json
