@@ -9,6 +9,10 @@ ARCHITECTURE_EVOLUTION_ROADMAP.md
 TurboCode/Documentation/task-delegation-feature-plan.md
 output/
 
+# Local agent and Xcode MCP instructions
+AGENTS.md
+xcode-mcp.md
+
 # Per-user Xcode settings
 **/xcuserdata/
 
