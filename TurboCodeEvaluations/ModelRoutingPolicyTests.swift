@@ -188,6 +188,44 @@ struct ModelRoutingPolicyTests {
         #expect(!prompt.contains("- grep\n"))
     }
 
+    @Test("Bash uses rg when the dedicated search capability is absent")
+    func promptUsesBashRipgrepFallback() {
+        let prompt = TurboCodeSystemPromptBuilder.build(
+            TurboCodeSystemPromptContext(
+                role: .standalone,
+                backend: .llamaServer,
+                workspaceRoot: "/tmp/workspace",
+                agentTuning: .default,
+                toolIDs: [.bash],
+                toolNames: ["bash"],
+                availableSkills: [],
+                workspaceInstructions: nil
+            )
+        )
+
+        #expect(prompt.contains("use bash with rg or rg --files first"))
+        #expect(!prompt.contains("Use the ripgrep tool first"))
+    }
+
+    @Test("Dedicated Ripgrep replaces the Bash search fallback")
+    func promptPrefersDedicatedRipgrepWhenSelected() {
+        let prompt = TurboCodeSystemPromptBuilder.build(
+            TurboCodeSystemPromptContext(
+                role: .standalone,
+                backend: .llamaServer,
+                workspaceRoot: "/tmp/workspace",
+                agentTuning: .default,
+                toolIDs: [.bash, .searchWorkspace],
+                toolNames: ["bash", ToolCapabilityID.searchWorkspace.runtimeName],
+                availableSkills: [],
+                workspaceInstructions: nil
+            )
+        )
+
+        #expect(prompt.contains("Use the ripgrep tool first"))
+        #expect(!prompt.contains("use bash with rg or rg --files first"))
+    }
+
     @Test("Prompt does not impose the removed microtask competence barrier")
     func promptDoesNotImposeMicrotaskBarrier() {
         let prompt = TurboCodeSystemPromptBuilder.build(
