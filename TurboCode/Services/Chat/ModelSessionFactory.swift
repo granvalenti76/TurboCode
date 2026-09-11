@@ -132,6 +132,8 @@ nonisolated struct ModelSessionEvents: Sendable {
     /// Optional harness admission used only when the user enables background
     /// delegation. A nil port preserves the blocking tool contract.
     let backgroundTaskSubmission: DelegatedTaskBackgroundSubmission?
+    /// Session-owned external tools, such as ACP-provided MCP gateways.
+    let additionalTools: [any Tool]
 
     init(
         currentTurnID: @escaping @MainActor @Sendable () async -> TurnID? = { nil },
@@ -156,7 +158,8 @@ nonisolated struct ModelSessionEvents: Sendable {
         ) async -> String = {
             await ToolApprovalRegistry.shared.request($0)
         },
-        backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil
+        backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil,
+        additionalTools: [any Tool] = []
     ) {
         self.currentTurnID = currentTurnID
         self.toolReceiptRegistry = toolReceiptRegistry
@@ -166,6 +169,7 @@ nonisolated struct ModelSessionEvents: Sendable {
         self.agentActivityChanged = agentActivityChanged
         self.requestApproval = requestApproval
         self.backgroundTaskSubmission = backgroundTaskSubmission
+        self.additionalTools = additionalTools
     }
 }
 
@@ -384,6 +388,7 @@ nonisolated enum ModelSessionFactory {
                 )
             )
         }
+        standaloneTools.append(contentsOf: events.additionalTools)
 
         return LanguageModelSession(
             profile: StandaloneProfile(
@@ -514,6 +519,7 @@ nonisolated enum ModelSessionFactory {
             receiptRegistry: events.toolReceiptRegistry,
             requestApproval: events.requestApproval
         )
+        orchestratorTools.append(contentsOf: events.additionalTools)
         if orchestratorPlan.contains(.callPowerfulModel) {
             orchestratorTools.append(powerfulTool)
         }

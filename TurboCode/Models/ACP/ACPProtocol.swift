@@ -77,6 +77,8 @@ nonisolated protocol ACPAgentDriver: Sendable {
 
     func cancel(sessionID: String) async
 
+    func shutdown() async
+
     func configurationOptions(
         sessionID: String
     ) async throws -> [ACPConfigOption]
@@ -90,6 +92,8 @@ nonisolated protocol ACPAgentDriver: Sendable {
 }
 
 nonisolated extension ACPAgentDriver {
+    func shutdown() async {}
+
     func prompt(
         sessionID: String,
         prompt: [MCPJSONValue],
@@ -139,6 +143,8 @@ nonisolated protocol ACPApplicationRuntime: Sendable {
 
     func cancel(sessionID: String) async
 
+    func shutdown() async
+
     func configurationOptions(
         sessionID: String
     ) async throws -> [ACPConfigOption]
@@ -151,6 +157,8 @@ nonisolated protocol ACPApplicationRuntime: Sendable {
 }
 
 nonisolated extension ACPApplicationRuntime {
+    func shutdown() async {}
+
     func run(
         turn: ACPApplicationTurn,
         updates: ACPUpdateChannel,
@@ -183,6 +191,32 @@ nonisolated struct ACPApplicationTurn: Sendable, Equatable {
     let prompt: [MCPJSONValue]
 }
 
+/// ACP's closed vocabulary for permission requests. Product tools keep their
+/// internal operation names; only this boundary translates them for the wire.
+nonisolated enum ACPPermissionKind: String, Sendable, Equatable {
+    case read
+    case edit
+    case delete
+    case move
+    case search
+    case execute
+    case other
+
+    init(operation: String) {
+        switch operation {
+        case "removeFile": self = .delete
+        case "create", "replace_file": self = .edit
+        case "move", "rename": self = .move
+        case "read", "readFile": self = .read
+        case "search", "ripgrep": self = .search
+        case let operation where operation.hasPrefix("git."):
+            self = .execute
+        default:
+            self = .other
+        }
+    }
+}
+
 /// The approval payload shared by the runtime and ACP transport. The action
 /// remains registered in `ToolApprovalRegistry`; this value carries only the
 /// metadata needed for the client decision and never the executable closure.
@@ -190,10 +224,13 @@ nonisolated struct ACPPermissionRequest: Sendable, Equatable {
     let sessionID: String
     let toolCallID: String
     let title: String
-    let kind: String
     let operation: String
     let path: String
     let destination: String?
+
+    var wireKind: ACPPermissionKind {
+        ACPPermissionKind(operation: operation)
+    }
 }
 
 nonisolated enum ACPPermissionOutcome: Sendable, Equatable {

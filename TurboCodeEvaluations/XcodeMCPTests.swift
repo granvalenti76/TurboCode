@@ -130,4 +130,57 @@ struct XcodeMCPTests {
         )
         #expect(output.contains("disabled"))
     }
+
+    @Test("ACP MCP stdio preserves session command environment and tool calls")
+    func acpStdioRuntime() async throws {
+        let serverScript = #"""
+        import json, os, sys
+
+        for line in sys.stdin:
+            request = json.loads(line)
+            method = request.get("method")
+            if method.startswith("notifications/"):
+                continue
+            result = {}
+            if method == "initialize":
+                result = {"protocolVersion": "2025-06-18"}
+            elif method == "tools/list":
+                result = {"tools": [{
+                    "name": "echo",
+                    "description": "Echo fixture",
+                    "inputSchema": {"type": "object"}
+                }]}
+            elif method == "tools/call":
+                value = request["params"]["arguments"]["value"]
+                result = {"content": [{"type": "text", "text":
+                    f"{os.environ.get('ACP_FIXTURE')}:{os.getcwd()}:{sys.argv[1]}:{value}"
+                }]}
+            print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
+        """#
+        let declaration: MCPJSONValue = .object([
+            "name": .string("fixture-server"),
+            "command": .string("/usr/bin/python3"),
+            "args": .array([
+                .string("-c"),
+                .string(serverScript),
+                .string("argument-preserved")
+            ]),
+            "env": .object(["ACP_FIXTURE": .string("environment-preserved")]),
+            "cwd": .string("/tmp")
+        ])
+
+        let runtime = ACPMCPRuntime()
+        let tools = try await runtime.start(declarations: [declaration], cwd: "/")
+        let tool = try #require(tools.first as? ACPMCPTool)
+        let output = try await tool.call(arguments: ACPMCPToolArguments(
+            operation: "call",
+            toolName: "echo",
+            argumentsJSON: #"{"value":"payload-preserved"}"#
+        ))
+        await runtime.stop()
+
+        #expect(tools.count == 1)
+        #expect(output.contains("environment-preserved:"))
+        #expect(output.contains("/tmp:argument-preserved:payload-preserved"))
+    }
 }

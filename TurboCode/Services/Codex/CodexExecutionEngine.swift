@@ -518,11 +518,21 @@ nonisolated protocol CodexTurnRunning: AnyObject, Sendable {
 
     func interrupt() async
 
+    /// Resolves a provider approval when the host owns the approval UI.
+    /// Fixtures and non-interactive adapters may keep the default no-op.
+    func resolveApproval(id: String, approved: Bool) async throws -> Bool
+
     func steerActiveTurn(
         turboThreadID: String,
         localTurnID: TurnID,
         input: String
     ) async throws -> String
+}
+
+nonisolated extension CodexTurnRunning {
+    func resolveApproval(id: String, approved: Bool) async throws -> Bool {
+        false
+    }
 }
 
 extension CodexExecutionEngine: CodexTurnRunning {}

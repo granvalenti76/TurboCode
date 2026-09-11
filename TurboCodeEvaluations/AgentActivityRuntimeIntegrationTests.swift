@@ -286,6 +286,34 @@ struct AgentActivityRuntimeIntegrationTests {
         #expect(toolResult?.output == "Error: file was not readable.")
     }
 
+    @Test("Codex approval callbacks resolve the provider request after ACP handling")
+    func codexApprovalResolutionReachesProvider() async {
+        let runtime = ApprovalAdapterCodexRuntime()
+        let adapter = CodexBackendSession(
+            runtime: runtime,
+            turboThreadID: "thread-approval",
+            agentTuning: AgentTuningConfig(),
+            approvalResolution: { request in
+                #expect(request.operation == "write")
+                return .allow
+            }
+        )
+
+        let result = await adapter.run(
+            request: TurnRequest(
+                prompt: "Approve the fixture write.",
+                backend: .codex,
+                modelName: "Codex test model",
+                workspaceRoot: "/tmp"
+            ),
+            events: .none
+        )
+
+        #expect(result.outcome == .succeeded)
+        #expect(await runtime.resolvedID == "codex-approval")
+        #expect(await runtime.resolvedApproved)
+    }
+
     @Test("Codex backend adapter maps authentication failures to recoverable outcomes")
     func codexBackendAdapterMapsAuthenticationFailure() async {
         let adapter = CodexBackendSession(
@@ -624,6 +652,45 @@ private actor BlockingAdapterCodexRuntime: CodexTurnRunning {
         interrupted = true
         continuation?.resume(throwing: CancellationError())
         continuation = nil
+    }
+
+    func steerActiveTurn(
+        turboThreadID: String,
+        localTurnID: TurnID,
+        input: String
+    ) async throws -> String {
+        "server-turn"
+    }
+}
+
+private actor ApprovalAdapterCodexRuntime: CodexTurnRunning {
+    private(set) var resolvedID: String?
+    private(set) var resolvedApproved = false
+
+    func runTurn(
+        request: CodexTurnRequest,
+        events: CodexTurnEvents
+    ) async throws -> CodexTurnResult {
+        await events.approvalRequested(
+            ApprovalRequest(
+                id: "codex-approval",
+                operation: "write",
+                path: "App.swift",
+                summary: "Write App.swift"
+            )
+        )
+        return CodexTurnResult(
+            assistantText: "Approved result.",
+            reasoningText: ""
+        )
+    }
+
+    func interrupt() async {}
+
+    func resolveApproval(id: String, approved: Bool) async throws -> Bool {
+        resolvedID = id
+        resolvedApproved = approved
+        return true
     }
 
     func steerActiveTurn(

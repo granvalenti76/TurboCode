@@ -131,7 +131,17 @@ actor ACPAgentServer {
                 "session/new requires an absolute cwd."
             )
         }
-        let mcpServers = object["mcpServers"]?.arrayValue ?? []
+        let mcpServers: [MCPJSONValue]
+        if let rawMCPServers = object["mcpServers"] {
+            guard let values = rawMCPServers.arrayValue else {
+                throw ACPProtocolError.invalidParams(
+                    "session/new mcpServers must be an array."
+                )
+            }
+            mcpServers = values
+        } else {
+            mcpServers = []
+        }
         do {
             let sessionID = try await driver.createSession(
                 cwd: cwd,
@@ -307,7 +317,7 @@ actor ACPAgentServer {
                 "toolCall": .object([
                     "toolCallId": .string(request.toolCallID),
                     "title": .string(request.title),
-                    "kind": .string(request.kind)
+                    "kind": .string(request.wireKind.rawValue)
                 ]),
                 "options": .array([
                     .object([
@@ -345,9 +355,12 @@ actor ACPAgentServer {
             return
         }
         switch optionID {
-        case "allow-once", "allow-always":
+        case "allow-once":
             resolvePermission(id: id, outcome: .allow)
         default:
+            // Only option IDs sent in the request are actionable. Unknown
+            // values, including ACP's unoffered allow-always variant, fail
+            // closed as a rejection.
             resolvePermission(id: id, outcome: .reject)
         }
     }
@@ -380,6 +393,22 @@ actor ACPAgentServer {
                 "update": update.update
             ])
         ]))
+    }
+
+    func shutdown() async {
+        let sessions = Array(activePrompts.keys)
+        for sessionID in sessions {
+            activePrompts[sessionID]?.cancel()
+        }
+        activePrompts.removeAll()
+        let permissionIDs = Array(pendingPermissions.keys)
+        for permissionID in permissionIDs {
+            guard let permission = pendingPermissions.removeValue(forKey: permissionID) else {
+                continue
+            }
+            permission.continuation.resume(returning: .cancelled)
+        }
+        await driver.shutdown()
     }
 
     private func finishPrompt(
@@ -474,8 +503,10 @@ nonisolated struct ACPStdioServer: Sendable {
             if !buffer.isEmpty {
                 await server.receive(buffer)
             }
+            await server.shutdown()
         } catch {
             FileHandle.standardError.write(Data("ACP stdin read failed: \(error.localizedDescription)\n".utf8))
+            await server.shutdown()
         }
     }
 }

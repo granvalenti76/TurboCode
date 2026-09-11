@@ -147,6 +147,61 @@ struct ACPApplicationRuntimeAdapterTests {
         ) == .endTurn)
     }
 
+    @Test("a blocked session does not reject an independent session")
+    func concurrentSessionIsolation() async throws {
+        let firstSession = ACPControlledBackendSession(blockUntilCancelled: true)
+        let secondSession = ACPControlledBackendSession()
+        var factoryIndex = 0
+        let adapter = ACPApplicationRuntimeAdapter(
+            makeAgentRuntime: { backend in
+                AgentRuntime(backend: backend)
+            },
+            makeLLMRuntime: { _ in
+                factoryIndex += 1
+                let session = factoryIndex == 1 ? firstSession : secondSession
+                return LLMRuntime(
+                    sessionFactory: ACPControlledBackendSessionFactory(session: session),
+                    foundationModelsBootstrap: FoundationModelsBootstrapConfiguration(
+                        backend: .llamaServer,
+                        usesSystemModel: true,
+                        remoteModel: .fallbackLlama
+                    )
+                )
+            },
+            makeConfiguration: { _ in Self.configuration() }
+        )
+        try await adapter.prepareSession(
+            sessionID: "session-a",
+            cwd: "/tmp/a",
+            mcpServers: []
+        )
+        try await adapter.prepareSession(
+            sessionID: "session-b",
+            cwd: "/tmp/b",
+            mcpServers: []
+        )
+
+        let firstTurn = Task {
+            try await adapter.run(
+                turn: Self.turn(id: "blocked-a", prompt: "first", sessionID: "session-a"),
+                updates: ACPUpdateChannel()
+            )
+        }
+        while await firstSession.requests.isEmpty {
+            await Task.yield()
+        }
+        let secondTurn = Task {
+            try await adapter.run(
+                turn: Self.turn(id: "independent-b", prompt: "second", sessionID: "session-b"),
+                updates: ACPUpdateChannel()
+            )
+        }
+
+        #expect(try await secondTurn.value == .endTurn)
+        await adapter.cancel(sessionID: "session-a")
+        #expect(try await firstTurn.value == .cancelled)
+    }
+
     @Test("model changes are session-local and apply to the next turn")
     func sessionModelSelection() async throws {
         let configuration = Self.configuration()

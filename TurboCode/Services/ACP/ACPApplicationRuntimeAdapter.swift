@@ -84,10 +84,10 @@ nonisolated struct ACPModelSelection: Sendable {
 ///
 /// This type is deliberately UI-free and nonisolated. Mutable session and
 /// turn identity live in `SessionState`; provider lifecycle remains owned by
-/// `AgentRuntime`/`LLMRuntime`, while `ACPEventProjector` is the only wire
-/// projection layer.
+/// the per-session `AgentRuntime`/`LLMRuntime` pair, while
+/// `ACPEventProjector` is the only wire projection layer.
 nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @unchecked Sendable {
-    private let agentRuntime: AgentRuntime
+    private let makeAgentRuntime: @Sendable (ModelBackend) -> AgentRuntime
     private let makeLLMRuntime: @MainActor @Sendable (
         ACPHostSessionConfiguration
     ) -> LLMRuntime
@@ -105,7 +105,9 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
         ) -> ACPHostSessionConfiguration,
         projector: ACPEventProjector = ACPEventProjector()
     ) {
-        self.agentRuntime = agentRuntime
+        // Kept for focused single-session fixtures. Production composition
+        // uses the factory initializer below so sessions cannot share state.
+        self.makeAgentRuntime = { _ in agentRuntime }
         self.makeLLMRuntime = { _ in llmRuntime }
         self.makeConfiguration = makeConfiguration
         self.projector = projector
@@ -121,7 +123,25 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
         ) -> ACPHostSessionConfiguration,
         projector: ACPEventProjector = ACPEventProjector()
     ) {
-        self.agentRuntime = agentRuntime
+        // Kept for focused single-session fixtures. Production composition
+        // uses the factory initializer below so sessions cannot share state.
+        self.makeAgentRuntime = { _ in agentRuntime }
+        self.makeLLMRuntime = makeLLMRuntime
+        self.makeConfiguration = makeConfiguration
+        self.projector = projector
+    }
+
+    init(
+        makeAgentRuntime: @escaping @Sendable (ModelBackend) -> AgentRuntime,
+        makeLLMRuntime: @escaping @MainActor @Sendable (
+            ACPHostSessionConfiguration
+        ) -> LLMRuntime,
+        makeConfiguration: @escaping @MainActor @Sendable (
+            String
+        ) -> ACPHostSessionConfiguration,
+        projector: ACPEventProjector = ACPEventProjector()
+    ) {
+        self.makeAgentRuntime = makeAgentRuntime
         self.makeLLMRuntime = makeLLMRuntime
         self.makeConfiguration = makeConfiguration
         self.projector = projector
@@ -133,15 +153,30 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
         mcpServers: [MCPJSONValue]
     ) async throws {
         let configuration = await makeConfiguration(cwd)
+        let agentRuntime = makeAgentRuntime(
+            configuration.modelConfiguration.backend
+        )
         let llmRuntime = await makeLLMRuntime(configuration)
+        let mcpRuntime = ACPMCPRuntime()
+        let mcpTools = try await mcpRuntime.start(
+            declarations: mcpServers,
+            cwd: cwd
+        )
         let eventRouter = ACPSessionEventRouter(sessionID: sessionID)
         await state.insert(
             sessionID: sessionID,
             cwd: cwd,
             configuration: configuration,
+            agentRuntime: agentRuntime,
             llmRuntime: llmRuntime,
+            mcpRuntime: mcpRuntime,
+            mcpTools: mcpTools,
             eventRouter: eventRouter
         )
+    }
+
+    func shutdown() async {
+        await state.shutdown()
     }
 
     func run(
@@ -172,6 +207,7 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
             )
         }
         let configuration = context.configuration
+        let agentRuntime = context.agentRuntime
         let llmRuntime = context.llmRuntime
         await context.eventRouter.install(
             turnID: turn.turnID,
@@ -224,7 +260,8 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
             let events = context.eventRouter.backendEvents
             let modelEvents = Self.modelSessionEvents(
                 sessionID: turn.sessionID,
-                eventRouter: context.eventRouter
+                eventRouter: context.eventRouter,
+                additionalTools: context.mcpTools
             )
             let admitted = await agentRuntime.runOperation(turnID: turn.turnID) {
                 let result: BackendSessionResult
@@ -234,7 +271,8 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
                         request: request,
                         configuration: Self.codexConfiguration(
                             sessionID: turn.sessionID,
-                            configuration: configuration
+                            configuration: configuration,
+                            requestPermission: requestPermission
                         ),
                         events: events
                     )
@@ -292,6 +330,7 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
             try await finish(
                 turn: turn,
                 outcome: outcome,
+                agentRuntime: agentRuntime,
                 eventRouter: context.eventRouter
             )
             switch outcome {
@@ -323,6 +362,7 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
     private func finish(
         turn: ACPApplicationTurn,
         outcome: TurnOutcome,
+        agentRuntime: AgentRuntime,
         eventRouter: ACPSessionEventRouter
     ) async throws {
         if let current = await agentRuntime.currentTurnState,
@@ -372,8 +412,8 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
     func cancel(sessionID: String) async {
         guard let active = await state.activeTurn(for: sessionID) else { return }
         await active.llmRuntime.interrupt(turnID: active.turnID)
-        await agentRuntime.cancelAndWaitForOperation()
-        _ = await agentRuntime.apply(.cancel(turnID: active.turnID))
+        await active.agentRuntime.cancelAndWaitForOperation()
+        _ = await active.agentRuntime.apply(.cancel(turnID: active.turnID))
         await active.eventRouter.clear(turnID: active.turnID)
         await state.finish(sessionID: sessionID, turnID: active.turnID)
         await projector.finish(turnID: active.turnID)
@@ -399,7 +439,8 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
 
     private static func modelSessionEvents(
         sessionID: String,
-        eventRouter: ACPSessionEventRouter
+        eventRouter: ACPSessionEventRouter,
+        additionalTools: [any Tool] = []
     ) -> ModelSessionEvents {
         return ModelSessionEvents(
             currentTurnID: {
@@ -424,7 +465,8 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
             agentActivityChanged: { _ in },
             requestApproval: { pending in
                 await eventRouter.requestApproval(pending)
-            }
+            },
+            additionalTools: additionalTools
         )
     }
 
@@ -473,7 +515,8 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
 
     private static func codexConfiguration(
         sessionID: String,
-        configuration: ACPHostSessionConfiguration
+        configuration: ACPHostSessionConfiguration,
+        requestPermission: @escaping ACPPermissionHandler
     ) -> CodexLLMExecutionConfiguration {
         CodexLLMExecutionConfiguration(
             turboThreadID: "acp-\(sessionID)",
@@ -489,7 +532,24 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
                 .resolvedToolIDs,
             activityStarted: { _, _ in },
             activityEnded: { _ in },
-            approvalRequested: { _ in }
+            approvalRequested: { _ in },
+            approvalResolution: { request in
+                let outcome = await requestPermission(
+                    ACPPermissionRequest(
+                        sessionID: sessionID,
+                        toolCallID: request.id,
+                        title: request.displaySummary,
+                        operation: request.operation,
+                        path: request.path,
+                        destination: request.destination
+                    )
+                )
+                switch outcome {
+                case .allow: return .allow
+                case .reject: return .reject
+                case .cancelled: return .cancelled
+                }
+            }
         )
     }
 
@@ -657,7 +717,6 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
                     sessionID: sessionID,
                     toolCallID: pending.id,
                     title: pending.summary,
-                    kind: pending.operation,
                     operation: pending.operation,
                     path: pending.path,
                     destination: pending.destination
@@ -685,7 +744,9 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
     private actor SessionState {
         struct TurnContext: Sendable {
             let configuration: ACPHostSessionConfiguration
+            let agentRuntime: AgentRuntime
             let llmRuntime: LLMRuntime
+            let mcpTools: [any Tool]
             let eventRouter: ACPSessionEventRouter
             let needsRebuild: Bool
         }
@@ -693,7 +754,10 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
         private struct Session: Sendable {
             let cwd: String
             var configuration: ACPHostSessionConfiguration
+            let agentRuntime: AgentRuntime
             let llmRuntime: LLMRuntime
+            let mcpRuntime: ACPMCPRuntime
+            let mcpTools: [any Tool]
             let eventRouter: ACPSessionEventRouter
             var runtimeModelID: String?
             var turnID: TurnID?
@@ -705,13 +769,19 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
             sessionID: String,
             cwd: String,
             configuration: ACPHostSessionConfiguration,
+            agentRuntime: AgentRuntime,
             llmRuntime: LLMRuntime,
+            mcpRuntime: ACPMCPRuntime,
+            mcpTools: [any Tool],
             eventRouter: ACPSessionEventRouter
         ) {
             sessions[sessionID] = Session(
                 cwd: cwd,
                 configuration: configuration,
+                agentRuntime: agentRuntime,
                 llmRuntime: llmRuntime,
+                mcpRuntime: mcpRuntime,
+                mcpTools: mcpTools,
                 eventRouter: eventRouter,
                 runtimeModelID: nil,
                 turnID: nil
@@ -726,7 +796,9 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
             sessions[sessionID] = session
             return TurnContext(
                 configuration: session.configuration,
+                agentRuntime: session.agentRuntime,
                 llmRuntime: session.llmRuntime,
+                mcpTools: session.mcpTools,
                 eventRouter: session.eventRouter,
                 needsRebuild: session.configuration.modelConfiguration.backend != .codex
                     && session.runtimeModelID != session.configuration.selectedModelID
@@ -739,11 +811,21 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
 
         func activeTurn(
             for sessionID: String
-        ) -> (turnID: TurnID, llmRuntime: LLMRuntime, eventRouter: ACPSessionEventRouter)? {
+        ) -> (
+            turnID: TurnID,
+            agentRuntime: AgentRuntime,
+            llmRuntime: LLMRuntime,
+            eventRouter: ACPSessionEventRouter
+        )? {
             guard let session = sessions[sessionID], let turnID = session.turnID else {
                 return nil
             }
-            return (turnID, session.llmRuntime, session.eventRouter)
+            return (
+                turnID,
+                session.agentRuntime,
+                session.llmRuntime,
+                session.eventRouter
+            )
         }
 
         func markRuntimeConfiguration(
@@ -804,6 +886,14 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
             session.turnID = nil
             sessions[sessionID] = session
         }
+
+        func shutdown() async {
+            let runtimes = sessions.values.map(\.mcpRuntime)
+            sessions.removeAll()
+            for runtime in runtimes {
+                await runtime.stop()
+            }
+        }
     }
 }
 
@@ -816,16 +906,22 @@ extension ACPApplicationRuntimeAdapter {
         let modelRuntime = ModelRuntimeStore()
         let codexRuntime = CodexRuntimeStore()
         let nativeRunner = NativeResponseRunner()
-        let sessionFactory = LiveLLMBackendSessionFactory(
-            nativeRunner: nativeRunner,
-            codexRuntime: codexRuntime
-        )
-        let agentRuntime = AgentRuntime(backend: modelRuntime.activeBackend)
 
         return ACPApplicationRuntimeAdapter(
-            agentRuntime: agentRuntime,
+            makeAgentRuntime: { backend in
+                AgentRuntime(backend: backend)
+            },
             makeLLMRuntime: { configuration in
-                LLMRuntime(
+                // Codex's client, approval table, and active-turn identity are
+                // session-owned. Native response execution may share its
+                // stateless runner, but its backend factory must not share the
+                // Codex runtime store across ACP sessions.
+                let sessionCodexRuntime = CodexRuntimeStore()
+                let sessionFactory = LiveLLMBackendSessionFactory(
+                    nativeRunner: nativeRunner,
+                    codexRuntime: sessionCodexRuntime
+                )
+                return LLMRuntime(
                     sessionFactory: sessionFactory,
                     foundationModelsBootstrap: Self.bootstrapConfiguration(
                         for: configuration

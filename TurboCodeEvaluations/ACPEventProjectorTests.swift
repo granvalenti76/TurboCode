@@ -47,6 +47,36 @@ struct ACPEventProjectorTests {
         )
     }
 
+    @Test("cancelled tool results use a valid ACP failed update")
+    func cancelledToolResult() async {
+        let projector = ACPEventProjector()
+        let result = ToolResult(
+            id: "call-cancelled",
+            turnID: TurnID(rawValue: "turn-1"),
+            status: .cancelled
+        )
+
+        let update = await projector.update(
+            for: .toolFinished(result),
+            sessionID: "session-1"
+        )
+        let payload = update?.update.objectValue
+        #expect(payload?["status"] == .string("failed"))
+        #expect(
+            payload?["content"]?.arrayValue?.first?.objectValue?["content"]?.objectValue?["text"]
+                == .string("Tool call was cancelled.")
+        )
+    }
+
+    @Test("permission operations map to the ACP tool kind vocabulary")
+    func permissionKindMapping() {
+        #expect(ACPPermissionKind(operation: "removeFile") == .delete)
+        #expect(ACPPermissionKind(operation: "create") == .edit)
+        #expect(ACPPermissionKind(operation: "replace_file") == .edit)
+        #expect(ACPPermissionKind(operation: "git.commit") == .execute)
+        #expect(ACPPermissionKind(operation: "provider_specific") == .other)
+    }
+
     @Test("reasoning and approvals are not advertised as unsupported updates")
     func unsupportedEventsRemainSilent() async {
         let projector = ACPEventProjector()

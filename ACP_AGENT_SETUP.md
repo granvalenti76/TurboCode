@@ -50,6 +50,19 @@ update and that this path exists:
 test -x /Applications/TurboCode.app/Contents/Helpers/turbocode-acp
 ```
 
+## MCP servers supplied by Xcode
+
+TurboCode supports the ACP v1 stdio MCP declarations supplied in
+`session/new`. Each server is started and stopped within that ACP session;
+`command`, `args`, `env`, and the session `cwd` are passed to the child
+process. Its advertised tools are exposed to the selected model through a
+session-local `mcp_<server-name>` gateway. HTTP/SSE MCP transports and session
+resume are not enabled by this helper.
+
+Provider-native Codex approvals are also routed back through ACP's
+`session/request_permission`. TurboCode offers one-shot allow/reject choices;
+unsupported or late responses are rejected safely.
+
 See Apple's [coding intelligence setup](https://developer.apple.com/documentation/Xcode/setting-up-coding-intelligence)
 and [external agent documentation](https://developer.apple.com/documentation/xcode/extending-and-customizing-agents/)
 for the Xcode-side settings and lifecycle.

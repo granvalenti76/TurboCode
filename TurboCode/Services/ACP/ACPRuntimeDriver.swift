@@ -63,6 +63,10 @@ nonisolated final class ACPRuntimeDriver: ACPAgentDriver, @unchecked Sendable {
         await runtime.cancel(sessionID: sessionID)
     }
 
+    nonisolated func shutdown() async {
+        await runtime.shutdown()
+    }
+
     nonisolated func configurationOptions(
         sessionID: String
     ) async throws -> [ACPConfigOption] {

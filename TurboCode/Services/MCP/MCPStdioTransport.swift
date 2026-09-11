@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 
 /// Errors at the JSON-RPC transport boundary. A process stop during a tool
 /// call is surfaced as a connection failure; callers must not retry a
@@ -38,6 +39,7 @@ actor MCPStdioTransport {
     private let executableURL: URL
     private let arguments: [String]
     private let environment: [String: String]?
+    private let workingDirectoryURL: URL?
     private let startupTimeout: Duration
     private let requestTimeout: Duration
 
@@ -55,12 +57,14 @@ actor MCPStdioTransport {
         executableURL: URL = URL(fileURLWithPath: "/usr/bin/xcrun"),
         arguments: [String] = ["mcpbridge"],
         environment: [String: String]? = nil,
+        workingDirectoryURL: URL? = nil,
         startupTimeout: Duration = .seconds(20),
         requestTimeout: Duration = .seconds(180)
     ) {
         self.executableURL = executableURL
         self.arguments = arguments
         self.environment = environment
+        self.workingDirectoryURL = workingDirectoryURL
         self.startupTimeout = startupTimeout
         self.requestTimeout = requestTimeout
     }
@@ -84,6 +88,7 @@ actor MCPStdioTransport {
         child.executableURL = executableURL
         child.arguments = arguments
         child.environment = environment
+        child.currentDirectoryURL = workingDirectoryURL
         child.standardInput = inputPipe
         child.standardOutput = outputPipe
         child.standardError = errorPipe
@@ -284,5 +289,275 @@ actor MCPStdioTransport {
         pending.removeAll()
         for (_, task) in timeoutTasks { task.cancel() }
         timeoutTasks.removeAll()
+    }
+}
+
+/// A validated MCP stdio declaration received by one ACP session. It is kept
+/// session-local so commands, credentials, and discovered tools never enter
+/// persisted application configuration.
+nonisolated struct ACPMCPServerConfiguration: Sendable, Equatable {
+    let name: String
+    let command: String
+    let arguments: [String]
+    let environment: [String: String]
+    let cwd: String
+
+    init(value: MCPJSONValue, cwd: String) throws {
+        guard let object = value.objectValue,
+              let name = object["name"]?.stringValue,
+              !name.isEmpty,
+              let command = object["command"]?.stringValue,
+              !command.isEmpty else {
+            throw ACPApplicationRuntimeError.invalidConfiguration(
+                "Each ACP MCP server must contain a non-empty name and command."
+            )
+        }
+        if let transport = object["transport"]?.stringValue,
+           transport != "stdio" {
+            throw ACPApplicationRuntimeError.invalidConfiguration(
+                "ACP MCP server '\(name)' must use the stdio transport."
+            )
+        }
+        let arguments = object["args"]?.arrayValue?.map { $0.stringValue } ?? []
+        guard arguments.allSatisfy({ $0 != nil }) else {
+            throw ACPApplicationRuntimeError.invalidConfiguration(
+                "ACP MCP server '\(name)' has a non-string argument."
+            )
+        }
+        let environmentObject = object["env"]?.objectValue ?? [:]
+        guard environmentObject.values.allSatisfy({ $0.stringValue != nil }) else {
+            throw ACPApplicationRuntimeError.invalidConfiguration(
+                "ACP MCP server '\(name)' has a non-string environment value."
+            )
+        }
+        let effectiveCwd = object["cwd"]?.stringValue ?? cwd
+        guard !effectiveCwd.isEmpty else {
+            throw ACPApplicationRuntimeError.invalidConfiguration(
+                "ACP MCP server '\(name)' must have a working directory."
+            )
+        }
+        self.name = name
+        self.command = command
+        self.arguments = arguments.compactMap { $0 }
+        self.environment = environmentObject.compactMapValues(\.stringValue)
+        self.cwd = effectiveCwd
+    }
+}
+
+/// Owns all MCP child processes for one ACP session and exposes only the
+/// discovered catalog plus validated calls to the model tool boundary.
+actor ACPMCPRuntime {
+    private struct Connection {
+        let configuration: ACPMCPServerConfiguration
+        let transport: MCPStdioTransport
+        let tools: [MCPToolDescriptor]
+        let alias: String
+    }
+
+    private var connections: [String: Connection] = [:]
+
+    func start(
+        declarations: [MCPJSONValue],
+        cwd: String
+    ) async throws -> [any Tool] {
+        let names = declarations.compactMap { $0.objectValue?["name"]?.stringValue }
+        guard declarations.count == names.count,
+              names.count == Set(names).count else {
+            throw ACPApplicationRuntimeError.invalidConfiguration(
+                "ACP MCP server declarations must have unique names."
+            )
+        }
+        do {
+            for declaration in declarations {
+                let configuration = try ACPMCPServerConfiguration(
+                    value: declaration,
+                    cwd: cwd
+                )
+                let executableURL = try Self.resolveExecutable(configuration.command)
+                // ACP env entries are overrides, not a request to remove the
+                // helper's normal PATH/HOME. The command itself is resolved
+                // before launch, while child MCP processes may still need the
+                // inherited environment for their own subprocesses.
+                let environment = ProcessInfo.processInfo.environment.merging(
+                    configuration.environment
+                ) { _, override in override }
+                let transport = MCPStdioTransport(
+                    executableURL: executableURL,
+                    arguments: configuration.arguments,
+                    environment: environment,
+                    workingDirectoryURL: URL(fileURLWithPath: configuration.cwd)
+                )
+                try await transport.start(
+                    protocolVersion: "2025-06-18",
+                    clientName: "TurboCode ACP",
+                    clientVersion: "0.1.0"
+                )
+                let tools = try await Self.listTools(using: transport)
+                let alias = Self.toolAlias(for: configuration.name)
+                guard !connections.values.contains(where: { $0.alias == alias }) else {
+                    throw ACPApplicationRuntimeError.invalidConfiguration(
+                        "ACP MCP server names collide after tool aliasing."
+                    )
+                }
+                connections[configuration.name] = Connection(
+                    configuration: configuration,
+                    transport: transport,
+                    tools: tools,
+                    alias: alias
+                )
+            }
+            return connections.values.sorted { $0.alias < $1.alias }.map {
+                ACPMCPTool(
+                    name: $0.alias,
+                    serverName: $0.configuration.name,
+                    serverDescription: "MCP tools from \($0.configuration.name).",
+                    tools: $0.tools,
+                    runtime: self
+                )
+            }
+        } catch {
+            await stop()
+            throw error
+        }
+    }
+
+    func call(
+        serverName: String,
+        toolName: String,
+        arguments: MCPJSONValue
+    ) async throws -> MCPToolResult {
+        guard let connection = connections[serverName] else {
+            throw ACPApplicationRuntimeError.invalidConfiguration(
+                "The ACP MCP server '\(serverName)' is not available."
+            )
+        }
+        guard connection.tools.contains(where: { $0.name == toolName }) else {
+            throw ACPApplicationRuntimeError.invalidConfiguration(
+                "The MCP tool '\(toolName)' is not advertised by '\(serverName)'."
+            )
+        }
+        let response = try await connection.transport.request(
+            method: "tools/call",
+            params: .object([
+                "name": .string(toolName),
+                "arguments": arguments
+            ])
+        )
+        guard let object = response.objectValue,
+              let content = object["content"]?.arrayValue else {
+            throw MCPStdioTransportError.invalidResponse(
+                "tools/call result did not contain content."
+            )
+        }
+        return MCPToolResult(
+            content: content,
+            structuredContent: object["structuredContent"],
+            isError: object["isError"]?.boolValue ?? false
+        )
+    }
+
+    func stop() async {
+        let transports = connections.values.map(\.transport)
+        connections.removeAll()
+        for transport in transports {
+            await transport.stop()
+        }
+    }
+
+    private static func listTools(
+        using transport: MCPStdioTransport
+    ) async throws -> [MCPToolDescriptor] {
+        let response = try await transport.request(method: "tools/list")
+        guard let rawTools = response.objectValue?["tools"]?.arrayValue else {
+            throw MCPStdioTransportError.invalidResponse(
+                "tools/list result did not contain a tools array."
+            )
+        }
+        return try rawTools.map { value in
+            try JSONDecoder().decode(
+                MCPToolDescriptor.self,
+                from: JSONEncoder().encode(value)
+            )
+        }
+    }
+
+    private static func resolveExecutable(_ command: String) throws -> URL {
+        if command.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: command) {
+            return URL(fileURLWithPath: command)
+        }
+        let path = ProcessInfo.processInfo.environment["PATH"] ?? ""
+        for directory in path.split(separator: ":") {
+            let candidate = "/\(directory)/\(command)"
+            if FileManager.default.isExecutableFile(atPath: candidate) {
+                return URL(fileURLWithPath: candidate)
+            }
+        }
+        throw MCPStdioTransportError.executableMissing(command)
+    }
+
+    private static func toolAlias(for serverName: String) -> String {
+        let sanitized = serverName.map { character in
+            character.isLetter || character.isNumber || character == "_"
+                ? character
+                : "_"
+        }
+        return "mcp_" + String(sanitized)
+    }
+}
+
+@Generable
+struct ACPMCPToolArguments {
+    var operation: String
+    var toolName: String?
+    var argumentsJSON: String?
+}
+
+/// Foundation Models gateway for one ACP-provided MCP server. Nested MCP
+/// schemas stay opaque and are validated again before crossing the process
+/// boundary.
+struct ACPMCPTool: Tool {
+    typealias Arguments = ACPMCPToolArguments
+    typealias Output = String
+
+    let name: String
+    let serverName: String
+    let serverDescription: String
+    let tools: [MCPToolDescriptor]
+    let runtime: ACPMCPRuntime
+
+    var description: String {
+        "\(serverDescription) Use list_tools before calling a discovered tool."
+    }
+
+    let includesSchemaInInstructions = true
+
+    func call(arguments: ACPMCPToolArguments) async throws -> String {
+        switch arguments.operation.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "list_tools", "list", "discover":
+            return tools.map {
+                "- \($0.name): \($0.description ?? "No description provided.")\n  input: \($0.inputSchema?.jsonString ?? "{}")"
+            }.joined(separator: "\n")
+        case "call":
+            let toolName = arguments.toolName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard tools.contains(where: { $0.name == toolName }) else {
+                return "Unknown MCP tool '\(toolName)'. Use list_tools first."
+            }
+            let source = arguments.argumentsJSON?.isEmpty == false
+                ? arguments.argumentsJSON!
+                : "{}"
+            guard let data = source.data(using: .utf8),
+                  let value = try? JSONDecoder().decode(MCPJSONValue.self, from: data),
+                  value.objectValue != nil else {
+                return "MCP argumentsJSON must be a valid JSON object."
+            }
+            let result = try await runtime.call(
+                serverName: serverName,
+                toolName: toolName,
+                arguments: value
+            )
+            return result.renderedForModel
+        default:
+            return "Unknown MCP operation. Use list_tools or call."
+        }
     }
 }

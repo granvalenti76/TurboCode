@@ -20,6 +20,12 @@ struct NativeLLMExecutionConfiguration {
 /// Provider configuration needed to build one Codex backend adapter.
 /// Presentation callbacks remain explicit output ports; the factory owns the
 /// Codex process adapter and does not leak it back through this value.
+nonisolated enum CodexApprovalDecision: Sendable, Equatable {
+    case allow
+    case reject
+    case cancelled
+}
+
 nonisolated struct CodexLLMExecutionConfiguration: Sendable {
     let turboThreadID: String
     let workspaceName: String?
@@ -42,6 +48,11 @@ nonisolated struct CodexLLMExecutionConfiguration: Sendable {
     let approvalRequested: @MainActor @Sendable (
         ApprovalRequest
     ) async -> Void
+    /// ACP supplies this resolver; desktop UI keeps it nil and resolves
+    /// approvals through its observable store.
+    let approvalResolution: (@MainActor @Sendable (
+        ApprovalRequest
+    ) async -> CodexApprovalDecision)?
 
     init(
         turboThreadID: String,
@@ -62,7 +73,10 @@ nonisolated struct CodexLLMExecutionConfiguration: Sendable {
         activityEnded: @escaping @MainActor @Sendable (String) async -> Void,
         approvalRequested: @escaping @MainActor @Sendable (
             ApprovalRequest
-        ) async -> Void
+        ) async -> Void,
+        approvalResolution: (@MainActor @Sendable (
+            ApprovalRequest
+        ) async -> CodexApprovalDecision)? = nil
     ) {
         self.turboThreadID = turboThreadID
         self.workspaceName = workspaceName
@@ -78,6 +92,7 @@ nonisolated struct CodexLLMExecutionConfiguration: Sendable {
         self.activityStarted = activityStarted
         self.activityEnded = activityEnded
         self.approvalRequested = approvalRequested
+        self.approvalResolution = approvalResolution
     }
 }
 
@@ -169,7 +184,8 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
             },
             activityStarted: configuration.activityStarted,
             activityEnded: configuration.activityEnded,
-            approvalRequested: configuration.approvalRequested
+            approvalRequested: configuration.approvalRequested,
+            approvalResolution: configuration.approvalResolution
         )
     }
 

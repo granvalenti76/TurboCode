@@ -30,9 +30,20 @@ actor ACPEventProjector {
             switch result.status {
             case .succeeded: status = "completed"
             case .failed: status = "failed"
-            case .cancelled: status = "cancelled"
+            // ACP v1 represents interruption through the prompt stop reason;
+            // a tool update must remain one of the schema's terminal states.
+            case .cancelled: status = "failed"
             }
-            let output = result.errorMessage ?? result.output
+            let output: String
+            if let errorMessage = result.errorMessage, !errorMessage.isEmpty {
+                output = errorMessage
+            } else if !result.output.isEmpty {
+                output = result.output
+            } else if result.status == .cancelled {
+                output = "Tool call was cancelled."
+            } else {
+                output = ""
+            }
             var payload: [String: MCPJSONValue] = [
                 "sessionUpdate": .string("tool_call_update"),
                 "toolCallId": .string(result.id),

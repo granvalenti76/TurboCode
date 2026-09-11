@@ -196,6 +196,37 @@ struct ACPAgentServerTests {
         #expect(await driver.permissionOutcomeValue() == .allow)
     }
 
+    @Test("permission responses cannot authorize an unoffered option")
+    func unofferedPermissionOptionRejects() async throws {
+        let driver = ACPTestDriver(requestPermission: true)
+        let output = ACPTestOutput()
+        let server = ACPAgentServer(driver: driver) { data in
+            await output.append(data)
+        }
+        await server.receive(line("""
+        {"jsonrpc":"2.0","id":12,"method":"session/prompt","params":{"sessionId":"session-1","prompt":[]}}
+        """))
+        let permission = try await output.nextObject()
+        let permissionID = try #require(permission["id"])
+        await server.receive(try JSONEncoder().encode(MCPJSONValue.object([
+            "jsonrpc": .string("2.0"),
+            "id": permissionID,
+            "result": .object([
+                "outcome": .object([
+                    "outcome": .string("selected"),
+                    "optionId": .string("allow-always")
+                ])
+            ])
+        ])))
+
+        let completion = try await output.nextObject()
+        #expect(
+            completion["result"]?.objectValue?["stopReason"]
+                == .string(ACPStopReason.refusal.rawValue)
+        )
+        #expect(await driver.permissionOutcomeValue() == .reject)
+    }
+
     private func line(_ string: String) -> Data {
         Data(string.utf8)
     }
@@ -328,7 +359,6 @@ private final class ACPTestDriver: ACPAgentDriver, @unchecked Sendable {
             sessionID: sessionID,
             toolCallID: "call-1",
             title: "Write file",
-            kind: "edit",
             operation: "write",
             path: "README.md",
             destination: nil
