@@ -234,7 +234,7 @@ extension ChatStore {
     }
 
     var availableSkills: [TurboCodeSkillDefinition] {
-        modelRuntimeStore.availableSkills
+        modelRuntimeStore.resolvedMarkdownSkills
     }
 
     var onDeviceSupportsToolCalling: Bool {

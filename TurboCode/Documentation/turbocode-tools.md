@@ -161,15 +161,20 @@ structured tool covers the operation. Time, output, network access, and writable
 paths follow Agent Settings. TurboCode prefers its Xcode, SwiftPM, Git, search,
 and file tools whenever they apply.
 
-## Skills and orchestration
+## Markdown skills and orchestration
 
-TurboCode's product-level skills are provider-neutral `SKILL.md` instruction
-files. Their name and description form the session catalog; their body is loaded
-only when relevant. Foundation Models may use an internal dynamic-instructions
-adapter, but that implementation detail does not define another installation
-format. A user-created skill belongs at `.agents/skills/<name>/SKILL.md` in the
-active workspace. Keep its instructions self-contained and use clear
-workspace-relative paths for any supporting project files.
+TurboCode's product-level Markdown skills are provider-neutral `SKILL.md`
+instruction files. Their name and description form the active profile's session
+catalog; their body is loaded only when relevant. A user-created skill belongs at
+`.agents/skills/<name>/SKILL.md` in the active workspace. Keep its instructions
+self-contained and use clear workspace-relative paths for any supporting project
+files.
+
+Foundation on-demand integrations are a separate catalog. In the current
+implementation, `/mcp` asks the model to list integrations registered through
+Foundation Models' `Skills` mechanism, such as Safari MCP. This internal
+implementation detail does not change the Markdown `SKILL.md` format. Plugin
+tools and ordinary tools are not members of either catalog.
 
 ### `load_skill`
 
@@ -177,6 +182,10 @@ Loads the instructions of one installed skill on demand. The tool is registered
 only when the active profile has access to at least one skill. `/skill <name>` and
 `/<name>` are explicit host-side selections and do not depend on the model first
 choosing the tool itself.
+
+`/skills` lists only the Markdown skills available to the active profile. It does
+not list Foundation on-demand integrations, MCP tools, plugin tools, or ordinary
+tools. `/mcp` is the model-facing request for the separate Foundation catalog.
 
 ### `create_skill`
 

@@ -29,6 +29,15 @@ final class ModelRuntimeStore {
         }
     }
 
+    /// The single Markdown catalog shared by the prompt, `load_skill`, slash
+    /// activation, composer suggestions, and Codex handoffs.
+    var resolvedMarkdownSkills: [TurboCodeSkillDefinition] {
+        DynamicProfileRuntimeSelection.skills(
+            from: availableSkills,
+            profile: activeDynamicProfile
+        )
+    }
+
     var activeBaseModelID: ProfileBaseModelID {
         if activeBackend == .codex { return .codex }
         if activeBackend == .foundationApple { return .onDevice }
@@ -326,10 +335,40 @@ final class ModelRuntimeStore {
     }
 
     func resolvedPrompt(for displayText: String) -> String? {
+        Self.resolvedPrompt(for: displayText, skills: resolvedMarkdownSkills)
+    }
+
+    /// Resolves host-owned Markdown slash syntax against an already-resolved
+    /// catalog. Keeping this pure makes the catalog boundary testable without
+    /// coupling prompt tests to the user's on-disk configuration.
+    nonisolated static func resolvedPrompt(
+        for displayText: String,
+        skills: [TurboCodeSkillDefinition]
+    ) -> String? {
         let trimmed = displayText.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
         guard trimmed != "/skill" else { return nil }
+        if trimmed == "/skills" {
+            guard !skills.isEmpty else {
+                return """
+                The active profile has no Markdown skills selected. Report that
+                no disk-backed `SKILL.md` skills are available. Do not list MCP
+                integrations, Foundation Skills, plugins, or ordinary tools.
+                """
+            }
+            let entries = skills
+                .map { "- \($0.name): \($0.description)" }
+                .joined(separator: "\n")
+            return """
+            The user asked for the Markdown skills available to the active profile.
+            Reproduce only this exact catalog and do not add MCP integrations,
+            Foundation Skills, plugins, or ordinary tools:
+
+            Markdown skills (SKILL.md):
+            \(entries)
+            """
+        }
         guard trimmed.hasPrefix("/") else { return displayText }
 
         let parts = trimmed.split(separator: " ", maxSplits: 2).map(String.init)
@@ -345,14 +384,14 @@ final class ModelRuntimeStore {
                 ? parts.dropFirst().joined(separator: " ")
                 : ""
         }
-        guard let skill = availableSkills.first(where: {
+        guard let skill = skills.first(where: {
             $0.name == skillName
         }) else { return displayText }
         let userRequest = request.isEmpty
             ? "Apply this skill and respond appropriately to the selected command."
             : request
         return """
-        The user explicitly selected the TurboCode skill '\(skill.name)'. Its instructions follow.
+        The user explicitly selected the Markdown skill '\(skill.name)'. Its instructions follow.
 
         <skill name="\(skill.name)">
         \(skill.prompt)
@@ -389,11 +428,7 @@ final class ModelRuntimeStore {
         )
         workspaceInstructionsRevision = workspaceInstructions?.revision
         let delegateModel = delegateRemoteModel
-        let sessionSkills = DynamicProfileRuntimeSelection.skills(
-            from: availableSkills,
-            profile: activeDynamicProfile,
-            safariMCPEnabled: agentTuning.experimental.safariMCPEnabled
-        )
+        let sessionSkills = resolvedMarkdownSkills
         return ModelSessionConfiguration(
             backend: activeBackend,
             activeRemoteModel: activeRemoteModel,
@@ -434,14 +469,11 @@ final class ModelRuntimeStore {
     }
 
     private func configuredSkills() -> [TurboCodeSkillDefinition] {
-        let discovered = TurboCodeConfig.shared.loadSkills(
+        // Discovery is intentionally independent from profile and integration
+        // settings. Only an explicit custom profile allowlist narrows it later.
+        return TurboCodeConfig.shared.loadSkills(
             workspaceRoot: skillsWorkspaceRoot
         )
-        guard !agentTuning.skills.discoversUserSkills else {
-            return discovered
-        }
-        let builtInNames: Set<String> = ["turbocode", "skill-creator"]
-        return discovered.filter { builtInNames.contains($0.name) }
     }
 
     private static func backend(for role: RemoteModelRole) -> ModelBackend {

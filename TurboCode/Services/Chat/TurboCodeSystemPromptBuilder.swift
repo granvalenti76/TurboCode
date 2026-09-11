@@ -99,11 +99,13 @@ nonisolated enum TurboCodeSystemPromptBuilder {
                 .map { "- \($0.name): \($0.description)" }
                 .joined(separator: "\n")
             sections.append("""
-                Skills:
+                Markdown skills (SKILL.md):
                 \(catalog)
-                Load a matching skill when its description applies. Treat /skill <name>
-                and /<skill-name> as explicit activation requests, and /skills as a
-                request to list the advertised skills.
+                Load a matching Markdown skill when its description applies. Treat
+                /skill <name> and /<skill-name> as explicit activation requests.
+                /skills lists exactly this Markdown catalog. Foundation on-demand
+                integrations (including MCP), plugin tools, and ordinary tools are
+                separate capabilities and are not Markdown skills.
                 """)
         }
 

@@ -315,8 +315,14 @@ struct InputFieldView: View {
             SlashCommandSuggestion(
                 command: "/skills",
                 insertion: "/skills",
-                description: "List available skills",
+                description: "List Markdown skills",
                 icon: "square.stack.3d.up"
+            ),
+            SlashCommandSuggestion(
+                command: "/mcp",
+                insertion: "/mcp",
+                description: "List on-demand MCP integrations",
+                icon: "network"
             ),
             SlashCommandSuggestion(
                 command: "/skill",

@@ -397,11 +397,7 @@ final class MessageSendCoordinator {
             mode: modelRuntime.orchestratorMode,
             workspaceKind: workspaceKind,
             agentTuning: tuning,
-            availableSkills: DynamicProfileRuntimeSelection.skills(
-                from: modelRuntime.availableSkills,
-                profile: profile,
-                safariMCPEnabled: tuning.experimental.safariMCPEnabled
-            ),
+            availableSkills: modelRuntime.resolvedMarkdownSkills,
             pluginTools: modelRuntime.activePluginTools,
             selectedToolIDs: profile?.resolvedToolIDs,
             codexModelID: profile?.codexModelID,

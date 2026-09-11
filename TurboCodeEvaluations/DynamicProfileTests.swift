@@ -573,8 +573,8 @@ struct DynamicProfileTests {
         #expect(profile.resolvedToolIDs == [.git, .loadSkill])
     }
 
-    @Test("Built-in profiles suppress only the TurboCode skill")
-    func builtInProfilesSuppressOnlyTurboCodeSkill() throws {
+    @Test("Built-in profiles receive every discovered Markdown skill")
+    func builtInProfilesReceiveEveryDiscoveredSkill() throws {
         let root = try makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let skillURL = root.appendingPathComponent("SKILL.md")
@@ -604,7 +604,7 @@ struct DynamicProfileTests {
             from: [skill, userSkill],
             profile: nil
         )
-        #expect(builtInSkills.map(\.name) == ["user-skill"])
+        #expect(builtInSkills.map(\.name) == ["turbocode", "user-skill"])
 
         let override = UserDynamicProfile(
             name: "TurboCode override",
@@ -616,6 +616,32 @@ struct DynamicProfileTests {
                 from: [skill, userSkill],
                 profile: override
             ).map(\.name) == ["turbocode"]
+        )
+    }
+
+    @Test("An empty custom profile receives no Markdown skills")
+    func emptyCustomProfileReceivesNoSkills() throws {
+        let root = try makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let skillURL = root.appendingPathComponent("first.md")
+        try Data(
+            """
+            ---
+            name: first
+            description: First skill
+            ---
+            First instructions.
+            """.utf8
+        ).write(to: skillURL)
+        let skill = try TurboCodeSkillDefinition(contentsOf: skillURL)
+        let profile = UserDynamicProfile(
+            name: "Empty",
+            baseModelID: .llama,
+            skillIDs: []
+        )
+
+        #expect(
+            DynamicProfileRuntimeSelection.skills(from: [skill], profile: profile).isEmpty
         )
     }
 

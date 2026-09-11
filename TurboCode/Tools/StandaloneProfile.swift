@@ -39,6 +39,9 @@ nonisolated struct StandaloneProfile: LanguageModelSession.DynamicProfile {
         LanguageModelSession.Profile {
             Instructions(instructions)
             if let safariSkillActivations {
+                // Foundation's dynamic `Skills` adapter is reserved here for
+                // the on-demand Safari MCP catalog; disk-backed Markdown
+                // skills are registered separately through `load_skill`.
                 Skills(
                     activations: safariSkillActivations,
                     toolName: "activate_safari_skill",

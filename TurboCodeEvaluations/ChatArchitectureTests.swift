@@ -89,6 +89,43 @@ struct ChatArchitectureTests {
         #expect(runtime.resolvedPrompt(for: "plain request") == "plain request")
     }
 
+    @Test("Markdown slash commands stay separate from the Foundation catalog")
+    func markdownSlashCommandsUseOnlyResolvedSkills() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCode-SlashSkills-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        let url = root.appendingPathComponent("SKILL.md")
+        try Data(
+            """
+            ---
+            name: turbocode
+            description: Keep runtime work focused.
+            ---
+            Follow the focused runtime workflow.
+            """.utf8
+        ).write(to: url)
+        let skill = try TurboCodeSkillDefinition(contentsOf: url)
+
+        let listing = ModelRuntimeStore.resolvedPrompt(
+            for: "/skills",
+            skills: [skill]
+        )
+        #expect(listing?.contains("turbocode: Keep runtime work focused.") == true)
+        #expect(listing?.contains("safari-mcp") == false)
+        #expect(ModelRuntimeStore.resolvedPrompt(for: "/mcp", skills: [skill]) == "/mcp")
+
+        let activation = ModelRuntimeStore.resolvedPrompt(
+            for: "/skill turbocode",
+            skills: [skill]
+        )
+        #expect(activation?.contains("Follow the focused runtime workflow.") == true)
+        #expect(ModelRuntimeStore.resolvedPrompt(for: "/skill safari-mcp", skills: [skill]) == "/skill safari-mcp")
+    }
+
     @Test("Response coordinator state remains observable through the facade")
     func responseStateForwardsObservation() async {
         let store = ChatStore(

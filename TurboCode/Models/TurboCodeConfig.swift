@@ -114,7 +114,9 @@ public final class TurboCodeConfig {
 
     // MARK: - Skills
 
-    /// Loads legacy TurboCode skills together with Codex-compatible skills.
+    /// Loads the complete deterministic Markdown skill catalog from legacy
+    /// TurboCode and Codex-compatible `SKILL.md` roots. Profile selection and
+    /// Foundation on-demand integrations are resolved by their own boundaries.
     /// Repository skills are discovered from `.agents/skills` at the selected
     /// workspace and its parents, matching Codex's repository scope rules.
     func loadSkills(workspaceRoot: String? = nil) -> [TurboCodeSkillDefinition] {
@@ -418,14 +420,16 @@ public final class TurboCodeConfig {
 
     \(xcodeProjectSkillSection)
 
-    ## Skills
+    ## Markdown skills (SKILL.md)
 
-    Skills are discovered automatically from the legacy `~/.turbocode/SKILLS/**/SKILL.md`
-    location and from Codex-compatible `.agents/skills/**/SKILL.md` folders in the
-    workspace and user scope.
-    Their names and descriptions stay in the session instructions; their full body
-    is loaded on demand when relevant. Users can type `/skills`, `/skill <name>`, or
-    `/<skill-name>` in the composer.
+    Markdown skills are discovered automatically from the legacy
+    `~/.turbocode/SKILLS/**/SKILL.md` location and from Codex-compatible
+    `.agents/skills/**/SKILL.md` folders in the workspace and user scope. Their
+    names and descriptions stay in the session instructions; their full body is
+    loaded on demand with `load_skill`. Users can type `/skills`, `/skill <name>`,
+    or `/<skill-name>` in the composer. Foundation on-demand integrations,
+    including MCP, are a separate catalog listed with `/mcp`; plugin tools and
+    ordinary tools are not skills.
 
     """
 
