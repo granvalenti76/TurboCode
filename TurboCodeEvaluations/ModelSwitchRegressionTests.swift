@@ -79,6 +79,52 @@ struct ModelSwitchRegressionTests {
         #expect(repaired.count == current.count)
     }
 
+    @Test("Interrupted turn rebuild does not replay repaired history")
+    func interruptedTurnRebuildDoesNotReplayHistory() {
+        let text: (String) -> Transcript.Segment = {
+            .text(Transcript.TextSegment(content: $0))
+        }
+        let baseline: [Transcript.Entry] = [
+            .prompt(Transcript.Prompt(segments: [text("Earlier request")])),
+            .response(
+                Transcript.Response(
+                    assetIDs: [],
+                    segments: [text("Earlier response")]
+                )
+            )
+        ]
+        let repaired = SessionRebuildHistory.reconcilingInterruptedTurn(
+            baseline: baseline,
+            current: baseline,
+            prompt: "Interrupted request",
+            reasoning: "Partial reasoning",
+            response: "Partial response"
+        )
+        let previousInstructions = Transcript.Entry.instructions(
+            Transcript.Instructions(
+                segments: [text("Previous instructions")],
+                toolDefinitions: []
+            )
+        )
+        let rebuiltInstructions = Transcript.Entry.instructions(
+            Transcript.Instructions(
+                segments: [text("Rebuilt instructions")],
+                toolDefinitions: []
+            )
+        )
+        let nextPrompt = Transcript.Entry.prompt(
+            Transcript.Prompt(segments: [text("Next request")])
+        )
+
+        let delta = FoundationModelsTranscriptDelta.newEntries(
+            previous: [previousInstructions] + repaired,
+            current: [rebuiltInstructions] + repaired + [nextPrompt]
+        )
+
+        #expect(delta == [nextPrompt])
+        #expect(repaired.count == 5)
+    }
+
     @Test("Llama profiles retain completed tool calls for cache-stable history")
     func llamaProfilesKeepAppendOnlyHistory() {
         // Built-in and custom Llama profiles both resolve to llamaServer, so the

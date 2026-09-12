@@ -145,23 +145,47 @@ actor FoundationModelsSessionRuntime {
     }
 
     /// Provider profile modifiers may remove older entries before generation.
-    /// The longest leading subsequence still present in the previous materialized
-    /// snapshot is old history; everything after it is newly generated history.
-    /// This handles both ordinary append-only sessions and automatic tool-call
-    /// pruning without reintroducing excluded entries into the provider view.
+    /// Instructions are profile-owned and may be rematerialized with a new
+    /// identity after rebuild, so they must never participate in the portable
+    /// history delta or enter canonical persistence.
     private func synchronizeCanonicalHistory() {
         let current = Array(session.transcript)
-        let newEntryStart = firstNewEntryIndex(
+        canonicalHistory.append(contentsOf: FoundationModelsTranscriptDelta.newEntries(
             previous: materializedSnapshot,
             current: current
-        )
-        if newEntryStart < current.endIndex {
-            canonicalHistory.append(contentsOf: current[newEntryStart...])
-        }
+        ))
         materializedSnapshot = current
     }
+}
 
-    private func firstNewEntryIndex(
+/// Computes the provider additions that belong in durable conversation history.
+/// Keeping this transform value-only makes rebuild and pruning edge cases
+/// testable without starting a model session.
+nonisolated enum FoundationModelsTranscriptDelta {
+    static func newEntries(
+        previous: [Transcript.Entry],
+        current: [Transcript.Entry]
+    ) -> [Transcript.Entry] {
+        let previousPortable = portableEntries(previous)
+        let currentPortable = portableEntries(current)
+        let newEntryStart = firstNewEntryIndex(
+            previous: previousPortable,
+            current: currentPortable
+        )
+        guard newEntryStart < currentPortable.endIndex else { return [] }
+        return Array(currentPortable[newEntryStart...])
+    }
+
+    private static func portableEntries(
+        _ entries: [Transcript.Entry]
+    ) -> [Transcript.Entry] {
+        entries.filter { entry in
+            if case .instructions = entry { return false }
+            return true
+        }
+    }
+
+    private static func firstNewEntryIndex(
         previous: [Transcript.Entry],
         current: [Transcript.Entry]
     ) -> Int {
