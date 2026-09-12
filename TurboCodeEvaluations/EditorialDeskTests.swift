@@ -60,6 +60,27 @@ struct EditorialDeskTests {
         #expect(viewModel.hasDocument)
     }
 
+    @Test("Ordinary Markdown becomes a new body without becoming a source")
+    @MainActor
+    func importedMarkdownCopiesOnlyBodyWithoutInferringMetadata() {
+        let viewModel = EditorialDeskViewModel(workspaceRoot: "/tmp/workspace")
+        let source = EditorialSource(
+            name: "brief",
+            origin: .importedFile(path: "notes/brief.md"),
+            content: "# Imported heading\n\nBody"
+        )
+
+        viewModel.loadImportedMarkdown(source)
+
+        #expect(viewModel.documentTitle.isEmpty)
+        #expect(viewModel.documentDeck.isEmpty)
+        #expect(viewModel.documentContent == source.content)
+        #expect(viewModel.sources.isEmpty)
+        #expect(viewModel.selectedSourceIDs.isEmpty)
+        #expect(viewModel.selectedTab == .write)
+        #expect(viewModel.publicationReviewID == nil)
+    }
+
     @Test("prompt keeps request, document, and ground truth distinct")
     func promptSeparatesEditorialInputs() {
         let request = EditorialRequest(

@@ -298,6 +298,77 @@ struct WorkspaceListingPresentationTests {
         #expect(store.editorialDeskPresentation == nil)
     }
 
+    @Test("Workspace Markdown import carries a distinct Desk opening request")
+    func workspaceMarkdownImportIsNotAnAuthenticDraftOpen() async {
+        let store = ChatStore(conversationRepository: ListingConversationRepository())
+        store.workspaceStore.selectWorkspace("/tmp/editorial-workspace")
+        await store.createThread()
+
+        store.presentEditorialDesk(importingMarkdown: "notes/ordinary.md")
+
+        #expect(
+            store.editorialDeskPresentation?.opening
+                == .importedMarkdown(relativePath: "notes/ordinary.md")
+        )
+        #expect(store.editorialDeskPresentation?.draftRelativePath == nil)
+    }
+
+    @Test("Live listing actions require the active conversation workspace")
+    func liveListingRequiresMatchingConversationWorkspace() async {
+        let store = ChatStore(conversationRepository: ListingConversationRepository())
+        store.workspaceStore.selectWorkspace("/tmp/first-workspace")
+        await store.createThread()
+        #expect(store.canUseLiveWorkspaceListing())
+
+        store.workspaceStore.selectWorkspace("/tmp/second-workspace")
+
+        #expect(!store.canUseLiveWorkspaceListing())
+        await #expect(throws: WorkspaceFilePreviewError.inactiveWorkspace) {
+            try await store.workspaceFilePreview(relativePath: "README.md")
+        }
+    }
+
+    @Test("Preview hides authentic draft front matter but preserves ordinary Markdown")
+    func previewDistinguishesEditorialAndOrdinaryMarkdown() async throws {
+        let workspace = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WorkspaceListingPreviewTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: workspace,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        try Data("# Ordinary\n\nBody".utf8).write(
+            to: workspace.appendingPathComponent("ordinary.md")
+        )
+        let publication = try EditorialDraftPublisher.publish(
+            draft: EditorialDraftSnapshot(
+                title: "Desk title",
+                body: "Desk body",
+                revision: 1
+            ),
+            draftID: UUID(),
+            targetRelativePath: "draft.md",
+            workspaceRoot: workspace.path
+        )
+        let store = ChatStore(conversationRepository: ListingConversationRepository())
+        store.workspaceStore.selectWorkspace(workspace.path)
+        await store.createThread()
+
+        let ordinary = try await store.workspaceFilePreview(
+            relativePath: "ordinary.md"
+        )
+        let draft = try await store.workspaceFilePreview(
+            relativePath: publication.relativePath
+        )
+
+        #expect(!ordinary.isEditorialDraft)
+        #expect(ordinary.content == "# Ordinary\n\nBody")
+        #expect(draft.isEditorialDraft)
+        #expect(draft.editorialTitle == "Desk title")
+        #expect(draft.content == "Desk body")
+        #expect(!draft.content.contains("editorial_draft_id"))
+    }
+
     @Test("Activity receipt reuses the existing native inspector snapshot")
     func activityReceiptSelectsInspectorSnapshot() {
         let store = ChatStore(conversationRepository: ListingConversationRepository())

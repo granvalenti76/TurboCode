@@ -34,10 +34,11 @@ struct EditorialDeskSheet: View {
     @State private var isLoadingDrafts = false
     @State private var draftLibraryError: String?
     @State private var pendingDraftSelection: PendingDraftSelection?
-    @State private var didOpenInitialDraft = false
+    @State private var importedDraftNeedsSave = false
+    @State private var didHandleInitialOpening = false
 
     private let workspaceRoot: String
-    private let initialDraftRelativePath: String?
+    private let initialOpening: EditorialDeskOpening
     private let dependencies: EditorialDeskDependencies
 
     private enum PendingDraftSelection {
@@ -52,11 +53,11 @@ struct EditorialDeskSheet: View {
 
     init(
         workspaceRoot: String,
-        initialDraftRelativePath: String? = nil,
+        initialOpening: EditorialDeskOpening = .newDraft,
         dependencies: EditorialDeskDependencies
     ) {
         self.workspaceRoot = workspaceRoot
-        self.initialDraftRelativePath = initialDraftRelativePath
+        self.initialOpening = initialOpening
         self.dependencies = dependencies
         let viewModel = EditorialDeskViewModel(
             workspaceRoot: workspaceRoot,
@@ -130,10 +131,9 @@ struct EditorialDeskSheet: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .task {
             await refreshDraftLibrary()
-            guard !didOpenInitialDraft,
-                  let initialDraftRelativePath else { return }
-            didOpenInitialDraft = true
-            await openDraft(relativePath: initialDraftRelativePath)
+            guard !didHandleInitialOpening else { return }
+            didHandleInitialOpening = true
+            await handleInitialOpening()
         }
         .fileImporter(
             isPresented: $sourceImporterPresented,
@@ -236,7 +236,8 @@ struct EditorialDeskSheet: View {
     }
 
     private var hasUnsavedDraftChanges: Bool {
-        viewModel.makeDraftSnapshot().revision != savedDraftRevision
+        importedDraftNeedsSave
+            || viewModel.makeDraftSnapshot().revision != savedDraftRevision
             || currentDraftMetadata != savedDraftMetadata
             || viewModel.publicationReviewID != savedReviewID
     }
@@ -304,6 +305,7 @@ struct EditorialDeskSheet: View {
 
     private func beginNewDraft() {
         viewModel.loadEditorialDraft(EditorialDraft(), reviewContext: nil)
+        importedDraftNeedsSave = false
         selectedDraftPath = nil
         activeDraftID = UUID()
         selectedSectionID = nil
@@ -324,6 +326,7 @@ struct EditorialDeskSheet: View {
                 file.draft,
                 reviewContext: file.reviewContext
             )
+            importedDraftNeedsSave = false
             selectedDraftPath = file.descriptor.relativePath
             activeDraftID = file.draftID
             selectedSectionID = file.metadata.section.flatMap { loaded in
@@ -339,6 +342,54 @@ struct EditorialDeskSheet: View {
             savedDraftRevision = viewModel.makeDraftSnapshot().revision
             savedDraftMetadata = currentDraftMetadata
             savedReviewID = viewModel.publicationReviewID
+        } catch {
+            draftLibraryError = error.localizedDescription
+        }
+    }
+
+    private func handleInitialOpening() async {
+        switch initialOpening {
+        case .newDraft:
+            break
+        case .existingDraft(let relativePath):
+            await openDraft(relativePath: relativePath)
+        case .importedMarkdown(let relativePath):
+            await importMarkdown(relativePath: relativePath)
+        }
+    }
+
+    /// Imports ordinary Markdown as a new, unsaved document while retaining
+    /// the source path. It deliberately bypasses the protocol-valid draft
+    /// loader, so imported files cannot inherit draft identity or review state.
+    private func importMarkdown(relativePath: String) async {
+        do {
+            let url = try WorkspacePathResolver.resolve(
+                relativePath,
+                within: workspaceRoot
+            )
+            let result = await dependencies.sourceService.load(
+                urls: [url],
+                workspaceRoot: workspaceRoot
+            )
+            guard let source = result.sources.first else {
+                draftLibraryError = result.errors.first
+                    ?? "The Markdown file could not be imported."
+                return
+            }
+            if EditorialMarkdownCodec.authenticDraftID(in: source.content) != nil {
+                await openDraft(relativePath: relativePath)
+                return
+            }
+            viewModel.loadImportedMarkdown(source)
+            selectedDraftPath = nil
+            activeDraftID = UUID()
+            selectedSectionID = nil
+            selectedTypeID = nil
+            selectedDate = nil
+            savedDraftRevision = viewModel.makeDraftSnapshot().revision
+            savedDraftMetadata = .empty
+            savedReviewID = nil
+            importedDraftNeedsSave = true
         } catch {
             draftLibraryError = error.localizedDescription
         }

@@ -91,6 +91,7 @@ public final class ChatStore {
     /// Compatibility forwarders keep the existing view and intent surface
     /// stable while construction lives in the non-observable assembly.
     private let assembly: ChatApplicationAssembly
+    private let workspaceFilePreviewService = WorkspaceFilePreviewService()
     var workspaceStore: WorkspaceStore { assembly.workspaceStore }
     var conversationStore: ConversationStore { assembly.conversationStore }
     var toolInteractionStore: ToolInteractionStore { assembly.toolInteractionStore }
@@ -1038,16 +1039,63 @@ public final class ChatStore {
     /// Recognizes a live workspace entry without changing the immutable tool
     /// receipt or exposing Editorial Desk service internals to SwiftUI.
     func editorialDraftSummary(relativePath: String) async -> EditorialDraftSummary? {
-        guard !workspaceRoot.isEmpty else { return nil }
+        guard canUseLiveWorkspaceListing() else { return nil }
         return await editorialDeskAssembly.draftSummary(
             relativePath: relativePath,
             workspaceRoot: workspaceRoot
         )
     }
 
+    /// Loads current file content only when the active conversation still owns
+    /// the selected workspace. Editorial front matter is decoded at the facade,
+    /// keeping both the generic file service and SwiftUI free of that protocol.
+    func workspaceFilePreview(relativePath: String) async throws -> WorkspaceFilePreview {
+        guard canUseLiveWorkspaceListing() else {
+            throw WorkspaceFilePreviewError.inactiveWorkspace
+        }
+        let preview = try await workspaceFilePreviewService.load(
+            relativePath: relativePath,
+            workspaceRoot: workspaceRoot
+        )
+        guard preview.kind == .markdown,
+              EditorialMarkdownCodec.authenticDraftID(in: preview.content) != nil else {
+            return preview
+        }
+        let decoded = EditorialMarkdownCodec.decode(preview.content)
+        return WorkspaceFilePreview(
+            relativePath: preview.relativePath,
+            fileName: preview.fileName,
+            content: decoded.draft.body,
+            kind: preview.kind,
+            sizeBytes: preview.sizeBytes,
+            previewedByteCount: preview.previewedByteCount,
+            isTruncated: preview.isTruncated,
+            isEditorialDraft: true,
+            editorialTitle: decoded.draft.title
+        )
+    }
+
+    /// Historical receipts may outlive their workspace selection. Requiring
+    /// the active conversation's persisted root to match prevents a same-named
+    /// file in another workspace from being read or opened through the widget.
+    func canUseLiveWorkspaceListing() -> Bool {
+        guard !workspaceRoot.isEmpty,
+              let activeThreadId,
+              let conversationRoot = conversationStore.conversation(id: activeThreadId)?.workspace else {
+            return false
+        }
+        return URL(fileURLWithPath: conversationRoot).standardizedFileURL.path
+            == URL(fileURLWithPath: workspaceRoot).standardizedFileURL.path
+    }
+
     func presentEditorialDesk(draftRelativePath: String? = nil) {
         guard !workspaceRoot.isEmpty else { return }
         workbenchStore.presentEditorialDesk(draftRelativePath: draftRelativePath)
+    }
+
+    func presentEditorialDesk(importingMarkdown relativePath: String) {
+        guard canUseLiveWorkspaceListing() else { return }
+        workbenchStore.presentEditorialDesk(importingMarkdown: relativePath)
     }
 
     /// Returns whether a structured result references a receipt that still
