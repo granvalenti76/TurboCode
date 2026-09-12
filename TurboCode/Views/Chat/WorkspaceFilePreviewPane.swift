@@ -12,6 +12,9 @@ struct WorkspaceFilePreviewPane: View {
     @Environment(ChatStore.self) private var chatStore
     @Environment(\.chatFontSize) private var chatFontSize
     @State private var state: State = .idle
+    @State private var markdownMode: MarkdownMode = .preview
+    @State private var editingLineNumber: Int?
+    @State private var showsDiscardConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -45,11 +48,31 @@ struct WorkspaceFilePreviewPane: View {
 
             if let entry {
                 Divider()
-                actions(for: entry)
+                if isReviewingMarkdown,
+                   !workspaceReviewComments(for: entry).isEmpty {
+                    reviewBar(for: entry)
+                } else {
+                    actions(for: entry)
+                }
             }
         }
         .task(id: loadKey) {
             await load()
+        }
+        .confirmationDialog(
+            "Discard review comments for this file?",
+            isPresented: $showsDiscardConfirmation
+        ) {
+            Button("Discard Comments", role: .destructive) {
+                guard let entry else { return }
+                editingLineNumber = nil
+                chatStore.discardWorkspaceFileReviewComments(
+                    relativePath: entry.relativePath
+                )
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("These comments have not been sent to the model.")
         }
     }
 
@@ -73,6 +96,22 @@ struct WorkspaceFilePreviewPane: View {
             }
 
             Spacer(minLength: 8)
+
+            if case .loaded(let preview) = state,
+               preview.kind == .markdown {
+                Picker("Markdown view", selection: $markdownMode) {
+                    Label("Preview", systemImage: "doc.richtext")
+                        .tag(MarkdownMode.preview)
+                    Label("Review", systemImage: "text.alignleft")
+                        .tag(MarkdownMode.review)
+                }
+                .labelsHidden()
+                .labelStyle(.iconOnly)
+                .pickerStyle(.segmented)
+                .frame(width: 76)
+                .help("Choose rendered preview or line review")
+                .accessibilityLabel("Markdown view")
+            }
 
             if let entry, entry.kind == .file {
                 Button {
@@ -100,46 +139,177 @@ struct WorkspaceFilePreviewPane: View {
 
     @ViewBuilder
     private func document(_ preview: WorkspaceFilePreview) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                if preview.isTruncated {
-                    Label {
-                        Text(partialPreviewLabel(preview))
-                    } icon: {
-                        Image(systemName: "text.page.badge.magnifyingglass")
+        if preview.kind == .markdown, markdownMode == .review {
+            markdownReview(preview)
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    if preview.isTruncated {
+                        partialPreviewBanner(preview)
                     }
-                    .font(AppTypography.metadata)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 6)
-                    .background(
-                        Color.accentColor.opacity(0.07),
-                        in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+
+                    if let editorialTitle = preview.editorialTitle,
+                       !editorialTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(editorialTitle)
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+
+                    switch preview.kind {
+                    case .markdown:
+                        Markdown(preview.content)
+                            .markdownTheme(AppTypography.chatMarkdownTheme(size: documentFontSize))
+                            .textSelection(.enabled)
+                    case .plainText:
+                        Text(preview.content)
+                            .font(.system(size: documentFontSize))
+                            .textSelection(.enabled)
+                    case .sourceCode:
+                        sourceCode(preview.content)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 18)
+            }
+        }
+    }
+
+    private func partialPreviewBanner(_ preview: WorkspaceFilePreview) -> some View {
+        Label {
+            Text(partialPreviewLabel(preview))
+        } icon: {
+            Image(systemName: "text.page.badge.magnifyingglass")
+        }
+        .font(AppTypography.metadata)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(
+            Color.accentColor.opacity(0.07),
+            in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+        )
+    }
+
+    /// The review canvas deliberately reuses the Git inspector's row and
+    /// comment editor so hover, gutter geometry, and keyboard behavior cannot
+    /// drift into a second competing interaction.
+    private func markdownReview(_ preview: WorkspaceFilePreview) -> some View {
+        let lines = reviewLines(for: preview)
+        let gutterWidth = InspectorDiffLayout.gutterWidth(for: lines)
+        let minimumWidth = InspectorDiffLayout.minimumContentWidth(
+            for: lines,
+            gutterWidth: gutterWidth
+        )
+        return VStack(spacing: 0) {
+            if preview.isTruncated {
+                partialPreviewBanner(preview)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                Divider()
+            }
+
+            GeometryReader { geometry in
+                let contentWidth = max(geometry.size.width, minimumWidth)
+                // Long Markdown lines may widen the scrolling code canvas, but
+                // the comment composer must remain a compact, viewport-sized card.
+                let commentEditorWidth = min(geometry.size.width, 520)
+                ScrollView([.horizontal, .vertical]) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                            markdownReviewRow(
+                                index: index,
+                                line: line,
+                                lines: lines,
+                                gutterWidth: gutterWidth,
+                                contentWidth: contentWidth,
+                                commentEditorWidth: commentEditorWidth,
+                                relativePath: preview.relativePath
+                            )
+                        }
+                    }
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(width: contentWidth, alignment: .leading)
+                }
+                .scrollIndicators(.visible)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func markdownReviewRow(
+        index: Int,
+        line: DiffLine,
+        lines: [DiffLine],
+        gutterWidth: CGFloat,
+        contentWidth: CGFloat,
+        commentEditorWidth: CGFloat,
+        relativePath: String
+    ) -> some View {
+        if let anchor = ReviewLineAnchor.make(
+            filePath: relativePath,
+            lineIndex: index,
+            lines: lines,
+            origin: .workspaceFile
+        ) {
+            let comment = workspaceReviewComment(matching: anchor)
+            VStack(alignment: .leading, spacing: 0) {
+                DiffLineView(
+                    line: line,
+                    tokens: [],
+                    gutterWidth: gutterWidth,
+                    hasComment: comment != nil,
+                    isEditing: editingLineNumber == anchor.lineNumber,
+                    onRequestComment: { editingLineNumber = anchor.lineNumber }
+                )
+                .frame(width: contentWidth, alignment: .leading)
+
+                if editingLineNumber == anchor.lineNumber {
+                    ReviewCommentEditor(
+                        anchor: anchor,
+                        existingComment: comment,
+                        gutterWidth: gutterWidth,
+                        onCancel: { editingLineNumber = nil },
+                        onSave: { body in
+                            _ = chatStore.upsertReviewComment(
+                                id: comment?.id,
+                                anchor: anchor,
+                                body: body
+                            )
+                            editingLineNumber = nil
+                        },
+                        onRemove: comment.map { existing in
+                            {
+                                chatStore.removeReviewComment(existing.id)
+                                editingLineNumber = nil
+                            }
+                        }
                     )
-                }
-
-                if let editorialTitle = preview.editorialTitle,
-                   !editorialTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(editorialTitle)
-                        .font(.system(size: 17, weight: .semibold))
-                }
-
-                switch preview.kind {
-                case .markdown:
-                    Markdown(preview.content)
-                        .markdownTheme(AppTypography.chatMarkdownTheme(size: documentFontSize))
-                        .textSelection(.enabled)
-                case .plainText:
-                    Text(preview.content)
-                        .font(.system(size: documentFontSize))
-                        .textSelection(.enabled)
-                case .sourceCode:
-                    sourceCode(preview.content)
+                    .frame(width: commentEditorWidth, alignment: .leading)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 22)
-            .padding(.vertical, 18)
+        }
+    }
+
+    private func reviewLines(for preview: WorkspaceFilePreview) -> [DiffLine] {
+        preview.content.components(separatedBy: "\n").enumerated().map { index, line in
+            let lineNumber = preview.contentStartLine + index
+            return DiffLine(
+                oldLineNumber: lineNumber,
+                newLineNumber: lineNumber,
+                content: line,
+                type: .context
+            )
+        }
+    }
+
+    private func workspaceReviewComment(
+        matching anchor: ReviewLineAnchor
+    ) -> ReviewComment? {
+        chatStore.workspaceFileReviewComments(relativePath: anchor.filePath).first {
+            !$0.isOutdated
+                && $0.anchor.lineNumber == anchor.lineNumber
+                && $0.anchor.content == anchor.content
         }
     }
 
@@ -249,6 +419,67 @@ struct WorkspaceFilePreviewPane: View {
         .padding(.vertical, 8)
     }
 
+    private func reviewBar(for entry: WorkspaceListingEntry) -> some View {
+        let comments = workspaceReviewComments(for: entry)
+        let outdatedCount = comments.count(where: \.isOutdated)
+        return HStack(spacing: 10) {
+            Label(
+                "\(comments.count) \(comments.count == 1 ? "comment" : "comments")",
+                systemImage: "text.bubble"
+            )
+            .font(.system(size: 11.5, weight: .medium))
+
+            if outdatedCount > 0 {
+                Text("\(outdatedCount) outdated")
+                    .font(AppTypography.metadata)
+                    .foregroundStyle(.orange)
+            }
+
+            Spacer(minLength: 8)
+
+            Button("Discard") {
+                showsDiscardConfirmation = true
+            }
+            .buttonStyle(.borderless)
+            .disabled(chatStore.busy)
+
+            Button("Send Review") {
+                editingLineNumber = nil
+                Task {
+                    await chatStore.sendWorkspaceFileReviewComments(
+                        relativePath: entry.relativePath
+                    )
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(
+                !chatStore.canSendWorkspaceFileReviewComments(
+                    relativePath: entry.relativePath
+                )
+            )
+            .help(
+                outdatedCount > 0
+                    ? "Refresh or remove outdated comments before sending"
+                    : "Send this file's review comments as one request"
+            )
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(.bar)
+    }
+
+    private func workspaceReviewComments(
+        for entry: WorkspaceListingEntry
+    ) -> [ReviewComment] {
+        chatStore.workspaceFileReviewComments(relativePath: entry.relativePath)
+    }
+
+    private var isReviewingMarkdown: Bool {
+        guard case .loaded(let preview) = state else { return false }
+        return preview.kind == .markdown && markdownMode == .review
+    }
+
     private func open(_ entry: WorkspaceListingEntry) {
         guard canUseLiveWorkspace,
               let url = resolvedURL(for: entry) else { return }
@@ -266,6 +497,7 @@ struct WorkspaceFilePreviewPane: View {
 
     @MainActor
     private func load() async {
+        editingLineNumber = nil
         guard let entry else {
             state = .idle
             return
@@ -297,6 +529,12 @@ struct WorkspaceFilePreviewPane: View {
                   self.entry?.id == requestedEntryID,
                   chatStore.activeThreadId == requestedThreadID,
                   chatStore.workspaceRoot == requestedWorkspaceRoot else { return }
+            if preview.kind == .markdown {
+                chatStore.reconcileWorkspaceFileReview(
+                    relativePath: preview.relativePath,
+                    lines: reviewLines(for: preview)
+                )
+            }
             state = .loaded(preview)
         } catch is CancellationError {
             return
@@ -383,5 +621,10 @@ struct WorkspaceFilePreviewPane: View {
         case loaded(WorkspaceFilePreview)
         case unsupported(String)
         case failed(String)
+    }
+
+    private enum MarkdownMode: Hashable {
+        case preview
+        case review
     }
 }

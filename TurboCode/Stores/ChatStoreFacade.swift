@@ -258,15 +258,18 @@ extension ChatStore {
     }
 
     var reviewComments: [ReviewComment] {
-        reviewDraftStore.comments
+        reviewDraftStore.comments.filter { $0.anchor.origin == .gitDiff }
     }
 
     var outdatedReviewCommentCount: Int {
-        reviewDraftStore.outdatedCount
+        reviewComments.count(where: \.isOutdated)
     }
 
     var canSendReviewComments: Bool {
-        reviewDraftStore.canSend && !busy && activeProfileCanSend
+        !reviewComments.isEmpty
+            && outdatedReviewCommentCount == 0
+            && !busy
+            && activeProfileCanSend
     }
 
     var isGitRepository: Bool {
@@ -299,7 +302,37 @@ extension ChatStore {
     }
 
     func discardReviewComments() {
-        reviewDraftStore.discardAll()
+        reviewDraftStore.discard(ids: Set(reviewComments.map(\.id)))
+    }
+
+    func workspaceFileReviewComments(relativePath: String) -> [ReviewComment] {
+        reviewDraftStore.comments.filter {
+            $0.anchor.origin == .workspaceFile
+                && $0.anchor.filePath == relativePath
+        }
+    }
+
+    func canSendWorkspaceFileReviewComments(relativePath: String) -> Bool {
+        let comments = workspaceFileReviewComments(relativePath: relativePath)
+        return !comments.isEmpty
+            && !comments.contains(where: \.isOutdated)
+            && !busy
+            && activeProfileCanSend
+    }
+
+    func reconcileWorkspaceFileReview(
+        relativePath: String,
+        lines: [DiffLine]
+    ) {
+        reviewDraftStore.reconcileWorkspaceFile(
+            relativePath: relativePath,
+            lines: lines
+        )
+    }
+
+    func discardWorkspaceFileReviewComments(relativePath: String) {
+        let comments = workspaceFileReviewComments(relativePath: relativePath)
+        reviewDraftStore.discard(ids: Set(comments.map(\.id)))
     }
 
     public func refreshGitBranches() async {

@@ -363,9 +363,11 @@ struct WorkspaceListingPresentationTests {
 
         #expect(!ordinary.isEditorialDraft)
         #expect(ordinary.content == "# Ordinary\n\nBody")
+        #expect(ordinary.contentStartLine == 1)
         #expect(draft.isEditorialDraft)
         #expect(draft.editorialTitle == "Desk title")
         #expect(draft.content == "Desk body")
+        #expect(draft.contentStartLine > 1)
         #expect(!draft.content.contains("editorial_draft_id"))
     }
 

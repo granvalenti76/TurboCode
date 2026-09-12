@@ -18,6 +18,9 @@ nonisolated struct WorkspaceFilePreview: Sendable, Equatable {
     let sizeBytes: Int
     let previewedByteCount: Int
     let isTruncated: Bool
+    /// One-based line in the on-disk file represented by `content` line one.
+    /// Editorial previews hide front matter but keep review anchors exact.
+    let contentStartLine: Int
     let isEditorialDraft: Bool
     let editorialTitle: String?
 
@@ -29,6 +32,7 @@ nonisolated struct WorkspaceFilePreview: Sendable, Equatable {
         sizeBytes: Int,
         previewedByteCount: Int,
         isTruncated: Bool,
+        contentStartLine: Int = 1,
         isEditorialDraft: Bool = false,
         editorialTitle: String? = nil
     ) {
@@ -39,6 +43,7 @@ nonisolated struct WorkspaceFilePreview: Sendable, Equatable {
         self.sizeBytes = sizeBytes
         self.previewedByteCount = previewedByteCount
         self.isTruncated = isTruncated
+        self.contentStartLine = contentStartLine
         self.isEditorialDraft = isEditorialDraft
         self.editorialTitle = editorialTitle
     }

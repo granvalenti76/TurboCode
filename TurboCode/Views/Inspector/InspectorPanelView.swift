@@ -2392,7 +2392,7 @@ struct DiffLineView: View {
 /// Inline editor anchored below one diff row. It mirrors the native review
 /// interaction used by developer tools while keeping comment submission local
 /// until the explicit Send Review action aggregates the complete draft.
-private struct ReviewCommentEditor: View {
+struct ReviewCommentEditor: View {
     let anchor: ReviewLineAnchor
     let existingComment: ReviewComment?
     let gutterWidth: CGFloat
@@ -2508,7 +2508,7 @@ private struct ReviewCommentEditor: View {
 /// The inspector is deliberately denser than the document-modal review. One
 /// contextual line number and a measured content canvas keep narrow panes useful
 /// without wrapping or clipping long source lines.
-private enum InspectorDiffLayout {
+enum InspectorDiffLayout {
     private static let codeFont = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
     private static let markerWidth: CGFloat = 20
 

@@ -9,10 +9,19 @@ nonisolated enum ReviewDiffSide: String, Sendable, Hashable {
     case original
 }
 
+/// Distinguishes annotations created from a Git diff from those attached to a
+/// current workspace-file preview. Both use the same line UI and prompt shape,
+/// but only Git comments participate in diff reconciliation.
+nonisolated enum ReviewAnchorOrigin: String, Sendable, Hashable {
+    case gitDiff
+    case workspaceFile
+}
+
 /// A content-backed source location that can be resolved again after Git
 /// refreshes the diff and gives every presentation row a new transient ID.
 nonisolated struct ReviewLineAnchor: Sendable, Hashable {
     let filePath: String
+    let origin: ReviewAnchorOrigin
     let side: ReviewDiffSide
     let lineNumber: Int
     let content: String
@@ -23,7 +32,8 @@ nonisolated struct ReviewLineAnchor: Sendable, Hashable {
     static func make(
         filePath: String,
         lineIndex: Int,
-        lines: [DiffLine]
+        lines: [DiffLine],
+        origin: ReviewAnchorOrigin = .gitDiff
     ) -> ReviewLineAnchor? {
         guard lines.indices.contains(lineIndex) else { return nil }
         let line = lines[lineIndex]
@@ -43,12 +53,14 @@ nonisolated struct ReviewLineAnchor: Sendable, Hashable {
         )
         return ReviewLineAnchor(
             filePath: filePath,
+            origin: origin,
             side: side,
             lineNumber: lineNumber,
             content: line.content,
             previousContent: previous,
             nextContent: next,
             fingerprint: fingerprint(
+                origin: origin,
                 side: side,
                 content: line.content,
                 previous: previous,
@@ -92,12 +104,13 @@ nonisolated struct ReviewLineAnchor: Sendable, Hashable {
     }
 
     private static func fingerprint(
+        origin: ReviewAnchorOrigin,
         side: ReviewDiffSide,
         content: String,
         previous: String?,
         next: String?
     ) -> String {
-        let source = [side.rawValue, previous ?? "", content, next ?? ""]
+        let source = [origin.rawValue, side.rawValue, previous ?? "", content, next ?? ""]
             .joined(separator: "\u{1F}")
         return SHA256.hash(data: Data(source.utf8))
             .map { String(format: "%02x", $0) }
@@ -145,7 +158,8 @@ nonisolated enum ReviewAnchorResolver {
             ReviewLineAnchor.make(
                 filePath: section.path,
                 lineIndex: $0,
-                lines: section.diffLines
+                lines: section.diffLines,
+                origin: anchor.origin
             )
         }.filter { $0.side == anchor.side }
 
@@ -211,10 +225,15 @@ nonisolated enum ReviewRequestBuilder {
 
         let promptItems = sorted.enumerated().map { index, comment in
             let side = comment.anchor.side == .current ? "current" : "removed/original"
-            let code = comment.anchor.content.isEmpty ? "<blank line>" : comment.anchor.content
+            let reviewedContent = comment.anchor.content.isEmpty
+                ? "<blank line>"
+                : comment.anchor.content
+            let reviewedLabel = comment.anchor.origin == .gitDiff
+                ? "Reviewed code"
+                : "Reviewed content"
             let context = [
                 comment.anchor.previousContent.map { "Context before: \($0)" },
-                Optional("Reviewed code: \(code)"),
+                Optional("\(reviewedLabel): \(reviewedContent)"),
                 comment.anchor.nextContent.map { "Context after: \($0)" }
             ].compactMap(\.self).joined(separator: "\n")
             return """
@@ -224,7 +243,7 @@ nonisolated enum ReviewRequestBuilder {
             """
         }.joined(separator: "\n\n")
         let prompt = """
-        Apply the following code-review comments with focused, reviewable edits. Inspect the current surrounding code before changing each file; the line numbers and excerpts identify the reviewed diff snapshot and may have shifted slightly. For removed/original anchors, inspect the Git diff when the reviewed line is absent from the current file.
+        Apply the following review comments with focused, reviewable edits. Inspect the current surrounding content before changing each file; the line numbers and excerpts identify the reviewed snapshot and may have shifted slightly. For removed/original anchors, inspect the Git diff when the reviewed line is absent from the current file.
 
         \(promptItems)
         """

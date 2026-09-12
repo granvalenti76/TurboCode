@@ -559,14 +559,33 @@ public final class ChatStore {
     /// compact timeline text remains readable while the model receives stable
     /// reviewed excerpts and sides through the provider-neutral prompt path.
     func sendReviewComments() async {
+        let comments = reviewDraftStore.comments.filter {
+            $0.anchor.origin == .gitDiff
+        }
+        await sendReviewComments(comments, closesChangesInspector: true)
+    }
+
+    /// Sends only the annotations belonging to one live Markdown preview. Git
+    /// review drafts remain untouched so the two surfaces can coexist safely.
+    func sendWorkspaceFileReviewComments(relativePath: String) async {
+        guard canUseLiveWorkspaceListing() else { return }
+        let comments = reviewDraftStore.comments.filter {
+            $0.anchor.origin == .workspaceFile
+                && $0.anchor.filePath == relativePath
+        }
+        await sendReviewComments(comments, closesChangesInspector: false)
+    }
+
+    private func sendReviewComments(
+        _ comments: [ReviewComment],
+        closesChangesInspector: Bool
+    ) async {
         guard !busy, activeProfileCanSend else { return }
-        guard reviewDraftStore.outdatedCount == 0 else {
+        guard !comments.contains(where: \.isOutdated) else {
             error = "Refresh or remove outdated review comments before sending."
             return
         }
-        guard let request = ReviewRequestBuilder.make(
-            comments: reviewDraftStore.comments
-        ) else { return }
+        guard let request = ReviewRequestBuilder.make(comments: comments) else { return }
 
         guard let promptText = await messageSendCoordinator.preparePrompt(
             for: request.promptText
@@ -574,8 +593,10 @@ public final class ChatStore {
 
         // The visible user block is now the durable receipt for this ephemeral
         // draft, so clearing before inference cannot lose the authored review.
-        reviewDraftStore.discardAll()
-        workbenchStore.rightPanelMode = nil
+        reviewDraftStore.discard(ids: Set(comments.map(\.id)))
+        if closesChangesInspector {
+            workbenchStore.rightPanelMode = nil
+        }
         await sendMessage(
             request.displayText,
             promptText: promptText,
@@ -1062,6 +1083,9 @@ public final class ChatStore {
             return preview
         }
         let decoded = EditorialMarkdownCodec.decode(preview.content)
+        let bodyStartLine = EditorialMarkdownCodec
+            .splitFrontMatter(preview.content)?
+            .bodyStartLine ?? 1
         return WorkspaceFilePreview(
             relativePath: preview.relativePath,
             fileName: preview.fileName,
@@ -1070,6 +1094,7 @@ public final class ChatStore {
             sizeBytes: preview.sizeBytes,
             previewedByteCount: preview.previewedByteCount,
             isTruncated: preview.isTruncated,
+            contentStartLine: bodyStartLine,
             isEditorialDraft: true,
             editorialTitle: decoded.draft.title
         )

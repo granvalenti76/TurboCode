@@ -141,7 +141,9 @@ nonisolated enum EditorialMarkdownCodec {
         return draftID
     }
 
-    static func splitFrontMatter(_ markdown: String) -> (header: String, body: String)? {
+    static func splitFrontMatter(
+        _ markdown: String
+    ) -> (header: String, body: String, bodyStartLine: Int)? {
         guard markdown.hasPrefix("---\n"),
               let range = markdown.range(of: "\n---", range: markdown.index(markdown.startIndex, offsetBy: 4)..<markdown.endIndex) else {
             return nil
@@ -155,7 +157,10 @@ nonisolated enum EditorialMarkdownCodec {
         while bodyStart < markdown.endIndex, markdown[bodyStart] == "\n" {
             bodyStart = markdown.index(after: bodyStart)
         }
-        return (header, String(markdown[bodyStart...]))
+        let bodyStartLine = markdown[..<bodyStart].reduce(1) { line, character in
+            character == "\n" ? line + 1 : line
+        }
+        return (header, String(markdown[bodyStart...]), bodyStartLine)
     }
 
     static func parse(_ header: String) -> [String: String] {
