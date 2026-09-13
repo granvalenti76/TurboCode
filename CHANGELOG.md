@@ -5,6 +5,72 @@ All notable changes to TurboCode are documented in this file.
 The project follows Semantic Versioning while its public API and persisted
 formats continue to evolve before 1.0.
 
+## [0.6.0]
+
+TurboCode 0.6 expands the application into a more connected desktop agent
+surface. It adds Xcode MCP and ACP integration, richer workspace inspection
+and review, clearer profile routing, and stronger lifecycle and safety
+boundaries across native and headless sessions.
+
+### Features
+
+- Added a built-in Codex profile with explicit profile tool overrides. Codex
+  capabilities are derived from its bridge, and server sessions rebuild when
+  their selected tools change.
+- Added configured profile workers for native and Codex delegation, including
+  worker destinations, role guidance, independent capacity, and support for up
+  to four concurrent workers.
+- Added opt-in Xcode MCP integration with stdio JSON-RPC transport, paginated
+  tool discovery, rich result preservation, and the `xcode_mcp` gateway for
+  Foundation Models and Codex sessions.
+- Added an ACP protocol boundary and a headless `turbocode-acp` helper for
+  initialization, sessions, prompts, updates, cancellation, and negotiated
+  permissions. The helper is embedded in the application bundle and reuses
+  the shared runtime instead of introducing a second execution loop.
+- Added session-local client MCP server discovery and tool routing for ACP
+  sessions, while keeping approvals and provider ownership inside the host
+  runtime.
+- Unified `SKILL.md` selection across prompts, tools, slash activation, and
+  Codex handoffs while keeping on-demand MCP integrations in their separate
+  catalog.
+- Added a desktop-blended translucent sidebar that preserves native
+  activation, appearance, and accessibility behavior.
+- Added bounded in-place previews for workspace Markdown and source files,
+  persistent selection, partial reads, Swift syntax highlighting, and compact
+  Editorial Desk identity markers.
+- Added workspace-file review with line-scoped comments, comment re-anchoring,
+  document-language prompts, and separation from Git diff comments.
+- Added destination-specific composer profile and reasoning selection together
+  with session-scoped `Context`, `Cache hit`, and `Session tokens` statistics
+  backed by optional persistence.
+
+### Fixes
+
+- Fixed Bash approval detection when filesystem denials were hidden by
+  redirects, truncated output, or a successful final shell command. Approval
+  retries now rerun the complete command, while process groups and inherited
+  children are cleaned up before replay.
+- Fixed ACP session lifecycle and model caching by retaining one provider
+  runtime per session, rebuilding only when the selected model changes, and
+  serializing persistent stdio input.
+- Fixed ACP permission and cancellation handling so rejected requests fail
+  closed and cancelled tool updates remain valid ACP states.
+- Fixed transcript duplication after stopping an interrupted turn by excluding
+  profile-owned instructions from the portable history delta.
+- Fixed plugin guidance so model-facing instructions point to the installed
+  SDK package and its actual examples.
+
+### Interventions
+
+- Refined the shared system prompt around role, collaboration, follow-through,
+  and delegation. Llama profiles now search through Bash with `rg`, while
+  profiles with the dedicated capability continue to use it directly.
+- Updated the Xcode project metadata, package integration, ACP helper setup,
+  bundle configuration, and external model configuration guidance to match
+  the new integration surfaces.
+- Documented the boundary between the public `dev` branch and the private
+  commercial CyberDeck package, including the intentional public teaser.
+
 ## [0.5.0] - Unreleased
 
 TurboCode 0.5 focuses on controllable agent workflows: steering an active
