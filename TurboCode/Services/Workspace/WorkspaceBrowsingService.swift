@@ -35,9 +35,14 @@ nonisolated enum WorkspaceBrowsingError: LocalizedError {
 nonisolated struct WorkspaceBrowsingService: Sendable {
     let workspaceRoot: String
 
-    func listDirectory(at path: String, maximumEntries: Int = 100) throws -> WorkspaceDirectorySnapshot {
+    func listDirectory(
+        at path: String,
+        maximumEntries: Int = 100,
+        fileExtension: String? = nil
+    ) throws -> WorkspaceDirectorySnapshot {
         let rootURL = try WorkspacePathResolver.resolve(".", within: workspaceRoot)
         let directoryURL = try WorkspacePathResolver.resolve(path, within: workspaceRoot)
+        let requestedExtension = normalizedFileExtension(fileExtension)
         let directoryValues = try? directoryURL.resourceValues(forKeys: [.isDirectoryKey])
         guard directoryValues?.isDirectory == true else {
             throw WorkspaceBrowsingError.notDirectory(path)
@@ -70,15 +75,20 @@ nonisolated struct WorkspaceBrowsingService: Sendable {
             } else {
                 kind = .file
             }
+            let itemExtension = kind == .file && !item.pathExtension.isEmpty
+                ? item.pathExtension.lowercased()
+                : nil
+            if let requestedExtension,
+               kind != .file || itemExtension != requestedExtension {
+                return nil
+            }
             return WorkspaceDirectoryEntrySnapshot(
                 name: item.lastPathComponent,
                 relativePath: relativePath(for: item, rootURL: rootURL),
                 kind: kind,
                 sizeBytes: kind == .directory ? nil : values.fileSize,
                 modifiedAt: values.contentModificationDate,
-                fileExtension: kind == .file && !item.pathExtension.isEmpty
-                    ? item.pathExtension.lowercased()
-                    : nil
+                fileExtension: itemExtension
             )
         }.sorted { lhs, rhs in
             if lhs.kind != rhs.kind {
@@ -100,5 +110,15 @@ nonisolated struct WorkspaceBrowsingService: Sendable {
     private func relativePath(for url: URL, rootURL: URL) -> String {
         if url.path == rootURL.path { return "." }
         return String(url.path.dropFirst(rootURL.path.count + 1))
+    }
+
+    private func normalizedFileExtension(_ value: String?) -> String? {
+        guard var value else { return nil }
+        value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix(".") {
+            value.removeFirst()
+        }
+        let normalized = value.lowercased()
+        return normalized.isEmpty ? nil : normalized
     }
 }

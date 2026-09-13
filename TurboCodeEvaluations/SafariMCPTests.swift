@@ -38,7 +38,7 @@ struct SafariMCPTests {
     func activationGuidanceDoesNotSuppressOtherTools() {
         let instructions = SafariMCPFeature.activationInstructions
 
-        #expect(instructions.contains("leave this skill inactive and continue normally"))
+        #expect(instructions.contains("leave this integration inactive and continue normally"))
         #expect(instructions.contains("does not restrict any other available"))
         #expect(!instructions.contains("without calling tools"))
     }
@@ -179,12 +179,11 @@ struct SafariMCPTests {
             TurboCodeSkillDefinition(contentsOf: safariURL),
             TurboCodeSkillDefinition(contentsOf: normalURL)
         ]
-        let filtered = DynamicProfileRuntimeSelection.skills(
+        let resolved = DynamicProfileRuntimeSelection.skills(
             from: skills,
-            profile: nil,
-            safariMCPEnabled: false
+            profile: nil
         )
 
-        #expect(filtered.map(\.name) == ["notes"])
+        #expect(resolved.map(\.name) == ["notes", "safari-mcp"])
     }
 }

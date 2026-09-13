@@ -545,7 +545,8 @@ final class ChatResponseCoordinator {
         workspaceRoot: String,
         modelName: String,
         serverURL: String? = nil,
-        contextChanged: @escaping @MainActor @Sendable (LlamaContextUsage?) -> Void = { _ in }
+        contextChanged: @escaping @MainActor @Sendable (LlamaContextUsage?) -> Void = { _ in },
+        usageChanged: @escaping @MainActor @Sendable (Usage?, ContextUsage?) -> Void = { _, _ in }
     ) async -> Result {
         let modelPrompt = WorkspaceListingFollowUpContext.enriching(
             promptText,
@@ -625,6 +626,10 @@ final class ChatResponseCoordinator {
                 contextChanged: { [weak self] usage in
                     guard let self, await self.ownsTurn(turnID) else { return }
                     contextChanged(usage)
+                },
+                usageChanged: { [weak self] usage, context in
+                    guard let self, await self.ownsTurn(turnID) else { return }
+                    usageChanged(usage, context)
                 },
                 approvalRequested: { [weak self] request in
                     guard let self, await self.ownsTurn(turnID) else { return }

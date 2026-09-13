@@ -125,9 +125,15 @@ nonisolated struct ModelSessionEvents: Sendable {
     let agentActivityChanged: @Sendable (
         AgentActivityRuntimeEvent
     ) async -> Void
+    /// Host-owned approval destination. The desktop host keeps the existing
+    /// shared registry; a headless host can reject explicitly or bridge the
+    /// request to its transport without blocking on UI state.
+    let requestApproval: @Sendable (PendingToolApproval) async -> String
     /// Optional harness admission used only when the user enables background
     /// delegation. A nil port preserves the blocking tool contract.
     let backgroundTaskSubmission: DelegatedTaskBackgroundSubmission?
+    /// Session-owned external tools, such as ACP-provided MCP gateways.
+    let additionalTools: [any Tool]
 
     init(
         currentTurnID: @escaping @MainActor @Sendable () async -> TurnID? = { nil },
@@ -147,7 +153,13 @@ nonisolated struct ModelSessionEvents: Sendable {
         agentActivityChanged: @escaping @Sendable (
             AgentActivityRuntimeEvent
         ) async -> Void = { _ in },
-        backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil
+        requestApproval: @escaping @Sendable (
+            PendingToolApproval
+        ) async -> String = {
+            await ToolApprovalRegistry.shared.request($0)
+        },
+        backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil,
+        additionalTools: [any Tool] = []
     ) {
         self.currentTurnID = currentTurnID
         self.toolReceiptRegistry = toolReceiptRegistry
@@ -155,7 +167,9 @@ nonisolated struct ModelSessionEvents: Sendable {
         self.toolFinished = toolFinished
         self.delegationChanged = delegationChanged
         self.agentActivityChanged = agentActivityChanged
+        self.requestApproval = requestApproval
         self.backgroundTaskSubmission = backgroundTaskSubmission
+        self.additionalTools = additionalTools
     }
 }
 
@@ -350,13 +364,15 @@ nonisolated enum ModelSessionFactory {
                     .listWorkspace,
                     .swiftWorkspaceMap,
                     .xcodeProject,
+                    .xcodeMCP,
                     .writeOnDevice,
                     .createSkill,
                     .safariMCP
                 ],
             repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
                 ?? 32_768,
-            receiptRegistry: events.toolReceiptRegistry
+            receiptRegistry: events.toolReceiptRegistry,
+            requestApproval: events.requestApproval
         )
         if let delegateInvoker {
             // Profiles that explicitly include delegate_task receive the
@@ -372,6 +388,7 @@ nonisolated enum ModelSessionFactory {
                 )
             )
         }
+        standaloneTools.append(contentsOf: events.additionalTools)
 
         return LanguageModelSession(
             profile: StandaloneProfile(
@@ -465,7 +482,8 @@ nonisolated enum ModelSessionFactory {
                 for: delegatePlan,
                 configuration: configuration,
                 repositoryMapContextTokens: configuration.delegateRemoteModel.contextWindowTokens,
-                receiptRegistry: events.toolReceiptRegistry
+                receiptRegistry: events.toolReceiptRegistry,
+                requestApproval: events.requestApproval
             ),
             delegateInstructions: delegateInstructions,
             onToolStart: { call in
@@ -498,8 +516,10 @@ nonisolated enum ModelSessionFactory {
         var orchestratorTools = toolInstances(
             for: orchestratorPlan,
             configuration: configuration,
-            receiptRegistry: events.toolReceiptRegistry
+            receiptRegistry: events.toolReceiptRegistry,
+            requestApproval: events.requestApproval
         )
+        orchestratorTools.append(contentsOf: events.additionalTools)
         if orchestratorPlan.contains(.callPowerfulModel) {
             orchestratorTools.append(powerfulTool)
         }
@@ -567,7 +587,10 @@ nonisolated enum ModelSessionFactory {
         configuration: ModelSessionConfiguration,
         including allowedIDs: Set<ToolCapabilityID>? = nil,
         repositoryMapContextTokens: Int = 32_768,
-        receiptRegistry: ToolReceiptRegistry? = nil
+        receiptRegistry: ToolReceiptRegistry? = nil,
+        requestApproval: @escaping @Sendable (PendingToolApproval) async -> String = {
+            await ToolApprovalRegistry.shared.request($0)
+        }
     ) -> [any Tool] {
         var tools = plan.assignments.compactMap { assignment -> (any Tool)? in
             guard assignment.isRegistered,
@@ -586,7 +609,8 @@ nonisolated enum ModelSessionFactory {
             case .readFile:
                 return ReadFileTool(
                     workspaceRoot: configuration.workspaceRoot,
-                    executionPolicy: configuration.agentTuning.execution
+                    executionPolicy: configuration.agentTuning.execution,
+                    requestApproval: requestApproval
                 )
             case .searchWorkspace:
                 return RipgrepTool(
@@ -596,19 +620,22 @@ nonisolated enum ModelSessionFactory {
             case .fileSystem:
                 return FileSystemTool(
                     workspaceRoot: configuration.workspaceRoot,
-                    receiptRegistry: receiptRegistry
+                    receiptRegistry: receiptRegistry,
+                    requestApproval: requestApproval
                 )
             case .git:
                 return GitTool(
                     workspaceRoot: configuration.workspaceRoot,
                     policy: configuration.agentTuning.git,
                     executionPolicy: configuration.agentTuning.execution,
-                    receiptRegistry: receiptRegistry
+                    receiptRegistry: receiptRegistry,
+                    requestApproval: requestApproval
                 )
             case .bash:
                 return BashTool(
                     workspaceRoot: configuration.workspaceRoot,
-                    executionPolicy: configuration.agentTuning.execution
+                    executionPolicy: configuration.agentTuning.execution,
+                    requestApproval: requestApproval
                 )
             case .swiftPackageManager:
                 return SwiftPackageManagerTool(
@@ -627,7 +654,8 @@ nonisolated enum ModelSessionFactory {
                 // coordinator routing must not change workspace safety semantics.
                 return EditFileTool(
                     workspaceRoot: configuration.workspaceRoot,
-                    receiptRegistry: receiptRegistry
+                    receiptRegistry: receiptRegistry,
+                    requestApproval: requestApproval
                 )
             case .writeOnDevice:
                 // The constrained on-device writer remains distinct from the
@@ -637,11 +665,19 @@ nonisolated enum ModelSessionFactory {
                     receiptRegistry: receiptRegistry
                 )
             case .removeFile:
-                return RemoveFileTool(workspaceRoot: configuration.workspaceRoot)
+                return RemoveFileTool(
+                    workspaceRoot: configuration.workspaceRoot,
+                    requestApproval: requestApproval
+                )
             case .safariMCP:
                 return SafariMCPTool(
                     client: .shared,
                     enabled: configuration.agentTuning.experimental.safariMCPEnabled
+                )
+            case .xcodeMCP:
+                return XcodeMCPTool(
+                    client: .shared,
+                    enabled: configuration.agentTuning.experimental.xcodeMCPEnabled
                 )
             case .loadSkill:
                 guard !configuration.availableSkills.isEmpty else { return nil }
@@ -761,7 +797,8 @@ nonisolated enum ModelSessionFactory {
                     configuration: configuration,
                     repositoryMapContextTokens:
                         isOnDevice ? 32_768 : remoteModel.contextWindowTokens,
-                    receiptRegistry: events.toolReceiptRegistry
+                    receiptRegistry: events.toolReceiptRegistry,
+                    requestApproval: events.requestApproval
                 ),
                 workspaceRoot: configuration.workspaceRoot,
                 instructions: systemPrompt(
@@ -847,6 +884,7 @@ nonisolated enum ModelSessionFactory {
             hasWorkspace: !configuration.workspaceRoot.isEmpty,
             hasSkills: !configuration.availableSkills.isEmpty,
             safariMCPEnabled: configuration.agentTuning.experimental.safariMCPEnabled,
+            xcodeMCPEnabled: configuration.agentTuning.experimental.xcodeMCPEnabled,
             hasDelegateModel: configuration.delegateRemoteModel.enabled,
             repositoryMapDetail: repositoryMap?.detail
         )

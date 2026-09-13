@@ -138,6 +138,7 @@ actor CodexExecutionEngine {
         let allowsTools: Bool
         let includesDelegation: Bool
         let safariMCPEnabled: Bool
+        let xcodeMCPEnabled: Bool
         let modelID: String
         let skillNames: [String]
         let pluginToolNames: [String]
@@ -262,6 +263,8 @@ actor CodexExecutionEngine {
             includesDelegation: includesDelegation,
             safariMCPEnabled: request.allowsTools
                 && request.agentTuning.experimental.safariMCPEnabled,
+            xcodeMCPEnabled: request.allowsTools
+                && request.agentTuning.experimental.xcodeMCPEnabled,
             modelID: snapshot.selectedModel.id,
             skillNames: request.allowsTools
                 ? request.availableSkills.map(\.name)
@@ -283,6 +286,7 @@ actor CodexExecutionEngine {
                     includesDelegation: includesDelegation,
                     availableSkills: request.availableSkills,
                     safariMCPEnabled: request.agentTuning.experimental.safariMCPEnabled,
+                    xcodeMCPEnabled: request.agentTuning.experimental.xcodeMCPEnabled,
                     pluginTools: pluginTools,
                     selectedToolIDs: request.selectedToolIDs
                 )
@@ -514,11 +518,21 @@ nonisolated protocol CodexTurnRunning: AnyObject, Sendable {
 
     func interrupt() async
 
+    /// Resolves a provider approval when the host owns the approval UI.
+    /// Fixtures and non-interactive adapters may keep the default no-op.
+    func resolveApproval(id: String, approved: Bool) async throws -> Bool
+
     func steerActiveTurn(
         turboThreadID: String,
         localTurnID: TurnID,
         input: String
     ) async throws -> String
+}
+
+nonisolated extension CodexTurnRunning {
+    func resolveApproval(id: String, approved: Bool) async throws -> Bool {
+        false
+    }
 }
 
 extension CodexExecutionEngine: CodexTurnRunning {}

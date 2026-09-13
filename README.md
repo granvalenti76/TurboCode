@@ -284,6 +284,10 @@ xcodebuild -version
 xcode-select -p
 ```
 
+To register TurboCode as an external ACP agent in Xcode, follow
+[ACP_AGENT_SETUP.md](ACP_AGENT_SETUP.md). The app embeds the helper at
+`Contents/Helpers/turbocode-acp`.
+
 ## Build from source
 
 Clone the repository, open `TurboCode.xcodeproj`, select the **TurboCode**

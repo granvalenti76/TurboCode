@@ -157,6 +157,66 @@ struct ReviewCommentsTests {
         #expect(store.comments.isEmpty)
     }
 
+    @MainActor
+    @Test("Workspace comments survive Git refreshes and follow shifted content")
+    func workspaceCommentsStayScopedAndReanchor() throws {
+        let store = ReviewDraftStore()
+        store.begin(workspaceRoot: "/tmp/workspace")
+        let originalLines = [
+            diffLine(10, "before", .context),
+            diffLine(11, "target", .context),
+            diffLine(12, "after", .context)
+        ]
+        let anchor = try #require(
+            ReviewLineAnchor.make(
+                filePath: "Notes/article.md",
+                lineIndex: 1,
+                lines: originalLines,
+                origin: .workspaceFile
+            )
+        )
+        _ = store.upsert(id: nil, anchor: anchor, body: "Clarify this paragraph.")
+
+        store.reconcile(workspaceRoot: "/tmp/workspace", sections: [])
+        #expect(store.comments[0].anchor.origin == .workspaceFile)
+        #expect(!store.comments[0].isOutdated)
+
+        let shiftedLines = [
+            diffLine(10, "inserted", .context),
+            diffLine(11, "before", .context),
+            diffLine(12, "target", .context),
+            diffLine(13, "after", .context)
+        ]
+        store.reconcileWorkspaceFile(
+            relativePath: "Notes/article.md",
+            lines: shiftedLines
+        )
+
+        #expect(store.comments[0].anchor.lineNumber == 12)
+        #expect(!store.comments[0].isOutdated)
+    }
+
+    @Test("Workspace review prompts describe content rather than Git code")
+    func workspaceReviewPromptUsesDocumentLanguage() throws {
+        let anchor = try #require(
+            ReviewLineAnchor.make(
+                filePath: "Notes/article.md",
+                lineIndex: 0,
+                lines: [diffLine(7, "An unclear paragraph.", .context)],
+                origin: .workspaceFile
+            )
+        )
+        let request = try #require(
+            ReviewRequestBuilder.make(
+                comments: [ReviewComment(anchor: anchor, body: "Make this more direct.")]
+            )
+        )
+
+        #expect(request.promptText.contains("Reviewed content: An unclear paragraph."))
+        #expect(!request.promptText.contains("Reviewed code:"))
+        #expect(request.promptText.contains("Notes/article.md — current line 7"))
+    }
+
     @Test("Review requests aggregate current and removed lines compactly")
     func reviewRequestIsDeterministicAndCompact() throws {
         let currentAnchor = try #require(

@@ -5,6 +5,9 @@ import FoundationModels
 struct ListWorkspaceArguments {
     /// Workspace-relative directory to inspect. Use "." for the workspace root.
     var path: String
+    /// Optional file extension to include, with or without a leading dot.
+    /// For example, "txt" and ".TXT" both select text files.
+    var fileExtension: String? = nil
 }
 
 @Generable
@@ -54,7 +57,9 @@ struct ListWorkspaceTool: Tool {
     var description: String {
         """
         List one directory in the active workspace. Pass a workspace-relative
-        path; use "." for the root. The result is read-only and shown natively.
+        path; use "." for the root. Optionally pass a file extension such as
+        "txt" or ".md" to show only matching files. The result is read-only
+        and shown natively.
         """
     }
     var includesSchemaInInstructions: Bool { true }
@@ -75,7 +80,10 @@ struct ListWorkspaceTool: Tool {
         }
         do {
             let snapshot = try WorkspaceBrowsingService(workspaceRoot: workspaceRoot)
-                .listDirectory(at: arguments.path)
+                .listDirectory(
+                    at: arguments.path,
+                    fileExtension: arguments.fileExtension
+                )
             let formatter = ISO8601DateFormatter()
             let entries = snapshot.entries.map { entry in
                 WorkspaceListingToolEntry(

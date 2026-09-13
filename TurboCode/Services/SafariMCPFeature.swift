@@ -4,16 +4,21 @@ import FoundationModelsUtilities
 /// Prompt-based activation is intentional: it appends the browser guidance as
 /// tool output instead of mutating the session's leading instructions entry.
 nonisolated enum SafariMCPFeature {
-    static let skillName = DynamicProfileRuntimeSelection.safariMCPSkillName
+    static let skillName = "safari-mcp"
 
-    /// Overrides the utility package's generic skill guidance, whose fallback
-    /// can be read as a ban on every tool. Safari activation must never narrow
-    /// the rest of the profile's independently resolved capability surface.
+    /// The utility renders this activation as a Foundation `Skill`. Product
+    /// instructions establish that it is an on-demand MCP integration, kept
+    /// separate from the disk-backed Markdown skill catalog.
     static let activationInstructions = """
-    Activate the Safari MCP skill only when the user's request requires browser work
-    through Safari. Otherwise leave this skill inactive and continue normally.
-    This activation decision does not restrict any other available tool; use those
-    tools whenever the task requires them.
+    Safari MCP is an on-demand MCP integration, not a Markdown skill. Activate it
+    only when the user's request requires browser work through Safari. Otherwise
+    leave this integration inactive and continue normally. This activation decision
+    does not restrict any other available tool; use those tools whenever the task
+    requires them.
+
+    `/mcp` asks you to list the currently exposed Foundation on-demand MCP
+    integrations. `/skills` refers only to the disk-backed Markdown `SKILL.md`
+    catalog. Plugin tools and ordinary tools are not members of either catalog.
     """
 
     static let prompt = """

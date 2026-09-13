@@ -152,6 +152,10 @@ public final class SettingsStore {
         remoteModels.removeAll { $0.isRetiredPCC }
     }
 
+    func updateRemoteModelDisplayName(_ name: String, for id: String) throws {
+        remoteModels = try TurboCodeConfig.shared.updateRemoteModelDisplayName(name, for: id)
+    }
+
     /// Replaces only the reasoning request contract for one configured model.
     /// Reloading immediately before the atomic write preserves endpoint edits
     /// made directly in `models.json` while Settings was open.

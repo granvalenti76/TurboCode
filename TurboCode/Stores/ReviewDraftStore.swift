@@ -1,9 +1,9 @@
 import Foundation
 import Observation
 
-/// Owns the ephemeral review being assembled in the Changes inspector.
-/// Comments survive panel dismissal and diff refreshes, but are intentionally
-/// cleared when the user changes workspace or conversation.
+/// Owns the ephemeral reviews assembled in the Changes inspector and Markdown
+/// file previews. Comments survive panel dismissal and content refreshes, but
+/// are intentionally cleared when the user changes workspace or conversation.
 @MainActor
 @Observable
 final class ReviewDraftStore {
@@ -39,6 +39,7 @@ final class ReviewDraftStore {
         if let index = comments.firstIndex(where: {
             !$0.isOutdated
                 && $0.anchor.filePath == anchor.filePath
+                && $0.anchor.origin == anchor.origin
                 && $0.anchor.side == anchor.side
                 && $0.anchor.lineNumber == anchor.lineNumber
                 && $0.anchor.content == anchor.content
@@ -61,13 +62,47 @@ final class ReviewDraftStore {
         comments = []
     }
 
+    /// Removes only the comments admitted by one review surface after that
+    /// surface has durably handed its request to the conversation timeline.
+    func discard(ids: Set<UUID>) {
+        comments.removeAll { ids.contains($0.id) }
+    }
+
     /// Reconciles comments only after a complete Git snapshot has been
     /// published. A loading placeholder must never make every anchor stale.
     func reconcile(workspaceRoot: String, sections: [FileDiffSection]) {
         begin(workspaceRoot: workspaceRoot)
         comments = comments.map { comment in
+            guard comment.anchor.origin == .gitDiff else { return comment }
             var updated = comment
             if let anchor = ReviewAnchorResolver.resolve(comment.anchor, in: sections) {
+                updated.anchor = anchor
+                updated.isOutdated = false
+            } else {
+                updated.isOutdated = true
+            }
+            return updated
+        }
+    }
+
+    /// Reanchors annotations against the current bounded Markdown snapshot.
+    /// Git refreshes deliberately ignore these comments, while each file
+    /// preview refresh updates only the annotations that belong to that path.
+    func reconcileWorkspaceFile(
+        relativePath: String,
+        lines: [DiffLine]
+    ) {
+        let section = FileDiffSection(
+            path: relativePath,
+            added: 0,
+            removed: 0,
+            diffLines: lines
+        )
+        comments = comments.map { comment in
+            guard comment.anchor.origin == .workspaceFile,
+                  comment.anchor.filePath == relativePath else { return comment }
+            var updated = comment
+            if let anchor = ReviewAnchorResolver.resolve(comment.anchor, in: [section]) {
                 updated.anchor = anchor
                 updated.isOutdated = false
             } else {

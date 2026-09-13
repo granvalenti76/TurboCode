@@ -15,6 +15,7 @@ final class ProfileSelectionCoordinator {
     private let llmRuntime: LLMRuntime
     private let runtimeProjection: AgentRuntimeProjectionStore
     private let responseCoordinator: ChatResponseCoordinator
+    private let statistics: ComposerSessionStatisticsStore
 
     private var codexSelectionTask: Task<Void, Never>?
     private var codexHandoffTask: Task<Void, Never>?
@@ -32,7 +33,8 @@ final class ProfileSelectionCoordinator {
         agentRuntime: AgentRuntime,
         llmRuntime: LLMRuntime,
         runtimeProjection: AgentRuntimeProjectionStore,
-        responseCoordinator: ChatResponseCoordinator
+        responseCoordinator: ChatResponseCoordinator,
+        statistics: ComposerSessionStatisticsStore
     ) {
         self.modelRuntime = modelRuntime
         self.codexRuntime = codexRuntime
@@ -44,6 +46,7 @@ final class ProfileSelectionCoordinator {
         self.llmRuntime = llmRuntime
         self.runtimeProjection = runtimeProjection
         self.responseCoordinator = responseCoordinator
+        self.statistics = statistics
     }
 
     func setOrchestratorMode(_ mode: OrchestratorMode) async {
@@ -79,9 +82,13 @@ final class ProfileSelectionCoordinator {
 
     func selectCodexProfile(
         modelID: String? = nil,
-        dynamicProfileID: UUID? = nil
+        dynamicProfileID: UUID? = nil,
+        reasoning: CodexReasoningEffort? = nil
     ) async {
-        guard !isBusy, modelRuntime.orchestratorMode == .standalone else { return }
+        guard !isBusy else { return }
+        if modelRuntime.orchestratorMode != .standalone {
+            modelRuntime.setOrchestratorMode(.standalone)
+        }
         let isEnteringFromTurboCode = modelRuntime.activeBackend != .codex
         let routeChanged = modelRuntime.activeDynamicProfileID != dynamicProfileID
         if (isEnteringFromTurboCode || routeChanged),
@@ -96,6 +103,7 @@ final class ProfileSelectionCoordinator {
                 await codexRuntime.resetThread(turboThreadID: threadID)
             }
         }
+        guard !Task.isCancelled else { return }
         modelRuntime.selectCodex(
             displayName: codexRuntime.displayName,
             profileID: dynamicProfileID
@@ -107,6 +115,9 @@ final class ProfileSelectionCoordinator {
             guard !Task.isCancelled,
                   modelRuntime.activeBackend == .codex,
                   modelRuntime.activeDynamicProfileID == dynamicProfileID else { return }
+            // Validate against the freshly loaded destination catalog, never
+            // the custom profile's previously active Codex model.
+            if let reasoning { codexRuntime.setReasoningEffort(reasoning) }
             modelRuntime.composerModel = modelRuntime.activeDynamicProfile?.name
                 ?? "Codex · \(codexRuntime.displayName)"
         } catch is CancellationError {
@@ -129,14 +140,16 @@ final class ProfileSelectionCoordinator {
     @discardableResult
     func scheduleCodexProfileSelection(
         modelID: String? = nil,
-        dynamicProfileID: UUID? = nil
+        dynamicProfileID: UUID? = nil,
+        reasoning: CodexReasoningEffort? = nil
     ) -> Task<Void, Never> {
         codexSelectionTask?.cancel()
         let task = Task { [weak self] in
             guard let self else { return }
             await self.selectCodexProfile(
                 modelID: modelID,
-                dynamicProfileID: dynamicProfileID
+                dynamicProfileID: dynamicProfileID,
+                reasoning: reasoning
             )
         }
         codexSelectionTask = task
@@ -173,23 +186,27 @@ final class ProfileSelectionCoordinator {
         }
     }
 
-    func selectBuiltInProfile(_ id: ProfileBaseModelID) async {
-        guard !isBusy, modelRuntime.orchestratorMode == .standalone else { return }
+    func selectBuiltInProfile(
+        _ id: ProfileBaseModelID,
+        reasoning: ReasoningEffort? = nil,
+        codexReasoning: CodexReasoningEffort? = nil
+    ) async {
+        guard !isBusy else { return }
         if id == .codex {
-            scheduleCodexProfileSelection()
+            scheduleCodexProfileSelection(reasoning: codexReasoning)
             return
         }
         cancelCodexSelection()
         if modelRuntime.activeBackend == .codex {
-            beginCodexHandoff(to: .builtIn(id))
+            beginCodexHandoff(to: .builtIn(id, reasoning: reasoning))
             return
         }
-        guard modelRuntime.selectBuiltInProfile(id) else { return }
+        guard modelRuntime.selectBuiltInProfile(id, reasoning: reasoning) else { return }
         await rebuildSession(discardingCapabilityContext: true)
     }
 
     func selectDynamicProfile(_ id: UUID) async {
-        guard !isBusy, modelRuntime.orchestratorMode == .standalone else { return }
+        guard !isBusy else { return }
         if let profile = modelRuntime.dynamicProfiles.first(where: { $0.id == id }),
            profile.baseModelID == .codex {
             scheduleCodexProfileSelection(
@@ -337,8 +354,12 @@ final class ProfileSelectionCoordinator {
         keepingHistory: Bool = true,
         discardingCapabilityContext: Bool = false,
         restoringHistory: [FoundationModelsTranscriptEntry]? = nil,
-        restoringProjection: TranscriptContextProjection? = nil
+        restoringProjection: TranscriptContextProjection? = nil,
+        invalidatingComposerContext: Bool = true
     ) async {
+        if invalidatingComposerContext {
+            statistics.invalidateContext()
+        }
         presentation.setLlamaContextUsage(nil)
         _ = await agentRuntime.apply(
             .switchBackend(
@@ -464,7 +485,7 @@ final class ProfileSelectionCoordinator {
         switch selection {
         case .backend(let backend): modelRuntime.selectBackend(backend)
         case .remoteModel(let id): modelRuntime.selectRemoteModel(id: id)
-        case .builtIn(let id): modelRuntime.selectBuiltInProfile(id)
+        case .builtIn(let id, let reasoning): modelRuntime.selectBuiltInProfile(id, reasoning: reasoning)
         case .dynamic(let id): modelRuntime.selectDynamicProfile(id)
         }
     }

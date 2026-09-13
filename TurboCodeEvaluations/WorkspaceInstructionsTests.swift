@@ -131,7 +131,7 @@ struct WorkspaceInstructionsTests {
         )
 
         #expect(prompt.contains("create and maintain TurboCode TypeScript plugins autonomously"))
-        #expect(prompt.contains("documentation, and examples are installed in ~/.turbocode/sdk"))
+        #expect(prompt.contains("documentation, and examples are installed in ~/.turbocode/sdk/@granvalenti/turbocode-sdk;"))
         #expect(prompt.contains("inspect them to learn the current plugin contract"))
         #expect(prompt.contains("plugins are installed in ~/.turbocode/plugins"))
         #expect(!prompt.contains("TURBOCODE_"))
@@ -148,7 +148,7 @@ struct WorkspaceInstructionsTests {
                 toolNames: []
             )
         )
-        let marker = "Be a calm, perceptive collaborator in ideas and actions."
+        let marker = "Be a calm, perceptive collaborator."
 
         #expect(prompt.contains(marker))
         #expect(
@@ -156,8 +156,8 @@ struct WorkspaceInstructionsTests {
                 separatedBy: marker
             ).count == 2
         )
-        #expect(prompt.contains("Match the depth, structure, and tone of the response"))
-        #expect(prompt.contains("without artificial brevity or padding"))
+        #expect(prompt.contains("Match the depth and structure of the response"))
+        #expect(prompt.contains("task's actual complexity"))
         #expect(!prompt.contains("what can be left out"))
         #expect(!prompt.contains("over maximal output"))
         #expect(!prompt.contains("overbuilt"))
@@ -173,7 +173,9 @@ struct WorkspaceInstructionsTests {
             )
         )
 
-        #expect(prompt.contains("Match the depth, structure, and tone of the response"))
+        #expect(prompt.contains("Match the depth and structure of the response"))
+        #expect(prompt.contains("Treat a clear request for action as authorization"))
+        #expect(prompt.contains("Use only the tools, skills, workers, and integrations"))
         #expect(!prompt.contains("Keep responses focused"))
         #expect(!prompt.contains("Keep responses concise"))
         #expect(!prompt.contains("Explain decisions and verification in detail"))

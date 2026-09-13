@@ -7,6 +7,8 @@ import Foundation
 enum TurboCodeProfileSelection {
     case backend(ModelBackend)
     case remoteModel(String)
-    case builtIn(ProfileBaseModelID)
+    // Carry effort through the asynchronous handoff and apply it only when
+    // the destination becomes active, before its single session rebuild.
+    case builtIn(ProfileBaseModelID, reasoning: ReasoningEffort? = nil)
     case dynamic(UUID)
 }

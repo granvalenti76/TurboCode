@@ -33,6 +33,9 @@ actor CodexBackendSession: BackendSession {
     private let approvalRequested: @MainActor @Sendable (
         ApprovalRequest
     ) async -> Void
+    private let approvalResolution: (@MainActor @Sendable (
+        ApprovalRequest
+    ) async -> CodexApprovalDecision)?
     private var activeRun: Task<BackendSessionResult, Never>?
     private var activeLocalTurnID: TurnID?
 
@@ -63,7 +66,10 @@ actor CodexBackendSession: BackendSession {
         ) async -> Void = { _ in },
         approvalRequested: @escaping @MainActor @Sendable (
             ApprovalRequest
-        ) async -> Void = { _ in }
+        ) async -> Void = { _ in },
+        approvalResolution: (@MainActor @Sendable (
+            ApprovalRequest
+        ) async -> CodexApprovalDecision)? = nil
     ) {
         self.runtime = runtime
         self.turboThreadID = turboThreadID
@@ -82,6 +88,7 @@ actor CodexBackendSession: BackendSession {
         self.activityStarted = activityStarted
         self.activityEnded = activityEnded
         self.approvalRequested = approvalRequested
+        self.approvalResolution = approvalResolution
     }
 
     func run(
@@ -106,6 +113,7 @@ actor CodexBackendSession: BackendSession {
         let activityStarted = self.activityStarted
         let activityEnded = self.activityEnded
         let approvalRequested = self.approvalRequested
+        let approvalResolution = self.approvalResolution
         let toolTimings = CodexToolTimingRegistry()
         activeLocalTurnID = request.id
 
@@ -206,6 +214,15 @@ actor CodexBackendSession: BackendSession {
                         },
                         approvalRequested: { request in
                             await approvalRequested(request)
+                            guard let approvalResolution else { return }
+                            let decision = await approvalResolution(request)
+                            _ = try? await runtime.resolveApproval(
+                                id: request.id,
+                                approved: decision == .allow
+                            )
+                            if decision == .cancelled {
+                                await runtime.interrupt()
+                            }
                         }
                     )
                 )

@@ -161,6 +161,14 @@ final class EditorialDeskViewModel {
         loadDraft(EditorialDraft(body: text))
     }
 
+    /// Copies a workspace Markdown file into a new draft body without treating
+    /// that same document as supporting evidence. No title, identity, source,
+    /// or review state is inferred from the imported document.
+    func loadImportedMarkdown(_ source: EditorialSource) {
+        loadEditorialDraft(EditorialDraft(body: source.content), reviewContext: nil)
+        selectedTab = .write
+    }
+
     /// Keeps the visible title, deck and body fields synchronized with the
     /// local draft projection. External prompt or Markdown encoding happens
     /// only after a Sendable snapshot crosses the UI boundary.

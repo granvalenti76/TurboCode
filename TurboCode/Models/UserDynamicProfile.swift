@@ -54,6 +54,28 @@ nonisolated enum ProfileBaseModelID: String, CaseIterable, Codable, Identifiable
     }
 }
 
+/// Resolves each destination independently of the active provider. Inspecting
+/// a submenu must not select a model, access credentials, or connect to it.
+nonisolated enum ComposerProfileMenu {
+    static let defaults: [ProfileBaseModelID] = [.onDevice, .codex, .llama, .deepseek]
+
+    static func name(for id: ProfileBaseModelID, models: [RemoteModelConfig]) -> String {
+        models.first { $0.id == id.remoteModelID }?.name ?? id.displayName
+    }
+
+    static func reasoningOptions(
+        for id: ProfileBaseModelID,
+        models: [RemoteModelConfig]
+    ) -> [ReasoningEffort] {
+        if id == .onDevice { return ReasoningEffort.allCases }
+        guard let model = models.first(where: { $0.id == id.remoteModelID }),
+              model.supportsReasoning,
+              model.reasoningTransport == .deepseekThinking
+                || model.reasoningConfiguration.mode == .requestTokenBudget else { return [] }
+        return id == .llama ? ReasoningEffort.allCases : [.low, .medium, .high]
+    }
+}
+
 /// One executable worker slot owned by a custom profile.
 ///
 /// Multiple slots may target the same provider. In that case their count is

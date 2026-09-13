@@ -91,6 +91,7 @@ public final class ChatStore {
     /// Compatibility forwarders keep the existing view and intent surface
     /// stable while construction lives in the non-observable assembly.
     private let assembly: ChatApplicationAssembly
+    private let workspaceFilePreviewService = WorkspaceFilePreviewService()
     var workspaceStore: WorkspaceStore { assembly.workspaceStore }
     var conversationStore: ConversationStore { assembly.conversationStore }
     var toolInteractionStore: ToolInteractionStore { assembly.toolInteractionStore }
@@ -289,8 +290,28 @@ public final class ChatStore {
         profileSelectionCoordinator.reopenCodexLoginPage()
     }
 
-    func selectBuiltInProfile(_ id: ProfileBaseModelID) async {
-        await profileSelectionCoordinator.selectBuiltInProfile(id)
+    func selectBuiltInProfile(
+        _ id: ProfileBaseModelID,
+        reasoning: ReasoningEffort? = nil,
+        codexReasoning: CodexReasoningEffort? = nil
+    ) async {
+        await profileSelectionCoordinator.selectBuiltInProfile(
+            id, reasoning: reasoning, codexReasoning: codexReasoning
+        )
+    }
+
+    /// Reflect a persisted label edit without rebuilding the provider session.
+    func updateRemoteModelDisplayName(id: String, name: String) {
+        modelRuntimeStore.updateRemoteModelDisplayName(id: id, name: name)
+    }
+
+    func configureCodexDefaultModel(id: String) {
+        guard !busy else { return }
+        let isDirectCodex = activeBackend == .codex && activeDynamicProfileID == nil
+        codexRuntimeStore.configureDefaultModel(id: id, updateActiveModel: isDirectCodex)
+        if isDirectCodex {
+            modelRuntimeStore.composerModel = "Codex · \(codexRuntimeStore.displayName)"
+        }
     }
 
     func selectDynamicProfile(_ id: UUID) async {
@@ -558,14 +579,33 @@ public final class ChatStore {
     /// compact timeline text remains readable while the model receives stable
     /// reviewed excerpts and sides through the provider-neutral prompt path.
     func sendReviewComments() async {
+        let comments = reviewDraftStore.comments.filter {
+            $0.anchor.origin == .gitDiff
+        }
+        await sendReviewComments(comments, closesChangesInspector: true)
+    }
+
+    /// Sends only the annotations belonging to one live Markdown preview. Git
+    /// review drafts remain untouched so the two surfaces can coexist safely.
+    func sendWorkspaceFileReviewComments(relativePath: String) async {
+        guard canUseLiveWorkspaceListing() else { return }
+        let comments = reviewDraftStore.comments.filter {
+            $0.anchor.origin == .workspaceFile
+                && $0.anchor.filePath == relativePath
+        }
+        await sendReviewComments(comments, closesChangesInspector: false)
+    }
+
+    private func sendReviewComments(
+        _ comments: [ReviewComment],
+        closesChangesInspector: Bool
+    ) async {
         guard !busy, activeProfileCanSend else { return }
-        guard reviewDraftStore.outdatedCount == 0 else {
+        guard !comments.contains(where: \.isOutdated) else {
             error = "Refresh or remove outdated review comments before sending."
             return
         }
-        guard let request = ReviewRequestBuilder.make(
-            comments: reviewDraftStore.comments
-        ) else { return }
+        guard let request = ReviewRequestBuilder.make(comments: comments) else { return }
 
         guard let promptText = await messageSendCoordinator.preparePrompt(
             for: request.promptText
@@ -573,8 +613,10 @@ public final class ChatStore {
 
         // The visible user block is now the durable receipt for this ephemeral
         // draft, so clearing before inference cannot lose the authored review.
-        reviewDraftStore.discardAll()
-        workbenchStore.rightPanelMode = nil
+        reviewDraftStore.discard(ids: Set(comments.map(\.id)))
+        if closesChangesInspector {
+            workbenchStore.rightPanelMode = nil
+        }
         await sendMessage(
             request.displayText,
             promptText: promptText,
@@ -1038,16 +1080,67 @@ public final class ChatStore {
     /// Recognizes a live workspace entry without changing the immutable tool
     /// receipt or exposing Editorial Desk service internals to SwiftUI.
     func editorialDraftSummary(relativePath: String) async -> EditorialDraftSummary? {
-        guard !workspaceRoot.isEmpty else { return nil }
+        guard canUseLiveWorkspaceListing() else { return nil }
         return await editorialDeskAssembly.draftSummary(
             relativePath: relativePath,
             workspaceRoot: workspaceRoot
         )
     }
 
+    /// Loads current file content only when the active conversation still owns
+    /// the selected workspace. Editorial front matter is decoded at the facade,
+    /// keeping both the generic file service and SwiftUI free of that protocol.
+    func workspaceFilePreview(relativePath: String) async throws -> WorkspaceFilePreview {
+        guard canUseLiveWorkspaceListing() else {
+            throw WorkspaceFilePreviewError.inactiveWorkspace
+        }
+        let preview = try await workspaceFilePreviewService.load(
+            relativePath: relativePath,
+            workspaceRoot: workspaceRoot
+        )
+        guard preview.kind == .markdown,
+              EditorialMarkdownCodec.authenticDraftID(in: preview.content) != nil else {
+            return preview
+        }
+        let decoded = EditorialMarkdownCodec.decode(preview.content)
+        let bodyStartLine = EditorialMarkdownCodec
+            .splitFrontMatter(preview.content)?
+            .bodyStartLine ?? 1
+        return WorkspaceFilePreview(
+            relativePath: preview.relativePath,
+            fileName: preview.fileName,
+            content: decoded.draft.body,
+            kind: preview.kind,
+            sizeBytes: preview.sizeBytes,
+            previewedByteCount: preview.previewedByteCount,
+            isTruncated: preview.isTruncated,
+            contentStartLine: bodyStartLine,
+            isEditorialDraft: true,
+            editorialTitle: decoded.draft.title
+        )
+    }
+
+    /// Historical receipts may outlive their workspace selection. Requiring
+    /// the active conversation's persisted root to match prevents a same-named
+    /// file in another workspace from being read or opened through the widget.
+    func canUseLiveWorkspaceListing() -> Bool {
+        guard !workspaceRoot.isEmpty,
+              let activeThreadId,
+              let conversationRoot = conversationStore.conversation(id: activeThreadId)?.workspace else {
+            return false
+        }
+        return URL(fileURLWithPath: conversationRoot).standardizedFileURL.path
+            == URL(fileURLWithPath: workspaceRoot).standardizedFileURL.path
+    }
+
     func presentEditorialDesk(draftRelativePath: String? = nil) {
         guard !workspaceRoot.isEmpty else { return }
         workbenchStore.presentEditorialDesk(draftRelativePath: draftRelativePath)
+    }
+
+    func presentEditorialDesk(importingMarkdown relativePath: String) {
+        guard canUseLiveWorkspaceListing() else { return }
+        workbenchStore.presentEditorialDesk(importingMarkdown: relativePath)
     }
 
     /// Returns whether a structured result references a receipt that still

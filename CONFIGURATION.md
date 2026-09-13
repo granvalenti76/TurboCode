@@ -15,6 +15,20 @@ options are also available in **TurboCode > Settings > Agents**.
 
 Never place credentials in a TurboCode JSON file.
 
+## Composer profiles
+
+The composer lists On-device, Codex, Llama, and DeepSeek, followed by custom
+profiles. Each default opens a reasoning submenu for that destination; a
+provider-managed configuration uses Automatic. Choosing an option selects the
+profile and effort together. The retired On-Device Delegation entry is absent;
+selecting a profile also exits that mode in older conversations.
+
+In **Profiles > Llama > Display name**, Save updates only the model entry's
+`name` in `models.json`. It preserves `id`, `modelName`, endpoint, and capability
+settings. The visible name refreshes without rebuilding the conversation.
+In **Profiles > Codex > Default model**, choose the direct profile's model;
+custom Codex profiles retain their own model configuration.
+
 ## Repository map model capability
 
 Each entry in `models.json` may declare the context budget and repository-map
@@ -82,6 +96,37 @@ the same incremental build state as builds started in the Xcode application.
 Individual result bundles are created in temporary storage and removed after
 TurboCode extracts diagnostics. Xcode operations use
 `execution.maximumCommandTimeoutSeconds`, up to the supported 600-second limit.
+
+## Xcode MCP
+
+`experimental.xcodeMCPEnabled` enables the opt-in `xcode_mcp` gateway. It
+connects to the Xcode-provided service through `xcrun mcpbridge` over stdio,
+discovers advertised tools with `tools/list`, and forwards calls with
+`tools/call`. Xcode must be open on the intended project and **Allow external
+agents to use Xcode tools** must be enabled in Xcode Intelligence settings.
+
+The gateway preserves MCP JSON schemas and rich result content, including
+`isError`, structured content, images, and resource references. It is separate
+from TurboCode's local `xcode_project` wrapper and is never added to delegated
+worker profiles.
+
+## Xcode ACP agent
+
+The `TurboCode` app target embeds the native ACP helper at
+`TurboCode.app/Contents/Helpers/turbocode-acp`. Register that absolute path in
+Xcode's **Add an ACP Agent** screen with the name `TurboCode` and no
+interpreter. The helper receives the session workspace from Xcode and keeps
+provider configuration in the external `~/.turbocode/models.json` file; the
+registration does not accept or store credentials. During `session/new`, the
+helper exposes enabled, credential-ready configurations through the ACP
+`configOptions` model selector. `session/set_config_option` changes only that
+ACP session and is snapshotted when the next turn is admitted; an in-flight
+provider operation is never switched underneath. Consecutive turns with the
+same selection keep the session and provider cache alive; changing the model
+rebuilds only that ACP session before its next turn.
+
+See [ACP_AGENT_SETUP.md](ACP_AGENT_SETUP.md) for the complete registration and
+smoke-check procedure.
 
 ## Agent Tuning Schema Version 1
 

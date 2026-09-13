@@ -140,7 +140,7 @@ struct SkillsView: View {
                     agentNodeRow(
                         ProfileAgentNode(
                             id: .primary,
-                            title: modelID.displayName,
+                            title: ComposerProfileMenu.name(for: modelID, models: settings.remoteModels),
                             subtitle: "Built-in agent",
                             systemImage: modelID.systemImage,
                             depth: 0
@@ -304,7 +304,7 @@ struct SkillsView: View {
                 Section("Default Profiles") {
                     ForEach(ProfileBaseModelID.builtInCases) { modelID in
                         profileRow(
-                            title: modelID.displayName,
+                            title: ComposerProfileMenu.name(for: modelID, models: settings.remoteModels),
                             subtitle: "Built in",
                             icon: modelID.systemImage,
                             active: chatStore.activeDynamicProfileID == nil
@@ -427,7 +427,7 @@ struct SkillsView: View {
             VStack(alignment: .leading, spacing: 22) {
                 HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 5) {
-                        Label(modelID.displayName, systemImage: modelID.systemImage)
+                        Label(ComposerProfileMenu.name(for: modelID, models: settings.remoteModels), systemImage: modelID.systemImage)
                             .font(.system(size: 27, weight: .semibold))
                         Text(option.subtitle)
                             .font(.callout)
@@ -449,8 +449,43 @@ struct SkillsView: View {
                 infoBanner(
                     icon: "lock.shield",
                     title: "Built-in profile",
-                    text: "Defaults stay unchanged. Create an override to choose an explicit set of tools and skills."
+                    text: "Default capabilities are managed by TurboCode. Create an override to customize tools and skills."
                 )
+
+                if modelID == .llama,
+                   let model = settings.remoteModels.first(where: { $0.id == modelID.remoteModelID }) {
+                    sectionCard(title: "Display name", subtitle: "Choose the name shown in Profiles and the composer.") {
+                        BuiltInProfileNameEditor(currentName: model.name) { name in
+                            try settings.updateRemoteModelDisplayName(name, for: model.id)
+                            if let saved = settings.remoteModels.first(where: { $0.id == model.id }) {
+                                chatStore.updateRemoteModelDisplayName(id: saved.id, name: saved.name)
+                            }
+                        }
+                    }
+                }
+
+                if modelID == .codex {
+                    sectionCard(title: "Default model", subtitle: "Choose the model used by the built-in Codex profile.") {
+                        if chatStore.codexModels.isEmpty {
+                            Button("Connect and use Codex") {
+                                chatStore.requestCodexProfileSelection()
+                            }
+                        } else {
+                            Picker("Model", selection: Binding(
+                                get: { chatStore.codexPreferredModel?.id ?? "" },
+                                set: { chatStore.configureCodexDefaultModel(id: $0) }
+                            )) {
+                                if chatStore.codexPreferredModel == nil {
+                                    Text("Choose a model").tag("")
+                                }
+                                ForEach(chatStore.codexModels) { model in
+                                    Text(model.displayName).tag(model.id)
+                                }
+                            }
+                        }
+                    }
+                    .disabled(chatStore.busy)
+                }
 
                 sectionCard(
                     title: "Default Capabilities",
@@ -2152,5 +2187,55 @@ private struct NewDynamicProfileSheet: View {
         return modelOptions.first(where: {
             $0.id == baseModelID
         })?.isAvailable == true
+    }
+}
+
+/// Name edits are explicit saves; typing must not persist provider metadata.
+private struct BuiltInProfileNameEditor: View {
+    let currentName: String
+    let onSave: (String) throws -> Void
+    @State private var draft: String
+    @State private var errorMessage: String?
+
+    init(currentName: String, onSave: @escaping (String) throws -> Void) {
+        self.currentName = currentName
+        self.onSave = onSave
+        _draft = State(initialValue: currentName)
+    }
+
+    private var normalizedName: String {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                TextField("Display name", text: $draft)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { save() }
+                Button("Save") { save() }
+                    .disabled(normalizedName.isEmpty || normalizedName == currentName)
+            }
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+            }
+        }
+        .onChange(of: currentName) { _, name in
+            draft = name
+            errorMessage = nil
+        }
+    }
+
+    private func save() {
+        guard !normalizedName.isEmpty, normalizedName != currentName else { return }
+        do {
+            try onSave(normalizedName)
+            draft = normalizedName
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }

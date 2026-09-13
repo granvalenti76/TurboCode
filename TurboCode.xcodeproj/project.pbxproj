@@ -14,6 +14,138 @@
 		5E77E52930081E4000C3E506 /* Media.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5E77E52830081E4000C3E506 /* Media.xcassets */; };
 		5E77E54130081E4000C3E506 /* TurboCodeSDK in Resources */ = {isa = PBXBuildFile; fileRef = 5E77E54030081E4000C3E506 /* TurboCodeSDK */; };
 		5E9A1003300A000100C554D4 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 5E9A1002300A000100C554D4 /* SwiftTerm */; };
+		B00000000000000000000001 /* TurboCode/Diagnostics/AgentDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000001 /* TurboCode/Diagnostics/AgentDiagnostics.swift */; };
+		B00000000000000000000003 /* TurboCode/Models/ACP/ACPProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000003 /* TurboCode/Models/ACP/ACPProtocol.swift */; };
+		B00000000000000000000004 /* TurboCode/Models/AgentActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000004 /* TurboCode/Models/AgentActivity.swift */; };
+		B00000000000000000000005 /* TurboCode/Models/AgentTaskContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000005 /* TurboCode/Models/AgentTaskContract.swift */; };
+		B00000000000000000000006 /* TurboCode/Models/AgentTuningConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000006 /* TurboCode/Models/AgentTuningConfig.swift */; };
+		B00000000000000000000007 /* TurboCode/Models/AppNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000007 /* TurboCode/Models/AppNavigation.swift */; };
+		B00000000000000000000008 /* TurboCode/Models/ApprovalRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000008 /* TurboCode/Models/ApprovalRequest.swift */; };
+		B00000000000000000000009 /* TurboCode/Models/ChatRuntimeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000009 /* TurboCode/Models/ChatRuntimeState.swift */; };
+		B0000000000000000000000a /* TurboCode/Models/ComposerCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000a /* TurboCode/Models/ComposerCommand.swift */; };
+		B0000000000000000000000b /* TurboCode/Models/LlamaContextUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000b /* TurboCode/Models/LlamaContextUsage.swift */; };
+		B0000000000000000000000c /* TurboCode/Models/MCP/MCPJSONValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000c /* TurboCode/Models/MCP/MCPJSONValue.swift */; };
+		B0000000000000000000000d /* TurboCode/Models/MCP/MCPToolResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000d /* TurboCode/Models/MCP/MCPToolResult.swift */; };
+		B0000000000000000000000e /* TurboCode/Models/ModelRoutingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000e /* TurboCode/Models/ModelRoutingPolicy.swift */; };
+		B0000000000000000000000f /* TurboCode/Models/ModelToolCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000000f /* TurboCode/Models/ModelToolCatalog.swift */; };
+		B00000000000000000000010 /* TurboCode/Models/OrchestratorMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000010 /* TurboCode/Models/OrchestratorMode.swift */; };
+		B00000000000000000000011 /* TurboCode/Models/ProductGuideBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000011 /* TurboCode/Models/ProductGuideBlock.swift */; };
+		B00000000000000000000012 /* TurboCode/Models/ProviderLanguageModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000012 /* TurboCode/Models/ProviderLanguageModel.swift */; };
+		B00000000000000000000013 /* TurboCode/Models/RemoteReasoningRequestAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000013 /* TurboCode/Models/RemoteReasoningRequestAdapter.swift */; };
+		B00000000000000000000014 /* TurboCode/Models/RepositoryMap/RepositoryMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000014 /* TurboCode/Models/RepositoryMap/RepositoryMap.swift */; };
+		B00000000000000000000015 /* TurboCode/Models/ReviewComment.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000015 /* TurboCode/Models/ReviewComment.swift */; };
+		B00000000000000000000016 /* TurboCode/Models/ToolActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000016 /* TurboCode/Models/ToolActivity.swift */; };
+		B00000000000000000000017 /* TurboCode/Models/TranscriptContextProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000017 /* TurboCode/Models/TranscriptContextProjection.swift */; };
+		B00000000000000000000018 /* TurboCode/Models/TurboCodeConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000018 /* TurboCode/Models/TurboCodeConfig.swift */; };
+		B00000000000000000000019 /* TurboCode/Models/TurboCodeProfileSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000019 /* TurboCode/Models/TurboCodeProfileSelection.swift */; };
+		B0000000000000000000001a /* TurboCode/Models/TurboCodeSkill.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000001a /* TurboCode/Models/TurboCodeSkill.swift */; };
+		B0000000000000000000001b /* TurboCode/Models/TypeScriptPluginCapability.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000001b /* TurboCode/Models/TypeScriptPluginCapability.swift */; };
+		B0000000000000000000001c /* TurboCode/Models/TypeScriptPluginLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000001c /* TurboCode/Models/TypeScriptPluginLifecycle.swift */; };
+		B0000000000000000000001d /* TurboCode/Models/TypeScriptPluginManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000001d /* TurboCode/Models/TypeScriptPluginManifest.swift */; };
+		B0000000000000000000001e /* TurboCode/Models/TypeScriptPluginTranscript.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000001e /* TurboCode/Models/TypeScriptPluginTranscript.swift */; };
+		B0000000000000000000001f /* TurboCode/Models/UserDynamicProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000001f /* TurboCode/Models/UserDynamicProfile.swift */; };
+		B00000000000000000000020 /* TurboCode/Models/Xcode/XcodeProject.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* TurboCode/Models/Xcode/XcodeProject.swift */; };
+		B00000000000000000000021 /* TurboCode/Services/ACP/ACPAgentServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000021 /* TurboCode/Services/ACP/ACPAgentServer.swift */; };
+		B00000000000000000000022 /* TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000022 /* TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift */; };
+		B00000000000000000000023 /* TurboCode/Services/ACP/ACPEventProjector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000023 /* TurboCode/Services/ACP/ACPEventProjector.swift */; };
+		B00000000000000000000024 /* TurboCode/Services/ACP/ACPRuntimeDriver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000024 /* TurboCode/Services/ACP/ACPRuntimeDriver.swift */; };
+		B00000000000000000000025 /* TurboCode/Services/Chat/AgentActivityRuntimeMapping.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000025 /* TurboCode/Services/Chat/AgentActivityRuntimeMapping.swift */; };
+		B00000000000000000000026 /* TurboCode/Services/Chat/AgentTaskInvokerFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000026 /* TurboCode/Services/Chat/AgentTaskInvokerFactory.swift */; };
+		B00000000000000000000027 /* TurboCode/Services/Chat/AgentTaskPathScope.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000027 /* TurboCode/Services/Chat/AgentTaskPathScope.swift */; };
+		B00000000000000000000028 /* TurboCode/Services/Chat/AgentTaskRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000028 /* TurboCode/Services/Chat/AgentTaskRunner.swift */; };
+		B00000000000000000000029 /* TurboCode/Services/Chat/AgentTaskVerificationRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000029 /* TurboCode/Services/Chat/AgentTaskVerificationRunner.swift */; };
+		B0000000000000000000002b /* TurboCode/Services/Chat/BackendSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000002b /* TurboCode/Services/Chat/BackendSession.swift */; };
+		B00000000000000000000031 /* TurboCode/Services/Chat/FoundationModelsReasoningLevel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000031 /* TurboCode/Services/Chat/FoundationModelsReasoningLevel.swift */; };
+		B00000000000000000000032 /* TurboCode/Services/Chat/FoundationModelsSessionRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000032 /* TurboCode/Services/Chat/FoundationModelsSessionRuntime.swift */; };
+		B00000000000000000000034 /* TurboCode/Services/Chat/LLMRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000034 /* TurboCode/Services/Chat/LLMRuntime.swift */; };
+		B00000000000000000000036 /* TurboCode/Services/Chat/ModelSessionFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000036 /* TurboCode/Services/Chat/ModelSessionFactory.swift */; };
+		B00000000000000000000037 /* TurboCode/Services/Chat/NativeResponseRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000037 /* TurboCode/Services/Chat/NativeResponseRunner.swift */; };
+		B00000000000000000000038 /* TurboCode/Services/Chat/OnDeviceStreamingGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000038 /* TurboCode/Services/Chat/OnDeviceStreamingGuard.swift */; };
+		B0000000000000000000003b /* TurboCode/Services/Chat/SessionRebuildHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000003b /* TurboCode/Services/Chat/SessionRebuildHistory.swift */; };
+		B0000000000000000000003d /* TurboCode/Services/Chat/TurboCodePersonality.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000003d /* TurboCode/Services/Chat/TurboCodePersonality.swift */; };
+		B0000000000000000000003e /* TurboCode/Services/Chat/TurboCodeSystemPromptBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000003e /* TurboCode/Services/Chat/TurboCodeSystemPromptBuilder.swift */; };
+		B00000000000000000000041 /* TurboCode/Services/Codex/CodexAppServerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000041 /* TurboCode/Services/Codex/CodexAppServerClient.swift */; };
+		B00000000000000000000042 /* TurboCode/Services/Codex/CodexBackendSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000042 /* TurboCode/Services/Codex/CodexBackendSession.swift */; };
+		B00000000000000000000043 /* TurboCode/Services/Codex/CodexExecutionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000043 /* TurboCode/Services/Codex/CodexExecutionEngine.swift */; };
+		B00000000000000000000044 /* TurboCode/Services/Codex/CodexTurboCodeToolBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000044 /* TurboCode/Services/Codex/CodexTurboCodeToolBridge.swift */; };
+		B00000000000000000000045 /* TurboCode/Services/Documentation/ProductDocumentationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000045 /* TurboCode/Services/Documentation/ProductDocumentationStore.swift */; };
+		B00000000000000000000046 /* TurboCode/Services/MCP/MCPStdioTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000046 /* TurboCode/Services/MCP/MCPStdioTransport.swift */; };
+		B00000000000000000000047 /* TurboCode/Services/Plugins/NodeRuntimeResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000047 /* TurboCode/Services/Plugins/NodeRuntimeResolver.swift */; };
+		B00000000000000000000048 /* TurboCode/Services/Plugins/TypeScriptPluginActivationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000048 /* TurboCode/Services/Plugins/TypeScriptPluginActivationStore.swift */; };
+		B00000000000000000000049 /* TurboCode/Services/Plugins/TypeScriptPluginHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000049 /* TurboCode/Services/Plugins/TypeScriptPluginHost.swift */; };
+		B0000000000000000000004a /* TurboCode/Services/Plugins/TypeScriptPluginProjectService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000004a /* TurboCode/Services/Plugins/TypeScriptPluginProjectService.swift */; };
+		B0000000000000000000004b /* TurboCode/Services/Plugins/TypeScriptPluginRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000004b /* TurboCode/Services/Plugins/TypeScriptPluginRegistry.swift */; };
+		B0000000000000000000004c /* TurboCode/Services/Profiles/DynamicProfileRuntimeSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000004c /* TurboCode/Services/Profiles/DynamicProfileRuntimeSelection.swift */; };
+		B0000000000000000000004d /* TurboCode/Services/Profiles/DynamicProfileStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000004d /* TurboCode/Services/Profiles/DynamicProfileStore.swift */; };
+		B0000000000000000000004e /* TurboCode/Services/RepositoryMap/RepositoryMapCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000004e /* TurboCode/Services/RepositoryMap/RepositoryMapCache.swift */; };
+		B0000000000000000000004f /* TurboCode/Services/RepositoryMap/RepositoryMapService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000004f /* TurboCode/Services/RepositoryMap/RepositoryMapService.swift */; };
+		B00000000000000000000050 /* TurboCode/Services/RepositoryMap/SwiftDeclarationScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000050 /* TurboCode/Services/RepositoryMap/SwiftDeclarationScanner.swift */; };
+		B00000000000000000000052 /* TurboCode/Services/SafariMCPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000052 /* TurboCode/Services/SafariMCPClient.swift */; };
+		B00000000000000000000053 /* TurboCode/Services/SafariMCPFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000053 /* TurboCode/Services/SafariMCPFeature.swift */; };
+		B00000000000000000000054 /* TurboCode/Services/ToolPresentation/NativeToolEchoFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000054 /* TurboCode/Services/ToolPresentation/NativeToolEchoFilter.swift */; };
+		B00000000000000000000055 /* TurboCode/Services/ToolPresentation/ToolCommandOutput.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000055 /* TurboCode/Services/ToolPresentation/ToolCommandOutput.swift */; };
+		B00000000000000000000056 /* TurboCode/Services/ToolPresentation/ToolReceiptRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000056 /* TurboCode/Services/ToolPresentation/ToolReceiptRouter.swift */; };
+		B00000000000000000000057 /* TurboCode/Services/ToolPresentation/WorkspaceListingFollowUpContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000057 /* TurboCode/Services/ToolPresentation/WorkspaceListingFollowUpContext.swift */; };
+		B00000000000000000000058 /* TurboCode/Services/Workspace/BashProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000058 /* TurboCode/Services/Workspace/BashProcessRunner.swift */; };
+		B00000000000000000000059 /* TurboCode/Services/Workspace/BashSandboxViolationMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000059 /* TurboCode/Services/Workspace/BashSandboxViolationMonitor.swift */; };
+		B0000000000000000000005a /* TurboCode/Services/Workspace/DiffPatchApplying.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000005a /* TurboCode/Services/Workspace/DiffPatchApplying.swift */; };
+		B0000000000000000000005b /* TurboCode/Services/Workspace/GitRepositoryServicing.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000005b /* TurboCode/Services/Workspace/GitRepositoryServicing.swift */; };
+		B0000000000000000000005c /* TurboCode/Services/Workspace/WorkspaceAccessGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000005c /* TurboCode/Services/Workspace/WorkspaceAccessGate.swift */; };
+		B0000000000000000000005d /* TurboCode/Services/Workspace/WorkspaceBrowsingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000005d /* TurboCode/Services/Workspace/WorkspaceBrowsingService.swift */; };
+		B0000000000000000000005e /* TurboCode/Services/Workspace/WorkspaceInstructionsLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000005e /* TurboCode/Services/Workspace/WorkspaceInstructionsLoader.swift */; };
+		B0000000000000000000005f /* TurboCode/Services/Xcode/XcodeCommandRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000005f /* TurboCode/Services/Xcode/XcodeCommandRunner.swift */; };
+		B00000000000000000000060 /* TurboCode/Services/Xcode/XcodeDiagnosticsParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000060 /* TurboCode/Services/Xcode/XcodeDiagnosticsParser.swift */; };
+		B00000000000000000000061 /* TurboCode/Services/Xcode/XcodeMCPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000061 /* TurboCode/Services/Xcode/XcodeMCPClient.swift */; };
+		B00000000000000000000062 /* TurboCode/Services/Xcode/XcodeProjectDiscoveryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000062 /* TurboCode/Services/Xcode/XcodeProjectDiscoveryService.swift */; };
+		B00000000000000000000063 /* TurboCode/Services/Xcode/XcodeProjectService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000063 /* TurboCode/Services/Xcode/XcodeProjectService.swift */; };
+		B0000000000000000000006a /* TurboCode/Stores/CodexRuntimeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006a /* TurboCode/Stores/CodexRuntimeStore.swift */; };
+		B0000000000000000000006d /* TurboCode/Stores/ModelRuntimeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000006d /* TurboCode/Stores/ModelRuntimeStore.swift */; };
+		B00000000000000000000075 /* TurboCode/Tools/ApplyEditsTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000075 /* TurboCode/Tools/ApplyEditsTool.swift */; };
+		B00000000000000000000076 /* TurboCode/Tools/BashTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000076 /* TurboCode/Tools/BashTool.swift */; };
+		B00000000000000000000077 /* TurboCode/Tools/CallPowerfulModelTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000077 /* TurboCode/Tools/CallPowerfulModelTool.swift */; };
+		B00000000000000000000078 /* TurboCode/Tools/CreateSkillTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000078 /* TurboCode/Tools/CreateSkillTool.swift */; };
+		B00000000000000000000079 /* TurboCode/Tools/DelegateProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000079 /* TurboCode/Tools/DelegateProfile.swift */; };
+		B0000000000000000000007a /* TurboCode/Tools/DelegateTaskTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000007a /* TurboCode/Tools/DelegateTaskTool.swift */; };
+		B0000000000000000000007b /* TurboCode/Tools/DiffPatchTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000007b /* TurboCode/Tools/DiffPatchTool.swift */; };
+		B0000000000000000000007c /* TurboCode/Tools/FileSystemTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000007c /* TurboCode/Tools/FileSystemTool.swift */; };
+		B0000000000000000000007d /* TurboCode/Tools/GitTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000007d /* TurboCode/Tools/GitTool.swift */; };
+		B0000000000000000000007e /* TurboCode/Tools/LoadSkillTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000007e /* TurboCode/Tools/LoadSkillTool.swift */; };
+		B0000000000000000000007f /* TurboCode/Tools/OnDevice/ListWorkspaceTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000007f /* TurboCode/Tools/OnDevice/ListWorkspaceTool.swift */; };
+		B00000000000000000000080 /* TurboCode/Tools/OnDevice/TurboCodeGuideTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000080 /* TurboCode/Tools/OnDevice/TurboCodeGuideTool.swift */; };
+		B00000000000000000000081 /* TurboCode/Tools/OnDevice/WriteOnDeviceTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000081 /* TurboCode/Tools/OnDevice/WriteOnDeviceTool.swift */; };
+		B00000000000000000000082 /* TurboCode/Tools/OrchestratorProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000082 /* TurboCode/Tools/OrchestratorProfile.swift */; };
+		B00000000000000000000083 /* TurboCode/Tools/Plugins/TypeScriptPluginToolAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000083 /* TurboCode/Tools/Plugins/TypeScriptPluginToolAdapter.swift */; };
+		B00000000000000000000084 /* TurboCode/Tools/ReadFileTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000084 /* TurboCode/Tools/ReadFileTool.swift */; };
+		B00000000000000000000085 /* TurboCode/Tools/RemoveFileTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000085 /* TurboCode/Tools/RemoveFileTool.swift */; };
+		B00000000000000000000086 /* TurboCode/Tools/RepositoryMap/SwiftWorkspaceMapTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000086 /* TurboCode/Tools/RepositoryMap/SwiftWorkspaceMapTool.swift */; };
+		B00000000000000000000087 /* TurboCode/Tools/RipgrepTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000087 /* TurboCode/Tools/RipgrepTool.swift */; };
+		B00000000000000000000088 /* TurboCode/Tools/SafariMCPTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000088 /* TurboCode/Tools/SafariMCPTool.swift */; };
+		B00000000000000000000089 /* TurboCode/Tools/StandaloneProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000089 /* TurboCode/Tools/StandaloneProfile.swift */; };
+		B0000000000000000000008a /* TurboCode/Tools/SwiftPackageManagerTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000008a /* TurboCode/Tools/SwiftPackageManagerTool.swift */; };
+		B0000000000000000000008b /* TurboCode/Tools/Xcode/XcodeMCPTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000008b /* TurboCode/Tools/Xcode/XcodeMCPTool.swift */; };
+		B0000000000000000000008c /* TurboCode/Tools/Xcode/XcodeProjectTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000008c /* TurboCode/Tools/Xcode/XcodeProjectTool.swift */; };
+		B0000000000000000000008d /* TurboCode/TurboCodeCore/Domain/ChatBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000008d /* TurboCode/TurboCodeCore/Domain/ChatBlock.swift */; };
+		B0000000000000000000008e /* TurboCode/TurboCodeCore/Domain/Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000008e /* TurboCode/TurboCodeCore/Domain/Conversation.swift */; };
+		B0000000000000000000008f /* TurboCode/TurboCodeCore/Domain/ModelBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000008f /* TurboCode/TurboCodeCore/Domain/ModelBackend.swift */; };
+		B00000000000000000000090 /* TurboCode/TurboCodeCore/Domain/ReasoningEffort.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000090 /* TurboCode/TurboCodeCore/Domain/ReasoningEffort.swift */; };
+		B00000000000000000000091 /* TurboCode/TurboCodeCore/Domain/ToolArtifact.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000091 /* TurboCode/TurboCodeCore/Domain/ToolArtifact.swift */; };
+		B00000000000000000000092 /* TurboCode/TurboCodeCore/Domain/WorkspaceListingBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000092 /* TurboCode/TurboCodeCore/Domain/WorkspaceListingBlock.swift */; };
+		B00000000000000000000093 /* TurboCode/TurboCodeCore/Persistence/ConversationPersistenceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000093 /* TurboCode/TurboCodeCore/Persistence/ConversationPersistenceService.swift */; };
+		B00000000000000000000094 /* TurboCode/TurboCodeCore/Persistence/ConversationRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000094 /* TurboCode/TurboCodeCore/Persistence/ConversationRepository.swift */; };
+		B00000000000000000000095 /* TurboCode/TurboCodeCore/Persistence/StoredSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000095 /* TurboCode/TurboCodeCore/Persistence/StoredSession.swift */; };
+		B00000000000000000000096 /* TurboCode/TurboCodeCore/Runtime/AgentRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000096 /* TurboCode/TurboCodeCore/Runtime/AgentRuntime.swift */; };
+		B00000000000000000000097 /* TurboCode/TurboCodeCore/Runtime/RuntimeContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000097 /* TurboCode/TurboCodeCore/Runtime/RuntimeContracts.swift */; };
+		B00000000000000000000098 /* TurboCode/TurboCodeCore/Runtime/SteeringContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000098 /* TurboCode/TurboCodeCore/Runtime/SteeringContracts.swift */; };
+		B00000000000000000000099 /* TurboCode/TurboCodeCore/Runtime/SteeringState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000099 /* TurboCode/TurboCodeCore/Runtime/SteeringState.swift */; };
+		B0000000000000000000009a /* TurboCodeACP/ACPMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000009a /* TurboCodeACP/ACPMain.swift */; };
+		B0000000000000000000009b /* TurboCode/Services/RuntimeContextHandoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000009b /* TurboCode/Services/RuntimeContextHandoff.swift */; };
+		B0000000000000000000009c /* TurboCode/Stores/CredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000009c /* TurboCode/Stores/CredentialStore.swift */; };
+		B0000000000000000000009d /* TurboCode/Stores/ApprovalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000009d /* TurboCode/Stores/ApprovalStore.swift */; };
+		B0000000000000000000009e /* TurboCode/ViewModels/GitDiffViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000009e /* TurboCode/ViewModels/GitDiffViewModel.swift */; };
+		B0000000000000000000009f /* TurboCode/Diagnostics/AgentBenchmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000009f /* TurboCode/Diagnostics/AgentBenchmark.swift */; };
+		B000000000000000000000a0 /* TurboCode/Stores/TypeScriptPluginRuntimeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a0 /* TurboCode/Stores/TypeScriptPluginRuntimeStore.swift */; };
+		B000000000000000000000a1 /* turbocode-acp in Helpers */ = {isa = PBXBuildFile; fileRef = 000000000000000000000320 /* turbocode-acp */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		C10000000000000000000000 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -24,14 +156,164 @@
 			remoteGlobalIDString = 000000000000000100000000;
 			remoteInfo = TurboCode;
 		};
+		000000000000000270000000 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 000000000000000000000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 000000000000000300000000;
+			remoteInfo = "turbocode-acp";
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		000000000000000150000000 /* Helpers */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = Contents/Helpers;
+			dstSubfolder = Wrapper;
+			files = (
+				B000000000000000000000a1 /* turbocode-acp in Helpers */,
+			);
+			name = Helpers;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* TurboCode.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TurboCode.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		000000000000000000000220 /* TurboCodeEvaluations.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TurboCodeEvaluations.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000320 /* turbocode-acp */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "turbocode-acp"; sourceTree = BUILT_PRODUCTS_DIR; };
 		5E77E3E530075DF800C3E506 /* turbocode-logo-provisional.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "turbocode-logo-provisional.png"; sourceTree = "<group>"; };
 		5E77E52830081E4000C3E506 /* Media.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Media.xcassets; sourceTree = "<group>"; };
 		5E77E54030081E4000C3E506 /* TurboCodeSDK */ = {isa = PBXFileReference; lastKnownFileType = folder; path = TurboCodeSDK; sourceTree = "<group>"; };
+		A00000000000000000000001 /* TurboCode/Diagnostics/AgentDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Diagnostics/AgentDiagnostics.swift; sourceTree = "<group>"; };
+		A00000000000000000000003 /* TurboCode/Models/ACP/ACPProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/ACP/ACPProtocol.swift; sourceTree = "<group>"; };
+		A00000000000000000000004 /* TurboCode/Models/AgentActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/AgentActivity.swift; sourceTree = "<group>"; };
+		A00000000000000000000005 /* TurboCode/Models/AgentTaskContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/AgentTaskContract.swift; sourceTree = "<group>"; };
+		A00000000000000000000006 /* TurboCode/Models/AgentTuningConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/AgentTuningConfig.swift; sourceTree = "<group>"; };
+		A00000000000000000000007 /* TurboCode/Models/AppNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/AppNavigation.swift; sourceTree = "<group>"; };
+		A00000000000000000000008 /* TurboCode/Models/ApprovalRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/ApprovalRequest.swift; sourceTree = "<group>"; };
+		A00000000000000000000009 /* TurboCode/Models/ChatRuntimeState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/ChatRuntimeState.swift; sourceTree = "<group>"; };
+		A0000000000000000000000a /* TurboCode/Models/ComposerCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/ComposerCommand.swift; sourceTree = "<group>"; };
+		A0000000000000000000000b /* TurboCode/Models/LlamaContextUsage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/LlamaContextUsage.swift; sourceTree = "<group>"; };
+		A0000000000000000000000c /* TurboCode/Models/MCP/MCPJSONValue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/MCP/MCPJSONValue.swift; sourceTree = "<group>"; };
+		A0000000000000000000000d /* TurboCode/Models/MCP/MCPToolResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/MCP/MCPToolResult.swift; sourceTree = "<group>"; };
+		A0000000000000000000000e /* TurboCode/Models/ModelRoutingPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/ModelRoutingPolicy.swift; sourceTree = "<group>"; };
+		A0000000000000000000000f /* TurboCode/Models/ModelToolCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/ModelToolCatalog.swift; sourceTree = "<group>"; };
+		A00000000000000000000010 /* TurboCode/Models/OrchestratorMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/OrchestratorMode.swift; sourceTree = "<group>"; };
+		A00000000000000000000011 /* TurboCode/Models/ProductGuideBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/ProductGuideBlock.swift; sourceTree = "<group>"; };
+		A00000000000000000000012 /* TurboCode/Models/ProviderLanguageModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/ProviderLanguageModel.swift; sourceTree = "<group>"; };
+		A00000000000000000000013 /* TurboCode/Models/RemoteReasoningRequestAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/RemoteReasoningRequestAdapter.swift; sourceTree = "<group>"; };
+		A00000000000000000000014 /* TurboCode/Models/RepositoryMap/RepositoryMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/RepositoryMap/RepositoryMap.swift; sourceTree = "<group>"; };
+		A00000000000000000000015 /* TurboCode/Models/ReviewComment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/ReviewComment.swift; sourceTree = "<group>"; };
+		A00000000000000000000016 /* TurboCode/Models/ToolActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/ToolActivity.swift; sourceTree = "<group>"; };
+		A00000000000000000000017 /* TurboCode/Models/TranscriptContextProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/TranscriptContextProjection.swift; sourceTree = "<group>"; };
+		A00000000000000000000018 /* TurboCode/Models/TurboCodeConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/TurboCodeConfig.swift; sourceTree = "<group>"; };
+		A00000000000000000000019 /* TurboCode/Models/TurboCodeProfileSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/TurboCodeProfileSelection.swift; sourceTree = "<group>"; };
+		A0000000000000000000001a /* TurboCode/Models/TurboCodeSkill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/TurboCodeSkill.swift; sourceTree = "<group>"; };
+		A0000000000000000000001b /* TurboCode/Models/TypeScriptPluginCapability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/TypeScriptPluginCapability.swift; sourceTree = "<group>"; };
+		A0000000000000000000001c /* TurboCode/Models/TypeScriptPluginLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/TypeScriptPluginLifecycle.swift; sourceTree = "<group>"; };
+		A0000000000000000000001d /* TurboCode/Models/TypeScriptPluginManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/TypeScriptPluginManifest.swift; sourceTree = "<group>"; };
+		A0000000000000000000001e /* TurboCode/Models/TypeScriptPluginTranscript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/TypeScriptPluginTranscript.swift; sourceTree = "<group>"; };
+		A0000000000000000000001f /* TurboCode/Models/UserDynamicProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/UserDynamicProfile.swift; sourceTree = "<group>"; };
+		A00000000000000000000020 /* TurboCode/Models/Xcode/XcodeProject.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/Xcode/XcodeProject.swift; sourceTree = "<group>"; };
+		A00000000000000000000021 /* TurboCode/Services/ACP/ACPAgentServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/ACP/ACPAgentServer.swift; sourceTree = "<group>"; };
+		A00000000000000000000022 /* TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift; sourceTree = "<group>"; };
+		A00000000000000000000023 /* TurboCode/Services/ACP/ACPEventProjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/ACP/ACPEventProjector.swift; sourceTree = "<group>"; };
+		A00000000000000000000024 /* TurboCode/Services/ACP/ACPRuntimeDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/ACP/ACPRuntimeDriver.swift; sourceTree = "<group>"; };
+		A00000000000000000000025 /* TurboCode/Services/Chat/AgentActivityRuntimeMapping.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/AgentActivityRuntimeMapping.swift; sourceTree = "<group>"; };
+		A00000000000000000000026 /* TurboCode/Services/Chat/AgentTaskInvokerFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/AgentTaskInvokerFactory.swift; sourceTree = "<group>"; };
+		A00000000000000000000027 /* TurboCode/Services/Chat/AgentTaskPathScope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/AgentTaskPathScope.swift; sourceTree = "<group>"; };
+		A00000000000000000000028 /* TurboCode/Services/Chat/AgentTaskRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/AgentTaskRunner.swift; sourceTree = "<group>"; };
+		A00000000000000000000029 /* TurboCode/Services/Chat/AgentTaskVerificationRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/AgentTaskVerificationRunner.swift; sourceTree = "<group>"; };
+		A0000000000000000000002b /* TurboCode/Services/Chat/BackendSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/BackendSession.swift; sourceTree = "<group>"; };
+		A00000000000000000000031 /* TurboCode/Services/Chat/FoundationModelsReasoningLevel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/FoundationModelsReasoningLevel.swift; sourceTree = "<group>"; };
+		A00000000000000000000032 /* TurboCode/Services/Chat/FoundationModelsSessionRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/FoundationModelsSessionRuntime.swift; sourceTree = "<group>"; };
+		A00000000000000000000034 /* TurboCode/Services/Chat/LLMRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/LLMRuntime.swift; sourceTree = "<group>"; };
+		A00000000000000000000036 /* TurboCode/Services/Chat/ModelSessionFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/ModelSessionFactory.swift; sourceTree = "<group>"; };
+		A00000000000000000000037 /* TurboCode/Services/Chat/NativeResponseRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/NativeResponseRunner.swift; sourceTree = "<group>"; };
+		A00000000000000000000038 /* TurboCode/Services/Chat/OnDeviceStreamingGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/OnDeviceStreamingGuard.swift; sourceTree = "<group>"; };
+		A0000000000000000000003b /* TurboCode/Services/Chat/SessionRebuildHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/SessionRebuildHistory.swift; sourceTree = "<group>"; };
+		A0000000000000000000003d /* TurboCode/Services/Chat/TurboCodePersonality.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/TurboCodePersonality.swift; sourceTree = "<group>"; };
+		A0000000000000000000003e /* TurboCode/Services/Chat/TurboCodeSystemPromptBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/TurboCodeSystemPromptBuilder.swift; sourceTree = "<group>"; };
+		A00000000000000000000041 /* TurboCode/Services/Codex/CodexAppServerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Codex/CodexAppServerClient.swift; sourceTree = "<group>"; };
+		A00000000000000000000042 /* TurboCode/Services/Codex/CodexBackendSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Codex/CodexBackendSession.swift; sourceTree = "<group>"; };
+		A00000000000000000000043 /* TurboCode/Services/Codex/CodexExecutionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Codex/CodexExecutionEngine.swift; sourceTree = "<group>"; };
+		A00000000000000000000044 /* TurboCode/Services/Codex/CodexTurboCodeToolBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Codex/CodexTurboCodeToolBridge.swift; sourceTree = "<group>"; };
+		A00000000000000000000045 /* TurboCode/Services/Documentation/ProductDocumentationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Documentation/ProductDocumentationStore.swift; sourceTree = "<group>"; };
+		A00000000000000000000046 /* TurboCode/Services/MCP/MCPStdioTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/MCP/MCPStdioTransport.swift; sourceTree = "<group>"; };
+		A00000000000000000000047 /* TurboCode/Services/Plugins/NodeRuntimeResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Plugins/NodeRuntimeResolver.swift; sourceTree = "<group>"; };
+		A00000000000000000000048 /* TurboCode/Services/Plugins/TypeScriptPluginActivationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Plugins/TypeScriptPluginActivationStore.swift; sourceTree = "<group>"; };
+		A00000000000000000000049 /* TurboCode/Services/Plugins/TypeScriptPluginHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Plugins/TypeScriptPluginHost.swift; sourceTree = "<group>"; };
+		A0000000000000000000004a /* TurboCode/Services/Plugins/TypeScriptPluginProjectService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Plugins/TypeScriptPluginProjectService.swift; sourceTree = "<group>"; };
+		A0000000000000000000004b /* TurboCode/Services/Plugins/TypeScriptPluginRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Plugins/TypeScriptPluginRegistry.swift; sourceTree = "<group>"; };
+		A0000000000000000000004c /* TurboCode/Services/Profiles/DynamicProfileRuntimeSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Profiles/DynamicProfileRuntimeSelection.swift; sourceTree = "<group>"; };
+		A0000000000000000000004d /* TurboCode/Services/Profiles/DynamicProfileStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Profiles/DynamicProfileStore.swift; sourceTree = "<group>"; };
+		A0000000000000000000004e /* TurboCode/Services/RepositoryMap/RepositoryMapCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/RepositoryMap/RepositoryMapCache.swift; sourceTree = "<group>"; };
+		A0000000000000000000004f /* TurboCode/Services/RepositoryMap/RepositoryMapService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/RepositoryMap/RepositoryMapService.swift; sourceTree = "<group>"; };
+		A00000000000000000000050 /* TurboCode/Services/RepositoryMap/SwiftDeclarationScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/RepositoryMap/SwiftDeclarationScanner.swift; sourceTree = "<group>"; };
+		A00000000000000000000052 /* TurboCode/Services/SafariMCPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/SafariMCPClient.swift; sourceTree = "<group>"; };
+		A00000000000000000000053 /* TurboCode/Services/SafariMCPFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/SafariMCPFeature.swift; sourceTree = "<group>"; };
+		A00000000000000000000054 /* TurboCode/Services/ToolPresentation/NativeToolEchoFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/ToolPresentation/NativeToolEchoFilter.swift; sourceTree = "<group>"; };
+		A00000000000000000000055 /* TurboCode/Services/ToolPresentation/ToolCommandOutput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/ToolPresentation/ToolCommandOutput.swift; sourceTree = "<group>"; };
+		A00000000000000000000056 /* TurboCode/Services/ToolPresentation/ToolReceiptRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/ToolPresentation/ToolReceiptRouter.swift; sourceTree = "<group>"; };
+		A00000000000000000000057 /* TurboCode/Services/ToolPresentation/WorkspaceListingFollowUpContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/ToolPresentation/WorkspaceListingFollowUpContext.swift; sourceTree = "<group>"; };
+		A00000000000000000000058 /* TurboCode/Services/Workspace/BashProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Workspace/BashProcessRunner.swift; sourceTree = "<group>"; };
+		A00000000000000000000059 /* TurboCode/Services/Workspace/BashSandboxViolationMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Workspace/BashSandboxViolationMonitor.swift; sourceTree = "<group>"; };
+		A0000000000000000000005a /* TurboCode/Services/Workspace/DiffPatchApplying.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Workspace/DiffPatchApplying.swift; sourceTree = "<group>"; };
+		A0000000000000000000005b /* TurboCode/Services/Workspace/GitRepositoryServicing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Workspace/GitRepositoryServicing.swift; sourceTree = "<group>"; };
+		A0000000000000000000005c /* TurboCode/Services/Workspace/WorkspaceAccessGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Workspace/WorkspaceAccessGate.swift; sourceTree = "<group>"; };
+		A0000000000000000000005d /* TurboCode/Services/Workspace/WorkspaceBrowsingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Workspace/WorkspaceBrowsingService.swift; sourceTree = "<group>"; };
+		A0000000000000000000005e /* TurboCode/Services/Workspace/WorkspaceInstructionsLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Workspace/WorkspaceInstructionsLoader.swift; sourceTree = "<group>"; };
+		A0000000000000000000005f /* TurboCode/Services/Xcode/XcodeCommandRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Xcode/XcodeCommandRunner.swift; sourceTree = "<group>"; };
+		A00000000000000000000060 /* TurboCode/Services/Xcode/XcodeDiagnosticsParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Xcode/XcodeDiagnosticsParser.swift; sourceTree = "<group>"; };
+		A00000000000000000000061 /* TurboCode/Services/Xcode/XcodeMCPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Xcode/XcodeMCPClient.swift; sourceTree = "<group>"; };
+		A00000000000000000000062 /* TurboCode/Services/Xcode/XcodeProjectDiscoveryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Xcode/XcodeProjectDiscoveryService.swift; sourceTree = "<group>"; };
+		A00000000000000000000063 /* TurboCode/Services/Xcode/XcodeProjectService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Xcode/XcodeProjectService.swift; sourceTree = "<group>"; };
+		A0000000000000000000006a /* TurboCode/Stores/CodexRuntimeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Stores/CodexRuntimeStore.swift; sourceTree = "<group>"; };
+		A0000000000000000000006d /* TurboCode/Stores/ModelRuntimeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Stores/ModelRuntimeStore.swift; sourceTree = "<group>"; };
+		A00000000000000000000075 /* TurboCode/Tools/ApplyEditsTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/ApplyEditsTool.swift; sourceTree = "<group>"; };
+		A00000000000000000000076 /* TurboCode/Tools/BashTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/BashTool.swift; sourceTree = "<group>"; };
+		A00000000000000000000077 /* TurboCode/Tools/CallPowerfulModelTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/CallPowerfulModelTool.swift; sourceTree = "<group>"; };
+		A00000000000000000000078 /* TurboCode/Tools/CreateSkillTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/CreateSkillTool.swift; sourceTree = "<group>"; };
+		A00000000000000000000079 /* TurboCode/Tools/DelegateProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/DelegateProfile.swift; sourceTree = "<group>"; };
+		A0000000000000000000007a /* TurboCode/Tools/DelegateTaskTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/DelegateTaskTool.swift; sourceTree = "<group>"; };
+		A0000000000000000000007b /* TurboCode/Tools/DiffPatchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/DiffPatchTool.swift; sourceTree = "<group>"; };
+		A0000000000000000000007c /* TurboCode/Tools/FileSystemTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/FileSystemTool.swift; sourceTree = "<group>"; };
+		A0000000000000000000007d /* TurboCode/Tools/GitTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/GitTool.swift; sourceTree = "<group>"; };
+		A0000000000000000000007e /* TurboCode/Tools/LoadSkillTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/LoadSkillTool.swift; sourceTree = "<group>"; };
+		A0000000000000000000007f /* TurboCode/Tools/OnDevice/ListWorkspaceTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/OnDevice/ListWorkspaceTool.swift; sourceTree = "<group>"; };
+		A00000000000000000000080 /* TurboCode/Tools/OnDevice/TurboCodeGuideTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/OnDevice/TurboCodeGuideTool.swift; sourceTree = "<group>"; };
+		A00000000000000000000081 /* TurboCode/Tools/OnDevice/WriteOnDeviceTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/OnDevice/WriteOnDeviceTool.swift; sourceTree = "<group>"; };
+		A00000000000000000000082 /* TurboCode/Tools/OrchestratorProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/OrchestratorProfile.swift; sourceTree = "<group>"; };
+		A00000000000000000000083 /* TurboCode/Tools/Plugins/TypeScriptPluginToolAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/Plugins/TypeScriptPluginToolAdapter.swift; sourceTree = "<group>"; };
+		A00000000000000000000084 /* TurboCode/Tools/ReadFileTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/ReadFileTool.swift; sourceTree = "<group>"; };
+		A00000000000000000000085 /* TurboCode/Tools/RemoveFileTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/RemoveFileTool.swift; sourceTree = "<group>"; };
+		A00000000000000000000086 /* TurboCode/Tools/RepositoryMap/SwiftWorkspaceMapTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/RepositoryMap/SwiftWorkspaceMapTool.swift; sourceTree = "<group>"; };
+		A00000000000000000000087 /* TurboCode/Tools/RipgrepTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/RipgrepTool.swift; sourceTree = "<group>"; };
+		A00000000000000000000088 /* TurboCode/Tools/SafariMCPTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/SafariMCPTool.swift; sourceTree = "<group>"; };
+		A00000000000000000000089 /* TurboCode/Tools/StandaloneProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/StandaloneProfile.swift; sourceTree = "<group>"; };
+		A0000000000000000000008a /* TurboCode/Tools/SwiftPackageManagerTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/SwiftPackageManagerTool.swift; sourceTree = "<group>"; };
+		A0000000000000000000008b /* TurboCode/Tools/Xcode/XcodeMCPTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/Xcode/XcodeMCPTool.swift; sourceTree = "<group>"; };
+		A0000000000000000000008c /* TurboCode/Tools/Xcode/XcodeProjectTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/Xcode/XcodeProjectTool.swift; sourceTree = "<group>"; };
+		A0000000000000000000008d /* TurboCode/TurboCodeCore/Domain/ChatBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/TurboCodeCore/Domain/ChatBlock.swift; sourceTree = "<group>"; };
+		A0000000000000000000008e /* TurboCode/TurboCodeCore/Domain/Conversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/TurboCodeCore/Domain/Conversation.swift; sourceTree = "<group>"; };
+		A0000000000000000000008f /* TurboCode/TurboCodeCore/Domain/ModelBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/TurboCodeCore/Domain/ModelBackend.swift; sourceTree = "<group>"; };
+		A00000000000000000000090 /* TurboCode/TurboCodeCore/Domain/ReasoningEffort.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/TurboCodeCore/Domain/ReasoningEffort.swift; sourceTree = "<group>"; };
+		A00000000000000000000091 /* TurboCode/TurboCodeCore/Domain/ToolArtifact.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/TurboCodeCore/Domain/ToolArtifact.swift; sourceTree = "<group>"; };
+		A00000000000000000000092 /* TurboCode/TurboCodeCore/Domain/WorkspaceListingBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/TurboCodeCore/Domain/WorkspaceListingBlock.swift; sourceTree = "<group>"; };
+		A00000000000000000000093 /* TurboCode/TurboCodeCore/Persistence/ConversationPersistenceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/TurboCodeCore/Persistence/ConversationPersistenceService.swift; sourceTree = "<group>"; };
+		A00000000000000000000094 /* TurboCode/TurboCodeCore/Persistence/ConversationRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/TurboCodeCore/Persistence/ConversationRepository.swift; sourceTree = "<group>"; };
+		A00000000000000000000095 /* TurboCode/TurboCodeCore/Persistence/StoredSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/TurboCodeCore/Persistence/StoredSession.swift; sourceTree = "<group>"; };
+		A00000000000000000000096 /* TurboCode/TurboCodeCore/Runtime/AgentRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/TurboCodeCore/Runtime/AgentRuntime.swift; sourceTree = "<group>"; };
+		A00000000000000000000097 /* TurboCode/TurboCodeCore/Runtime/RuntimeContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/TurboCodeCore/Runtime/RuntimeContracts.swift; sourceTree = "<group>"; };
+		A00000000000000000000098 /* TurboCode/TurboCodeCore/Runtime/SteeringContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/TurboCodeCore/Runtime/SteeringContracts.swift; sourceTree = "<group>"; };
+		A00000000000000000000099 /* TurboCode/TurboCodeCore/Runtime/SteeringState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/TurboCodeCore/Runtime/SteeringState.swift; sourceTree = "<group>"; };
+		A0000000000000000000009a /* TurboCodeACP/ACPMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCodeACP/ACPMain.swift; sourceTree = "<group>"; };
+		A0000000000000000000009b /* TurboCode/Services/RuntimeContextHandoff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/RuntimeContextHandoff.swift; sourceTree = "<group>"; };
+		A0000000000000000000009c /* TurboCode/Stores/CredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Stores/CredentialStore.swift; sourceTree = "<group>"; };
+		A0000000000000000000009d /* TurboCode/Stores/ApprovalStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Stores/ApprovalStore.swift; sourceTree = "<group>"; };
+		A0000000000000000000009e /* TurboCode/ViewModels/GitDiffViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/ViewModels/GitDiffViewModel.swift; sourceTree = "<group>"; };
+		A0000000000000000000009f /* TurboCode/Diagnostics/AgentBenchmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Diagnostics/AgentBenchmark.swift; sourceTree = "<group>"; };
+		A000000000000000000000a0 /* TurboCode/Stores/TypeScriptPluginRuntimeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Stores/TypeScriptPluginRuntimeStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -62,6 +344,12 @@
 				5E37CA94303816A70024A2E8 /* FoundationModelsUtilities in Frameworks */,
 			);
 		};
+		000000000000000330000000 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+				C10000000000000000000000 /* FoundationModelsUtilities in Frameworks */,
+			);
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -74,6 +362,7 @@
 				000000000000000000000210 /* TurboCodeEvaluations */,
 				5E77E3E530075DF800C3E506 /* turbocode-logo-provisional.png */,
 				000000000000000000000020 /* Products */,
+				5ED5DEEF305523190080A4BD /* Recovered References */,
 			);
 			sourceTree = "<group>";
 		};
@@ -82,8 +371,146 @@
 			children = (
 				000000000000000000000120 /* TurboCode.app */,
 				000000000000000000000220 /* TurboCodeEvaluations.xctest */,
+				000000000000000000000320 /* turbocode-acp */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		5ED5DEEF305523190080A4BD /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000001 /* TurboCode/Diagnostics/AgentDiagnostics.swift */,
+				A00000000000000000000003 /* TurboCode/Models/ACP/ACPProtocol.swift */,
+				A00000000000000000000004 /* TurboCode/Models/AgentActivity.swift */,
+				A00000000000000000000005 /* TurboCode/Models/AgentTaskContract.swift */,
+				A00000000000000000000006 /* TurboCode/Models/AgentTuningConfig.swift */,
+				A00000000000000000000007 /* TurboCode/Models/AppNavigation.swift */,
+				A00000000000000000000008 /* TurboCode/Models/ApprovalRequest.swift */,
+				A00000000000000000000009 /* TurboCode/Models/ChatRuntimeState.swift */,
+				A0000000000000000000000a /* TurboCode/Models/ComposerCommand.swift */,
+				A0000000000000000000000b /* TurboCode/Models/LlamaContextUsage.swift */,
+				A0000000000000000000000c /* TurboCode/Models/MCP/MCPJSONValue.swift */,
+				A0000000000000000000000d /* TurboCode/Models/MCP/MCPToolResult.swift */,
+				A0000000000000000000000e /* TurboCode/Models/ModelRoutingPolicy.swift */,
+				A0000000000000000000000f /* TurboCode/Models/ModelToolCatalog.swift */,
+				A00000000000000000000010 /* TurboCode/Models/OrchestratorMode.swift */,
+				A00000000000000000000011 /* TurboCode/Models/ProductGuideBlock.swift */,
+				A00000000000000000000012 /* TurboCode/Models/ProviderLanguageModel.swift */,
+				A00000000000000000000013 /* TurboCode/Models/RemoteReasoningRequestAdapter.swift */,
+				A00000000000000000000014 /* TurboCode/Models/RepositoryMap/RepositoryMap.swift */,
+				A00000000000000000000015 /* TurboCode/Models/ReviewComment.swift */,
+				A00000000000000000000016 /* TurboCode/Models/ToolActivity.swift */,
+				A00000000000000000000017 /* TurboCode/Models/TranscriptContextProjection.swift */,
+				A00000000000000000000018 /* TurboCode/Models/TurboCodeConfig.swift */,
+				A00000000000000000000019 /* TurboCode/Models/TurboCodeProfileSelection.swift */,
+				A0000000000000000000001a /* TurboCode/Models/TurboCodeSkill.swift */,
+				A0000000000000000000001b /* TurboCode/Models/TypeScriptPluginCapability.swift */,
+				A0000000000000000000001c /* TurboCode/Models/TypeScriptPluginLifecycle.swift */,
+				A0000000000000000000001d /* TurboCode/Models/TypeScriptPluginManifest.swift */,
+				A0000000000000000000001e /* TurboCode/Models/TypeScriptPluginTranscript.swift */,
+				A0000000000000000000001f /* TurboCode/Models/UserDynamicProfile.swift */,
+				A00000000000000000000020 /* TurboCode/Models/Xcode/XcodeProject.swift */,
+				A00000000000000000000021 /* TurboCode/Services/ACP/ACPAgentServer.swift */,
+				A00000000000000000000022 /* TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift */,
+				A00000000000000000000023 /* TurboCode/Services/ACP/ACPEventProjector.swift */,
+				A00000000000000000000024 /* TurboCode/Services/ACP/ACPRuntimeDriver.swift */,
+				A00000000000000000000025 /* TurboCode/Services/Chat/AgentActivityRuntimeMapping.swift */,
+				A00000000000000000000026 /* TurboCode/Services/Chat/AgentTaskInvokerFactory.swift */,
+				A00000000000000000000027 /* TurboCode/Services/Chat/AgentTaskPathScope.swift */,
+				A00000000000000000000028 /* TurboCode/Services/Chat/AgentTaskRunner.swift */,
+				A00000000000000000000029 /* TurboCode/Services/Chat/AgentTaskVerificationRunner.swift */,
+				A0000000000000000000002b /* TurboCode/Services/Chat/BackendSession.swift */,
+				A00000000000000000000031 /* TurboCode/Services/Chat/FoundationModelsReasoningLevel.swift */,
+				A00000000000000000000032 /* TurboCode/Services/Chat/FoundationModelsSessionRuntime.swift */,
+				A00000000000000000000034 /* TurboCode/Services/Chat/LLMRuntime.swift */,
+				A00000000000000000000036 /* TurboCode/Services/Chat/ModelSessionFactory.swift */,
+				A00000000000000000000037 /* TurboCode/Services/Chat/NativeResponseRunner.swift */,
+				A00000000000000000000038 /* TurboCode/Services/Chat/OnDeviceStreamingGuard.swift */,
+				A0000000000000000000003b /* TurboCode/Services/Chat/SessionRebuildHistory.swift */,
+				A0000000000000000000003d /* TurboCode/Services/Chat/TurboCodePersonality.swift */,
+				A0000000000000000000003e /* TurboCode/Services/Chat/TurboCodeSystemPromptBuilder.swift */,
+				A00000000000000000000041 /* TurboCode/Services/Codex/CodexAppServerClient.swift */,
+				A00000000000000000000042 /* TurboCode/Services/Codex/CodexBackendSession.swift */,
+				A00000000000000000000043 /* TurboCode/Services/Codex/CodexExecutionEngine.swift */,
+				A00000000000000000000044 /* TurboCode/Services/Codex/CodexTurboCodeToolBridge.swift */,
+				A00000000000000000000045 /* TurboCode/Services/Documentation/ProductDocumentationStore.swift */,
+				A00000000000000000000046 /* TurboCode/Services/MCP/MCPStdioTransport.swift */,
+				A00000000000000000000047 /* TurboCode/Services/Plugins/NodeRuntimeResolver.swift */,
+				A00000000000000000000048 /* TurboCode/Services/Plugins/TypeScriptPluginActivationStore.swift */,
+				A00000000000000000000049 /* TurboCode/Services/Plugins/TypeScriptPluginHost.swift */,
+				A0000000000000000000004a /* TurboCode/Services/Plugins/TypeScriptPluginProjectService.swift */,
+				A0000000000000000000004b /* TurboCode/Services/Plugins/TypeScriptPluginRegistry.swift */,
+				A0000000000000000000004c /* TurboCode/Services/Profiles/DynamicProfileRuntimeSelection.swift */,
+				A0000000000000000000004d /* TurboCode/Services/Profiles/DynamicProfileStore.swift */,
+				A0000000000000000000004e /* TurboCode/Services/RepositoryMap/RepositoryMapCache.swift */,
+				A0000000000000000000004f /* TurboCode/Services/RepositoryMap/RepositoryMapService.swift */,
+				A00000000000000000000050 /* TurboCode/Services/RepositoryMap/SwiftDeclarationScanner.swift */,
+				A00000000000000000000052 /* TurboCode/Services/SafariMCPClient.swift */,
+				A00000000000000000000053 /* TurboCode/Services/SafariMCPFeature.swift */,
+				A00000000000000000000054 /* TurboCode/Services/ToolPresentation/NativeToolEchoFilter.swift */,
+				A00000000000000000000055 /* TurboCode/Services/ToolPresentation/ToolCommandOutput.swift */,
+				A00000000000000000000056 /* TurboCode/Services/ToolPresentation/ToolReceiptRouter.swift */,
+				A00000000000000000000057 /* TurboCode/Services/ToolPresentation/WorkspaceListingFollowUpContext.swift */,
+				A00000000000000000000058 /* TurboCode/Services/Workspace/BashProcessRunner.swift */,
+				A00000000000000000000059 /* TurboCode/Services/Workspace/BashSandboxViolationMonitor.swift */,
+				A0000000000000000000005a /* TurboCode/Services/Workspace/DiffPatchApplying.swift */,
+				A0000000000000000000005b /* TurboCode/Services/Workspace/GitRepositoryServicing.swift */,
+				A0000000000000000000005c /* TurboCode/Services/Workspace/WorkspaceAccessGate.swift */,
+				A0000000000000000000005d /* TurboCode/Services/Workspace/WorkspaceBrowsingService.swift */,
+				A0000000000000000000005e /* TurboCode/Services/Workspace/WorkspaceInstructionsLoader.swift */,
+				A0000000000000000000005f /* TurboCode/Services/Xcode/XcodeCommandRunner.swift */,
+				A00000000000000000000060 /* TurboCode/Services/Xcode/XcodeDiagnosticsParser.swift */,
+				A00000000000000000000061 /* TurboCode/Services/Xcode/XcodeMCPClient.swift */,
+				A00000000000000000000062 /* TurboCode/Services/Xcode/XcodeProjectDiscoveryService.swift */,
+				A00000000000000000000063 /* TurboCode/Services/Xcode/XcodeProjectService.swift */,
+				A0000000000000000000006a /* TurboCode/Stores/CodexRuntimeStore.swift */,
+				A0000000000000000000006d /* TurboCode/Stores/ModelRuntimeStore.swift */,
+				A00000000000000000000075 /* TurboCode/Tools/ApplyEditsTool.swift */,
+				A00000000000000000000076 /* TurboCode/Tools/BashTool.swift */,
+				A00000000000000000000077 /* TurboCode/Tools/CallPowerfulModelTool.swift */,
+				A00000000000000000000078 /* TurboCode/Tools/CreateSkillTool.swift */,
+				A00000000000000000000079 /* TurboCode/Tools/DelegateProfile.swift */,
+				A0000000000000000000007a /* TurboCode/Tools/DelegateTaskTool.swift */,
+				A0000000000000000000007b /* TurboCode/Tools/DiffPatchTool.swift */,
+				A0000000000000000000007c /* TurboCode/Tools/FileSystemTool.swift */,
+				A0000000000000000000007d /* TurboCode/Tools/GitTool.swift */,
+				A0000000000000000000007e /* TurboCode/Tools/LoadSkillTool.swift */,
+				A0000000000000000000007f /* TurboCode/Tools/OnDevice/ListWorkspaceTool.swift */,
+				A00000000000000000000080 /* TurboCode/Tools/OnDevice/TurboCodeGuideTool.swift */,
+				A00000000000000000000081 /* TurboCode/Tools/OnDevice/WriteOnDeviceTool.swift */,
+				A00000000000000000000082 /* TurboCode/Tools/OrchestratorProfile.swift */,
+				A00000000000000000000083 /* TurboCode/Tools/Plugins/TypeScriptPluginToolAdapter.swift */,
+				A00000000000000000000084 /* TurboCode/Tools/ReadFileTool.swift */,
+				A00000000000000000000085 /* TurboCode/Tools/RemoveFileTool.swift */,
+				A00000000000000000000086 /* TurboCode/Tools/RepositoryMap/SwiftWorkspaceMapTool.swift */,
+				A00000000000000000000087 /* TurboCode/Tools/RipgrepTool.swift */,
+				A00000000000000000000088 /* TurboCode/Tools/SafariMCPTool.swift */,
+				A00000000000000000000089 /* TurboCode/Tools/StandaloneProfile.swift */,
+				A0000000000000000000008a /* TurboCode/Tools/SwiftPackageManagerTool.swift */,
+				A0000000000000000000008b /* TurboCode/Tools/Xcode/XcodeMCPTool.swift */,
+				A0000000000000000000008c /* TurboCode/Tools/Xcode/XcodeProjectTool.swift */,
+				A0000000000000000000008d /* TurboCode/TurboCodeCore/Domain/ChatBlock.swift */,
+				A0000000000000000000008e /* TurboCode/TurboCodeCore/Domain/Conversation.swift */,
+				A0000000000000000000008f /* TurboCode/TurboCodeCore/Domain/ModelBackend.swift */,
+				A00000000000000000000090 /* TurboCode/TurboCodeCore/Domain/ReasoningEffort.swift */,
+				A00000000000000000000091 /* TurboCode/TurboCodeCore/Domain/ToolArtifact.swift */,
+				A00000000000000000000092 /* TurboCode/TurboCodeCore/Domain/WorkspaceListingBlock.swift */,
+				A00000000000000000000093 /* TurboCode/TurboCodeCore/Persistence/ConversationPersistenceService.swift */,
+				A00000000000000000000094 /* TurboCode/TurboCodeCore/Persistence/ConversationRepository.swift */,
+				A00000000000000000000095 /* TurboCode/TurboCodeCore/Persistence/StoredSession.swift */,
+				A00000000000000000000096 /* TurboCode/TurboCodeCore/Runtime/AgentRuntime.swift */,
+				A00000000000000000000097 /* TurboCode/TurboCodeCore/Runtime/RuntimeContracts.swift */,
+				A00000000000000000000098 /* TurboCode/TurboCodeCore/Runtime/SteeringContracts.swift */,
+				A00000000000000000000099 /* TurboCode/TurboCodeCore/Runtime/SteeringState.swift */,
+				A0000000000000000000009b /* TurboCode/Services/RuntimeContextHandoff.swift */,
+				A0000000000000000000009c /* TurboCode/Stores/CredentialStore.swift */,
+				A0000000000000000000009d /* TurboCode/Stores/ApprovalStore.swift */,
+				A0000000000000000000009e /* TurboCode/ViewModels/GitDiffViewModel.swift */,
+				A0000000000000000000009f /* TurboCode/Diagnostics/AgentBenchmark.swift */,
+				A000000000000000000000a0 /* TurboCode/Stores/TypeScriptPluginRuntimeStore.swift */,
+				A0000000000000000000009a /* TurboCodeACP/ACPMain.swift */,
+			);
+			name = "Recovered References";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -96,8 +523,12 @@
 				000000000000000120000000 /* Sources */,
 				000000000000000130000000 /* Frameworks */,
 				000000000000000140000000 /* Resources */,
+				000000000000000150000000 /* Helpers */,
 			);
 			buildRules = (
+			);
+			dependencies = (
+				000000000000000160000000 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				000000000000000000000010 /* TurboCode */,
@@ -136,6 +567,24 @@
 			productReference = 000000000000000000000220 /* TurboCodeEvaluations.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		000000000000000300000000 /* turbocode-acp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 000000000000000310000000 /* Build configuration list for PBXNativeTarget "turbocode-acp" */;
+			buildPhases = (
+				000000000000000320000000 /* Sources */,
+				000000000000000330000000 /* Frameworks */,
+				000000000000000340000000 /* Resources */,
+			);
+			buildRules = (
+			);
+			name = "turbocode-acp";
+			packageProductDependencies = (
+				5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */,
+			);
+			productName = "turbocode-acp";
+			productReference = 000000000000000000000320 /* turbocode-acp */;
+			productType = "com.apple.product-type.tool";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -152,6 +601,9 @@
 					000000000000000200000000 = {
 						CreatedOnToolsVersion = 27.0;
 						TestTargetID = 000000000000000100000000;
+					};
+					000000000000000300000000 = {
+						CreatedOnToolsVersion = 27.0;
 					};
 				};
 			};
@@ -176,6 +628,7 @@
 			targets = (
 				000000000000000100000000 /* TurboCode */,
 				000000000000000200000000 /* TurboCodeEvaluations */,
+				000000000000000300000000 /* turbocode-acp */,
 			);
 		};
 /* End PBXProject section */
@@ -194,6 +647,11 @@
 			files = (
 			);
 		};
+		000000000000000340000000 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -207,9 +665,149 @@
 			files = (
 			);
 		};
+		000000000000000320000000 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+				B00000000000000000000001 /* TurboCode/Diagnostics/AgentDiagnostics.swift in Sources */,
+				B00000000000000000000003 /* TurboCode/Models/ACP/ACPProtocol.swift in Sources */,
+				B00000000000000000000004 /* TurboCode/Models/AgentActivity.swift in Sources */,
+				B00000000000000000000005 /* TurboCode/Models/AgentTaskContract.swift in Sources */,
+				B00000000000000000000006 /* TurboCode/Models/AgentTuningConfig.swift in Sources */,
+				B00000000000000000000007 /* TurboCode/Models/AppNavigation.swift in Sources */,
+				B00000000000000000000008 /* TurboCode/Models/ApprovalRequest.swift in Sources */,
+				B00000000000000000000009 /* TurboCode/Models/ChatRuntimeState.swift in Sources */,
+				B0000000000000000000000a /* TurboCode/Models/ComposerCommand.swift in Sources */,
+				B0000000000000000000000b /* TurboCode/Models/LlamaContextUsage.swift in Sources */,
+				B0000000000000000000000c /* TurboCode/Models/MCP/MCPJSONValue.swift in Sources */,
+				B0000000000000000000000d /* TurboCode/Models/MCP/MCPToolResult.swift in Sources */,
+				B0000000000000000000000e /* TurboCode/Models/ModelRoutingPolicy.swift in Sources */,
+				B0000000000000000000000f /* TurboCode/Models/ModelToolCatalog.swift in Sources */,
+				B00000000000000000000010 /* TurboCode/Models/OrchestratorMode.swift in Sources */,
+				B00000000000000000000011 /* TurboCode/Models/ProductGuideBlock.swift in Sources */,
+				B00000000000000000000012 /* TurboCode/Models/ProviderLanguageModel.swift in Sources */,
+				B00000000000000000000013 /* TurboCode/Models/RemoteReasoningRequestAdapter.swift in Sources */,
+				B00000000000000000000014 /* TurboCode/Models/RepositoryMap/RepositoryMap.swift in Sources */,
+				B00000000000000000000015 /* TurboCode/Models/ReviewComment.swift in Sources */,
+				B00000000000000000000016 /* TurboCode/Models/ToolActivity.swift in Sources */,
+				B00000000000000000000017 /* TurboCode/Models/TranscriptContextProjection.swift in Sources */,
+				B00000000000000000000018 /* TurboCode/Models/TurboCodeConfig.swift in Sources */,
+				B00000000000000000000019 /* TurboCode/Models/TurboCodeProfileSelection.swift in Sources */,
+				B0000000000000000000001a /* TurboCode/Models/TurboCodeSkill.swift in Sources */,
+				B0000000000000000000001b /* TurboCode/Models/TypeScriptPluginCapability.swift in Sources */,
+				B0000000000000000000001c /* TurboCode/Models/TypeScriptPluginLifecycle.swift in Sources */,
+				B0000000000000000000001d /* TurboCode/Models/TypeScriptPluginManifest.swift in Sources */,
+				B0000000000000000000001e /* TurboCode/Models/TypeScriptPluginTranscript.swift in Sources */,
+				B0000000000000000000001f /* TurboCode/Models/UserDynamicProfile.swift in Sources */,
+				B00000000000000000000020 /* TurboCode/Models/Xcode/XcodeProject.swift in Sources */,
+				B00000000000000000000021 /* TurboCode/Services/ACP/ACPAgentServer.swift in Sources */,
+				B00000000000000000000022 /* TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift in Sources */,
+				B00000000000000000000023 /* TurboCode/Services/ACP/ACPEventProjector.swift in Sources */,
+				B00000000000000000000024 /* TurboCode/Services/ACP/ACPRuntimeDriver.swift in Sources */,
+				B00000000000000000000025 /* TurboCode/Services/Chat/AgentActivityRuntimeMapping.swift in Sources */,
+				B00000000000000000000026 /* TurboCode/Services/Chat/AgentTaskInvokerFactory.swift in Sources */,
+				B00000000000000000000027 /* TurboCode/Services/Chat/AgentTaskPathScope.swift in Sources */,
+				B00000000000000000000028 /* TurboCode/Services/Chat/AgentTaskRunner.swift in Sources */,
+				B00000000000000000000029 /* TurboCode/Services/Chat/AgentTaskVerificationRunner.swift in Sources */,
+				B0000000000000000000002b /* TurboCode/Services/Chat/BackendSession.swift in Sources */,
+				B00000000000000000000031 /* TurboCode/Services/Chat/FoundationModelsReasoningLevel.swift in Sources */,
+				B00000000000000000000032 /* TurboCode/Services/Chat/FoundationModelsSessionRuntime.swift in Sources */,
+				B00000000000000000000034 /* TurboCode/Services/Chat/LLMRuntime.swift in Sources */,
+				B00000000000000000000036 /* TurboCode/Services/Chat/ModelSessionFactory.swift in Sources */,
+				B00000000000000000000037 /* TurboCode/Services/Chat/NativeResponseRunner.swift in Sources */,
+				B00000000000000000000038 /* TurboCode/Services/Chat/OnDeviceStreamingGuard.swift in Sources */,
+				B0000000000000000000003b /* TurboCode/Services/Chat/SessionRebuildHistory.swift in Sources */,
+				B0000000000000000000003d /* TurboCode/Services/Chat/TurboCodePersonality.swift in Sources */,
+				B0000000000000000000003e /* TurboCode/Services/Chat/TurboCodeSystemPromptBuilder.swift in Sources */,
+				B00000000000000000000041 /* TurboCode/Services/Codex/CodexAppServerClient.swift in Sources */,
+				B00000000000000000000042 /* TurboCode/Services/Codex/CodexBackendSession.swift in Sources */,
+				B00000000000000000000043 /* TurboCode/Services/Codex/CodexExecutionEngine.swift in Sources */,
+				B00000000000000000000044 /* TurboCode/Services/Codex/CodexTurboCodeToolBridge.swift in Sources */,
+				B00000000000000000000045 /* TurboCode/Services/Documentation/ProductDocumentationStore.swift in Sources */,
+				B00000000000000000000046 /* TurboCode/Services/MCP/MCPStdioTransport.swift in Sources */,
+				B00000000000000000000047 /* TurboCode/Services/Plugins/NodeRuntimeResolver.swift in Sources */,
+				B00000000000000000000048 /* TurboCode/Services/Plugins/TypeScriptPluginActivationStore.swift in Sources */,
+				B00000000000000000000049 /* TurboCode/Services/Plugins/TypeScriptPluginHost.swift in Sources */,
+				B0000000000000000000004a /* TurboCode/Services/Plugins/TypeScriptPluginProjectService.swift in Sources */,
+				B0000000000000000000004b /* TurboCode/Services/Plugins/TypeScriptPluginRegistry.swift in Sources */,
+				B0000000000000000000004c /* TurboCode/Services/Profiles/DynamicProfileRuntimeSelection.swift in Sources */,
+				B0000000000000000000004d /* TurboCode/Services/Profiles/DynamicProfileStore.swift in Sources */,
+				B0000000000000000000004e /* TurboCode/Services/RepositoryMap/RepositoryMapCache.swift in Sources */,
+				B0000000000000000000004f /* TurboCode/Services/RepositoryMap/RepositoryMapService.swift in Sources */,
+				B00000000000000000000050 /* TurboCode/Services/RepositoryMap/SwiftDeclarationScanner.swift in Sources */,
+				B00000000000000000000052 /* TurboCode/Services/SafariMCPClient.swift in Sources */,
+				B00000000000000000000053 /* TurboCode/Services/SafariMCPFeature.swift in Sources */,
+				B00000000000000000000054 /* TurboCode/Services/ToolPresentation/NativeToolEchoFilter.swift in Sources */,
+				B00000000000000000000055 /* TurboCode/Services/ToolPresentation/ToolCommandOutput.swift in Sources */,
+				B00000000000000000000056 /* TurboCode/Services/ToolPresentation/ToolReceiptRouter.swift in Sources */,
+				B00000000000000000000057 /* TurboCode/Services/ToolPresentation/WorkspaceListingFollowUpContext.swift in Sources */,
+				B00000000000000000000058 /* TurboCode/Services/Workspace/BashProcessRunner.swift in Sources */,
+				B00000000000000000000059 /* TurboCode/Services/Workspace/BashSandboxViolationMonitor.swift in Sources */,
+				B0000000000000000000005a /* TurboCode/Services/Workspace/DiffPatchApplying.swift in Sources */,
+				B0000000000000000000005b /* TurboCode/Services/Workspace/GitRepositoryServicing.swift in Sources */,
+				B0000000000000000000005c /* TurboCode/Services/Workspace/WorkspaceAccessGate.swift in Sources */,
+				B0000000000000000000005d /* TurboCode/Services/Workspace/WorkspaceBrowsingService.swift in Sources */,
+				B0000000000000000000005e /* TurboCode/Services/Workspace/WorkspaceInstructionsLoader.swift in Sources */,
+				B0000000000000000000005f /* TurboCode/Services/Xcode/XcodeCommandRunner.swift in Sources */,
+				B00000000000000000000060 /* TurboCode/Services/Xcode/XcodeDiagnosticsParser.swift in Sources */,
+				B00000000000000000000061 /* TurboCode/Services/Xcode/XcodeMCPClient.swift in Sources */,
+				B00000000000000000000062 /* TurboCode/Services/Xcode/XcodeProjectDiscoveryService.swift in Sources */,
+				B00000000000000000000063 /* TurboCode/Services/Xcode/XcodeProjectService.swift in Sources */,
+				B0000000000000000000006a /* TurboCode/Stores/CodexRuntimeStore.swift in Sources */,
+				B0000000000000000000006d /* TurboCode/Stores/ModelRuntimeStore.swift in Sources */,
+				B00000000000000000000075 /* TurboCode/Tools/ApplyEditsTool.swift in Sources */,
+				B00000000000000000000076 /* TurboCode/Tools/BashTool.swift in Sources */,
+				B00000000000000000000077 /* TurboCode/Tools/CallPowerfulModelTool.swift in Sources */,
+				B00000000000000000000078 /* TurboCode/Tools/CreateSkillTool.swift in Sources */,
+				B00000000000000000000079 /* TurboCode/Tools/DelegateProfile.swift in Sources */,
+				B0000000000000000000007a /* TurboCode/Tools/DelegateTaskTool.swift in Sources */,
+				B0000000000000000000007b /* TurboCode/Tools/DiffPatchTool.swift in Sources */,
+				B0000000000000000000007c /* TurboCode/Tools/FileSystemTool.swift in Sources */,
+				B0000000000000000000007d /* TurboCode/Tools/GitTool.swift in Sources */,
+				B0000000000000000000007e /* TurboCode/Tools/LoadSkillTool.swift in Sources */,
+				B0000000000000000000007f /* TurboCode/Tools/OnDevice/ListWorkspaceTool.swift in Sources */,
+				B00000000000000000000080 /* TurboCode/Tools/OnDevice/TurboCodeGuideTool.swift in Sources */,
+				B00000000000000000000081 /* TurboCode/Tools/OnDevice/WriteOnDeviceTool.swift in Sources */,
+				B00000000000000000000082 /* TurboCode/Tools/OrchestratorProfile.swift in Sources */,
+				B00000000000000000000083 /* TurboCode/Tools/Plugins/TypeScriptPluginToolAdapter.swift in Sources */,
+				B00000000000000000000084 /* TurboCode/Tools/ReadFileTool.swift in Sources */,
+				B00000000000000000000085 /* TurboCode/Tools/RemoveFileTool.swift in Sources */,
+				B00000000000000000000086 /* TurboCode/Tools/RepositoryMap/SwiftWorkspaceMapTool.swift in Sources */,
+				B00000000000000000000087 /* TurboCode/Tools/RipgrepTool.swift in Sources */,
+				B00000000000000000000088 /* TurboCode/Tools/SafariMCPTool.swift in Sources */,
+				B00000000000000000000089 /* TurboCode/Tools/StandaloneProfile.swift in Sources */,
+				B0000000000000000000008a /* TurboCode/Tools/SwiftPackageManagerTool.swift in Sources */,
+				B0000000000000000000008b /* TurboCode/Tools/Xcode/XcodeMCPTool.swift in Sources */,
+				B0000000000000000000008c /* TurboCode/Tools/Xcode/XcodeProjectTool.swift in Sources */,
+				B0000000000000000000008d /* TurboCode/TurboCodeCore/Domain/ChatBlock.swift in Sources */,
+				B0000000000000000000008e /* TurboCode/TurboCodeCore/Domain/Conversation.swift in Sources */,
+				B0000000000000000000008f /* TurboCode/TurboCodeCore/Domain/ModelBackend.swift in Sources */,
+				B00000000000000000000090 /* TurboCode/TurboCodeCore/Domain/ReasoningEffort.swift in Sources */,
+				B00000000000000000000091 /* TurboCode/TurboCodeCore/Domain/ToolArtifact.swift in Sources */,
+				B00000000000000000000092 /* TurboCode/TurboCodeCore/Domain/WorkspaceListingBlock.swift in Sources */,
+				B00000000000000000000093 /* TurboCode/TurboCodeCore/Persistence/ConversationPersistenceService.swift in Sources */,
+				B00000000000000000000094 /* TurboCode/TurboCodeCore/Persistence/ConversationRepository.swift in Sources */,
+				B00000000000000000000095 /* TurboCode/TurboCodeCore/Persistence/StoredSession.swift in Sources */,
+				B00000000000000000000096 /* TurboCode/TurboCodeCore/Runtime/AgentRuntime.swift in Sources */,
+				B00000000000000000000097 /* TurboCode/TurboCodeCore/Runtime/RuntimeContracts.swift in Sources */,
+				B00000000000000000000098 /* TurboCode/TurboCodeCore/Runtime/SteeringContracts.swift in Sources */,
+				B00000000000000000000099 /* TurboCode/TurboCodeCore/Runtime/SteeringState.swift in Sources */,
+				B0000000000000000000009b /* TurboCode/Services/RuntimeContextHandoff.swift in Sources */,
+				B0000000000000000000009c /* TurboCode/Stores/CredentialStore.swift in Sources */,
+				B0000000000000000000009d /* TurboCode/Stores/ApprovalStore.swift in Sources */,
+				B0000000000000000000009e /* TurboCode/ViewModels/GitDiffViewModel.swift in Sources */,
+				B0000000000000000000009f /* TurboCode/Diagnostics/AgentBenchmark.swift in Sources */,
+				B000000000000000000000a0 /* TurboCode/Stores/TypeScriptPluginRuntimeStore.swift in Sources */,
+				B0000000000000000000009a /* TurboCodeACP/ACPMain.swift in Sources */,
+			);
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		000000000000000160000000 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 000000000000000300000000 /* turbocode-acp */;
+			targetProxy = 000000000000000270000000 /* PBXContainerItemProxy */;
+		};
 		000000000000000250000000 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 000000000000000100000000 /* TurboCode */;
@@ -384,7 +982,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.5;
+				MARKETING_VERSION = 0.6;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -441,7 +1039,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.5;
+				MARKETING_VERSION = 0.6;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -500,6 +1098,46 @@
 			};
 			name = Release;
 		};
+		000000000000000311000000 /* Debug configuration for PBXNativeTarget "turbocode-acp" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W8WM5JY5LX;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				PRODUCT_BUNDLE_IDENTIFIER = art.granvalenti.turbocode.acp;
+				PRODUCT_NAME = "turbocode-acp";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		000000000000000312000000 /* Release configuration for PBXNativeTarget "turbocode-acp" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = W8WM5JY5LX;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				PRODUCT_BUNDLE_IDENTIFIER = art.granvalenti.turbocode.acp;
+				PRODUCT_NAME = "turbocode-acp";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -524,6 +1162,14 @@
 			buildConfigurations = (
 				000000000000000211000000 /* Debug configuration for PBXNativeTarget "TurboCodeEvaluations" */,
 				000000000000000212000000 /* Release configuration for PBXNativeTarget "TurboCodeEvaluations" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		000000000000000310000000 /* Build configuration list for PBXNativeTarget "turbocode-acp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				000000000000000311000000 /* Debug configuration for PBXNativeTarget "turbocode-acp" */,
+				000000000000000312000000 /* Release configuration for PBXNativeTarget "turbocode-acp" */,
 			);
 			defaultConfigurationName = Release;
 		};

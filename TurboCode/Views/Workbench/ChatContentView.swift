@@ -136,6 +136,14 @@ struct ChatContentView: View {
 
             if let command = approval.command {
                 VStack(alignment: .leading, spacing: 6) {
+                    if approval.isCompleteCommandRerun {
+                        Text("Access denied: \(approval.path)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .lineLimit(3)
+                    }
+
                     Text("Bash command")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
@@ -152,6 +160,13 @@ struct ChatContentView: View {
                                 .strokeBorder(.separator.opacity(0.55), lineWidth: 0.5)
                         }
                         .accessibilityLabel("Bash command")
+
+                    if approval.isCompleteCommandRerun {
+                        Text("Approval reruns the complete command. The first attempt may already have produced effects; approval does not roll them back.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             } else if let targets = approval.externalTargetDetails {
                 VStack(alignment: .leading, spacing: 6) {

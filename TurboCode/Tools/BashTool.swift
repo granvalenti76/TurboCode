@@ -24,7 +24,8 @@ struct BashTool: Tool {
     private let sdkRoot: String
     private let homeDirectory: String
     private let requestApproval: @Sendable (PendingToolApproval) async -> String
-    private let service = BashService()
+    private let sandboxViolationMonitor: any BashSandboxViolationMonitoring
+    private let service: BashService
 
     init(
         workspaceRoot: String,
@@ -35,6 +36,7 @@ struct BashTool: Tool {
         // Production uses the real home so `~` keeps its normal shell meaning.
         // Tests may inject a disposable home without changing runtime behavior.
         homeDirectory: String = FileManager.default.homeDirectoryForCurrentUser.path,
+        sandboxViolationMonitor: any BashSandboxViolationMonitoring = BashSandboxViolationMonitor.shared,
         requestApproval: @escaping @Sendable (PendingToolApproval) async -> String = {
             await ToolApprovalRegistry.shared.request($0)
         }
@@ -44,6 +46,8 @@ struct BashTool: Tool {
         self.taskScope = taskScope
         self.sdkRoot = sdkRoot
         self.homeDirectory = homeDirectory
+        self.sandboxViolationMonitor = sandboxViolationMonitor
+        self.service = BashService(monitor: sandboxViolationMonitor)
         self.requestApproval = requestApproval
     }
 
@@ -54,6 +58,7 @@ struct BashTool: Tool {
             taskScope: scope,
             sdkRoot: sdkRoot,
             homeDirectory: homeDirectory,
+            sandboxViolationMonitor: sandboxViolationMonitor,
             requestApproval: requestApproval
         )
     }
@@ -71,8 +76,8 @@ struct BashTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: BashArguments) async throws -> String {
-        let command = arguments.command.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !command.isEmpty else {
+        let command = arguments.command
+        guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return "Error: command cannot be empty."
         }
 
@@ -101,6 +106,12 @@ struct BashTool: Tool {
 // MARK: - Sandboxed Process Runner
 
 private actor BashService {
+    private let monitor: any BashSandboxViolationMonitoring
+
+    init(monitor: any BashSandboxViolationMonitoring) {
+        self.monitor = monitor
+    }
+
     func run(
         command: String,
         workspaceRoot: String,
@@ -111,40 +122,66 @@ private actor BashService {
         homeDirectory: String,
         requestApproval: @Sendable (PendingToolApproval) async -> String
     ) async -> String {
-        // Seatbelt makes the first decision. Only its denial can open a host-owned
-        // approval; no approval text produced by the model is parsed or trusted.
-        let result = execute(
-            command: command,
-            workspaceRoot: workspaceRoot,
-            timeoutSeconds: timeoutSeconds,
-            outputLimit: outputLimit,
-            allowNetworkAccess: allowNetworkAccess,
-            sdkRoot: sdkRoot,
-            homeDirectory: homeDirectory,
-            allowExternalAccess: false
-        )
-        guard Self.isSandboxDenial(result) else { return result }
-
-        let authorized = await WorkspaceAccessGate.shared.authorizeExternalExecution(
-            tool: "Bash",
-            workspaceRoot: workspaceRoot,
-            targetDescription: "filesystem paths requested by this command",
-            command: command,
-            requestApproval: requestApproval
-        )
-        guard authorized else {
-            return "External filesystem access denied by the user. The command was not rerun."
+        guard !Task.isCancelled else { return BashOutcome.cancelled.wrap("Command cancelled before execution.") }
+        let firstMonitor: BashSandboxMonitorInvocation
+        switch await monitor.begin() {
+        case .unavailable(let reason):
+            return (Task.isCancelled ? BashOutcome.cancelled : .diagnosticsIncomplete)
+                .wrap("Error: sandbox diagnostics unavailable: \(reason) Command was not run.")
+        case .ready(let invocation):
+            firstMonitor = invocation
         }
-        return execute(
-            command: command,
-            workspaceRoot: workspaceRoot,
-            timeoutSeconds: timeoutSeconds,
-            outputLimit: outputLimit,
-            allowNetworkAccess: allowNetworkAccess,
-            sdkRoot: sdkRoot,
-            homeDirectory: homeDirectory,
-            allowExternalAccess: true
+        let first = await execute(
+            command: command, workspaceRoot: workspaceRoot, timeoutSeconds: timeoutSeconds,
+            outputLimit: outputLimit, allowNetworkAccess: allowNetworkAccess,
+            sdkRoot: sdkRoot, homeDirectory: homeDirectory,
+            allowExternalAccess: false, sandboxMessage: firstMonitor.tag
         )
+        let observation = await monitor.end(firstMonitor)
+        let firstText = first.render(observation: observation, outputLimit: outputLimit)
+        // Process state is kept separate from printable output. A denial never
+        // revives a timed-out/cancelled attempt or one with uncertain cleanup.
+        guard first.process.canRerun, !Task.isCancelled else {
+            return (Task.isCancelled ? BashOutcome.cancelled : first.outcome(observation))
+                .wrap(firstText + "\n\nThe complete command was not rerun.")
+        }
+        guard !observation.violations.isEmpty else {
+            return first.outcome(observation).wrap(firstText)
+        }
+        let authorized = await WorkspaceAccessGate.shared.authorizeExternalExecution(
+            tool: "Bash", workspaceRoot: workspaceRoot,
+            targetDescription: observation.violations.map(\.path).joined(separator: "\n"),
+            command: command, requestApproval: requestApproval
+        )
+        guard !Task.isCancelled else {
+            return BashOutcome.cancelled.wrap(firstText + "\n\nCommand cancelled. The complete command was not rerun.")
+        }
+        guard authorized else {
+            return BashOutcome.pathDenied.wrap(firstText + "\n\nExternal filesystem access denied by the user. The complete command was not rerun.")
+        }
+        let retryMonitor: BashSandboxMonitorInvocation
+        switch await monitor.begin() {
+        case .unavailable(let reason):
+            return (Task.isCancelled ? BashOutcome.cancelled : .diagnosticsIncomplete).wrap(
+                firstText + "\n\nApproved, but the complete command was not rerun because sandbox diagnostics became unavailable: \(reason)"
+            )
+        case .ready(let invocation):
+            retryMonitor = invocation
+        }
+        // execute checks cancellation again after begin's suspension and just
+        // before spawning. end always closes the monitor, including on Stop.
+        let retry = await execute(
+            command: command, workspaceRoot: workspaceRoot, timeoutSeconds: timeoutSeconds,
+            outputLimit: outputLimit, allowNetworkAccess: allowNetworkAccess,
+            sdkRoot: sdkRoot, homeDirectory: homeDirectory,
+            allowExternalAccess: true, sandboxMessage: retryMonitor.tag
+        )
+        let retryObservation = await monitor.end(retryMonitor)
+        // Only the final attempt decides the host outcome. Share the original
+        // output budget between attempts, retaining both sets of metadata.
+        let text = "First attempt:\n" + first.render(observation: observation, outputLimit: outputLimit / 2)
+            + "\n\nApproved complete rerun:\n" + retry.render(observation: retryObservation, outputLimit: outputLimit / 2)
+        return (Task.isCancelled ? BashOutcome.cancelled : retry.outcome(retryObservation)).wrap(text)
     }
 
     private func execute(
@@ -155,8 +192,9 @@ private actor BashService {
         allowNetworkAccess: Bool,
         sdkRoot: String,
         homeDirectory: String,
-        allowExternalAccess: Bool
-    ) -> String {
+        allowExternalAccess: Bool,
+        sandboxMessage: String
+    ) async -> BashAttemptResult {
         let resolvedWorkspace = try? WorkspacePathResolver.resolve(".", within: workspaceRoot)
         let activeWorkspaceURL = resolvedWorkspace.flatMap { Self.isDirectory($0) ? $0 : nil }
 
@@ -171,7 +209,7 @@ private actor BashService {
             FileManager.default.createFile(atPath: stdoutURL.path, contents: nil)
             FileManager.default.createFile(atPath: stderrURL.path, contents: nil)
         } catch {
-            return "Error preparing command output: \(error.localizedDescription)"
+            return .failure("Error preparing command output: \(error.localizedDescription)")
         }
         defer { try? FileManager.default.removeItem(at: outputDirectory) }
         // A stale workspace must never redirect relative commands into a real
@@ -185,10 +223,9 @@ private actor BashService {
             stdoutHandle = try FileHandle(forWritingTo: stdoutURL)
             stderrHandle = try FileHandle(forWritingTo: stderrURL)
         } catch {
-            return "Error opening command output: \(error.localizedDescription)"
+            return .failure("Error opening command output: \(error.localizedDescription)")
         }
 
-        let process = Process()
         // GUI-launched apps often miss the shell's Node manager PATH. Reuse the
         // plugin resolver so npm, npx, and node scripts see the same supported
         // Node installation that TurboCode would use to launch a plugin.
@@ -204,21 +241,20 @@ private actor BashService {
         let commandPath = [nodeBinDirectory, inheritedPath]
             .compactMap { $0 }
             .joined(separator: ":")
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
-        process.arguments = [
+        let arguments = [
             "-p",
             sandboxProfile(
                 workspacePath: workingDirectoryURL.path,
                 outputPath: outputDirectory.path,
                 allowNetworkAccess: allowNetworkAccess,
                 nodeRuntimeRoot: nodeRuntimeRoot,
-                allowExternalAccess: allowExternalAccess
+                allowExternalAccess: allowExternalAccess,
+                sandboxMessage: sandboxMessage
             ),
             "/bin/zsh",
             "-fc",
             command
         ]
-        process.currentDirectoryURL = workingDirectoryURL
         var commandEnvironment = ProcessInfo.processInfo.environment.merging([
             "TMPDIR": outputDirectory.path,
             "HOME": shellHome.path,
@@ -233,73 +269,37 @@ private actor BashService {
         commandEnvironment.removeValue(forKey: "TURBOCODE_SDK_ROOT")
         commandEnvironment.removeValue(forKey: "TURBOCODE_PLUGIN_ROOT")
         commandEnvironment.removeValue(forKey: "TURBOCODE_NODE_PATH")
-        process.environment = commandEnvironment
-        process.standardOutput = stdoutHandle
-        process.standardError = stderrHandle
-
-        let startedAt = Date()
-        do {
-            try process.run()
-        } catch {
-            try? stdoutHandle.close()
-            try? stderrHandle.close()
-            return "Error launching command: \(error.localizedDescription)"
-        }
-
-        var timedOut = false
-        while process.isRunning {
-            if Date().timeIntervalSince(startedAt) >= Double(timeoutSeconds) {
-                timedOut = true
-                process.terminate()
-                break
-            }
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        if timedOut {
-            let terminationDeadline = Date().addingTimeInterval(1)
-            while process.isRunning && Date() < terminationDeadline {
-                Thread.sleep(forTimeInterval: 0.05)
-            }
-            if process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
-            }
-        }
-        process.waitUntilExit()
+        let startedAt = ContinuousClock.now
+        let process = await BashProcessRunner.run(
+            executable: "/usr/bin/sandbox-exec", arguments: arguments,
+            environment: commandEnvironment, directory: workingDirectoryURL.path,
+            stdout: stdoutHandle.fileDescriptor, stderr: stderrHandle.fileDescriptor,
+            timeout: .seconds(timeoutSeconds)
+        )
         try? stdoutHandle.close()
         try? stderrHandle.close()
-
         let stdout = readOutput(at: stdoutURL, limit: outputLimit / 2)
         let stderr = readOutput(at: stderrURL, limit: outputLimit / 2)
-        let duration = Date().timeIntervalSince(startedAt)
-
-        var sections = [
+        let duration = startedAt.duration(to: .now)
+        var metadata = [
             "Working directory: \(workingDirectoryURL.path)",
             activeWorkspaceURL == nil
                 ? "Workspace unavailable: relative paths use a disposable directory."
                 : "Workspace: \(activeWorkspaceURL!.path)",
-            "Exit code: \(process.terminationStatus)",
-            String(format: "Duration: %.2fs", duration)
+            "Exit code: \(process.exitCode.map(String.init) ?? "unavailable")",
+            "Duration: \(duration)"
         ]
-        if timedOut {
-            sections.append("Timed out after \(timeoutSeconds)s.")
+        if process.timedOut { metadata.append("Timed out after \(timeoutSeconds)s.") }
+        if process.cancelled { metadata.append("Command cancelled.") }
+        if !process.cleanupComplete {
+            metadata.append("Command process cleanup could not be confirmed; no rerun is allowed.")
         }
-        if !stdout.text.isEmpty {
-            sections.append("STDOUT:\n\(stdout.text)\(stdout.truncated ? "\n... (stdout truncated)" : "")")
-        }
-        if !stderr.text.isEmpty {
-            sections.append("STDERR:\n\(stderr.text)\(stderr.truncated ? "\n... (stderr truncated)" : "")")
-        }
-        if stdout.text.isEmpty && stderr.text.isEmpty {
-            sections.append("(no output)")
-        }
-        return sections.joined(separator: "\n\n")
-    }
-
-    private static func isSandboxDenial(_ result: String) -> Bool {
-        let normalized = result.lowercased()
-        return normalized.contains("operation not permitted")
-            || normalized.contains("permission denied")
-            || normalized.contains("sandbox") && normalized.contains("deny")
+        if let error = process.error { metadata.append(error) }
+        return BashAttemptResult(
+            process: process, metadata: metadata.joined(separator: "\n\n"),
+            stdout: stdout.text, stderr: stderr.text,
+            stdoutTruncated: stdout.truncated, stderrTruncated: stderr.truncated
+        )
     }
 
     private static func isDirectory(_ url: URL) -> Bool {
@@ -315,7 +315,8 @@ private actor BashService {
         outputPath: String,
         allowNetworkAccess: Bool,
         nodeRuntimeRoot: String?,
-        allowExternalAccess: Bool
+        allowExternalAccess: Bool,
+        sandboxMessage: String
     ) -> String {
         let workspace = profileEscaped(workspacePath)
         let output = profileEscaped(outputPath)
@@ -342,8 +343,9 @@ private actor BashService {
                         (require-not
                             (require-any
                                 (literal "\(output)")
-                                (subpath "\(output)"))))))
-            (deny file-write*)
+                                (subpath "\(output)")))))
+                (with message "\(sandboxMessage)"))
+            (deny file-write* (with message "\(sandboxMessage)"))
             (allow file-write* (subpath "\(output)"))
             (allow file-write* (subpath "/var/folders"))
             (allow file-write* (subpath "/private/var/folders"))
@@ -403,5 +405,61 @@ private actor BashService {
                 .trimmingCharacters(in: .newlines),
             truncated
         )
+    }
+}
+
+/// The first line is host-authored and precedes all untrusted command output.
+/// Consumers can classify the final attempt without scanning earlier stdout or
+/// a previous exit code. Keep the legacy classifier for stored older results.
+nonisolated enum BashOutcome: String {
+    case succeeded, failed, cancelled, timedOut, pathDenied, diagnosticsIncomplete
+
+    func wrap(_ text: String) -> String { "Bash outcome: \(rawValue)\n\n\(text)" }
+
+    static func read(from text: String) -> Self? {
+        let prefix = "Bash outcome: "
+        guard text.hasPrefix(prefix) else { return nil }
+        return Self(rawValue: String(text.dropFirst(prefix.count).prefix { $0 != "\n" }))
+    }
+}
+
+nonisolated private struct BashAttemptResult: Sendable {
+    let process: BashProcessRunner.Result
+    let metadata: String
+    let stdout: String
+    let stderr: String
+    let stdoutTruncated: Bool
+    let stderrTruncated: Bool
+
+    static func failure(_ message: String) -> Self {
+        Self(process: .init(exitCode: nil, timedOut: false, cancelled: false, cleanupComplete: true, error: message),
+             metadata: message, stdout: "", stderr: "", stdoutTruncated: false, stderrTruncated: false)
+    }
+
+    func outcome(_ observation: BashSandboxMonitorObservation) -> BashOutcome {
+        if process.cancelled { return .cancelled }
+        if process.timedOut { return .timedOut }
+        if !process.canRerun { return .failed }
+        if !observation.violations.isEmpty { return .pathDenied }
+        if !observation.isComplete { return .diagnosticsIncomplete }
+        return process.exitCode == 0 ? .succeeded : .failed
+    }
+
+    func render(observation: BashSandboxMonitorObservation, outputLimit: Int) -> String {
+        var sections = [metadata]
+        for (name, text, truncated) in [("STDOUT", stdout, stdoutTruncated), ("STDERR", stderr, stderrTruncated)] {
+            guard !text.isEmpty else { continue }
+            let visible = String(text.prefix(outputLimit / 2))
+            sections.append("\(name):\n\(visible)" + (truncated || visible.count < text.count ? "\n... (output truncated)" : ""))
+        }
+        if stdout.isEmpty && stderr.isEmpty { sections.append("(no output)") }
+        if !observation.violations.isEmpty {
+            sections.append("Observed sandbox filesystem denials:\n" + observation.violations
+                .map { "\($0.operation): \($0.path)" }.joined(separator: "\n"))
+        }
+        if !observation.isComplete {
+            sections.append("Sandbox diagnostics incomplete: " + (observation.diagnostic ?? "Some events may not have been collected."))
+        }
+        return sections.joined(separator: "\n\n")
     }
 }

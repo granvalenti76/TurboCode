@@ -31,6 +31,8 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
     /// A reversible context view over `transcript`. Older sessions decode an
     /// empty projection and therefore retain their previous runtime behavior.
     public var contextProjection: TranscriptContextProjection
+    /// Optional so sessions saved before composer statistics remain readable.
+    var statistics: ComposerSessionStatistics?
     /// Pending steering survives relaunch as recoverable metadata. The runtime
     /// must explicitly rebind it before any provider delivery is attempted.
     var steering: SteeringQueueSnapshot
@@ -53,13 +55,14 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
         self.transcript = transcript
         self.contextProjection = contextProjection
         self.steering = steering
+        self.statistics = nil
     }
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, id, title, projectName, workspacePath
         case createdAt, updatedAt, isPinned, isArchived, mode
         case modelBackend, blocks, transcript, contextProjection
-        case steering
+        case steering, statistics
     }
 
     public init(from decoder: Decoder) throws {
@@ -86,6 +89,10 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
             SteeringQueueSnapshot.self,
             forKey: .steering
         ) ?? .empty
+        statistics = try values.decodeIfPresent(
+            ComposerSessionStatistics.self,
+            forKey: .statistics
+        )
     }
 
     public func hash(into hasher: inout Hasher) {

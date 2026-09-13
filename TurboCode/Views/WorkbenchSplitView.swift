@@ -64,7 +64,7 @@ struct WorkbenchSplitView: View {
         .sheet(item: editorialDeskPresentationBinding) { presentation in
             EditorialDeskSheet(
                 workspaceRoot: chatStore.workspaceRoot,
-                initialDraftRelativePath: presentation.draftRelativePath,
+                initialOpening: presentation.opening,
                 dependencies: chatStore.editorialDeskAssembly.dependencies(
                     for: chatStore.workspaceRoot
                 )

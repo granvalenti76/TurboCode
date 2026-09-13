@@ -10,15 +10,27 @@ struct DiffPatchReviewPresentation: Identifiable {
     let patch: DiffPatchBlock
 }
 
-/// Stable shell-owned request for the removable Editorial Desk sheet. A nil
-/// path starts a new draft; a workspace-relative path opens an authentic one.
+/// Distinguishes document creation from the two workspace-file entry points.
+/// Ordinary Markdown must never pass through the authentic-draft loader.
+nonisolated enum EditorialDeskOpening: Equatable, Sendable {
+    case newDraft
+    case existingDraft(relativePath: String)
+    case importedMarkdown(relativePath: String)
+}
+
+/// Stable shell-owned request for the removable Editorial Desk sheet.
 struct EditorialDeskPresentation: Identifiable, Equatable {
     let id: UUID
-    let draftRelativePath: String?
+    let opening: EditorialDeskOpening
 
-    init(id: UUID = UUID(), draftRelativePath: String? = nil) {
+    init(id: UUID = UUID(), opening: EditorialDeskOpening = .newDraft) {
         self.id = id
-        self.draftRelativePath = draftRelativePath
+        self.opening = opening
+    }
+
+    var draftRelativePath: String? {
+        guard case .existingDraft(let relativePath) = opening else { return nil }
+        return relativePath
     }
 }
 
@@ -111,7 +123,14 @@ final class WorkbenchStore {
 
     func presentEditorialDesk(draftRelativePath: String? = nil) {
         editorialDeskPresentation = EditorialDeskPresentation(
-            draftRelativePath: draftRelativePath
+            opening: draftRelativePath.map(EditorialDeskOpening.existingDraft)
+                ?? .newDraft
+        )
+    }
+
+    func presentEditorialDesk(importingMarkdown relativePath: String) {
+        editorialDeskPresentation = EditorialDeskPresentation(
+            opening: .importedMarkdown(relativePath: relativePath)
         )
     }
 

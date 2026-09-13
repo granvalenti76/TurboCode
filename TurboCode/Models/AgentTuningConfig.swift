@@ -105,20 +105,25 @@ nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
 /// New fields must default to disabled when decoding older configuration files.
 nonisolated public struct ExperimentalPolicy: Codable, Hashable, Sendable {
     public var safariMCPEnabled: Bool
+    /// Xcode's MCP bridge is an external-app integration and therefore stays
+    /// opt-in even when a profile already has ordinary Xcode tools.
+    public var xcodeMCPEnabled: Bool
     /// Third-party Node plugins are an explicit trust-boundary opt-in. Keep
     /// this disabled when decoding older configurations.
     public var thirdPartyPluginsEnabled: Bool
 
     public init(
         safariMCPEnabled: Bool = false,
+        xcodeMCPEnabled: Bool = false,
         thirdPartyPluginsEnabled: Bool = false
     ) {
         self.safariMCPEnabled = safariMCPEnabled
+        self.xcodeMCPEnabled = xcodeMCPEnabled
         self.thirdPartyPluginsEnabled = thirdPartyPluginsEnabled
     }
 
     private enum CodingKeys: String, CodingKey {
-        case safariMCPEnabled, thirdPartyPluginsEnabled
+        case safariMCPEnabled, xcodeMCPEnabled, thirdPartyPluginsEnabled
     }
 
     public init(from decoder: Decoder) throws {
@@ -126,6 +131,10 @@ nonisolated public struct ExperimentalPolicy: Codable, Hashable, Sendable {
         safariMCPEnabled = try values.decodeIfPresent(
             Bool.self,
             forKey: .safariMCPEnabled
+        ) ?? false
+        xcodeMCPEnabled = try values.decodeIfPresent(
+            Bool.self,
+            forKey: .xcodeMCPEnabled
         ) ?? false
         thirdPartyPluginsEnabled = try values.decodeIfPresent(
             Bool.self,

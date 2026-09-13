@@ -87,6 +87,98 @@ struct FoundationModelsSessionRuntimeTests {
         #expect(materialized.contains { if case .toolOutput = $0 { true } else { false } } == false)
     }
 
+    @Test("Rematerialized instructions do not duplicate canonical history")
+    func rematerializedInstructionsDoNotDuplicateHistory() {
+        let earlierPrompt = Transcript.Entry.prompt(
+            Transcript.Prompt(segments: [Self.text("Earlier request")])
+        )
+        let earlierResponse = Transcript.Entry.response(
+            Transcript.Response(
+                assetIDs: [],
+                segments: [Self.text("Earlier response")]
+            )
+        )
+        let nextPrompt = Transcript.Entry.prompt(
+            Transcript.Prompt(segments: [Self.text("Next request")])
+        )
+        let previous = [
+            Self.instructions("Previous instructions"),
+            earlierPrompt,
+            earlierResponse
+        ]
+        let current = [
+            Self.instructions("Rematerialized instructions"),
+            earlierPrompt,
+            earlierResponse,
+            nextPrompt
+        ]
+
+        let delta = FoundationModelsTranscriptDelta.newEntries(
+            previous: previous,
+            current: current
+        )
+
+        #expect(delta == [nextPrompt])
+        #expect(!delta.contains { if case .instructions = $0 { true } else { false } })
+    }
+
+    @Test("Transcript pruning still appends only genuinely new entries")
+    func prunedTranscriptAppendsOnlyNewEntries() {
+        let prompt = Transcript.Entry.prompt(
+            Transcript.Prompt(segments: [Self.text("Inspect")])
+        )
+        let call = Transcript.ToolCall(
+            id: "call-pruned-history",
+            toolName: "read_file",
+            arguments: GeneratedContent(properties: ["path": "README.md"])
+        )
+        let toolCalls = Transcript.Entry.toolCalls(Transcript.ToolCalls([call]))
+        let toolOutput = Transcript.Entry.toolOutput(
+            Transcript.ToolOutput(
+                id: call.id,
+                toolName: call.toolName,
+                segments: [Self.text("Contents")]
+            )
+        )
+        let response = Transcript.Entry.response(
+            Transcript.Response(assetIDs: [], segments: [Self.text("Done")])
+        )
+        let nextPrompt = Transcript.Entry.prompt(
+            Transcript.Prompt(segments: [Self.text("Continue")])
+        )
+
+        let delta = FoundationModelsTranscriptDelta.newEntries(
+            previous: [
+                Self.instructions("Previous instructions"),
+                prompt,
+                toolCalls,
+                toolOutput,
+                response
+            ],
+            current: [
+                Self.instructions("Rematerialized instructions"),
+                prompt,
+                response,
+                nextPrompt
+            ]
+        )
+
+        #expect(delta == [nextPrompt])
+    }
+
+    private static func text(_ value: String) -> Transcript.Segment {
+        .text(Transcript.TextSegment(content: value))
+    }
+
+    private static func instructions(_ value: String) -> Transcript.Entry {
+        .instructions(
+            Transcript.Instructions(
+                segments: [text(value)],
+                toolDefinitions: []
+            )
+        )
+    }
+
     private static var noopEvents: ModelSessionEvents {
         ModelSessionEvents(
             toolStarted: { _, _, _ in },

@@ -14,12 +14,47 @@ struct NativeLLMExecutionConfiguration {
     let serverURL: String?
     let diagnosticsChanged: @MainActor @Sendable (String?) async -> Void
     let contextChanged: @MainActor @Sendable (LlamaContextUsage?) async -> Void
+    let usageChanged: @MainActor @Sendable (
+        Usage?, ContextUsage?
+    ) async -> Void
     let approvalRequested: @MainActor @Sendable (ApprovalRequest) async -> Void
+
+    nonisolated init(
+        mode: OrchestratorMode,
+        workspaceKind: String,
+        serverURL: String?,
+        diagnosticsChanged: @escaping @MainActor @Sendable (
+            String?
+        ) async -> Void,
+        contextChanged: @escaping @MainActor @Sendable (
+            LlamaContextUsage?
+        ) async -> Void,
+        usageChanged: @escaping @MainActor @Sendable (
+            Usage?, ContextUsage?
+        ) async -> Void = { _, _ in },
+        approvalRequested: @escaping @MainActor @Sendable (
+            ApprovalRequest
+        ) async -> Void
+    ) {
+        self.mode = mode
+        self.workspaceKind = workspaceKind
+        self.serverURL = serverURL
+        self.diagnosticsChanged = diagnosticsChanged
+        self.contextChanged = contextChanged
+        self.usageChanged = usageChanged
+        self.approvalRequested = approvalRequested
+    }
 }
 
 /// Provider configuration needed to build one Codex backend adapter.
 /// Presentation callbacks remain explicit output ports; the factory owns the
 /// Codex process adapter and does not leak it back through this value.
+nonisolated enum CodexApprovalDecision: Sendable, Equatable {
+    case allow
+    case reject
+    case cancelled
+}
+
 nonisolated struct CodexLLMExecutionConfiguration: Sendable {
     let turboThreadID: String
     let workspaceName: String?
@@ -42,6 +77,11 @@ nonisolated struct CodexLLMExecutionConfiguration: Sendable {
     let approvalRequested: @MainActor @Sendable (
         ApprovalRequest
     ) async -> Void
+    /// ACP supplies this resolver; desktop UI keeps it nil and resolves
+    /// approvals through its observable store.
+    let approvalResolution: (@MainActor @Sendable (
+        ApprovalRequest
+    ) async -> CodexApprovalDecision)?
 
     init(
         turboThreadID: String,
@@ -62,7 +102,10 @@ nonisolated struct CodexLLMExecutionConfiguration: Sendable {
         activityEnded: @escaping @MainActor @Sendable (String) async -> Void,
         approvalRequested: @escaping @MainActor @Sendable (
             ApprovalRequest
-        ) async -> Void
+        ) async -> Void,
+        approvalResolution: (@MainActor @Sendable (
+            ApprovalRequest
+        ) async -> CodexApprovalDecision)? = nil
     ) {
         self.turboThreadID = turboThreadID
         self.workspaceName = workspaceName
@@ -78,6 +121,7 @@ nonisolated struct CodexLLMExecutionConfiguration: Sendable {
         self.activityStarted = activityStarted
         self.activityEnded = activityEnded
         self.approvalRequested = approvalRequested
+        self.approvalResolution = approvalResolution
     }
 }
 
@@ -136,6 +180,7 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
             reasoningStreamRelay: reasoningStreamRelay,
             diagnosticsChanged: configuration.diagnosticsChanged,
             contextChanged: configuration.contextChanged,
+            usageChanged: configuration.usageChanged,
             approvalRequested: configuration.approvalRequested
         )
     }
@@ -169,7 +214,8 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
             },
             activityStarted: configuration.activityStarted,
             activityEnded: configuration.activityEnded,
-            approvalRequested: configuration.approvalRequested
+            approvalRequested: configuration.approvalRequested,
+            approvalResolution: configuration.approvalResolution
         )
     }
 
@@ -205,6 +251,9 @@ actor LLMRuntime {
     private let foundationModelsRuntime: FoundationModelsSessionRuntime?
     private var activeTurnID: TurnID?
     private var activeSession: (any BackendSession)?
+    /// Focused ACP tests use this counter to prove that ordinary follow-up
+    /// turns reuse the provider session instead of rebuilding its cache.
+    private(set) var foundationModelsRebuildCount = 0
 #if DEBUG
     /// Developer diagnostics use a separate ephemeral model, but still share
     /// the runtime's single-execution gate with production adapters.
@@ -366,6 +415,7 @@ actor LLMRuntime {
             projection: projection,
             events: events
         )
+        foundationModelsRebuildCount += 1
         return true
     }
 

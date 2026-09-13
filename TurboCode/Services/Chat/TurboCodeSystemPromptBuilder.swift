@@ -81,7 +81,10 @@ nonisolated enum TurboCodeSystemPromptBuilder {
                 .runsDelegatedTasksInBackground
         )
         if !toolGuidance.isEmpty {
-            sections.append("Tool guidelines:\n" + toolGuidance.joined(separator: "\n"))
+            sections.append(
+                "Rules for getting work done:\n"
+                    + toolGuidance.joined(separator: "\n")
+            )
         }
 
         if tools.contains(.delegateTask), !context.workers.isEmpty {
@@ -99,11 +102,13 @@ nonisolated enum TurboCodeSystemPromptBuilder {
                 .map { "- \($0.name): \($0.description)" }
                 .joined(separator: "\n")
             sections.append("""
-                Skills:
+                Markdown skills (SKILL.md):
                 \(catalog)
-                Load a matching skill when its description applies. Treat /skill <name>
-                and /<skill-name> as explicit activation requests, and /skills as a
-                request to list the advertised skills.
+                Load a matching Markdown skill when its description applies. Treat
+                /skill <name> and /<skill-name> as explicit activation requests.
+                /skills lists exactly this Markdown catalog. Foundation on-demand
+                integrations (including MCP), plugin tools, and ordinary tools are
+                separate capabilities and are not Markdown skills.
                 """)
         }
 
@@ -116,6 +121,12 @@ nonisolated enum TurboCodeSystemPromptBuilder {
                 file-change tools whenever they cover the operation. TurboCode
                 executes their safety checks and presents their review receipts.
                 """)
+        } else if context.role == .delegate {
+            sections.append("""
+                Delegated task:
+                Complete the bounded assignment given by the coordinator. Return the
+                outcome, relevant changes, verification, and any unresolved blocker.
+                """)
         }
 
         if !context.workspaceRoot.isEmpty {
@@ -124,7 +135,7 @@ nonisolated enum TurboCodeSystemPromptBuilder {
                 \(context.workspaceRoot)
                 This workspace is the default working directory.
                 You can create and maintain TurboCode TypeScript plugins autonomously.
-                The SDK, documentation, and examples are installed in ~/.turbocode/sdk;
+                The SDK, documentation, and examples are installed in ~/.turbocode/sdk/@granvalenti/turbocode-sdk;
                 inspect them to learn the current plugin contract.
                 TypeScript plugins are installed in ~/.turbocode/plugins.
                 """)
@@ -153,36 +164,50 @@ nonisolated enum TurboCodeSystemPromptBuilder {
     }
 
     private static let identitySection = """
-        You are TurboCode, a native macOS agent.
+        Role:
+        You are TurboCode, a native macOS coding agent. Work with the user until
+        their requested outcome is handled.
         """
 
     private static func behaviorSection(
         for context: TurboCodeSystemPromptContext
     ) -> String {
-        var guidelines = [
+        var workingPrinciples = [
+            "Treat a clear request for action as authorization to perform the work within the available capabilities and safety boundaries. Make reasonable assumptions when they do not change the intended outcome; ask only when a missing choice would materially change the result or an action requires approval.",
+            "Continue through the necessary inspection, implementation, and verification. Do not stop after proposing work when the request already authorizes it.",
             "Work from evidence in the active workspace. Use the available tools when inspection or execution is required; never claim to have read, changed, built, or tested something unless the operation succeeded.",
             "Keep changes focused and reviewable. Respect TurboCode workspace boundaries, revision checks, approval gates, and tool restrictions.",
-            "Respond in the user's language and lead with the outcome."
+            "Use only the tools, skills, workers, and integrations exposed by the active profile."
+        ]
+
+        var communication = [
+            "Respond in the user's language and lead with the outcome.",
+            "Use clear paragraphs and plain language. Match the depth and structure of the response to the request and the task's actual complexity; use lists or headings when they improve readability."
         ]
 
         switch context.agentTuning.agent.responseStyle {
         case .concise:
-            guidelines.append("Keep responses concise and include only details needed to act or verify.")
+            communication.append("Keep responses concise and include only details needed to act or verify.")
         case .balanced:
-            // Balanced is the neutral default. The shared personality already
-            // adapts depth to the request, so another length directive here
-            // would reintroduce a fixed stylistic bias.
+            // The shared communication rule already makes balanced adaptive,
+            // so the default does not add another fixed depth directive.
             break
         case .detailed:
-            guidelines.append("Explain decisions and verification in detail without repeating tool output.")
+            communication.append("Explain decisions and verification in detail without repeating tool output.")
         }
         if context.agentTuning.agent.verifiesChanges {
-            guidelines.append("After changing source code, run the most focused available build or test that verifies the change.")
+            workingPrinciples.append("After changing source code, run the smallest meaningful build or test that verifies the behavior. Broaden verification only when failures or remaining risks justify it.")
         }
         if context.backend == .foundationApple {
-            guidelines.append("Use short plain-text responses; use Markdown only when it materially improves readability.")
+            communication.append("Use short plain-text responses; use Markdown only when it materially improves readability.")
         }
-        return "Guidelines:\n" + guidelines.map { "- \($0)" }.joined(separator: "\n")
+        return """
+        Working principles:
+        \(workingPrinciples.map { "- \($0)" }.joined(separator: "\n"))
+
+        Communication:
+        \(communication.map { "- \($0)" }.joined(separator: "\n"))
+        """
     }
 
     /// Apple On-Device has no request transport for effort, so it retains an
@@ -257,7 +282,7 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             lines.append("- read_file returns numbered UTF-8 ranges with revisions and can request approval for external paths.")
         }
         if tools.contains(.searchWorkspace) {
-            lines.append("- Use ripgrep flexibly to discover files or search workspace content; narrow its optional filters only when useful.")
+            lines.append("- Use the ripgrep tool first to discover files or search workspace text; narrow its optional filters only when useful.")
         }
         if tools.contains(.editFile) {
             lines.append("- Prefer edit_file when its native Review and Undo widget is useful; existing files require the revision returned by read_file. Bash remains available for file changes.")
@@ -268,8 +293,17 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         if tools.contains(.xcodeProject) {
             lines.append("- xcode_project provides Xcode discovery, builds, tests, and compact diagnostics.")
         }
+        if tools.contains(.xcodeMCP) {
+            lines.append("- xcode_mcp discovers the tools published by Xcode. Call list_tools first, then call an exact advertised tool name with a JSON object; this is distinct from TurboCode's local xcode_project wrapper.")
+        }
         if tools.contains(.bash) {
-            lines.append("- bash runs arbitrary zsh commands. It discovers the supported Node runtime. Relative paths start at the reported Working directory and cd does not persist between calls; external filesystem access pauses for host approval.")
+            if !tools.contains(.searchWorkspace) {
+                // The standalone and delegate defaults expose Bash, while the
+                // dedicated Ripgrep capability is opt-in. Keep the preferred
+                // search primitive available without advertising a missing tool.
+                lines.append("- For workspace text or file searches, use bash with rg or rg --files first. If rg is unavailable, use the closest available alternative without stopping.")
+            }
+            lines.append("- bash runs arbitrary zsh commands. Treat command text as code and quote arguments safely. It discovers the supported Node runtime. Relative paths start at the reported Working directory and cd does not persist between calls; external filesystem access pauses for host approval.")
         }
         if tools.contains(.swiftPackageManager) {
             lines.append("- swift_package_manager provides structured Swift package initialization, dependency, build, test, run, cleanup, and inspection actions.")

@@ -688,6 +688,12 @@ struct AgentSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
+                Toggle("Xcode MCP", isOn: s.agentTuning.experimental.xcodeMCPEnabled)
+
+                Text("Allows the active model to discover and call Xcode's MCP tools through xcrun mcpbridge. Enable external agents in Xcode Intelligence settings first.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Toggle(
                     "Allow third-party plugins",
                     isOn: s.agentTuning.experimental.thirdPartyPluginsEnabled

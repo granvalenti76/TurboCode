@@ -118,6 +118,16 @@ Safari MCP is a coordinator-only capability. It is never passed to delegated
 workers, whose tool surface remains restricted to the configured workspace and
 worker profile boundaries.
 
+### `xcode_mcp`
+
+Discovers and calls the tools exposed by Xcode's official MCP service through
+`xcrun mcpbridge`. It is disabled by default and requires **Agents >
+Experimental > Xcode MCP**, plus Xcode's **Allow external agents to use Xcode
+tools** permission. Use `list_tools` first, then `call` with an exact advertised
+tool name and a JSON object. This gateway is distinct from `xcode_project`:
+the latter is TurboCode's local compact build/test wrapper, while this tool
+uses Xcode's live MCP service. It is coordinator-only and is never delegated.
+
 ## Build, test, packages, and Git
 
 ### `xcode_project`
@@ -151,15 +161,20 @@ structured tool covers the operation. Time, output, network access, and writable
 paths follow Agent Settings. TurboCode prefers its Xcode, SwiftPM, Git, search,
 and file tools whenever they apply.
 
-## Skills and orchestration
+## Markdown skills and orchestration
 
-TurboCode's product-level skills are provider-neutral `SKILL.md` instruction
-files. Their name and description form the session catalog; their body is loaded
-only when relevant. Foundation Models may use an internal dynamic-instructions
-adapter, but that implementation detail does not define another installation
-format. A user-created skill belongs at `.agents/skills/<name>/SKILL.md` in the
-active workspace. Keep its instructions self-contained and use clear
-workspace-relative paths for any supporting project files.
+TurboCode's product-level Markdown skills are provider-neutral `SKILL.md`
+instruction files. Their name and description form the active profile's session
+catalog; their body is loaded only when relevant. A user-created skill belongs at
+`.agents/skills/<name>/SKILL.md` in the active workspace. Keep its instructions
+self-contained and use clear workspace-relative paths for any supporting project
+files.
+
+Foundation on-demand integrations are a separate catalog. In the current
+implementation, `/mcp` asks the model to list integrations registered through
+Foundation Models' `Skills` mechanism, such as Safari MCP. This internal
+implementation detail does not change the Markdown `SKILL.md` format. Plugin
+tools and ordinary tools are not members of either catalog.
 
 ### `load_skill`
 
@@ -167,6 +182,10 @@ Loads the instructions of one installed skill on demand. The tool is registered
 only when the active profile has access to at least one skill. `/skill <name>` and
 `/<name>` are explicit host-side selections and do not depend on the model first
 choosing the tool itself.
+
+`/skills` lists only the Markdown skills available to the active profile. It does
+not list Foundation on-demand integrations, MCP tools, plugin tools, or ordinary
+tools. `/mcp` is the model-facing request for the separate Foundation catalog.
 
 ### `create_skill`
 

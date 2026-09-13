@@ -20,6 +20,21 @@ struct ChatStoreCharacterizationTests {
         #expect(request.externalTargetDetails == "/tmp/source.txt\n/tmp/destination.txt")
     }
 
+    @Test("Bash approval explains the complete rerun and its limit")
+    func bashApprovalPresentationExplainsRerun() {
+        let request = ApprovalRequest(
+            id: "bash-external",
+            operation: "workspace.external.Bash",
+            path: "/private/tmp/external.txt",
+            summary: "External Bash access",
+            command: "cat /private/tmp/external.txt"
+        )
+
+        #expect(request.displaySummary == "Allow Bash to rerun this complete command with external filesystem access?")
+        #expect(request.isCompleteCommandRerun)
+        #expect(request.externalTargetDetails == nil)
+    }
+
     @Test("Approval requests are presented once in FIFO order")
     func approvalQueueIsFIFOAndDeduplicated() {
         let store = ChatStore(
