@@ -55,11 +55,42 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
         let contextChanged: @MainActor @Sendable (
             LlamaContextUsage?
         ) async -> Void
+        let usageChanged: @MainActor @Sendable (
+            Usage?, ContextUsage?
+        ) async -> Void
         let liveContentChanged: @MainActor @Sendable (String) async -> Void
         let liveReasoningChanged: @MainActor @Sendable (String) async -> Void
         let approvalRequested: @MainActor @Sendable (
             ApprovalRequest
         ) async -> Void
+
+        init(
+            diagnosticsChanged: @escaping @MainActor @Sendable (
+                String?
+            ) async -> Void,
+            contextChanged: @escaping @MainActor @Sendable (
+                LlamaContextUsage?
+            ) async -> Void,
+            usageChanged: @escaping @MainActor @Sendable (
+                Usage?, ContextUsage?
+            ) async -> Void = { _, _ in },
+            liveContentChanged: @escaping @MainActor @Sendable (
+                String
+            ) async -> Void,
+            liveReasoningChanged: @escaping @MainActor @Sendable (
+                String
+            ) async -> Void,
+            approvalRequested: @escaping @MainActor @Sendable (
+                ApprovalRequest
+            ) async -> Void
+        ) {
+            self.diagnosticsChanged = diagnosticsChanged
+            self.contextChanged = contextChanged
+            self.usageChanged = usageChanged
+            self.liveContentChanged = liveContentChanged
+            self.liveReasoningChanged = liveReasoningChanged
+            self.approvalRequested = approvalRequested
+        }
     }
 
     func run(
@@ -125,10 +156,11 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
                         runID: runID,
                         usage: snapshot.usage
                     )
-                } else if request.backend == .llamaServer {
+                } else {
                     // Llama reports cumulative usage on the stream's trailing
                     // snapshot. Keep only the latest value locally so metrics
-                    // collection cannot add one actor hop per token.
+                    // collection cannot add one actor hop per token. The same
+                    // replacement rule also protects remote provider samples.
                     latestUsage = snapshot.usage
                     latestInputTokenCount = snapshot.usage.input.totalTokenCount
                 }
@@ -232,6 +264,24 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
                     usedTokens: latestInputTokenCount,
                     contextSize: llamaContextSize
                 )
+            )
+        }
+
+        if let latestUsage {
+            let context = request.backend == .llamaServer
+                ? llamaContextSize.flatMap { size in
+                    latestInputTokenCount.map {
+                        ContextUsage(usedTokens: $0, contextSize: size)
+                    }
+                }
+                : nil
+            await events.usageChanged(
+                Usage(
+                    inputTokens: latestUsage.input.totalTokenCount,
+                    cachedInputTokens: latestUsage.input.cachedTokenCount,
+                    outputTokens: latestUsage.output.totalTokenCount
+                ),
+                context
             )
         }
 
@@ -360,6 +410,9 @@ actor NativeBackendSession: BackendSession {
     private let contextChanged: @MainActor @Sendable (
         LlamaContextUsage?
     ) async -> Void
+    private let usageChanged: @MainActor @Sendable (
+        Usage?, ContextUsage?
+    ) async -> Void
     private let approvalRequested: @MainActor @Sendable (
         ApprovalRequest
     ) async -> Void
@@ -379,6 +432,9 @@ actor NativeBackendSession: BackendSession {
         contextChanged: @escaping @MainActor @Sendable (
             LlamaContextUsage?
         ) async -> Void = { _ in },
+        usageChanged: @escaping @MainActor @Sendable (
+            Usage?, ContextUsage?
+        ) async -> Void = { _, _ in },
         approvalRequested: @escaping @MainActor @Sendable (
             ApprovalRequest
         ) async -> Void = { _ in }
@@ -392,6 +448,7 @@ actor NativeBackendSession: BackendSession {
         self.reasoningStreamRelay = reasoningStreamRelay
         self.diagnosticsChanged = diagnosticsChanged
         self.contextChanged = contextChanged
+        self.usageChanged = usageChanged
         self.approvalRequested = approvalRequested
     }
 
@@ -408,6 +465,7 @@ actor NativeBackendSession: BackendSession {
         let reasoningStreamRelay = self.reasoningStreamRelay
         let diagnosticsChanged = self.diagnosticsChanged
         let contextChanged = self.contextChanged
+        let usageChanged = self.usageChanged
         let approvalRequested = self.approvalRequested
 
         // The child inherits this actor only long enough to capture immutable
@@ -435,6 +493,7 @@ actor NativeBackendSession: BackendSession {
                 events: NativeResponseRunner.Events(
                     diagnosticsChanged: diagnosticsChanged,
                     contextChanged: contextChanged,
+                    usageChanged: usageChanged,
                     liveContentChanged: { content in
                         await events.emit(
                             .assistantTextChanged(

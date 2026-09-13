@@ -483,6 +483,162 @@ nonisolated struct ContextUsage: Codable, Hashable, Sendable {
     }
 }
 
+/// A provider-neutral usage sample belonging to one conversation request.
+/// Replacing samples by request ID prevents cumulative stream snapshots from
+/// inflating the session totals.
+nonisolated struct ComposerUsageSample: Codable, Equatable, Sendable {
+    let requestID: String
+    let backend: String
+    let inputTokens: Int?
+    let cachedInputTokens: Int?
+    let outputTokens: Int?
+    let recordedAt: Date
+
+    init(
+        requestID: String,
+        backend: String,
+        inputTokens: Int? = nil,
+        cachedInputTokens: Int? = nil,
+        outputTokens: Int? = nil,
+        recordedAt: Date = .now
+    ) {
+        self.requestID = requestID
+        self.backend = backend
+        self.inputTokens = inputTokens.map { max(0, $0) }
+        self.cachedInputTokens = cachedInputTokens.map { max(0, $0) }
+        self.outputTokens = outputTokens.map { max(0, $0) }
+        self.recordedAt = recordedAt
+    }
+}
+
+/// Durable, conversation-scoped statistics displayed by the composer.
+/// Missing fields remain missing so the UI can label partial coverage.
+nonisolated struct ComposerSessionStatistics: Codable, Equatable, Sendable {
+    let conversationID: String
+    private(set) var samples: [String: ComposerUsageSample]
+    private(set) var context: ContextUsage?
+    private(set) var contextBackend: String?
+    private(set) var lastUpdatedAt: Date?
+
+    init(
+        conversationID: String,
+        samples: [String: ComposerUsageSample] = [:],
+        context: ContextUsage? = nil,
+        contextBackend: String? = nil,
+        lastUpdatedAt: Date? = nil
+    ) {
+        self.conversationID = conversationID
+        self.samples = samples
+        self.context = context
+        self.contextBackend = contextBackend
+        self.lastUpdatedAt = lastUpdatedAt
+    }
+
+    var requestCount: Int { samples.count }
+
+    var measuredInputRequestCount: Int {
+        samples.values.filter { $0.inputTokens != nil }.count
+    }
+
+    var measuredOutputRequestCount: Int {
+        samples.values.filter { $0.outputTokens != nil }.count
+    }
+
+    var measuredCacheRequestCount: Int {
+        samples.values.filter {
+            guard let input = $0.inputTokens, input > 0 else { return false }
+            return $0.cachedInputTokens != nil
+        }.count
+    }
+
+    var inputTokens: Int? { sum(samples.values.compactMap(\.inputTokens)) }
+    var cachedInputTokens: Int? { sum(samples.values.compactMap(\.cachedInputTokens)) }
+    var outputTokens: Int? { sum(samples.values.compactMap(\.outputTokens)) }
+
+    /// The denominator includes only requests with a matching cache sample.
+    var cacheHitFraction: Double? {
+        let measured = samples.values.compactMap { sample -> (Int, Int)? in
+            guard let input = sample.inputTokens,
+                  input > 0,
+                  let cached = sample.cachedInputTokens else { return nil }
+            return (input, min(input, cached))
+        }
+        let denominator = measured.reduce(0) { $0 + $1.0 }
+        guard denominator > 0 else { return nil }
+        return Double(measured.reduce(0) { $0 + $1.1 }) / Double(denominator)
+    }
+
+    var totalTokens: Int? {
+        guard inputTokens != nil || outputTokens != nil else { return nil }
+        return (inputTokens ?? 0) + (outputTokens ?? 0)
+    }
+
+    var hasPartialUsage: Bool {
+        measuredInputRequestCount < requestCount
+            || measuredOutputRequestCount < requestCount
+    }
+
+    var hasPartialCacheCoverage: Bool {
+        measuredCacheRequestCount < measuredInputRequestCount
+    }
+
+    mutating func replace(
+        _ sample: ComposerUsageSample,
+        context: ContextUsage? = nil,
+        contextBackend: String? = nil
+    ) {
+        samples[sample.requestID] = sample
+        if let context {
+            self.context = context
+            self.contextBackend = contextBackend
+        }
+        lastUpdatedAt = sample.recordedAt
+    }
+
+    /// Context is a current-model snapshot, not a cumulative total.
+    mutating func invalidateContext() {
+        context = nil
+        contextBackend = nil
+    }
+
+    private func sum(_ values: [Int]) -> Int? {
+        values.isEmpty ? nil : values.reduce(0, +)
+    }
+}
+
+/// Pure reducer used by the application-owned session statistics store.
+nonisolated struct ComposerSessionStatisticsReducer: Sendable {
+    private(set) var statistics: ComposerSessionStatistics
+
+    init(conversationID: String) {
+        statistics = ComposerSessionStatistics(conversationID: conversationID)
+    }
+
+    init(statistics: ComposerSessionStatistics) {
+        self.statistics = statistics
+    }
+
+    mutating func apply(
+        _ sample: ComposerUsageSample,
+        context: ContextUsage? = nil,
+        contextBackend: String? = nil
+    ) {
+        if context != nil, sample.backend != contextBackend {
+            statistics.replace(sample)
+        } else {
+            statistics.replace(
+                sample,
+                context: context,
+                contextBackend: contextBackend
+            )
+        }
+    }
+
+    mutating func invalidateContext() {
+        statistics.invalidateContext()
+    }
+}
+
 /// Events emitted by runtime adapters after provider-specific normalization.
 nonisolated enum AgentRuntimeEvent: Sendable {
     case started(TurnRequest)

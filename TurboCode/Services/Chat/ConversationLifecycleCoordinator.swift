@@ -17,6 +17,7 @@ final class ConversationLifecycleCoordinator {
     private let profiles: ProfileSelectionCoordinator
     private let sessions: ConversationSessionCoordinator
     private let transitionBarrier: RuntimeTransitionBarrier
+    private let statistics: ComposerSessionStatisticsStore
 
     init(
         conversations: ConversationStore,
@@ -30,7 +31,8 @@ final class ConversationLifecycleCoordinator {
         runtime: AgentRuntime,
         profiles: ProfileSelectionCoordinator,
         sessions: ConversationSessionCoordinator,
-        transitionBarrier: RuntimeTransitionBarrier
+        transitionBarrier: RuntimeTransitionBarrier,
+        statistics: ComposerSessionStatisticsStore
     ) {
         self.conversations = conversations
         self.timeline = timeline
@@ -44,6 +46,7 @@ final class ConversationLifecycleCoordinator {
         self.profiles = profiles
         self.sessions = sessions
         self.transitionBarrier = transitionBarrier
+        self.statistics = statistics
     }
 
     /// Selects thread identity only after every provider and profile operation
@@ -58,6 +61,7 @@ final class ConversationLifecycleCoordinator {
                 reviewDrafts.discardAll()
             }
             conversations.activeThreadID = id
+            statistics.activate(conversationID: id)
             _ = await runtime.apply(.switchThread(threadID: id))
         }
     }
@@ -91,6 +95,7 @@ final class ConversationLifecycleCoordinator {
                 mode: mode
             )
             _ = await runtime.apply(.switchThread(threadID: thread.id))
+            statistics.activate(conversationID: thread.id)
             timeline.reset()
             resetActivityPresentation()
             await profiles.rebuildSession(keepingHistory: false)
@@ -118,6 +123,10 @@ final class ConversationLifecycleCoordinator {
         workbench.dismissTranscript()
         reviewDrafts.discardAll()
         conversations.activeThreadID = id
+        statistics.activate(
+            conversationID: id,
+            restored: snapshot.statistics
+        )
         _ = await runtime.apply(.restore(threadID: id))
         timeline.restore(snapshot.blocks)
         resetActivityPresentation()
@@ -140,7 +149,8 @@ final class ConversationLifecycleCoordinator {
         await profiles.rebuildSession(
             keepingHistory: false,
             restoringHistory: restoredHistory,
-            restoringProjection: snapshot.contextProjection
+            restoringProjection: snapshot.contextProjection,
+            invalidatingComposerContext: false
         )
         await runtime.restoreSteering(snapshot.steering)
         await AgentDiagnosticsRecorder.shared.recordBoundary(
@@ -186,6 +196,7 @@ final class ConversationLifecycleCoordinator {
             return
         }
         presentation.errorMessage = nil
+        statistics.remove(conversationID: id)
         guard deletesActiveThread else { return }
 
         conversations.activeThreadID = nil
@@ -221,6 +232,7 @@ final class ConversationLifecycleCoordinator {
         guard created else { return }
 
         if let threadID = conversations.activeThreadID {
+            statistics.activate(conversationID: threadID)
             _ = await runtime.apply(.switchThread(threadID: threadID))
         }
         guard !hasOrphanedBlocks else { return }

@@ -15,6 +15,20 @@ options are also available in **TurboCode > Settings > Agents**.
 
 Never place credentials in a TurboCode JSON file.
 
+## Composer profiles
+
+The composer lists On-device, Codex, Llama, and DeepSeek, followed by custom
+profiles. Each default opens a reasoning submenu for that destination; a
+provider-managed configuration uses Automatic. Choosing an option selects the
+profile and effort together. The retired On-Device Delegation entry is absent;
+selecting a profile also exits that mode in older conversations.
+
+In **Profiles > Llama > Display name**, Save updates only the model entry's
+`name` in `models.json`. It preserves `id`, `modelName`, endpoint, and capability
+settings. The visible name refreshes without rebuilding the conversation.
+In **Profiles > Codex > Default model**, choose the direct profile's model;
+custom Codex profiles retain their own model configuration.
+
 ## Repository map model capability
 
 Each entry in `models.json` may declare the context budget and repository-map

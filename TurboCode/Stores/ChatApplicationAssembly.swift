@@ -52,6 +52,9 @@ final class ChatApplicationAssembly {
         let runtimeProjection = AgentRuntimeProjectionStore()
         let composer = ComposerViewModel()
         let presentation = ChatPresentationViewModel()
+        let statistics = ComposerSessionStatisticsStore(
+            presentation: presentation
+        )
         let agentRuntime = AgentRuntime { snapshot in
             await runtimeProjection.apply(snapshot)
             await timeline.applyRuntimeSnapshot(snapshot)
@@ -99,7 +102,8 @@ final class ChatApplicationAssembly {
             modelRuntime: modelRuntime,
             llmRuntime: llmRuntime,
             runtime: agentRuntime,
-            persistence: conversationPersistence
+            persistence: conversationPersistence,
+            statistics: statistics
         )
         let reviewCoordinator = ReviewCoordinator(
             timeline: timeline,
@@ -152,7 +156,8 @@ final class ChatApplicationAssembly {
             agentRuntime: agentRuntime,
             llmRuntime: llmRuntime,
             runtimeProjection: runtimeProjection,
-            responseCoordinator: responseCoordinator
+            responseCoordinator: responseCoordinator,
+            statistics: statistics
         )
         let backgroundDelegationCoordinator = BackgroundDelegationCoordinator(
             supervisor: DelegatedTaskSupervisor(),
@@ -198,7 +203,8 @@ final class ChatApplicationAssembly {
             runtime: agentRuntime,
             profiles: profileSelectionCoordinator,
             sessions: sessionCoordinator,
-            transitionBarrier: transitionBarrier
+            transitionBarrier: transitionBarrier,
+            statistics: statistics
         )
         let workspaceLifecycleCoordinator = WorkspaceLifecycleCoordinator(
             workspace: workspace,
@@ -244,7 +250,8 @@ final class ChatApplicationAssembly {
             sessions: sessionCoordinator,
             profiles: profileSelectionCoordinator,
             lifecycle: conversationLifecycleCoordinator,
-            steering: steeringCoordinator
+            steering: steeringCoordinator,
+            statistics: statistics
         )
         steeringCoordinator.setDeliveryHandler { [weak messageSendCoordinator] batch, requests in
             guard let messageSendCoordinator else { return .uncertain }

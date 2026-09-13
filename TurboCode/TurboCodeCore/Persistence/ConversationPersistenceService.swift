@@ -30,7 +30,9 @@ nonisolated struct ConversationPersistenceService: Sendable {
             modelBackend: existing?.modelBackend ?? defaultModelBackend,
             blocks: existing?.blocks ?? [],
             transcript: existing?.transcript,
-            steering: existing?.steering ?? .empty
+            contextProjection: existing?.contextProjection ?? .empty,
+            steering: existing?.steering ?? .empty,
+            statistics: existing?.statistics
         )
         try await repository.save(snapshot)
     }

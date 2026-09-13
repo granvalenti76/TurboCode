@@ -12,6 +12,7 @@ final class ConversationSessionCoordinator {
     private let llmRuntime: LLMRuntime
     private let runtime: AgentRuntime
     private let persistence: ConversationPersistenceService
+    private let statistics: ComposerSessionStatisticsStore
 
     init(
         conversations: ConversationStore,
@@ -19,7 +20,8 @@ final class ConversationSessionCoordinator {
         modelRuntime: ModelRuntimeStore,
         llmRuntime: LLMRuntime,
         runtime: AgentRuntime,
-        persistence: ConversationPersistenceService
+        persistence: ConversationPersistenceService,
+        statistics: ComposerSessionStatisticsStore
     ) {
         self.conversations = conversations
         self.timeline = timeline
@@ -27,6 +29,7 @@ final class ConversationSessionCoordinator {
         self.llmRuntime = llmRuntime
         self.runtime = runtime
         self.persistence = persistence
+        self.statistics = statistics
     }
 
     /// Value checkpoint used by context policies that must inspect the active
@@ -54,6 +57,7 @@ final class ConversationSessionCoordinator {
             return
         }
         let backend = modelRuntime.activeBackend
+        let composerStatistics = statistics.activeStatistics
         let steering = await runtime.steeringSnapshot
         let transcript = backend == .codex
             ? nil
@@ -69,7 +73,8 @@ final class ConversationSessionCoordinator {
             // Models transcript would contaminate a later Codex restoration.
             transcript: transcript,
             contextProjection: contextProjection,
-            steering: steering
+            steering: steering,
+            statistics: composerStatistics
         )
 
         do {

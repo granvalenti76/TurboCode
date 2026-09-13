@@ -14,10 +14,7 @@ final class CodexRuntimeStore {
     var model: CodexModelDescriptor?
     var models: [CodexModelDescriptor] = []
     var loginURL: URL?
-    var reasoningEffort: CodexReasoningEffort =
-        UserDefaults.standard.string(forKey: "codexReasoningEffort")
-            .flatMap(CodexReasoningEffort.init(rawValue:))
-        ?? .medium
+    var reasoningEffort: CodexReasoningEffort
 
     var reasoningOptions: [CodexReasoningOption] {
         model?.supportedReasoningEfforts
@@ -36,9 +33,23 @@ final class CodexRuntimeStore {
     /// Execution code never reaches back into this observable facade mid-turn.
     var preferredExecutionModelID: String { preferredModelID }
 
+    /// Editing the built-in profile changes its next-turn preference without
+    /// activating Codex or overwriting the model of an active custom profile.
+    func configureDefaultModel(id: String, updateActiveModel: Bool) {
+        guard let selected = models.first(where: { $0.id == id }) else { return }
+        preferredModelID = selected.id
+        preferences.set(selected.id, forKey: "codexModelID")
+        preferences.set(selected.displayName, forKey: "codexModelDisplayName")
+        if !selected.supportedReasoningEfforts.contains(where: { $0.reasoningEffort == reasoningEffort }) {
+            reasoningEffort = selected.defaultReasoningEffort
+            preferences.set(reasoningEffort.rawValue, forKey: "codexReasoningEffort")
+        }
+        if updateActiveModel { model = selected }
+    }
+
     var displayName: String {
         model?.displayName
-            ?? UserDefaults.standard.string(forKey: "codexModelDisplayName")
+            ?? preferences.string(forKey: "codexModelDisplayName")
             ?? "Luna"
     }
 
@@ -48,17 +59,25 @@ final class CodexRuntimeStore {
     }
 
     let executionEngine: CodexExecutionEngine
-    private var preferredModelID: String =
-        UserDefaults.standard.string(forKey: "codexModelID")
-            ?? CodexAppServerClient.lunaModelID
-    init(executionEngine: CodexExecutionEngine = CodexExecutionEngine()) {
+    private var preferredModelID: String
+    private let preferences: UserDefaults
+
+    init(
+        executionEngine: CodexExecutionEngine = CodexExecutionEngine(),
+        preferences: UserDefaults = .standard
+    ) {
         self.executionEngine = executionEngine
+        self.preferences = preferences
+        reasoningEffort = preferences.string(forKey: "codexReasoningEffort")
+            .flatMap(CodexReasoningEffort.init(rawValue:)) ?? .medium
+        preferredModelID = preferences.string(forKey: "codexModelID")
+            ?? CodexAppServerClient.lunaModelID
     }
 
     func select(modelID: String? = nil) async throws {
         if let modelID {
             preferredModelID = modelID
-            UserDefaults.standard.set(modelID, forKey: "codexModelID")
+            preferences.set(modelID, forKey: "codexModelID")
         }
         connectionState = .connecting
         let snapshot = try await executionEngine.prepareCodex(
@@ -104,7 +123,7 @@ final class CodexRuntimeStore {
             $0.reasoningEffort == effort
         }) else { return }
         reasoningEffort = effort
-        UserDefaults.standard.set(
+        preferences.set(
             effort.rawValue,
             forKey: "codexReasoningEffort"
         )
@@ -179,11 +198,11 @@ final class CodexRuntimeStore {
         model = snapshot.selectedModel
         if persistsPreference {
             preferredModelID = snapshot.selectedModel.id
-            UserDefaults.standard.set(
+            preferences.set(
                 snapshot.selectedModel.id,
                 forKey: "codexModelID"
             )
-            UserDefaults.standard.set(
+            preferences.set(
                 snapshot.selectedModel.displayName,
                 forKey: "codexModelDisplayName"
             )
@@ -193,7 +212,7 @@ final class CodexRuntimeStore {
                $0.reasoningEffort == reasoningEffort
            }) {
             reasoningEffort = snapshot.selectedModel.defaultReasoningEffort
-            UserDefaults.standard.set(
+            preferences.set(
                 reasoningEffort.rawValue,
                 forKey: "codexReasoningEffort"
             )

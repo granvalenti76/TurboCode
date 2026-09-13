@@ -290,8 +290,28 @@ public final class ChatStore {
         profileSelectionCoordinator.reopenCodexLoginPage()
     }
 
-    func selectBuiltInProfile(_ id: ProfileBaseModelID) async {
-        await profileSelectionCoordinator.selectBuiltInProfile(id)
+    func selectBuiltInProfile(
+        _ id: ProfileBaseModelID,
+        reasoning: ReasoningEffort? = nil,
+        codexReasoning: CodexReasoningEffort? = nil
+    ) async {
+        await profileSelectionCoordinator.selectBuiltInProfile(
+            id, reasoning: reasoning, codexReasoning: codexReasoning
+        )
+    }
+
+    /// Reflect a persisted label edit without rebuilding the provider session.
+    func updateRemoteModelDisplayName(id: String, name: String) {
+        modelRuntimeStore.updateRemoteModelDisplayName(id: id, name: name)
+    }
+
+    func configureCodexDefaultModel(id: String) {
+        guard !busy else { return }
+        let isDirectCodex = activeBackend == .codex && activeDynamicProfileID == nil
+        codexRuntimeStore.configureDefaultModel(id: id, updateActiveModel: isDirectCodex)
+        if isDirectCodex {
+            modelRuntimeStore.composerModel = "Codex · \(codexRuntimeStore.displayName)"
+        }
     }
 
     func selectDynamicProfile(_ id: UUID) async {

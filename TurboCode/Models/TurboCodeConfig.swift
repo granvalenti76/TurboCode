@@ -569,6 +569,21 @@ public final class TurboCodeConfig {
         try encoder.encode(validated).write(to: modelsURL, options: .atomic)
     }
 
+    /// Reload immediately before writing so a display-name edit cannot replace
+    /// endpoint or capability changes made externally while Profiles was open.
+    func updateRemoteModelDisplayName(_ name: String, for id: String) throws -> [RemoteModelConfig] {
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { throw RemoteModelDisplayNameError.empty }
+        let loaded = try loadRemoteModels()
+        var models = loaded.isEmpty ? RemoteModelConfig.defaults : loaded
+        guard let index = models.firstIndex(where: { $0.id == id }) else {
+            throw RemoteModelDisplayNameError.unavailable
+        }
+        models[index].name = normalized
+        try saveRemoteModels(models)
+        return models
+    }
+
     private func migrateRemoteModels() throws {
         var models: [RemoteModelConfig]
         if FileManager.default.fileExists(atPath: modelsURL.path) {
@@ -703,6 +718,18 @@ nonisolated extension RemoteRepositoryMapCapability {
         case .none: nil
         case .compact: .compact
         case .enhanced: .enhanced
+        }
+    }
+}
+
+nonisolated enum RemoteModelDisplayNameError: LocalizedError {
+    case empty
+    case unavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .empty: "Enter a display name."
+        case .unavailable: "This model is no longer configured."
         }
     }
 }

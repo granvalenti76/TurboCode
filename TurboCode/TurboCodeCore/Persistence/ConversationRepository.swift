@@ -10,6 +10,8 @@ nonisolated struct ConversationSnapshot: Sendable {
     let blocks: [ChatBlock]
     let transcript: Transcript?
     let contextProjection: TranscriptContextProjection
+    /// Optional usage metadata keeps pre-statistics session files readable.
+    let statistics: ComposerSessionStatistics?
     /// Steering is persisted with the conversation, but its provider claim is
     /// never resumed implicitly after a process or context boundary.
     let steering: SteeringQueueSnapshot
@@ -20,7 +22,8 @@ nonisolated struct ConversationSnapshot: Sendable {
         blocks: [ChatBlock],
         transcript: Transcript?,
         contextProjection: TranscriptContextProjection = .empty,
-        steering: SteeringQueueSnapshot = .empty
+        steering: SteeringQueueSnapshot = .empty,
+        statistics: ComposerSessionStatistics? = nil
     ) {
         self.conversation = conversation
         self.modelBackend = modelBackend
@@ -28,6 +31,7 @@ nonisolated struct ConversationSnapshot: Sendable {
         self.transcript = transcript
         self.contextProjection = contextProjection
         self.steering = steering
+        self.statistics = statistics
     }
 
     /// Re-encodes the durable session shape without exposing repository paths
@@ -194,7 +198,8 @@ private extension ConversationSnapshot {
             blocks: blocks + newBlocks,
             transcript: updatedTranscript,
             contextProjection: contextProjection,
-            steering: steering
+            steering: steering,
+            statistics: statistics
         )
     }
 }
@@ -220,10 +225,11 @@ private extension ConversationSnapshot {
         transcript = stored.transcript
         contextProjection = stored.contextProjection
         steering = stored.steering
+        statistics = stored.statistics
     }
 
     nonisolated var storedSession: StoredSession {
-        StoredSession(
+        var storedSession = StoredSession(
             id: conversation.id,
             title: conversation.title,
             projectName: conversation.workspace
@@ -241,6 +247,8 @@ private extension ConversationSnapshot {
             contextProjection: contextProjection,
             steering: steering
         )
+        storedSession.statistics = statistics
+        return storedSession
     }
 }
 

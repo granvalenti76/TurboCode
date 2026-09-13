@@ -14,7 +14,36 @@ struct NativeLLMExecutionConfiguration {
     let serverURL: String?
     let diagnosticsChanged: @MainActor @Sendable (String?) async -> Void
     let contextChanged: @MainActor @Sendable (LlamaContextUsage?) async -> Void
+    let usageChanged: @MainActor @Sendable (
+        Usage?, ContextUsage?
+    ) async -> Void
     let approvalRequested: @MainActor @Sendable (ApprovalRequest) async -> Void
+
+    nonisolated init(
+        mode: OrchestratorMode,
+        workspaceKind: String,
+        serverURL: String?,
+        diagnosticsChanged: @escaping @MainActor @Sendable (
+            String?
+        ) async -> Void,
+        contextChanged: @escaping @MainActor @Sendable (
+            LlamaContextUsage?
+        ) async -> Void,
+        usageChanged: @escaping @MainActor @Sendable (
+            Usage?, ContextUsage?
+        ) async -> Void = { _, _ in },
+        approvalRequested: @escaping @MainActor @Sendable (
+            ApprovalRequest
+        ) async -> Void
+    ) {
+        self.mode = mode
+        self.workspaceKind = workspaceKind
+        self.serverURL = serverURL
+        self.diagnosticsChanged = diagnosticsChanged
+        self.contextChanged = contextChanged
+        self.usageChanged = usageChanged
+        self.approvalRequested = approvalRequested
+    }
 }
 
 /// Provider configuration needed to build one Codex backend adapter.
@@ -151,6 +180,7 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
             reasoningStreamRelay: reasoningStreamRelay,
             diagnosticsChanged: configuration.diagnosticsChanged,
             contextChanged: configuration.contextChanged,
+            usageChanged: configuration.usageChanged,
             approvalRequested: configuration.approvalRequested
         )
     }

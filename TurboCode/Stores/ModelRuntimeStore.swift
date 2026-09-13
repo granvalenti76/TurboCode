@@ -17,6 +17,7 @@ final class ModelRuntimeStore {
     private(set) var availableSkills: [TurboCodeSkillDefinition] = []
     private(set) var activePluginTools: [TypeScriptPluginToolBinding] = []
     private var workspaceInstructionsRevision: String?
+    private let preferences: UserDefaults
 
     var composerModel: String
     var activeBackend: ModelBackend
@@ -107,9 +108,16 @@ final class ModelRuntimeStore {
             : activeRemoteModelID
     }
 
-    init() {
-        let loadedProfiles = (try? DynamicProfileStore.live.load()) ?? []
-        let configuredRemoteModels = (try? TurboCodeConfig.shared.loadRemoteModels())
+    /// Optional snapshots and a preferences domain keep selection tests away
+    /// from the user's provider configuration and saved profile choices.
+    init(
+        models: [RemoteModelConfig]? = nil,
+        profiles: [UserDynamicProfile]? = nil,
+        preferences: UserDefaults = .standard
+    ) {
+        self.preferences = preferences
+        let loadedProfiles = profiles ?? (try? DynamicProfileStore.live.load()) ?? []
+        let configuredRemoteModels = models ?? (try? TurboCodeConfig.shared.loadRemoteModels())
             .flatMap { $0.isEmpty ? nil : $0 }
             ?? RemoteModelConfig.defaults
         // PCC-RETIREMENT: keep this defensive gate until the legacy backend
@@ -117,17 +125,17 @@ final class ModelRuntimeStore {
         let selectableRemoteModels = configuredRemoteModels.filter {
             !$0.isRetiredPCC
         }
-        let savedProfileID = UserDefaults.standard.string(
+        let savedProfileID = preferences.string(
             forKey: "activeDynamicProfileID"
         ).flatMap(UUID.init(uuidString:))
         let savedProfile = loadedProfiles.first {
             $0.id == savedProfileID
         }
-        let savedMode = UserDefaults.standard.string(forKey: "orchestratorMode")
+        let savedMode = preferences.string(forKey: "orchestratorMode")
             ?? OrchestratorMode.standalone.rawValue
         let mode = OrchestratorMode(rawValue: savedMode) ?? .standalone
         let selectedID = savedProfile?.baseModelID.remoteModelID
-            ?? UserDefaults.standard.string(forKey: "activeRemoteModelID")
+            ?? preferences.string(forKey: "activeRemoteModelID")
             ?? "llama"
         // Restore the selected provider from configuration only. Credential
         // availability is checked when the user selects the model or sends a
@@ -162,7 +170,7 @@ final class ModelRuntimeStore {
             : (restoredProfile?.name ?? initialRemote.name)
 
         if savedProfile != nil, restoredProfile == nil {
-            UserDefaults.standard.removeObject(
+            preferences.removeObject(
                 forKey: "activeDynamicProfileID"
             )
         }
@@ -193,7 +201,7 @@ final class ModelRuntimeStore {
 
     func setOrchestratorMode(_ mode: OrchestratorMode) {
         orchestratorMode = mode
-        UserDefaults.standard.set(mode.rawValue, forKey: "orchestratorMode")
+        preferences.set(mode.rawValue, forKey: "orchestratorMode")
         if mode == .orchestrator {
             activeBackend = .foundationApple
             clearDynamicProfileSelection()
@@ -210,7 +218,7 @@ final class ModelRuntimeStore {
                $0.id == profileID && $0.baseModelID == .codex
            }) {
             activeDynamicProfileID = profile.id
-            UserDefaults.standard.set(
+            preferences.set(
                 profile.id.uuidString,
                 forKey: "activeDynamicProfileID"
             )
@@ -248,17 +256,28 @@ final class ModelRuntimeStore {
     }
 
     @discardableResult
-    func selectBuiltInProfile(_ id: ProfileBaseModelID) -> Bool {
+    func selectBuiltInProfile(_ id: ProfileBaseModelID, reasoning: ReasoningEffort? = nil) -> Bool {
+        guard applyBaseModel(id) else { return false }
+        // Old conversations may restore the retired orchestrator mode. A
+        // successful explicit selection always returns to a standalone route.
+        orchestratorMode = .standalone
+        preferences.set(OrchestratorMode.standalone.rawValue, forKey: "orchestratorMode")
         clearDynamicProfileSelection()
-        return applyBaseModel(id)
+        if let reasoning,
+           ComposerProfileMenu.reasoningOptions(for: id, models: remoteModels).contains(reasoning) {
+            setReasoningEffort(reasoning)
+        }
+        return true
     }
 
     @discardableResult
     func selectDynamicProfile(_ id: UUID) -> Bool {
         guard let profile = dynamicProfiles.first(where: { $0.id == id }),
               applyBaseModel(profile.baseModelID) else { return false }
+        orchestratorMode = .standalone
+        preferences.set(OrchestratorMode.standalone.rawValue, forKey: "orchestratorMode")
         activeDynamicProfileID = profile.id
-        UserDefaults.standard.set(
+        preferences.set(
             profile.id.uuidString,
             forKey: "activeDynamicProfileID"
         )
@@ -286,6 +305,18 @@ final class ModelRuntimeStore {
     /// not rebuild the open conversation or disturb its KV-cache prefix.
     func reloadDynamicProfilesPreservingSession() throws {
         dynamicProfiles = try DynamicProfileStore.live.load()
+    }
+
+    /// A display-name edit is metadata only: preserve the active configuration
+    /// snapshot and KV cache until a real model/configuration selection occurs.
+    func updateRemoteModelDisplayName(id: String, name: String) {
+        guard let index = remoteModels.firstIndex(where: { $0.id == id }) else { return }
+        remoteModels[index].name = name
+        if activeRemoteModelID == id, activeDynamicProfileID == nil,
+           activeBackend != .foundationApple, activeBackend != .codex,
+           orchestratorMode == .standalone {
+            composerModel = name
+        }
     }
 
     func reloadRemoteModels() -> Bool {
@@ -403,7 +434,7 @@ final class ModelRuntimeStore {
     }
 
     func setReasoningEffort(_ effort: ReasoningEffort) {
-        UserDefaults.standard.set(effort.rawValue, forKey: "reasoningEffort")
+        preferences.set(effort.rawValue, forKey: "reasoningEffort")
     }
 
     func isConfigured(_ model: RemoteModelConfig) -> Bool {
@@ -487,7 +518,7 @@ final class ModelRuntimeStore {
 
     private func selectRemoteModel(_ model: RemoteModelConfig) {
         activeRemoteModelID = model.id
-        UserDefaults.standard.set(model.id, forKey: "activeRemoteModelID")
+        preferences.set(model.id, forKey: "activeRemoteModelID")
         activeBackend = Self.backend(for: model.role)
         composerModel = model.name
     }
@@ -514,7 +545,7 @@ final class ModelRuntimeStore {
 
     private func clearDynamicProfileSelection() {
         activeDynamicProfileID = nil
-        UserDefaults.standard.removeObject(forKey: "activeDynamicProfileID")
+        preferences.removeObject(forKey: "activeDynamicProfileID")
     }
 
     private func reasoningEffort(
@@ -528,7 +559,7 @@ final class ModelRuntimeStore {
     /// switching between them preserves intent. Non-local remote transports
     /// never receive the prompt-level X-High policy.
     private var persistedReasoningEffort: ReasoningEffort {
-        let raw = UserDefaults.standard.string(forKey: "reasoningEffort")
+        let raw = preferences.string(forKey: "reasoningEffort")
             ?? ReasoningEffort.medium.rawValue
         return ReasoningEffort(rawValue: raw) ?? .medium
     }

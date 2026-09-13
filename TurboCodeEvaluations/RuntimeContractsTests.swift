@@ -386,6 +386,122 @@ struct RuntimeContractsTests {
         #expect(failure.code == AgentTaskFailureReason.invalidResult.rawValue)
         #expect(failure.message == result.failureDetail)
     }
+
+    @Test("Composer statistics use weighted cache coverage and replace snapshots")
+    func aggregatesConversationUsageWithoutDoubleCounting() {
+        var reducer = ComposerSessionStatisticsReducer(
+            conversationID: "conversation-1"
+        )
+        reducer.apply(
+            ComposerUsageSample(
+                requestID: "request-1",
+                backend: ModelBackend.llamaServer.rawValue,
+                inputTokens: 100,
+                cachedInputTokens: 60,
+                outputTokens: 20
+            )
+        )
+        reducer.apply(
+            ComposerUsageSample(
+                requestID: "request-2",
+                backend: ModelBackend.llamaServer.rawValue,
+                inputTokens: 300,
+                cachedInputTokens: 0,
+                outputTokens: 30
+            )
+        )
+
+        #expect(reducer.statistics.inputTokens == 400)
+        #expect(reducer.statistics.outputTokens == 50)
+        #expect(reducer.statistics.totalTokens == 450)
+        #expect(reducer.statistics.cacheHitFraction == 0.15)
+
+        reducer.apply(
+            ComposerUsageSample(
+                requestID: "request-1",
+                backend: ModelBackend.llamaServer.rawValue,
+                inputTokens: 120,
+                cachedInputTokens: 30,
+                outputTokens: 40
+            )
+        )
+        #expect(reducer.statistics.inputTokens == 420)
+        #expect(reducer.statistics.outputTokens == 70)
+        #expect(reducer.statistics.totalTokens == 490)
+    }
+
+    @Test("Composer statistics preserve partial and missing provider data")
+    func preservesPartialUsageAndUnknownCache() {
+        var reducer = ComposerSessionStatisticsReducer(
+            conversationID: "conversation-2"
+        )
+        reducer.apply(
+            ComposerUsageSample(
+                requestID: "request-1",
+                backend: ModelBackend.foundationApple.rawValue,
+                outputTokens: 12
+            )
+        )
+
+        #expect(reducer.statistics.inputTokens == nil)
+        #expect(reducer.statistics.outputTokens == 12)
+        #expect(reducer.statistics.totalTokens == 12)
+        #expect(reducer.statistics.cacheHitFraction == nil)
+        #expect(reducer.statistics.hasPartialUsage)
+        #expect(reducer.statistics.hasPartialCacheCoverage == false)
+    }
+
+    @Test("Composer statistics invalidate context without changing totals")
+    func contextInvalidationIsSeparateFromCumulativeTraffic() {
+        var reducer = ComposerSessionStatisticsReducer(
+            conversationID: "conversation-3"
+        )
+        reducer.apply(
+            ComposerUsageSample(
+                requestID: "request-1",
+                backend: ModelBackend.llamaServer.rawValue,
+                inputTokens: 100,
+                outputTokens: 20
+            ),
+            context: ContextUsage(usedTokens: 500, contextSize: 1_000),
+            contextBackend: ModelBackend.llamaServer.rawValue
+        )
+        reducer.invalidateContext()
+
+        #expect(reducer.statistics.context == nil)
+        #expect(reducer.statistics.totalTokens == 120)
+    }
+
+    @Test("Persisted composer statistics remain optional and round-trip")
+    func persistedStatisticsRoundTripAndLegacyDecode() throws {
+        let stats = ComposerSessionStatistics(
+            conversationID: "conversation-4",
+            samples: [
+                "request-1": ComposerUsageSample(
+                    requestID: "request-1",
+                    backend: ModelBackend.llamaServer.rawValue,
+                    inputTokens: 100,
+                    cachedInputTokens: 60,
+                    outputTokens: 20
+                )
+            ],
+            context: ContextUsage(usedTokens: 200, contextSize: 1_000),
+            contextBackend: ModelBackend.llamaServer.rawValue
+        )
+        var stored = StoredSession(title: "Usage", projectName: "TurboCode")
+        stored.statistics = stats
+
+        let data = try JSONEncoder().encode(stored)
+        let decoded = try JSONDecoder().decode(StoredSession.self, from: data)
+        #expect(decoded.statistics == stats)
+
+        var legacy = try #require(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        legacy.removeValue(forKey: "statistics")
+        let legacyData = try JSONSerialization.data(withJSONObject: legacy)
+        #expect(try JSONDecoder().decode(StoredSession.self, from: legacyData).statistics == nil)
+    }
 }
 
 private actor RuntimeEventOrderRecorder {

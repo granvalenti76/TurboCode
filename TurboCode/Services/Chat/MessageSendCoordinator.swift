@@ -30,6 +30,7 @@ final class MessageSendCoordinator {
     private let profiles: ProfileSelectionCoordinator
     private let lifecycle: ConversationLifecycleCoordinator
     private let steering: SteeringCoordinator
+    private let statistics: ComposerSessionStatisticsStore
     /// Captured before runtime ownership is released, then consumed exactly
     /// once by either the release callback or an immediate steering delivery.
     private var interruptedHistoryRestores: [TurnID: InterruptedHistoryRestore] = [:]
@@ -50,7 +51,8 @@ final class MessageSendCoordinator {
         sessions: ConversationSessionCoordinator,
         profiles: ProfileSelectionCoordinator,
         lifecycle: ConversationLifecycleCoordinator,
-        steering: SteeringCoordinator
+        steering: SteeringCoordinator,
+        statistics: ComposerSessionStatisticsStore
     ) {
         self.runtime = runtime
         self.llmRuntime = llmRuntime
@@ -68,6 +70,7 @@ final class MessageSendCoordinator {
         self.profiles = profiles
         self.lifecycle = lifecycle
         self.steering = steering
+        self.statistics = statistics
     }
 
     func preparePrompt(for text: String) async -> String? {
@@ -277,6 +280,19 @@ final class MessageSendCoordinator {
                                 return
                             }
                             self.presentation.setLlamaContextUsage(usage)
+                        },
+                        usageChanged: { [weak self] usage, context in
+                            guard let self, let usage,
+                                  self.conversations.activeThreadID
+                                    == batch.context.conversationID else {
+                                return
+                            }
+                            self.statistics.record(
+                                requestID: turnID.rawValue,
+                                backend: backend.rawValue,
+                                usage: usage,
+                                context: context
+                            )
                         }
                     )
                     await self.stageInterruptedTurn(
@@ -446,6 +462,18 @@ final class MessageSendCoordinator {
             contextChanged: { [weak self] usage in
                 guard let self, modelRuntime.activeBackend == .llamaServer else { return }
                 presentation.setLlamaContextUsage(usage)
+            },
+            usageChanged: { [weak self] usage, context in
+                guard let self, let usage,
+                      conversations.activeThreadID == conversationID else {
+                    return
+                }
+                statistics.record(
+                    requestID: turnID.rawValue,
+                    backend: backend.rawValue,
+                    usage: usage,
+                    context: context
+                )
             }
         )
         await stageInterruptedTurn(
