@@ -227,9 +227,130 @@ struct ACPAgentServerTests {
         #expect(await driver.permissionOutcomeValue() == .reject)
     }
 
+    @Test("shutdown resolves a pending permission before awaiting the prompt")
+    func shutdownResolvesPendingPermission() async throws {
+        let driver = ACPTestDriver(requestPermission: true)
+        let output = ACPTestOutput()
+        let server = ACPAgentServer(driver: driver) { data in
+            await output.append(data)
+        }
+        await server.receive(line("""
+        {"jsonrpc":"2.0","id":13,"method":"session/prompt","params":{"sessionId":"session-1","prompt":[]}}
+        """))
+        let permission = try await output.nextObject()
+        #expect(permission["method"] == .string("session/request_permission"))
+
+        await server.shutdown()
+
+        #expect(await driver.permissionOutcomeValue() == .cancelled)
+        let completion = try await output.nextObject()
+        #expect(completion["id"] == .number(13))
+        #expect(
+            completion["result"]?.objectValue?["stopReason"]
+                == .string(ACPStopReason.refusal.rawValue)
+        )
+    }
+
+    @Test("slow session setup does not block an unrelated protocol response")
+    func slowSessionSetupDoesNotBlockReader() async throws {
+        let gate = ACPTestGate()
+        let output = ACPTestOutput()
+        let server = ACPAgentServer(driver: ACPBlockingSessionDriver(gate: gate)) { data in
+            await output.append(data)
+        }
+
+        await server.receive(line("""
+        {"jsonrpc":"2.0","id":1,"method":"session/new","params":{"cwd":"/tmp/project"}}
+        """))
+        await server.receive(line("""
+        {"jsonrpc":"2.0","id":2,"method":"method/independent","params":{}}
+        """))
+
+        let independent = try await output.nextObject()
+        #expect(independent["id"] == .number(2))
+        #expect(independent["error"]?.objectValue?["code"] == .number(-32601))
+
+        await gate.open()
+        let session = try await output.nextObject()
+        #expect(session["id"] == .number(1))
+        #expect(session["result"]?.objectValue?["sessionId"] == .string("session-1"))
+        await server.shutdown()
+    }
+
     private func line(_ string: String) -> Data {
         Data(string.utf8)
     }
+}
+
+private actor ACPTestGate {
+    private var released = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if released { return }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func open() {
+        released = true
+        for waiter in waiters {
+            waiter.resume()
+        }
+        waiters.removeAll()
+    }
+}
+
+private final class ACPBlockingSessionDriver: ACPAgentDriver, @unchecked Sendable {
+    private let gate: ACPTestGate
+
+    init(gate: ACPTestGate) {
+        self.gate = gate
+    }
+
+    nonisolated func createSession(
+        cwd: String,
+        mcpServers: [MCPJSONValue]
+    ) async throws -> String {
+        await gate.wait()
+        return "session-1"
+    }
+
+    nonisolated func prompt(
+        sessionID: String,
+        prompt: [MCPJSONValue],
+        updates: ACPUpdateChannel
+    ) async throws -> ACPStopReason {
+        .endTurn
+    }
+
+    nonisolated func prompt(
+        sessionID: String,
+        prompt: [MCPJSONValue],
+        updates: ACPUpdateChannel,
+        requestPermission: @escaping ACPPermissionHandler
+    ) async throws -> ACPStopReason {
+        .endTurn
+    }
+
+    nonisolated func cancel(sessionID: String) async {}
+
+    nonisolated func configurationOptions(
+        sessionID: String
+    ) async throws -> [ACPConfigOption] {
+        []
+    }
+
+    nonisolated func setConfigurationOption(
+        sessionID: String,
+        configID: String,
+        value: MCPJSONValue
+    ) async throws -> [ACPConfigOption] {
+        []
+    }
+
+    nonisolated func shutdown() async {}
 }
 
 private actor ACPTestOutput {

@@ -11,7 +11,9 @@ actor ACPAgentServer {
     private let agentName: String
     private let agentVersion: String
     private var activePrompts: [String: Task<Void, Never>] = [:]
+    private var operationTasks: [UUID: Task<Void, Never>] = [:]
     private var pendingPermissions: [ACPRequestID: PendingPermission] = [:]
+    private var acceptingMessages = true
 
     init(
         driver: any ACPAgentDriver,
@@ -65,13 +67,13 @@ actor ACPAgentServer {
             case "initialize":
                 try await initialize(id: message.id, params: message.params)
             case "session/new":
-                try await createSession(id: message.id, params: message.params)
+                scheduleCreateSession(id: message.id, params: message.params)
             case "session/set_config_option":
-                try await setConfigurationOption(id: message.id, params: message.params)
+                scheduleConfigurationOption(id: message.id, params: message.params)
             case "session/prompt":
                 try await startPrompt(id: message.id, params: message.params)
             case "session/cancel":
-                try await cancel(id: message.id, params: message.params)
+                scheduleCancel(id: message.id, params: message.params)
             default:
                 await respond(
                     to: message.id,
@@ -87,6 +89,87 @@ actor ACPAgentServer {
             )
         } catch {
             await respond(to: message.id, errorCode: -32600, message: error.localizedDescription)
+        }
+    }
+
+    /// Registers a long-running request before its first suspension. The
+    /// stdio reader can therefore accept unrelated JSON-RPC messages while
+    /// session setup, configuration, or cancellation waits on a backend.
+    private func schedule(_ operation: @escaping @Sendable () async -> Void) {
+        guard acceptingMessages else { return }
+        let operationID = UUID()
+        let task = Task { [weak self] in
+            guard !Task.isCancelled else {
+                await self?.operationFinished(operationID)
+                return
+            }
+            await operation()
+            await self?.operationFinished(operationID)
+        }
+        operationTasks[operationID] = task
+    }
+
+    private func operationFinished(_ operationID: UUID) {
+        operationTasks.removeValue(forKey: operationID)
+    }
+
+    private func scheduleCreateSession(
+        id: ACPRequestID?,
+        params: MCPJSONValue?
+    ) {
+        schedule { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.createSession(id: id, params: params)
+            } catch let error as ACPProtocolError {
+                await self.respond(
+                    to: id,
+                    errorCode: error.rpcCode,
+                    message: error.localizedDescription
+                )
+            } catch {
+                await self.respond(to: id, errorCode: -32600, message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func scheduleConfigurationOption(
+        id: ACPRequestID?,
+        params: MCPJSONValue?
+    ) {
+        schedule { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.setConfigurationOption(id: id, params: params)
+            } catch let error as ACPProtocolError {
+                await self.respond(
+                    to: id,
+                    errorCode: error.rpcCode,
+                    message: error.localizedDescription
+                )
+            } catch {
+                await self.respond(to: id, errorCode: -32600, message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func scheduleCancel(
+        id: ACPRequestID?,
+        params: MCPJSONValue?
+    ) {
+        schedule { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.cancel(id: id, params: params)
+            } catch let error as ACPProtocolError {
+                await self.respond(
+                    to: id,
+                    errorCode: error.rpcCode,
+                    message: error.localizedDescription
+                )
+            } catch {
+                await self.respond(to: id, errorCode: -32600, message: error.localizedDescription)
+            }
         }
     }
 
@@ -195,6 +278,11 @@ actor ACPAgentServer {
         id: ACPRequestID?,
         params: MCPJSONValue?
     ) async throws {
+        guard acceptingMessages else {
+            throw ACPProtocolError.invalidRequest(
+                "The ACP server is shutting down."
+            )
+        }
         guard let id else {
             throw ACPProtocolError.invalidRequest(
                 "session/prompt must be a request with an ID."
@@ -396,19 +484,40 @@ actor ACPAgentServer {
     }
 
     func shutdown() async {
-        let sessions = Array(activePrompts.keys)
-        for sessionID in sessions {
-            activePrompts[sessionID]?.cancel()
+        acceptingMessages = false
+        let prompts = Array(activePrompts.values)
+        for prompt in prompts {
+            prompt.cancel()
         }
+        let operations = Array(operationTasks.values)
+        for operation in operations {
+            operation.cancel()
+        }
+        resolveAllPermissions(with: .cancelled)
+
+        // Start runtime shutdown while request tasks unwind. Provider
+        // interruption is what releases a prompt blocked in model/tool work;
+        // awaiting the handles below proves no task remains after EOF.
+        let driverShutdown = Task { [driver] in
+            await driver.shutdown()
+        }
+        for operation in operations {
+            await operation.value
+        }
+        await driverShutdown.value
+        for prompt in prompts {
+            await prompt.value
+        }
+        operationTasks.removeAll()
         activePrompts.removeAll()
+        resolveAllPermissions(with: .cancelled)
+    }
+
+    private func resolveAllPermissions(with outcome: ACPPermissionOutcome) {
         let permissionIDs = Array(pendingPermissions.keys)
         for permissionID in permissionIDs {
-            guard let permission = pendingPermissions.removeValue(forKey: permissionID) else {
-                continue
-            }
-            permission.continuation.resume(returning: .cancelled)
+            resolvePermission(id: permissionID, outcome: outcome)
         }
-        await driver.shutdown()
     }
 
     private func finishPrompt(

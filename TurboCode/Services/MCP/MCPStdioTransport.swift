@@ -45,6 +45,8 @@ actor MCPStdioTransport {
 
     private var process: Process?
     private var inputHandle: FileHandle?
+    private var outputHandle: FileHandle?
+    private var errorHandle: FileHandle?
     private var readerTask: Task<Void, Never>?
     private var errorReaderTask: Task<Void, Never>?
     private var outputBuffer = Data()
@@ -75,7 +77,7 @@ actor MCPStdioTransport {
         clientVersion: String
     ) async throws {
         guard process?.isRunning != true else { return }
-        stop()
+        await stop()
         lastError = nil
         guard FileManager.default.isExecutableFile(atPath: executableURL.path) else {
             throw MCPStdioTransportError.executableMissing(executableURL.path)
@@ -102,6 +104,8 @@ actor MCPStdioTransport {
         inputHandle = inputPipe.fileHandleForWriting
         let outputHandle = outputPipe.fileHandleForReading
         let errorHandle = errorPipe.fileHandleForReading
+        self.outputHandle = outputHandle
+        self.errorHandle = errorHandle
         readerTask = Task.detached { [weak self, outputHandle] in
             while !Task.isCancelled {
                 let data = outputHandle.availableData
@@ -135,7 +139,7 @@ actor MCPStdioTransport {
             )
             try sendNotification(method: "notifications/initialized")
         } catch {
-            stop()
+            await stop()
             throw error
         }
     }
@@ -183,21 +187,31 @@ actor MCPStdioTransport {
         process?.isRunning == true
     }
 
-    func stop() {
+    /// Stops the owned child and waits until it has exited. Closing the pipes
+    /// first is required because a fixture or MCP server may otherwise remain
+    /// blocked in a read after termination was requested.
+    func stop() async {
         let currentProcess = process
         process = nil
+        inputHandle?.closeFile()
         inputHandle = nil
+        outputHandle?.closeFile()
+        outputHandle = nil
+        errorHandle?.closeFile()
+        errorHandle = nil
         readerTask?.cancel()
         errorReaderTask?.cancel()
         readerTask = nil
         errorReaderTask = nil
         if currentProcess?.isRunning == true {
             currentProcess?.terminate()
+            currentProcess?.waitUntilExit()
         }
         let error = MCPStdioTransportError.processStopped(
             lastError ?? "The MCP process stopped."
         )
         failPending(with: error)
+        outputBuffer.removeAll(keepingCapacity: false)
     }
 
     private func cancel(id: Int) {
@@ -278,8 +292,14 @@ actor MCPStdioTransport {
             lastError ?? "The MCP process stopped unexpectedly."
         )
         process = nil
+        inputHandle?.closeFile()
         inputHandle = nil
+        outputHandle?.closeFile()
+        outputHandle = nil
+        errorHandle?.closeFile()
+        errorHandle = nil
         failPending(with: error)
+        outputBuffer.removeAll(keepingCapacity: false)
     }
 
     private func failPending(with error: any Error) {
@@ -324,11 +344,33 @@ nonisolated struct ACPMCPServerConfiguration: Sendable, Equatable {
                 "ACP MCP server '\(name)' has a non-string argument."
             )
         }
-        let environmentObject = object["env"]?.objectValue ?? [:]
-        guard environmentObject.values.allSatisfy({ $0.stringValue != nil }) else {
-            throw ACPApplicationRuntimeError.invalidConfiguration(
-                "ACP MCP server '\(name)' has a non-string environment value."
-            )
+        let environment: [String: String]
+        if let rawEnvironment = object["env"] {
+            guard let entries = rawEnvironment.arrayValue else {
+                throw ACPApplicationRuntimeError.invalidConfiguration(
+                    "ACP MCP server '\(name)' environment must be an array."
+                )
+            }
+            var parsedEnvironment: [String: String] = [:]
+            for entry in entries {
+                guard let entryObject = entry.objectValue,
+                      let environmentName = entryObject["name"]?.stringValue,
+                      let environmentValue = entryObject["value"]?.stringValue,
+                      Self.isValidEnvironmentName(environmentName) else {
+                    throw ACPApplicationRuntimeError.invalidConfiguration(
+                        "ACP MCP server '\(name)' has an invalid environment entry."
+                    )
+                }
+                guard parsedEnvironment[environmentName] == nil else {
+                    throw ACPApplicationRuntimeError.invalidConfiguration(
+                        "ACP MCP server '\(name)' has duplicate environment name '\(environmentName)'."
+                    )
+                }
+                parsedEnvironment[environmentName] = environmentValue
+            }
+            environment = parsedEnvironment
+        } else {
+            environment = [:]
         }
         let effectiveCwd = object["cwd"]?.stringValue ?? cwd
         guard !effectiveCwd.isEmpty else {
@@ -339,8 +381,19 @@ nonisolated struct ACPMCPServerConfiguration: Sendable, Equatable {
         self.name = name
         self.command = command
         self.arguments = arguments.compactMap { $0 }
-        self.environment = environmentObject.compactMapValues(\.stringValue)
+        self.environment = environment
         self.cwd = effectiveCwd
+    }
+
+    private static func isValidEnvironmentName(_ name: String) -> Bool {
+        guard let first = name.utf8.first,
+              first == 0x5F || (0x41...0x5A).contains(first) || (0x61...0x7A).contains(first) else {
+            return false
+        }
+        return name.utf8.dropFirst().allSatisfy { byte in
+            byte == 0x5F || (0x30...0x39).contains(byte) ||
+                (0x41...0x5A).contains(byte) || (0x61...0x7A).contains(byte)
+        }
     }
 }
 
@@ -355,11 +408,16 @@ actor ACPMCPRuntime {
     }
 
     private var connections: [String: Connection] = [:]
+    private var inFlightTransport: MCPStdioTransport?
+    private var stopRequested = false
 
     func start(
         declarations: [MCPJSONValue],
         cwd: String
     ) async throws -> [any Tool] {
+        guard !stopRequested else {
+            throw MCPStdioTransportError.cancelled
+        }
         let names = declarations.compactMap { $0.objectValue?["name"]?.stringValue }
         guard declarations.count == names.count,
               names.count == Set(names).count else {
@@ -387,12 +445,19 @@ actor ACPMCPRuntime {
                     environment: environment,
                     workingDirectoryURL: URL(fileURLWithPath: configuration.cwd)
                 )
+                // Keep ownership before the first request. Setup failures can
+                // happen after initialize but before a connection is visible
+                // in the catalog, so the catch must still stop this child.
+                inFlightTransport = transport
                 try await transport.start(
                     protocolVersion: "2025-06-18",
                     clientName: "TurboCode ACP",
                     clientVersion: "0.1.0"
                 )
                 let tools = try await Self.listTools(using: transport)
+                guard !stopRequested else {
+                    throw MCPStdioTransportError.cancelled
+                }
                 let alias = Self.toolAlias(for: configuration.name)
                 guard !connections.values.contains(where: { $0.alias == alias }) else {
                     throw ACPApplicationRuntimeError.invalidConfiguration(
@@ -405,6 +470,7 @@ actor ACPMCPRuntime {
                     tools: tools,
                     alias: alias
                 )
+                inFlightTransport = nil
             }
             return connections.values.sorted { $0.alias < $1.alias }.map {
                 ACPMCPTool(
@@ -416,6 +482,8 @@ actor ACPMCPRuntime {
                 )
             }
         } catch {
+            await inFlightTransport?.stop()
+            inFlightTransport = nil
             await stop()
             throw error
         }
@@ -457,8 +525,14 @@ actor ACPMCPRuntime {
     }
 
     func stop() async {
+        stopRequested = true
+        let pendingTransport = inFlightTransport
+        inFlightTransport = nil
         let transports = connections.values.map(\.transport)
         connections.removeAll()
+        if let pendingTransport {
+            await pendingTransport.stop()
+        }
         for transport in transports {
             await transport.stop()
         }

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Testing
 @testable import TurboCode
 
@@ -131,6 +132,51 @@ struct XcodeMCPTests {
         #expect(output.contains("disabled"))
     }
 
+    @Test("ACP MCP environment accepts standard entries and rejects invalid declarations")
+    func acpEnvironmentValidation() throws {
+        let base: [String: MCPJSONValue] = [
+            "name": .string("fixture-server"),
+            "command": .string("fixture-server")
+        ]
+        let standard = try ACPMCPServerConfiguration(
+            value: .object(base.merging([
+                "env": .array([
+                    .object(["name": .string("ACP_FIXTURE"), "value": .string("")]),
+                    .object(["name": .string("PATH_OVERRIDE"), "value": .string("/tmp")])
+                ])
+            ]) { _, new in new }),
+            cwd: "/"
+        )
+        #expect(standard.environment == ["ACP_FIXTURE": "", "PATH_OVERRIDE": "/tmp"])
+
+        let absent = try ACPMCPServerConfiguration(value: .object(base), cwd: "/")
+        #expect(absent.environment.isEmpty)
+        let empty = try ACPMCPServerConfiguration(
+            value: .object(base.merging(["env": .array([])]) { _, new in new }),
+            cwd: "/"
+        )
+        #expect(empty.environment.isEmpty)
+
+        let object = base.merging(["env": .object(["ACP_FIXTURE": .string("legacy")])]) { _, new in new }
+        #expect(throws: ACPApplicationRuntimeError.invalidConfiguration(
+            "ACP MCP server 'fixture-server' environment must be an array."
+        )) {
+            _ = try ACPMCPServerConfiguration(value: .object(object), cwd: "/")
+        }
+
+        let duplicate = base.merging([
+            "env": .array([
+                .object(["name": .string("DUPLICATE"), "value": .string("one")]),
+                .object(["name": .string("DUPLICATE"), "value": .string("two")])
+            ])
+        ]) { _, new in new }
+        #expect(throws: ACPApplicationRuntimeError.invalidConfiguration(
+            "ACP MCP server 'fixture-server' has duplicate environment name 'DUPLICATE'."
+        )) {
+            _ = try ACPMCPServerConfiguration(value: .object(duplicate), cwd: "/")
+        }
+    }
+
     @Test("ACP MCP stdio preserves session command environment and tool calls")
     func acpStdioRuntime() async throws {
         let serverScript = #"""
@@ -165,7 +211,12 @@ struct XcodeMCPTests {
                 .string(serverScript),
                 .string("argument-preserved")
             ]),
-            "env": .object(["ACP_FIXTURE": .string("environment-preserved")]),
+            "env": .array([
+                .object([
+                    "name": .string("ACP_FIXTURE"),
+                    "value": .string("environment-preserved")
+                ])
+            ]),
             "cwd": .string("/tmp")
         ])
 
@@ -182,5 +233,192 @@ struct XcodeMCPTests {
         #expect(tools.count == 1)
         #expect(output.contains("environment-preserved:"))
         #expect(output.contains("/tmp:argument-preserved:payload-preserved"))
+    }
+
+    @Test("ACP MCP setup failure stops the current child and repeated stop is safe")
+    func failedSetupStopsCurrentProcess() async throws {
+        let fixture = MCPProcessFixture(name: "failed-setup", mode: "error")
+        defer { fixture.cleanup() }
+        let runtime = ACPMCPRuntime()
+
+        do {
+            _ = try await runtime.start(
+                declarations: [fixture.declaration],
+                cwd: "/"
+            )
+            Issue.record("Expected tools/list setup to fail")
+        } catch {
+            // The process marker below is the observable cleanup contract.
+        }
+
+        #expect(await fixture.waitForExit())
+        await runtime.stop()
+        await runtime.stop()
+    }
+
+    @Test("ACP MCP stop during setup stops the in-flight child")
+    func stopDuringSetupStopsCurrentProcess() async throws {
+        let fixture = MCPProcessFixture(name: "slow-setup", mode: "slow")
+        defer { fixture.cleanup() }
+        let runtime = ACPMCPRuntime()
+        let setup = Task {
+            try await runtime.start(
+                declarations: [fixture.declaration],
+                cwd: "/"
+            )
+        }
+
+        #expect(await fixture.waitForStart())
+        await runtime.stop()
+        do {
+            _ = try await setup.value
+            Issue.record("Expected setup to be interrupted")
+        } catch {
+            // Stopping the runtime must unwind the setup request.
+        }
+        #expect(await fixture.waitForExit())
+    }
+
+    @Test("ACP MCP failure stops already registered and in-flight children")
+    func failedSecondSetupStopsAllChildren() async throws {
+        let first = MCPProcessFixture(name: "first-server", mode: "success")
+        let second = MCPProcessFixture(name: "second-server", mode: "error")
+        defer {
+            first.cleanup()
+            second.cleanup()
+        }
+        let runtime = ACPMCPRuntime()
+
+        do {
+            _ = try await runtime.start(
+                declarations: [first.declaration, second.declaration],
+                cwd: "/"
+            )
+            Issue.record("Expected the second tools/list request to fail")
+        } catch {
+            // Both fixture exit markers must be observed before the test ends.
+        }
+
+        #expect(await first.waitForExit())
+        #expect(await second.waitForExit())
+        await runtime.stop()
+    }
+
+    @Test("ACP MCP alias collision stops the child started for the rejected alias")
+    func aliasCollisionStopsCurrentProcess() async throws {
+        let first = MCPProcessFixture(name: "alias-server", mode: "success")
+        let second = MCPProcessFixture(name: "alias_server", mode: "success")
+        defer {
+            first.cleanup()
+            second.cleanup()
+        }
+        let runtime = ACPMCPRuntime()
+
+        do {
+            _ = try await runtime.start(
+                declarations: [first.declaration, second.declaration],
+                cwd: "/"
+            )
+            Issue.record("Expected the normalized MCP aliases to collide")
+        } catch {
+            // Alias rejection must still release both owned processes.
+        }
+
+        #expect(await first.waitForExit())
+        #expect(await second.waitForExit())
+        await runtime.stop()
+    }
+}
+
+private struct MCPProcessFixture {
+    let declaration: MCPJSONValue
+    private let pidURL: URL
+    private let exitURL: URL
+
+    init(name: String, mode: String) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCodeMCP-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        pidURL = root.appendingPathComponent("pid")
+        exitURL = root.appendingPathComponent("exit")
+        let script = #"""
+        import json, os, signal, sys, time
+
+        pid_path, exit_path, mode = sys.argv[1:4]
+        with open(pid_path, "w") as marker:
+            marker.write(str(os.getpid()))
+
+        def mark_exit(signum, frame):
+            with open(exit_path, "w") as marker:
+                marker.write("exited")
+            raise SystemExit(0)
+
+        signal.signal(signal.SIGTERM, mark_exit)
+        if mode == "slow":
+            time.sleep(1.5)
+        try:
+            for line in sys.stdin:
+                request = json.loads(line)
+                method = request.get("method")
+                if method.startswith("notifications/"):
+                    continue
+                if method == "initialize":
+                    result = {"protocolVersion": "2025-06-18"}
+                    response = {"jsonrpc": "2.0", "id": request["id"], "result": result}
+                elif method == "tools/list" and mode == "error":
+                    response = {"jsonrpc": "2.0", "id": request["id"], "error":
+                        {"code": -32001, "message": "fixture tools/list failure"}}
+                elif method == "tools/list":
+                    response = {"jsonrpc": "2.0", "id": request["id"], "result": {"tools": []}}
+                else:
+                    response = {"jsonrpc": "2.0", "id": request["id"], "result": {}}
+                print(json.dumps(response), flush=True)
+        finally:
+            with open(exit_path, "w") as marker:
+                marker.write("exited")
+        """#
+        self.declaration = .object([
+            "name": .string(name),
+            "command": .string("/usr/bin/python3"),
+            "args": .array([
+                .string("-c"),
+                .string(script),
+                .string(pidURL.path),
+                .string(exitURL.path),
+                .string(mode)
+            ]),
+            "cwd": .string("/tmp")
+        ])
+    }
+
+    func waitForExit() async -> Bool {
+        for _ in 0..<150 {
+            if FileManager.default.fileExists(atPath: exitURL.path) {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return false
+    }
+
+    func waitForStart() async -> Bool {
+        for _ in 0..<150 {
+            if FileManager.default.fileExists(atPath: pidURL.path) {
+                return true
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return false
+    }
+
+    func cleanup() {
+        if let pid = try? String(contentsOf: pidURL, encoding: .utf8),
+           let processID = Int32(pid.trimmingCharacters(in: .whitespacesAndNewlines)) {
+            _ = kill(processID, SIGTERM)
+        }
+        try? FileManager.default.removeItem(at: pidURL.deletingLastPathComponent())
     }
 }
