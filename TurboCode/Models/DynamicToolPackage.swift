@@ -31,7 +31,7 @@ nonisolated enum DynamicToolPackage: String, CaseIterable, Codable, Sendable, Ha
         case .exploration:
             "Inspect files, search the workspace, and read repository structure."
         case .coding:
-            "Inspect and edit source files with the profile's safeguards."
+            "Inspect and edit workspace files with the profile's safeguards."
         case .git:
             "Inspect the repository and its current Git state."
         case .build:
@@ -41,22 +41,22 @@ nonisolated enum DynamicToolPackage: String, CaseIterable, Codable, Sendable, Ha
         }
     }
 
-    /// Descriptions are deliberately contrastive because the encoder chooses
-    /// among these strings rather than generating a free-form tool plan.
+    /// One compact semantic definition per category lets the multilingual
+    /// encoder generalize without accumulating request-specific examples.
     var classifierDescription: String {
         switch self {
         case .conversation:
-            "Ciao, grazie, spiegami un concetto, parliamo di un'idea. General conversation, explanations, questions and planning without inspecting or changing project files."
+            "Conversation, explanations and text rewriting without accessing project files."
         case .exploration:
-            "Mostra i file del progetto, leggi un file, cerca una funzione, esplora le cartelle. List workspace files, read source, search for symbols and understand the repository structure."
+            "Read and search workspace files to understand the project."
         case .coding:
-            "Correggi un errore nel codice, risolvi un bug, modifica un file, aggiungi una funzione. Fix a bug, edit source code, implement a feature, refactor an existing function."
+            "Modify workspace code or documents."
         case .git:
-            "Controlla lo stato git, mostra il diff, i branch e la storia dei commit. Inspect Git status, branches, commits, diffs, history and repository changes."
+            "Inspect and manage Git changes, branches and commits."
         case .build:
-            "Compila il progetto, esegui i test, mostra il risultato della build. Run the existing tests, build the Xcode project, inspect compiler diagnostics and build settings."
+            "Build the project, run existing tests and inspect compiler diagnostics."
         case .implementation:
-            "Implementa la feature e verifica con i test. Correggi il bug e compila. Modifica il codice e fai commit. Implement code changes AND run tests or build or commit them."
+            "Modify project files and then verify the changes with builds or tests."
         }
     }
 
@@ -78,13 +78,60 @@ nonisolated enum DynamicToolPackage: String, CaseIterable, Codable, Sendable, Ha
     }
 }
 
+/// Transient UI phases for the experimental Dynamic routing receipt. These
+/// phases describe observable application work; they are not extra waits in
+/// the provider path and must remain safe to skip when routing is immediate.
+nonisolated enum DynamicRoutingPhase: String, Sendable, Equatable {
+    case idle
+    case analyzing
+    case selecting
+    case assembling
+    case ready
+
+    var title: String {
+        switch self {
+        case .idle: "Waiting"
+        case .analyzing: "Analyzing prompt"
+        case .selecting: "Matching intent"
+        case .assembling: "Assembling tool chain"
+        case .ready: "Ready"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .idle:
+            "The next request will be routed before it reaches the model."
+        case .analyzing:
+            "AnchorSignal is comparing the request with the bounded tool packages."
+        case .selecting:
+            "The best-fit capability package has been selected."
+        case .assembling:
+            "The selected tools are being inserted into the session boundary."
+        case .ready:
+            "The session is ready with the tools selected for this request."
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .idle: "circle.dotted"
+        case .analyzing: "waveform"
+        case .selecting: "scope"
+        case .assembling: "shippingbox"
+        case .ready: "checkmark.circle.fill"
+        }
+    }
+}
+
 nonisolated struct DynamicRoutingDecision: Sendable, Equatable {
     enum Source: String, Sendable, Equatable {
         case model
         case fallback
     }
 
-    let package: DynamicToolPackage
+    /// Nil means routing failed and the configured profile supplies its defaults.
+    let package: DynamicToolPackage?
     let toolIDs: Set<ToolCapabilityID>
     let topScore: Double
     let margin: Double
@@ -92,28 +139,22 @@ nonisolated struct DynamicRoutingDecision: Sendable, Equatable {
     let latencyMilliseconds: Double
     /// A fallback must be visible: it is not evidence that CoreAI ran.
     var fallbackReason: String? = nil
+
+    var title: String { package?.title ?? "Profile defaults" }
+    var summary: String {
+        package?.summary ?? "Using the configured profile’s default tools."
+    }
 }
 
 /// Resolves the candidate catalog and keeps the Dynamic feature independent
 /// from the closed model-facing tool catalog implementation.
 nonisolated enum DynamicToolPackageResolver {
-    static func candidates(allowedToolIDs: Set<ToolCapabilityID>, prompt: String = "") -> [DynamicToolPackage] {
+    static func candidates(allowedToolIDs: Set<ToolCapabilityID>, prompt _: String = "") -> [DynamicToolPackage] {
         DynamicToolPackage.allCases.filter { package in
-            // A package is meaningful only when the active profile can provide
-            // its complete capability set; routing must never manufacture a
-            // partial package and present it as a different operating mode.
-            (package == .conversation || package.toolIDs.isSubset(of: allowedToolIDs))
-                && (package != .implementation || requestsCombinedWork(prompt))
+            // Eligibility depends only on profile permissions, never on words
+            // in the prompt. The encoder ranks every eligible category.
+            package == .conversation || package.toolIDs.isSubset(of: allowedToolIDs)
         }
-    }
-
-    /// The broad package requires explicit edit-and-verify intent. Embedding
-    /// similarity alone tends to favor this catch-all description.
-    private static func requestsCombinedWork(_ prompt: String) -> Bool {
-        let text = prompt.lowercased()
-        let edits = ["implement", "modific", "corregg", "refactor", "fix", "edit", "change"]
-        let checks = ["test", "compil", "build", "verific", "commit"]
-        return edits.contains(where: text.contains) && checks.contains(where: text.contains)
     }
 
     static func effectiveToolIDs(

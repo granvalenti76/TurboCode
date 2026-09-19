@@ -637,9 +637,9 @@ struct InputFieldView: View {
             .toggleStyle(.button)
             .controlSize(.small)
             .disabled(chatStore.busy || chatStore.isDynamicRouting)
-            .help("Select workspace tools for each Llama prompt")
+            .help("Select workspace tools for each prompt")
             .accessibilityLabel("Dynamic tool routing")
-            .accessibilityHint("Classifies each prompt before sending it to Llama")
+            .accessibilityHint("Classifies each prompt before sending it to the model")
             if chatStore.dynamicRoutingEnabled {
                 Button {
                     showsDynamicRouting.toggle()
@@ -651,7 +651,7 @@ struct InputFieldView: View {
                         } else {
                             Image(systemName: chatStore.dynamicRoutingDecision?.source == .fallback
                                   ? "exclamationmark.triangle" : "arrow.triangle.branch")
-                            Text("\(chatStore.dynamicRoutingDecision?.package.title ?? "Ready") · \(chatStore.dynamicRoutingToolNames.count) tools")
+                            Text("\(chatStore.dynamicRoutingPresentedToolNames.count) tools")
                         }
                     }
                 }
@@ -671,11 +671,11 @@ struct InputFieldView: View {
             Label("Dynamic routing · Experimental", systemImage: "arrow.triangle.branch")
                 .font(.headline)
             if chatStore.isDynamicRouting {
-                Text("Classifying your request before sending it to Llama…")
+                Text("Classifying your request before sending it to the model…")
             } else if let decision = chatStore.dynamicRoutingDecision {
-                Text(decision.package.title).font(.title3.bold())
-                Text(decision.package.summary).foregroundStyle(.secondary)
-                LabeledContent("Classifier", value: decision.source == .model ? "AnchorSignal" : "Keyword fallback")
+                Text(decision.title).font(.title3.bold())
+                Text(decision.summary).foregroundStyle(.secondary)
+                LabeledContent("Classifier", value: decision.source == .model ? "AnchorSignal" : "Profile defaults")
                 LabeledContent("Routing time", value: "\(decision.latencyMilliseconds.formatted(.number.precision(.fractionLength(0)))) ms")
                 if decision.source == .model {
                     LabeledContent("Similarity", value: decision.topScore.formatted(.number.precision(.fractionLength(3))))
@@ -687,15 +687,15 @@ struct InputFieldView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Divider()
-                Text("Loaded tools (\(chatStore.dynamicRoutingToolNames.count))").font(.subheadline.bold())
-                if chatStore.dynamicRoutingToolNames.isEmpty {
+                Text("Selected tools (\(chatStore.dynamicRoutingPresentedToolNames.count))").font(.subheadline.bold())
+                if chatStore.dynamicRoutingPresentedToolNames.isEmpty {
                     Text("No tools for this turn.").foregroundStyle(.secondary)
                 } else {
-                    ForEach(chatStore.dynamicRoutingToolNames, id: \.self) { name in
+                    ForEach(chatStore.dynamicRoutingPresentedToolNames, id: \.self) { name in
                         Text(name).font(.system(.caption, design: .monospaced))
                     }
                 }
-                Text("The session is reused when the tool set stays the same. Changing tools can reduce Llama’s cache reuse.")
+                Text("The session is reused when the tool set stays the same. Changing tools rebuilds the session.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 Text("Waiting for your first prompt. The session starts with no tools; a package is selected before each turn.")

@@ -364,8 +364,8 @@ final class ProfileSelectionCoordinator {
         }
         if invalidatingComposerContext {
             statistics.invalidateContext()
+            presentation.setLlamaContextUsage(nil)
         }
-        presentation.setLlamaContextUsage(nil)
         _ = await agentRuntime.apply(
             .switchBackend(
                 RuntimeBackendSelection(

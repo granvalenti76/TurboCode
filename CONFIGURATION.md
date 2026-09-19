@@ -29,21 +29,40 @@ settings. The visible name refreshes without rebuilding the conversation.
 In **Profiles > Codex > Default model**, choose the direct profile's model;
 custom Codex profiles retain their own model configuration.
 
-### Experimental Dynamic routing (Llama)
+### Experimental Dynamic routing (Llama and on-device)
 
 Enable **Dynamic** below the composer to start without tools and select a native
 tool package before each turn. The adjacent status opens a popover showing the
 package, actual session tool names, routing duration, and classifier source.
-The active Llama column in Tools follows this session snapshot. Custom profile
+The active Llama or Apple On-Device column in Tools follows this session snapshot. Custom profile
 allowlists still apply; external plugin/MCP catalogs are excluded in this experiment.
 
-The prototype loads `TextEncoder.aimodel` and `tokenizer/tokenizer.json` from
-`~/Work/Programmi/Anchorsignal/models/anchorsignal-small` lazily using CoreAI.
-No Python conversion is needed. Missing or failed assets use a visibly labelled
-keyword fallback with the error in the popover. Similarity scores are not
+The prototype loads `TextEncoder.aimodel` and `tokenizer/tokenizer.json` from a
+user-provided external model directory lazily using CoreAI. The model asset is
+deliberately not bundled with the repository; provision it separately before
+enabling Dynamic routing. No Python conversion is needed at runtime. Missing or
+failed assets, and similarity below `0.800`, restore the configured profile’s
+default tools, with the reason visible in the popover. Similarity scores are not
 confidence probabilities. The first request includes model loading; later
 requests reuse the encoder and cached package embeddings. Repeated tool sets
 keep the provider session; changed tool definitions can reduce KV-cache reuse.
+
+Semantic routing uses one short description per category and selects the highest
+cosine similarity when the score reaches `0.800`. There are no keyword gates or
+capability penalties. The encoder's multilingual representations handle the
+request language.
+Both requests and category descriptions use the `query: ` prefix recommended by
+E5 for semantic similarity. The local export accepts 512 tokens, including the
+prefix and special tokens, so longer requests are truncated before inference.
+Profile permissions and the backend's tool tier still constrain the installed tools.
+Dynamic routing is available for standalone Llama and Apple on-device profiles.
+
+To verify bilingual routing against the external encoder (rather than fallback),
+run the focused suite with the test-runner environment variable:
+
+```sh
+TEST_RUNNER_TURBOCODE_EVALUATE_ANCHORSIGNAL=1 xcodebuild test -project TurboCode.xcodeproj -scheme TurboCodeEvaluations -destination 'platform=macOS' -only-testing:TurboCodeEvaluations/DynamicRoutingTests
+```
 
 ## Repository map model capability
 

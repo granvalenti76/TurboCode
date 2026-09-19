@@ -118,7 +118,12 @@ final class MessageSendCoordinator {
         if modelRuntime.dynamicRoutingEnabled, modelRuntime.dynamicRoutingSupported {
             do {
                 if try await modelRuntime.routeDynamicTools(for: promptText) {
-                    guard await profiles.rebuildSession() else {
+                    // Keep the last valid context/cache/session snapshot visible
+                    // while the routed tool boundary is rebuilt. The provider
+                    // publishes the fresh values when this turn completes.
+                    guard await profiles.rebuildSession(
+                        invalidatingComposerContext: false
+                    ) else {
                         modelRuntime.resetDynamicRoutingSnapshot()
                         presentation.errorMessage = "Dynamic could not update the tools. Please retry."
                         return false

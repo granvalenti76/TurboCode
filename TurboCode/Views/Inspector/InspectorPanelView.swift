@@ -8,7 +8,9 @@ struct InspectorPanelView: View {
 
     var body: some View {
         Group {
-            if chatStore.rightPanelMode == .activity {
+            if chatStore.rightPanelMode == .routing {
+                DynamicRoutingInspectorView()
+            } else if chatStore.rightPanelMode == .activity {
                 if !chatStore.agentActivities.isEmpty {
                     AgentActivityCollectionView(
                         activities: chatStore.agentActivities,
@@ -41,7 +43,14 @@ struct InspectorPanelView: View {
                 FileInspectorView(sections: chatStore.diffSections)
             }
         }
-        .background(.background)
+        // The routing inspector owns its own transparent visual field; the
+        // standard panel background would otherwise leave a gray slab behind
+        // the Metal animation. Other inspector modes retain the native panel.
+        .background(
+            chatStore.rightPanelMode == .routing
+                ? Color.clear
+                : Color(nsColor: .windowBackgroundColor)
+        )
     }
 
     private func stateView(

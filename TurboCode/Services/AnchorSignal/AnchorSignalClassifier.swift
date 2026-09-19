@@ -6,13 +6,17 @@ nonisolated struct AnchorSignalConfiguration: Sendable {
     let tokenizerURL: URL
     let maximumTokenCount: Int
 
+    /// Reject weak rankings so the active profile keeps its normal tool set.
+    static let minimumConfidence = 0.8
+
     static var `default`: Self {
         let root = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Work/Programmi/Anchorsignal/models/anchorsignal-small")
         return Self(
             modelURL: root.appendingPathComponent("TextEncoder.aimodel"),
             tokenizerURL: root.appendingPathComponent("tokenizer/tokenizer.json"),
-            maximumTokenCount: 64
+            // The exported Core AI graph has a fixed [1, 512] input shape.
+            maximumTokenCount: 512
         )
     }
 }
@@ -37,17 +41,12 @@ actor AnchorSignalClassifier {
     ) async -> DynamicRoutingDecision {
         let started = ContinuousClock.now
         let candidates = DynamicToolPackageResolver.candidates(
-            allowedToolIDs: allowedToolIDs,
-            prompt: prompt
+            allowedToolIDs: allowedToolIDs
         )
 
         guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return decision(
-                package: .conversation,
-                allowedToolIDs: allowedToolIDs,
-                topScore: 0,
-                margin: 0,
-                source: .fallback,
+            return profileFallback(
+                reason: "The request is empty.",
                 started: started
             )
         }
@@ -57,13 +56,27 @@ actor AnchorSignalClassifier {
             let query = try await embed("query: \(prompt)")
             var scored: [(DynamicToolPackage, Double)] = []
             for package in candidates {
-                let embedding = try await embedding(for: package)
-                scored.append((package, dot(query, embedding)))
+                let anchor = try await embedding(for: package)
+                // Intent is ranked only by the encoder. Profile permissions
+                // constrain tools independently of wording or similarity.
+                scored.append((package, cosineSimilarity(query, anchor)))
             }
             let ordered = scored.sorted { $0.1 > $1.1 }
-            let selected = ordered.first?.0 ?? .conversation
-            let topScore = ordered.first?.1 ?? 0
+            guard let best = ordered.first else {
+                return profileFallback(
+                    reason: "AnchorSignal returned no candidate category.",
+                    started: started
+                )
+            }
+            let selected = best.0
+            let topScore = best.1
             let secondScore = ordered.dropFirst().first?.1 ?? 0
+            guard topScore >= AnchorSignalConfiguration.minimumConfidence else {
+                return profileFallback(
+                    reason: "Similarity \(topScore.formatted(.number.precision(.fractionLength(3)))) is below the minimum 0.800.",
+                    started: started
+                )
+            }
             return decision(
                 package: selected,
                 allowedToolIDs: allowedToolIDs,
@@ -73,20 +86,10 @@ actor AnchorSignalClassifier {
                 started: started
             )
         } catch {
-            // The experimental control remains useful on machines without the
-            // external model asset, while diagnostics can still distinguish the
-            // fallback path from a real encoder decision.
-            let package = lexicalFallback(prompt, candidates: candidates)
-            var fallback = decision(
-                package: package,
-                allowedToolIDs: allowedToolIDs,
-                topScore: 0,
-                margin: 0,
-                source: .fallback,
+            return profileFallback(
+                reason: error.localizedDescription,
                 started: started
             )
-            fallback.fallbackReason = error.localizedDescription
-            return fallback
         }
     }
 
@@ -117,9 +120,11 @@ actor AnchorSignalClassifier {
         if let cached = packageEmbeddings[package] {
             return cached
         }
-        let values = try await embed(
-            "passage: \(package.classifierDescription)"
-        )
+        // E5 recommends query: on both sides of semantic similarity tasks;
+        // passage: is for asymmetric document retrieval. Keep this prefix in
+        // English even when the request or category description is multilingual.
+        let values = try await embed("query: \(package.classifierDescription)")
+        // Subsequent turns embed only the query.
         packageEmbeddings[package] = values
         return values
     }
@@ -175,29 +180,28 @@ actor AnchorSignalClassifier {
         )
     }
 
-    private func lexicalFallback(
-        _ prompt: String,
-        candidates: [DynamicToolPackage]
-    ) -> DynamicToolPackage {
-        let text = prompt.lowercased()
-        let scores: [(DynamicToolPackage, Int)] = candidates.map { package in
-            let words: [String]
-            switch package {
-            case .conversation: words = []
-            case .exploration: words = ["cerca", "trova", "leggi", "mostra", "ispeziona", "search", "find", "inspect", "read", "list"]
-            case .coding: words = ["correggi", "implementa", "modifica", "cambia", "refactor", "fix", "implement", "edit", "change"]
-            case .git: words = ["git", "commit", "branch", "diff", "status", "storia", "merge"]
-            case .build: words = ["build", "compila", "compilare", "test", "tests", "xcode", "diagnostica", "errore"]
-            case .implementation: words = ["completo", "end-to-end", "verifica", "implementazione", "feature"]
-            }
-            return (package, words.reduce(into: 0) { score, word in
-                if text.localizedCaseInsensitiveContains(word) { score += 1 }
-            })
-        }
-        guard let best = scores.max(by: { $0.1 < $1.1 }), best.1 > 0 else {
-            return .conversation
-        }
-        return best.0
+    private func profileFallback(
+        reason: String,
+        started: ContinuousClock.Instant
+    ) -> DynamicRoutingDecision {
+        // No package was classified. The runtime must rebuild through the
+        // profile's normal defaults, including its explicit tool selections.
+        DynamicRoutingDecision(
+            package: nil,
+            toolIDs: [],
+            topScore: 0,
+            margin: 0,
+            source: .fallback,
+            latencyMilliseconds: started.duration(to: .now).milliseconds,
+            fallbackReason: reason
+        )
+    }
+
+    private func cosineSimilarity(_ lhs: [Float], _ rhs: [Float]) -> Double {
+        let lhsMagnitude = sqrt(dot(lhs, lhs))
+        let rhsMagnitude = sqrt(dot(rhs, rhs))
+        guard lhsMagnitude > 0, rhsMagnitude > 0 else { return 0 }
+        return dot(lhs, rhs) / (lhsMagnitude * rhsMagnitude)
     }
 
     private func dot(_ lhs: [Float], _ rhs: [Float]) -> Double {

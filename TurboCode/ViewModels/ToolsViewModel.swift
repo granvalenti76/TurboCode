@@ -55,6 +55,11 @@ final class ToolsViewModel {
         let onDeviceContext = context(repositoryMap: nil)
         let isOrchestrating = chatStore.orchestratorMode == .orchestrator
         let delegateName = settings.selectedOrchestratorModel?.name ?? "No delegate configured"
+        let usesDynamicTools = chatStore.dynamicRoutingEnabled && chatStore.dynamicRoutingSupported
+        let dynamicIDs = Set(ToolCapabilityID.allCases.filter {
+            chatStore.dynamicRoutingToolNames.contains($0.runtimeName)
+        })
+        let isOnDeviceDynamic = usesDynamicTools && chatStore.activeBackend == .foundationApple
 
         var resolvedProfiles: [ToolModelProfileViewState] = [
             ToolModelProfileViewState(
@@ -64,13 +69,16 @@ final class ToolsViewModel {
                 modelIdentifier: "Apple on-device",
                 systemImage: "apple.logo",
                 tierLabel: "On-device",
-                statusLabel: onDeviceSupportsTools ? "Available" : "Tool calling unavailable",
+                statusLabel: isOnDeviceDynamic
+                    ? "Dynamic · \(chatStore.dynamicRoutingDecision?.title ?? "Ready")"
+                    : (onDeviceSupportsTools ? "Available" : "Tool calling unavailable"),
                 isUsable: onDeviceSupportsTools,
                 isActive: chatStore.activeBackend == .foundationApple && !isOrchestrating,
                 plan: ModelToolCatalog.plan(
                     profile: .standalone,
                     tier: onDeviceTier,
-                    context: onDeviceContext
+                    context: onDeviceContext,
+                    selectedIDs: isOnDeviceDynamic ? dynamicIDs : nil
                 )
             ),
             ToolModelProfileViewState(
@@ -94,6 +102,7 @@ final class ToolsViewModel {
         resolvedProfiles += settings.remoteModels.map { model in
             let isDynamic = chatStore.dynamicRoutingEnabled
                 && chatStore.dynamicRoutingSupported
+                && chatStore.activeBackend != .foundationApple
                 && chatStore.activeRemoteModelID == model.id
             // The active Dynamic column describes the constructed session.
             // Other columns continue to show their configured capability plans.
@@ -120,7 +129,7 @@ final class ToolsViewModel {
                 systemImage: modelIcon(model),
                 tierLabel: "\(modelTier == .enhanced ? "Enhanced" : "Standard") · \(contextLabel(model.contextWindowTokens)) ctx",
                 statusLabel: isDynamic
-                    ? "Dynamic · \(chatStore.dynamicRoutingDecision?.package.title ?? "Ready")"
+                    ? "Dynamic · \(chatStore.dynamicRoutingDecision?.title ?? "Ready")"
                     : status,
                 isUsable: model.enabled && configured,
                 isActive: !isOrchestrating && chatStore.activeRemoteModelID == model.id,

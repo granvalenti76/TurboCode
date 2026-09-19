@@ -19,6 +19,10 @@ final class ModelRuntimeStore {
     private(set) var dynamicRoutingEnabled: Bool
     private(set) var dynamicRoutingDecision: DynamicRoutingDecision?
     private(set) var isDynamicRouting = false
+    private(set) var dynamicRoutingPhase: DynamicRoutingPhase = .idle
+    private(set) var dynamicRoutingPromptPreview = ""
+    private(set) var dynamicRoutingPreviewToolIDs: [ToolCapabilityID] = []
+    private(set) var dynamicRoutingPresentationRevision = 0
     /// Read back from the constructed session, not from the requested package.
     private(set) var dynamicRoutingToolNames: [String] = []
     private var dynamicRoutingRevision = UUID()
@@ -38,10 +42,12 @@ final class ModelRuntimeStore {
         }
     }
 
-    /// The classifier is intentionally available only to Llama-backed
-    /// conversations. Other providers retain their existing profile behavior.
+    /// Native standalone sessions share the router; tool construction still
+    /// applies the selected backend's capability tier and profile permissions.
     var dynamicRoutingSupported: Bool {
-        activeBackend == .llamaServer && activeBaseModelID == .llama
+        orchestratorMode == .standalone
+            && (activeBackend == .foundationApple
+                || (activeBackend == .llamaServer && activeBaseModelID == .llama))
     }
 
     /// The single Markdown catalog shared by the prompt, `load_skill`, slash
@@ -211,6 +217,15 @@ final class ModelRuntimeStore {
     func routeDynamicTools(for prompt: String) async throws -> Bool {
         guard dynamicRoutingEnabled, dynamicRoutingSupported else { return false }
         let revision = dynamicRoutingRevision
+        let previouslyUsedProfileDefaults = dynamicRoutingDecision?.source == .fallback
+        dynamicRoutingPresentationRevision &+= 1
+        dynamicRoutingPromptPreview = Self.routingPromptPreview(for: prompt)
+        // Clear the previous visual receipt before classifying the new prompt;
+        // the active tool boundary remains in `dynamicRoutingToolIDs` until the
+        // new decision is ready, so presentation state cannot alter execution.
+        dynamicRoutingDecision = nil
+        dynamicRoutingPreviewToolIDs = []
+        dynamicRoutingPhase = .analyzing
         isDynamicRouting = true
         defer { isDynamicRouting = false }
         let allowedToolIDs = activeDynamicProfile?.resolvedToolIDs
@@ -223,9 +238,26 @@ final class ModelRuntimeStore {
         // this result; never install the old profile's capabilities afterward.
         try Task.checkCancellation()
         guard revision == dynamicRoutingRevision else { throw CancellationError() }
-        let changed = dynamicRoutingToolIDs != decision.toolIDs
-        dynamicRoutingToolIDs = decision.toolIDs
+        let usesProfileDefaults = decision.source == .fallback
+        let selectedToolIDs: Set<ToolCapabilityID>? = usesProfileDefaults ? nil : decision.toolIDs
+        // A first failure must rebuild the initially toolless session even
+        // though both selections are nil. Later failures reuse profile defaults.
+        let changed = dynamicRoutingToolIDs != selectedToolIDs
+            || previouslyUsedProfileDefaults != usesProfileDefaults
+        if changed {
+            // Names belong to the previous session until the rebuilt session
+            // reports its definitions. The selected IDs below are the interim
+            // presentation source, preventing stale package/tool combinations.
+            dynamicRoutingToolNames = []
+        }
+        dynamicRoutingToolIDs = selectedToolIDs
         dynamicRoutingDecision = decision
+        dynamicRoutingPreviewToolIDs = orderedToolIDs(decision.toolIDs)
+        dynamicRoutingPhase = .selecting
+        // Give SwiftUI a chance to render the selection stage without adding
+        // a wall-clock delay to classification or session construction.
+        await Task.yield()
+        dynamicRoutingPhase = changed ? .assembling : .ready
         return changed
     }
 
@@ -516,6 +548,10 @@ final class ModelRuntimeStore {
         workspaceInstructionsRevision = workspaceInstructions?.revision
         let delegateModel = delegateRemoteModel
         let sessionSkills = resolvedMarkdownSkills
+        // Disable the override on failure so the factory follows its existing
+        // profile path, rather than interpreting nil as the initial empty session.
+        let usesDynamicTools = dynamicRoutingEnabled && dynamicRoutingSupported
+            && dynamicRoutingDecision?.source != .fallback
         return ModelSessionConfiguration(
             backend: activeBackend,
             activeRemoteModel: activeRemoteModel,
@@ -526,8 +562,8 @@ final class ModelRuntimeStore {
             availableSkills: sessionSkills,
             documentationStore: .live,
             activeDynamicProfile: activeDynamicProfile,
-            dynamicRoutingEnabled: dynamicRoutingEnabled && dynamicRoutingSupported,
-            dynamicRoutingToolIDs: dynamicRoutingEnabled && dynamicRoutingSupported
+            dynamicRoutingEnabled: usesDynamicTools,
+            dynamicRoutingToolIDs: usesDynamicTools
                 ? dynamicRoutingToolIDs
                 : nil,
             reasoningEffort: reasoningEffort,
@@ -615,11 +651,50 @@ final class ModelRuntimeStore {
         dynamicRoutingRevision = UUID()
         dynamicRoutingToolIDs = nil
         dynamicRoutingDecision = nil
+        dynamicRoutingPhase = .idle
+        dynamicRoutingPromptPreview = ""
+        dynamicRoutingPreviewToolIDs = []
+        dynamicRoutingPresentationRevision &+= 1
         dynamicRoutingToolNames = []
     }
 
     func recordDynamicRoutingTools(_ names: [String]) {
-        dynamicRoutingToolNames = dynamicRoutingEnabled && dynamicRoutingSupported ? names : []
+        guard dynamicRoutingEnabled, dynamicRoutingSupported else {
+            dynamicRoutingToolNames = []
+            return
+        }
+        dynamicRoutingToolNames = names
+        if dynamicRoutingDecision != nil {
+            dynamicRoutingPhase = .ready
+        }
+    }
+
+    /// One presentation contract shared by the composer and routing inspector.
+    /// Runtime names win after a rebuild; selected capability names cover the
+    /// short interval before the new session publishes its definitions.
+    var dynamicRoutingPresentedToolNames: [String] {
+        if !dynamicRoutingToolNames.isEmpty {
+            return dynamicRoutingToolNames
+        }
+        return dynamicRoutingPreviewToolIDs.map {
+            ModelToolCatalog.descriptor(for: $0).name
+        }
+    }
+
+    private func orderedToolIDs(_ ids: Set<ToolCapabilityID>) -> [ToolCapabilityID] {
+        ids.sorted {
+            ModelToolCatalog.descriptor(for: $0).name
+                .localizedStandardCompare(ModelToolCatalog.descriptor(for: $1).name)
+                == .orderedAscending
+        }
+    }
+
+    private static func routingPromptPreview(for prompt: String) -> String {
+        let normalized = prompt
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+        guard normalized.count > 180 else { return normalized }
+        return String(normalized.prefix(177)) + "…"
     }
 
     private func reasoningEffort(
