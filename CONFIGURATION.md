@@ -29,6 +29,22 @@ settings. The visible name refreshes without rebuilding the conversation.
 In **Profiles > Codex > Default model**, choose the direct profile's model;
 custom Codex profiles retain their own model configuration.
 
+### Experimental Dynamic routing (Llama)
+
+Enable **Dynamic** below the composer to start without tools and select a native
+tool package before each turn. The adjacent status opens a popover showing the
+package, actual session tool names, routing duration, and classifier source.
+The active Llama column in Tools follows this session snapshot. Custom profile
+allowlists still apply; external plugin/MCP catalogs are excluded in this experiment.
+
+The prototype loads `TextEncoder.aimodel` and `tokenizer/tokenizer.json` from
+`~/Work/Programmi/Anchorsignal/models/anchorsignal-small` lazily using CoreAI.
+No Python conversion is needed. Missing or failed assets use a visibly labelled
+keyword fallback with the error in the popover. Similarity scores are not
+confidence probabilities. The first request includes model loading; later
+requests reuse the encoder and cached package embeddings. Repeated tool sets
+keep the provider session; changed tool definitions can reduce KV-cache reuse.
+
 ## Repository map model capability
 
 Each entry in `models.json` may declare the context budget and repository-map

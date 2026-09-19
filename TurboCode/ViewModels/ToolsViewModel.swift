@@ -92,6 +92,16 @@ final class ToolsViewModel {
         ]
 
         resolvedProfiles += settings.remoteModels.map { model in
+            let isDynamic = chatStore.dynamicRoutingEnabled
+                && chatStore.dynamicRoutingSupported
+                && chatStore.activeRemoteModelID == model.id
+            // The active Dynamic column describes the constructed session.
+            // Other columns continue to show their configured capability plans.
+            let dynamicIDs: Set<ToolCapabilityID>? = isDynamic ? Set(
+                ToolCapabilityID.allCases.filter {
+                    chatStore.dynamicRoutingToolNames.contains($0.runtimeName)
+                }
+            ) : nil
             let modelTier: ModelToolTier = model.repositoryMap == .enhanced ? .enhanced : .standard
             let configured = settings.isConfigured(model)
             let status: String
@@ -109,13 +119,16 @@ final class ToolsViewModel {
                 modelIdentifier: model.modelName,
                 systemImage: modelIcon(model),
                 tierLabel: "\(modelTier == .enhanced ? "Enhanced" : "Standard") · \(contextLabel(model.contextWindowTokens)) ctx",
-                statusLabel: status,
+                statusLabel: isDynamic
+                    ? "Dynamic · \(chatStore.dynamicRoutingDecision?.package.title ?? "Ready")"
+                    : status,
                 isUsable: model.enabled && configured,
                 isActive: !isOrchestrating && chatStore.activeRemoteModelID == model.id,
                 plan: ModelToolCatalog.plan(
                     profile: .standalone,
                     tier: modelTier,
-                    context: context(repositoryMap: model.repositoryMap)
+                    context: context(repositoryMap: model.repositoryMap),
+                    selectedIDs: dynamicIDs
                 )
             )
         }

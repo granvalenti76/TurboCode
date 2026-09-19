@@ -16,8 +16,16 @@ final class ModelRuntimeStore {
     private(set) var activeDynamicProfileID: UUID?
     private(set) var availableSkills: [TurboCodeSkillDefinition] = []
     private(set) var activePluginTools: [TypeScriptPluginToolBinding] = []
+    private(set) var dynamicRoutingEnabled: Bool
+    private(set) var dynamicRoutingDecision: DynamicRoutingDecision?
+    private(set) var isDynamicRouting = false
+    /// Read back from the constructed session, not from the requested package.
+    private(set) var dynamicRoutingToolNames: [String] = []
+    private var dynamicRoutingRevision = UUID()
+    private var dynamicRoutingToolIDs: Set<ToolCapabilityID>?
     private var workspaceInstructionsRevision: String?
     private let preferences: UserDefaults
+    private let dynamicRouter: AnchorSignalClassifier
 
     var composerModel: String
     var activeBackend: ModelBackend
@@ -28,6 +36,12 @@ final class ModelRuntimeStore {
         activeDynamicProfileID.flatMap { id in
             dynamicProfiles.first(where: { $0.id == id })
         }
+    }
+
+    /// The classifier is intentionally available only to Llama-backed
+    /// conversations. Other providers retain their existing profile behavior.
+    var dynamicRoutingSupported: Bool {
+        activeBackend == .llamaServer && activeBaseModelID == .llama
     }
 
     /// The single Markdown catalog shared by the prompt, `load_skill`, slash
@@ -116,6 +130,10 @@ final class ModelRuntimeStore {
         preferences: UserDefaults = .standard
     ) {
         self.preferences = preferences
+        self.dynamicRouter = AnchorSignalClassifier()
+        self.dynamicRoutingEnabled = preferences.bool(forKey: "dynamicRoutingEnabled")
+        self.dynamicRoutingToolIDs = nil
+        self.dynamicRoutingDecision = nil
         let loadedProfiles = profiles ?? (try? DynamicProfileStore.live.load()) ?? []
         let configuredRemoteModels = models ?? (try? TurboCodeConfig.shared.loadRemoteModels())
             .flatMap { $0.isEmpty ? nil : $0 }
@@ -176,6 +194,41 @@ final class ModelRuntimeStore {
         }
     }
 
+    /// Enables the experimental per-turn capability router. The selected
+    /// package is cleared so the next request always starts from a toolless
+    /// session and is classified against the current profile.
+    @discardableResult
+    func setDynamicRoutingEnabled(_ enabled: Bool) -> Bool {
+        let changed = dynamicRoutingEnabled != enabled || dynamicRoutingToolIDs != nil
+        dynamicRoutingEnabled = enabled
+        resetDynamicRoutingSnapshot()
+        preferences.set(enabled, forKey: "dynamicRoutingEnabled")
+        return changed
+    }
+
+    /// Classifies one prompt and stores only the resolved capability IDs. The
+    /// caller owns the one required session rebuild when that set changes.
+    func routeDynamicTools(for prompt: String) async throws -> Bool {
+        guard dynamicRoutingEnabled, dynamicRoutingSupported else { return false }
+        let revision = dynamicRoutingRevision
+        isDynamicRouting = true
+        defer { isDynamicRouting = false }
+        let allowedToolIDs = activeDynamicProfile?.resolvedToolIDs
+            ?? Set(ToolCapabilityID.allCases)
+        let decision = await dynamicRouter.classify(
+            prompt: prompt,
+            allowedToolIDs: allowedToolIDs
+        )
+        // A profile/thread transition during lazy model loading invalidates
+        // this result; never install the old profile's capabilities afterward.
+        try Task.checkCancellation()
+        guard revision == dynamicRoutingRevision else { throw CancellationError() }
+        let changed = dynamicRoutingToolIDs != decision.toolIDs
+        dynamicRoutingToolIDs = decision.toolIDs
+        dynamicRoutingDecision = decision
+        return changed
+    }
+
     /// Selects the first session model from persisted configuration before a
     /// `LanguageModelSession` is created. This prevents startup from briefly
     /// binding Llama to the built-in localhost fallback when `models.json`
@@ -203,6 +256,7 @@ final class ModelRuntimeStore {
         orchestratorMode = mode
         preferences.set(mode.rawValue, forKey: "orchestratorMode")
         if mode == .orchestrator {
+            resetDynamicRoutingSnapshot()
             activeBackend = .foundationApple
             clearDynamicProfileSelection()
             composerModel = "Apple · Orchestrator"
@@ -212,6 +266,7 @@ final class ModelRuntimeStore {
     }
 
     func selectCodex(displayName: String, profileID: UUID? = nil) {
+        resetDynamicRoutingSnapshot()
         clearDynamicProfileSelection()
         if let profileID,
            let profile = dynamicProfiles.first(where: {
@@ -233,6 +288,7 @@ final class ModelRuntimeStore {
     func selectBackend(_ backend: ModelBackend) -> Bool {
         clearDynamicProfileSelection()
         if backend == .foundationApple {
+            resetDynamicRoutingSnapshot()
             activeBackend = .foundationApple
             composerModel = backend.rawValue
             return true
@@ -470,6 +526,10 @@ final class ModelRuntimeStore {
             availableSkills: sessionSkills,
             documentationStore: .live,
             activeDynamicProfile: activeDynamicProfile,
+            dynamicRoutingEnabled: dynamicRoutingEnabled && dynamicRoutingSupported,
+            dynamicRoutingToolIDs: dynamicRoutingEnabled && dynamicRoutingSupported
+                ? dynamicRoutingToolIDs
+                : nil,
             reasoningEffort: reasoningEffort,
             delegateReasoningEffort: reasoningEffort(for: delegateModel),
             activeTemperature: temperature(for: activeRemoteModel),
@@ -517,6 +577,7 @@ final class ModelRuntimeStore {
     }
 
     private func selectRemoteModel(_ model: RemoteModelConfig) {
+        resetDynamicRoutingSnapshot()
         activeRemoteModelID = model.id
         preferences.set(model.id, forKey: "activeRemoteModelID")
         activeBackend = Self.backend(for: model.role)
@@ -525,11 +586,13 @@ final class ModelRuntimeStore {
 
     private func applyBaseModel(_ id: ProfileBaseModelID) -> Bool {
         if id == .codex {
+            resetDynamicRoutingSnapshot()
             activeBackend = .codex
             composerModel = id.displayName
             return true
         }
         if id == .onDevice {
+            resetDynamicRoutingSnapshot()
             activeBackend = .foundationApple
             composerModel = id.displayName
             return true
@@ -546,6 +609,17 @@ final class ModelRuntimeStore {
     private func clearDynamicProfileSelection() {
         activeDynamicProfileID = nil
         preferences.removeObject(forKey: "activeDynamicProfileID")
+    }
+
+    func resetDynamicRoutingSnapshot() {
+        dynamicRoutingRevision = UUID()
+        dynamicRoutingToolIDs = nil
+        dynamicRoutingDecision = nil
+        dynamicRoutingToolNames = []
+    }
+
+    func recordDynamicRoutingTools(_ names: [String]) {
+        dynamicRoutingToolNames = dynamicRoutingEnabled && dynamicRoutingSupported ? names : []
     }
 
     private func reasoningEffort(

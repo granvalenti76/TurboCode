@@ -318,6 +318,19 @@ public final class ChatStore {
         await profileSelectionCoordinator.selectDynamicProfile(id)
     }
 
+    /// Enables the experimental Llama-only router and rebuilds the released
+    /// provider session with the selected capability boundary.
+    func setDynamicRoutingEnabled(_ enabled: Bool) async {
+        guard !busy, !modelRuntimeStore.isDynamicRouting,
+              modelRuntimeStore.dynamicRoutingSupported || !enabled else {
+            return
+        }
+        guard modelRuntimeStore.setDynamicRoutingEnabled(enabled) else { return }
+        await profileSelectionCoordinator.rebuildSession(
+            discardingCapabilityContext: false
+        )
+    }
+
     /// Selects a profile with `delegate_task` as one atomic runtime change.
     ///
     /// The historical global "orchestrator" mode is the on-device compatibility

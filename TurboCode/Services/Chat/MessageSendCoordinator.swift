@@ -104,6 +104,7 @@ final class MessageSendCoordinator {
         visibleInTimeline: Bool
     ) async -> Bool {
         guard !displayText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !modelRuntime.isDynamicRouting,
               !runtimeProjection.hasActiveOperation,
               !presentation.isProfileTransitioning,
               modelRuntime.activeBackend != .codex || codexRuntime.canSend else {
@@ -112,6 +113,21 @@ final class MessageSendCoordinator {
 
         await compactOnDeviceContextIfNeeded()
         await lifecycle.ensureActiveThread()
+        // Route after thread/session initialization and before turn admission.
+        // This also covers callers that already provide a resolved prompt.
+        if modelRuntime.dynamicRoutingEnabled, modelRuntime.dynamicRoutingSupported {
+            do {
+                if try await modelRuntime.routeDynamicTools(for: promptText) {
+                    guard await profiles.rebuildSession() else {
+                        modelRuntime.resetDynamicRoutingSnapshot()
+                        presentation.errorMessage = "Dynamic could not update the tools. Please retry."
+                        return false
+                    }
+                }
+            } catch {
+                return false
+            }
+        }
         let turnID = TurnID()
         let titleThreadID = conversations.activeThreadID
         // Routing is immutable for the accepted turn. A later menu selection
