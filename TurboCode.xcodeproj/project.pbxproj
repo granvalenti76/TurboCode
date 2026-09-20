@@ -146,6 +146,7 @@
 		B000000000000000000000a0 /* TurboCode/Stores/TypeScriptPluginRuntimeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a0 /* TurboCode/Stores/TypeScriptPluginRuntimeStore.swift */; };
 		B000000000000000000000a2 /* TurboCode/Models/DynamicToolPackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a2 /* TurboCode/Models/DynamicToolPackage.swift */; };
 		B000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift */; };
+		B000000000000000000000a4 /* TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a4 /* TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift */; };
 		B000000000000000000000a1 /* turbocode-acp in Helpers */ = {isa = PBXBuildFile; fileRef = 000000000000000000000320 /* turbocode-acp */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		C10000000000000000000000 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 /* End PBXBuildFile section */
@@ -220,6 +221,7 @@
 		A000000000000000000000a2 /* TurboCode/Models/DynamicToolPackage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/DynamicToolPackage.swift; sourceTree = "<group>"; };
 		A00000000000000000000021 /* TurboCode/Services/ACP/ACPAgentServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/ACP/ACPAgentServer.swift; sourceTree = "<group>"; };
 		A000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift; sourceTree = "<group>"; };
+		A000000000000000000000a4 /* TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift; sourceTree = "<group>"; };
 		A00000000000000000000022 /* TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift; sourceTree = "<group>"; };
 		A00000000000000000000023 /* TurboCode/Services/ACP/ACPEventProjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/ACP/ACPEventProjector.swift; sourceTree = "<group>"; };
 		A00000000000000000000024 /* TurboCode/Services/ACP/ACPRuntimeDriver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/ACP/ACPRuntimeDriver.swift; sourceTree = "<group>"; };
@@ -417,6 +419,7 @@
 				A000000000000000000000a2 /* TurboCode/Models/DynamicToolPackage.swift */,
 				A00000000000000000000021 /* TurboCode/Services/ACP/ACPAgentServer.swift */,
 				A000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift */,
+				A000000000000000000000a4 /* TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift */,
 				A00000000000000000000022 /* TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift */,
 				A00000000000000000000023 /* TurboCode/Services/ACP/ACPEventProjector.swift */,
 				A00000000000000000000024 /* TurboCode/Services/ACP/ACPRuntimeDriver.swift */,
@@ -708,6 +711,7 @@
 				B000000000000000000000a2 /* TurboCode/Models/DynamicToolPackage.swift in Sources */,
 				B00000000000000000000021 /* TurboCode/Services/ACP/ACPAgentServer.swift in Sources */,
 				B000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift in Sources */,
+				B000000000000000000000a4 /* TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift in Sources */,
 				B00000000000000000000022 /* TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift in Sources */,
 				B00000000000000000000023 /* TurboCode/Services/ACP/ACPEventProjector.swift in Sources */,
 				B00000000000000000000024 /* TurboCode/Services/ACP/ACPRuntimeDriver.swift in Sources */,

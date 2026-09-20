@@ -16,6 +16,7 @@ final class ModelRuntimeStore {
     private(set) var activeDynamicProfileID: UUID?
     private(set) var availableSkills: [TurboCodeSkillDefinition] = []
     private(set) var activePluginTools: [TypeScriptPluginToolBinding] = []
+    private(set) var dynamicRoutingFeatureEnabled: Bool
     private(set) var dynamicRoutingEnabled: Bool
     private(set) var dynamicRoutingDecision: DynamicRoutingDecision?
     private(set) var isDynamicRouting = false
@@ -45,7 +46,8 @@ final class ModelRuntimeStore {
     /// Native standalone sessions share the router; tool construction still
     /// applies the selected backend's capability tier and profile permissions.
     var dynamicRoutingSupported: Bool {
-        orchestratorMode == .standalone
+        dynamicRoutingFeatureEnabled
+            && orchestratorMode == .standalone
             && (activeBackend == .foundationApple
                 || (activeBackend == .llamaServer && activeBaseModelID == .llama))
     }
@@ -133,11 +135,19 @@ final class ModelRuntimeStore {
     init(
         models: [RemoteModelConfig]? = nil,
         profiles: [UserDynamicProfile]? = nil,
-        preferences: UserDefaults = .standard
+        preferences: UserDefaults = .standard,
+        dynamicRoutingAssetsPrepared: Bool? = nil
     ) {
         self.preferences = preferences
         self.dynamicRouter = AnchorSignalClassifier()
-        self.dynamicRoutingEnabled = preferences.bool(forKey: "dynamicRoutingEnabled")
+        let assetsPrepared = dynamicRoutingAssetsPrepared
+            ?? AnchorSignalAssetDescriptor.current.isPrepared()
+        let featureEnabled = preferences.bool(
+            forKey: "dynamicRoutingFeatureEnabled"
+        ) && assetsPrepared
+        self.dynamicRoutingFeatureEnabled = featureEnabled
+        self.dynamicRoutingEnabled = featureEnabled
+            && preferences.bool(forKey: "dynamicRoutingEnabled")
         self.dynamicRoutingToolIDs = nil
         self.dynamicRoutingDecision = nil
         let loadedProfiles = profiles ?? (try? DynamicProfileStore.live.load()) ?? []
@@ -205,10 +215,29 @@ final class ModelRuntimeStore {
     /// session and is classified against the current profile.
     @discardableResult
     func setDynamicRoutingEnabled(_ enabled: Bool) -> Bool {
+        guard !enabled || dynamicRoutingFeatureEnabled else { return false }
         let changed = dynamicRoutingEnabled != enabled || dynamicRoutingToolIDs != nil
         dynamicRoutingEnabled = enabled
         resetDynamicRoutingSnapshot()
         preferences.set(enabled, forKey: "dynamicRoutingEnabled")
+        return changed
+    }
+
+    /// Publishes the installed feature to the composer only after CoreAI has a
+    /// cached specialization. Disabling the feature also closes any active
+    /// routed tool boundary so later sessions return to their profile tools.
+    @discardableResult
+    func setDynamicRoutingFeatureEnabled(_ enabled: Bool) -> Bool {
+        guard !enabled || AnchorSignalAssetDescriptor.current.isPrepared() else {
+            return false
+        }
+        let changed = dynamicRoutingFeatureEnabled != enabled
+            || (!enabled && dynamicRoutingEnabled)
+        dynamicRoutingFeatureEnabled = enabled
+        preferences.set(enabled, forKey: "dynamicRoutingFeatureEnabled")
+        if !enabled {
+            _ = setDynamicRoutingEnabled(false)
+        }
         return changed
     }
 

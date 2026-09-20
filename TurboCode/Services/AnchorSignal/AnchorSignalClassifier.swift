@@ -10,11 +10,10 @@ nonisolated struct AnchorSignalConfiguration: Sendable {
     static let minimumSimilarity = 0.772
 
     static var `default`: Self {
-        let root = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Work/Programmi/Anchorsignal/models/anchorsignal-small")
+        let assets = AnchorSignalAssetDescriptor.current
         return Self(
-            modelURL: root.appendingPathComponent("TextEncoder.aimodel"),
-            tokenizerURL: root.appendingPathComponent("tokenizer/tokenizer.json"),
+            modelURL: assets.modelURL(),
+            tokenizerURL: assets.tokenizerURL(),
             // The exported Core AI graph has a fixed [1, 512] input shape.
             maximumTokenCount: 512
         )
@@ -33,6 +32,17 @@ actor AnchorSignalClassifier {
 
     init(configuration: AnchorSignalConfiguration = .default) {
         self.configuration = configuration
+    }
+
+    /// Exercises both the prepared model and tokenizer before Settings marks
+    /// the feature ready. A successful load alone does not prove that the two
+    /// downloaded assets still agree on their input contract.
+    func validateInstalledAssets() async throws {
+        try await loadIfNeeded()
+        let output = try await embed("query: explain this workspace")
+        guard output.count == 384, output.allSatisfy({ $0.isFinite }) else {
+            throw AnchorSignalError.invalidOutput
+        }
     }
 
     func classify(

@@ -183,6 +183,10 @@ extension ChatStore {
         modelRuntimeStore.dynamicRoutingEnabled
     }
 
+    var dynamicRoutingFeatureEnabled: Bool {
+        modelRuntimeStore.dynamicRoutingFeatureEnabled
+    }
+
     var dynamicRoutingSupported: Bool {
         modelRuntimeStore.dynamicRoutingSupported
     }
