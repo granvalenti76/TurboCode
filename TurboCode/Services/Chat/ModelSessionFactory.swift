@@ -45,6 +45,10 @@ nonisolated struct ModelSessionConfiguration: Sendable {
     /// never reaches through `TurboCodeConfig.shared` for a global dependency.
     let documentationStore: ProductDocumentationStore
     let activeDynamicProfile: UserDynamicProfile?
+    /// Dynamic routing starts with no tool IDs and fills this snapshot after
+    /// the application classifies the next user request.
+    let dynamicRoutingEnabled: Bool
+    let dynamicRoutingToolIDs: Set<ToolCapabilityID>?
     let reasoningEffort: ReasoningEffort?
     let delegateReasoningEffort: ReasoningEffort?
     let activeTemperature: Double?
@@ -71,6 +75,8 @@ nonisolated struct ModelSessionConfiguration: Sendable {
         availableSkills: [TurboCodeSkillDefinition],
         documentationStore: ProductDocumentationStore,
         activeDynamicProfile: UserDynamicProfile?,
+        dynamicRoutingEnabled: Bool = false,
+        dynamicRoutingToolIDs: Set<ToolCapabilityID>? = nil,
         reasoningEffort: ReasoningEffort?,
         delegateReasoningEffort: ReasoningEffort?,
         activeTemperature: Double?,
@@ -90,6 +96,8 @@ nonisolated struct ModelSessionConfiguration: Sendable {
         self.availableSkills = availableSkills
         self.documentationStore = documentationStore
         self.activeDynamicProfile = activeDynamicProfile
+        self.dynamicRoutingEnabled = dynamicRoutingEnabled
+        self.dynamicRoutingToolIDs = dynamicRoutingToolIDs
         self.reasoningEffort = reasoningEffort
         self.delegateReasoningEffort = delegateReasoningEffort
         self.activeTemperature = activeTemperature
@@ -308,6 +316,27 @@ nonisolated enum ModelSessionFactory {
             activeProfile: configuration.activeDynamicProfile
         )
 
+        // Dynamic routing intentionally creates a toolless first session. The
+        // application classifies the user request before rebuilding this
+        // profile with a bounded package, so ordinary sessions never pay for
+        // the experimental path.
+        if configuration.dynamicRoutingEnabled,
+           configuration.dynamicRoutingToolIDs == nil {
+            return makeToollessSession(
+                instructions: systemPrompt(
+                    for: configuration,
+                    role: .standalone,
+                    backend: configuration.backend,
+                    plan: nil
+                ),
+                model: activeModel,
+                temperature: temperature,
+                samplingMode: samplingMode,
+                reasoningLevel: activeCapabilities.reasoningLevel,
+                history: history
+            )
+        }
+
         if routing.role == .experimentalOnDeviceCoordinator,
            activeCapabilities.toolAccess != .none {
             return makeOrchestratorSession(
@@ -344,9 +373,11 @@ nonisolated enum ModelSessionFactory {
                 for: configuration,
                 repositoryMap: activeRemoteConfiguration?.repositoryMap
             ),
-            selectedIDs: configuration.activeDynamicProfile?.resolvedToolIDs
+            selectedIDs: configuration.dynamicRoutingToolIDs
+                ?? configuration.activeDynamicProfile?.resolvedToolIDs
         )
-        let usesExclusiveToolSelection = configuration.activeDynamicProfile != nil
+        let usesExclusiveToolSelection = configuration.dynamicRoutingEnabled
+            || configuration.activeDynamicProfile != nil
         let delegateInvoker = standalonePlan.contains(.delegateTask)
             ? makeDelegateInvoker(configuration: configuration, events: events)
             : nil
@@ -388,7 +419,9 @@ nonisolated enum ModelSessionFactory {
                 )
             )
         }
-        standaloneTools.append(contentsOf: events.additionalTools)
+        if !configuration.dynamicRoutingEnabled {
+            standaloneTools.append(contentsOf: events.additionalTools)
+        }
 
         return LanguageModelSession(
             profile: StandaloneProfile(
@@ -406,7 +439,8 @@ nonisolated enum ModelSessionFactory {
                 toolPlan: standalonePlan,
                 usesExclusiveToolSelection: usesExclusiveToolSelection,
                 supplementalTools: standaloneTools,
-                safariSkillActivations: configuration.agentTuning.experimental.safariMCPEnabled
+                safariSkillActivations: !configuration.dynamicRoutingEnabled
+                    && configuration.agentTuning.experimental.safariMCPEnabled
                     ? SkillActivations()
                     : nil,
                 onToolStart: { call in
@@ -692,7 +726,10 @@ nonisolated enum ModelSessionFactory {
                 return nil
             }
         }
-        guard configuration.agentTuning.experimental.thirdPartyPluginsEnabled else {
+        // Dynamic packages currently describe native tools only. External
+        // catalogs must not silently widen a routed (including empty) package.
+        guard !configuration.dynamicRoutingEnabled,
+              configuration.agentTuning.experimental.thirdPartyPluginsEnabled else {
             return tools
         }
         let selectedPluginIDs = configuration.activeDynamicProfile?

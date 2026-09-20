@@ -41,7 +41,7 @@ struct InspectorPanelView: View {
                 FileInspectorView(sections: chatStore.diffSections)
             }
         }
-        .background(.background)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private func stateView(

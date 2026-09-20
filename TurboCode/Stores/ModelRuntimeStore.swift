@@ -16,8 +16,21 @@ final class ModelRuntimeStore {
     private(set) var activeDynamicProfileID: UUID?
     private(set) var availableSkills: [TurboCodeSkillDefinition] = []
     private(set) var activePluginTools: [TypeScriptPluginToolBinding] = []
+    private(set) var dynamicRoutingFeatureEnabled: Bool
+    private(set) var dynamicRoutingEnabled: Bool
+    private(set) var dynamicRoutingDecision: DynamicRoutingDecision?
+    private(set) var isDynamicRouting = false
+    private(set) var dynamicRoutingPhase: DynamicRoutingPhase = .idle
+    private(set) var dynamicRoutingPromptPreview = ""
+    private(set) var dynamicRoutingPreviewToolIDs: [ToolCapabilityID] = []
+    private(set) var dynamicRoutingPresentationRevision = 0
+    /// Read back from the constructed session, not from the requested package.
+    private(set) var dynamicRoutingToolNames: [String] = []
+    private var dynamicRoutingRevision = UUID()
+    private var dynamicRoutingToolIDs: Set<ToolCapabilityID>?
     private var workspaceInstructionsRevision: String?
     private let preferences: UserDefaults
+    private let dynamicRouter: AnchorSignalClassifier
 
     var composerModel: String
     var activeBackend: ModelBackend
@@ -28,6 +41,15 @@ final class ModelRuntimeStore {
         activeDynamicProfileID.flatMap { id in
             dynamicProfiles.first(where: { $0.id == id })
         }
+    }
+
+    /// Native standalone sessions share the router; tool construction still
+    /// applies the selected backend's capability tier and profile permissions.
+    var dynamicRoutingSupported: Bool {
+        dynamicRoutingFeatureEnabled
+            && orchestratorMode == .standalone
+            && (activeBackend == .foundationApple
+                || (activeBackend == .llamaServer && activeBaseModelID == .llama))
     }
 
     /// The single Markdown catalog shared by the prompt, `load_skill`, slash
@@ -113,9 +135,21 @@ final class ModelRuntimeStore {
     init(
         models: [RemoteModelConfig]? = nil,
         profiles: [UserDynamicProfile]? = nil,
-        preferences: UserDefaults = .standard
+        preferences: UserDefaults = .standard,
+        dynamicRoutingAssetsPrepared: Bool? = nil
     ) {
         self.preferences = preferences
+        self.dynamicRouter = AnchorSignalClassifier()
+        let assetsPrepared = dynamicRoutingAssetsPrepared
+            ?? AnchorSignalAssetDescriptor.current.isPrepared()
+        let featureEnabled = preferences.bool(
+            forKey: "dynamicRoutingFeatureEnabled"
+        ) && assetsPrepared
+        self.dynamicRoutingFeatureEnabled = featureEnabled
+        self.dynamicRoutingEnabled = featureEnabled
+            && preferences.bool(forKey: "dynamicRoutingEnabled")
+        self.dynamicRoutingToolIDs = nil
+        self.dynamicRoutingDecision = nil
         let loadedProfiles = profiles ?? (try? DynamicProfileStore.live.load()) ?? []
         let configuredRemoteModels = models ?? (try? TurboCodeConfig.shared.loadRemoteModels())
             .flatMap { $0.isEmpty ? nil : $0 }
@@ -176,6 +210,86 @@ final class ModelRuntimeStore {
         }
     }
 
+    /// Enables the experimental per-turn capability router. The selected
+    /// package is cleared so the next request always starts from a toolless
+    /// session and is classified against the current profile.
+    @discardableResult
+    func setDynamicRoutingEnabled(_ enabled: Bool) -> Bool {
+        guard !enabled || dynamicRoutingFeatureEnabled else { return false }
+        let changed = dynamicRoutingEnabled != enabled || dynamicRoutingToolIDs != nil
+        dynamicRoutingEnabled = enabled
+        resetDynamicRoutingSnapshot()
+        preferences.set(enabled, forKey: "dynamicRoutingEnabled")
+        return changed
+    }
+
+    /// Publishes the installed feature to the composer only after CoreAI has a
+    /// cached specialization. Disabling the feature also closes any active
+    /// routed tool boundary so later sessions return to their profile tools.
+    @discardableResult
+    func setDynamicRoutingFeatureEnabled(_ enabled: Bool) -> Bool {
+        guard !enabled || AnchorSignalAssetDescriptor.current.isPrepared() else {
+            return false
+        }
+        let changed = dynamicRoutingFeatureEnabled != enabled
+            || (!enabled && dynamicRoutingEnabled)
+        dynamicRoutingFeatureEnabled = enabled
+        preferences.set(enabled, forKey: "dynamicRoutingFeatureEnabled")
+        if !enabled {
+            _ = setDynamicRoutingEnabled(false)
+        }
+        return changed
+    }
+
+    /// Classifies one prompt and stores only the resolved capability IDs. The
+    /// caller owns the one required session rebuild when that set changes.
+    func routeDynamicTools(for prompt: String) async throws -> Bool {
+        guard dynamicRoutingEnabled, dynamicRoutingSupported else { return false }
+        let revision = dynamicRoutingRevision
+        let previouslyUsedProfileDefaults = dynamicRoutingDecision?.source == .fallback
+        dynamicRoutingPresentationRevision &+= 1
+        dynamicRoutingPromptPreview = Self.routingPromptPreview(for: prompt)
+        // Clear the previous visual receipt before classifying the new prompt;
+        // the active tool boundary remains in `dynamicRoutingToolIDs` until the
+        // new decision is ready, so presentation state cannot alter execution.
+        dynamicRoutingDecision = nil
+        dynamicRoutingPreviewToolIDs = []
+        dynamicRoutingPhase = .analyzing
+        isDynamicRouting = true
+        defer { isDynamicRouting = false }
+        let allowedToolIDs = activeDynamicProfile?.resolvedToolIDs
+            ?? Set(ToolCapabilityID.allCases)
+        let decision = await dynamicRouter.classify(
+            prompt: prompt,
+            allowedToolIDs: allowedToolIDs
+        )
+        // A profile/thread transition during lazy model loading invalidates
+        // this result; never install the old profile's capabilities afterward.
+        try Task.checkCancellation()
+        guard revision == dynamicRoutingRevision else { throw CancellationError() }
+        let usesProfileDefaults = decision.source == .fallback
+        let selectedToolIDs: Set<ToolCapabilityID>? = usesProfileDefaults ? nil : decision.toolIDs
+        // A first failure must rebuild the initially toolless session even
+        // though both selections are nil. Later failures reuse profile defaults.
+        let changed = dynamicRoutingToolIDs != selectedToolIDs
+            || previouslyUsedProfileDefaults != usesProfileDefaults
+        if changed {
+            // Names belong to the previous session until the rebuilt session
+            // reports its definitions. The selected IDs below are the interim
+            // presentation source, preventing stale package/tool combinations.
+            dynamicRoutingToolNames = []
+        }
+        dynamicRoutingToolIDs = selectedToolIDs
+        dynamicRoutingDecision = decision
+        dynamicRoutingPreviewToolIDs = orderedToolIDs(decision.toolIDs)
+        dynamicRoutingPhase = .selecting
+        // Give SwiftUI a chance to render the selection stage without adding
+        // a wall-clock delay to classification or session construction.
+        await Task.yield()
+        dynamicRoutingPhase = changed ? .assembling : .ready
+        return changed
+    }
+
     /// Selects the first session model from persisted configuration before a
     /// `LanguageModelSession` is created. This prevents startup from briefly
     /// binding Llama to the built-in localhost fallback when `models.json`
@@ -203,6 +317,7 @@ final class ModelRuntimeStore {
         orchestratorMode = mode
         preferences.set(mode.rawValue, forKey: "orchestratorMode")
         if mode == .orchestrator {
+            resetDynamicRoutingSnapshot()
             activeBackend = .foundationApple
             clearDynamicProfileSelection()
             composerModel = "Apple · Orchestrator"
@@ -212,6 +327,7 @@ final class ModelRuntimeStore {
     }
 
     func selectCodex(displayName: String, profileID: UUID? = nil) {
+        resetDynamicRoutingSnapshot()
         clearDynamicProfileSelection()
         if let profileID,
            let profile = dynamicProfiles.first(where: {
@@ -233,6 +349,7 @@ final class ModelRuntimeStore {
     func selectBackend(_ backend: ModelBackend) -> Bool {
         clearDynamicProfileSelection()
         if backend == .foundationApple {
+            resetDynamicRoutingSnapshot()
             activeBackend = .foundationApple
             composerModel = backend.rawValue
             return true
@@ -460,6 +577,10 @@ final class ModelRuntimeStore {
         workspaceInstructionsRevision = workspaceInstructions?.revision
         let delegateModel = delegateRemoteModel
         let sessionSkills = resolvedMarkdownSkills
+        // Disable the override on failure so the factory follows its existing
+        // profile path, rather than interpreting nil as the initial empty session.
+        let usesDynamicTools = dynamicRoutingEnabled && dynamicRoutingSupported
+            && dynamicRoutingDecision?.source != .fallback
         return ModelSessionConfiguration(
             backend: activeBackend,
             activeRemoteModel: activeRemoteModel,
@@ -470,6 +591,10 @@ final class ModelRuntimeStore {
             availableSkills: sessionSkills,
             documentationStore: .live,
             activeDynamicProfile: activeDynamicProfile,
+            dynamicRoutingEnabled: usesDynamicTools,
+            dynamicRoutingToolIDs: usesDynamicTools
+                ? dynamicRoutingToolIDs
+                : nil,
             reasoningEffort: reasoningEffort,
             delegateReasoningEffort: reasoningEffort(for: delegateModel),
             activeTemperature: temperature(for: activeRemoteModel),
@@ -517,6 +642,7 @@ final class ModelRuntimeStore {
     }
 
     private func selectRemoteModel(_ model: RemoteModelConfig) {
+        resetDynamicRoutingSnapshot()
         activeRemoteModelID = model.id
         preferences.set(model.id, forKey: "activeRemoteModelID")
         activeBackend = Self.backend(for: model.role)
@@ -525,11 +651,13 @@ final class ModelRuntimeStore {
 
     private func applyBaseModel(_ id: ProfileBaseModelID) -> Bool {
         if id == .codex {
+            resetDynamicRoutingSnapshot()
             activeBackend = .codex
             composerModel = id.displayName
             return true
         }
         if id == .onDevice {
+            resetDynamicRoutingSnapshot()
             activeBackend = .foundationApple
             composerModel = id.displayName
             return true
@@ -546,6 +674,56 @@ final class ModelRuntimeStore {
     private func clearDynamicProfileSelection() {
         activeDynamicProfileID = nil
         preferences.removeObject(forKey: "activeDynamicProfileID")
+    }
+
+    func resetDynamicRoutingSnapshot() {
+        dynamicRoutingRevision = UUID()
+        dynamicRoutingToolIDs = nil
+        dynamicRoutingDecision = nil
+        dynamicRoutingPhase = .idle
+        dynamicRoutingPromptPreview = ""
+        dynamicRoutingPreviewToolIDs = []
+        dynamicRoutingPresentationRevision &+= 1
+        dynamicRoutingToolNames = []
+    }
+
+    func recordDynamicRoutingTools(_ names: [String]) {
+        guard dynamicRoutingEnabled, dynamicRoutingSupported else {
+            dynamicRoutingToolNames = []
+            return
+        }
+        dynamicRoutingToolNames = names
+        if dynamicRoutingDecision != nil {
+            dynamicRoutingPhase = .ready
+        }
+    }
+
+    /// One presentation contract shared by the composer and routing inspector.
+    /// Runtime names win after a rebuild; selected capability names cover the
+    /// short interval before the new session publishes its definitions.
+    var dynamicRoutingPresentedToolNames: [String] {
+        if !dynamicRoutingToolNames.isEmpty {
+            return dynamicRoutingToolNames
+        }
+        return dynamicRoutingPreviewToolIDs.map {
+            ModelToolCatalog.descriptor(for: $0).name
+        }
+    }
+
+    private func orderedToolIDs(_ ids: Set<ToolCapabilityID>) -> [ToolCapabilityID] {
+        ids.sorted {
+            ModelToolCatalog.descriptor(for: $0).name
+                .localizedStandardCompare(ModelToolCatalog.descriptor(for: $1).name)
+                == .orderedAscending
+        }
+    }
+
+    private static func routingPromptPreview(for prompt: String) -> String {
+        let normalized = prompt
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+        guard normalized.count > 180 else { return normalized }
+        return String(normalized.prefix(177)) + "…"
     }
 
     private func reasoningEffort(

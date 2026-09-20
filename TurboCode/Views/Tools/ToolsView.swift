@@ -27,6 +27,9 @@ struct ToolsView: View {
         .onChange(of: chatStore.workspaceRoot) { _, _ in reload() }
         .onChange(of: chatStore.activeRemoteModelID) { _, _ in reload() }
         .onChange(of: chatStore.orchestratorMode) { _, _ in reload() }
+        .onChange(of: chatStore.dynamicRoutingEnabled) { _, _ in reload() }
+        .onChange(of: chatStore.dynamicRoutingDecision) { _, _ in reload() }
+        .onChange(of: chatStore.dynamicRoutingToolNames) { _, _ in reload() }
     }
 
     private var header: some View {

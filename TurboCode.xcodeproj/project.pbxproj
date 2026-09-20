@@ -145,6 +145,9 @@
 		B0000000000000000000009f /* TurboCode/Diagnostics/AgentBenchmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000009f /* TurboCode/Diagnostics/AgentBenchmark.swift */; };
 		B000000000000000000000a0 /* TurboCode/Stores/TypeScriptPluginRuntimeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a0 /* TurboCode/Stores/TypeScriptPluginRuntimeStore.swift */; };
 		B000000000000000000000a1 /* turbocode-acp in Helpers */ = {isa = PBXBuildFile; fileRef = 000000000000000000000320 /* turbocode-acp */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		B000000000000000000000a2 /* TurboCode/Models/DynamicToolPackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a2 /* TurboCode/Models/DynamicToolPackage.swift */; };
+		B000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift */; };
+		B000000000000000000000a4 /* TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a4 /* TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift */; };
 		C10000000000000000000000 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 /* End PBXBuildFile section */
 
@@ -314,6 +317,9 @@
 		A0000000000000000000009e /* TurboCode/ViewModels/GitDiffViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/ViewModels/GitDiffViewModel.swift; sourceTree = "<group>"; };
 		A0000000000000000000009f /* TurboCode/Diagnostics/AgentBenchmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Diagnostics/AgentBenchmark.swift; sourceTree = "<group>"; };
 		A000000000000000000000a0 /* TurboCode/Stores/TypeScriptPluginRuntimeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Stores/TypeScriptPluginRuntimeStore.swift; sourceTree = "<group>"; };
+		A000000000000000000000a2 /* TurboCode/Models/DynamicToolPackage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/DynamicToolPackage.swift; sourceTree = "<group>"; };
+		A000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift; sourceTree = "<group>"; };
+		A000000000000000000000a4 /* TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -410,7 +416,10 @@
 				A0000000000000000000001e /* TurboCode/Models/TypeScriptPluginTranscript.swift */,
 				A0000000000000000000001f /* TurboCode/Models/UserDynamicProfile.swift */,
 				A00000000000000000000020 /* TurboCode/Models/Xcode/XcodeProject.swift */,
+				A000000000000000000000a2 /* TurboCode/Models/DynamicToolPackage.swift */,
 				A00000000000000000000021 /* TurboCode/Services/ACP/ACPAgentServer.swift */,
+				A000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift */,
+				A000000000000000000000a4 /* TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift */,
 				A00000000000000000000022 /* TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift */,
 				A00000000000000000000023 /* TurboCode/Services/ACP/ACPEventProjector.swift */,
 				A00000000000000000000024 /* TurboCode/Services/ACP/ACPRuntimeDriver.swift */,
@@ -699,7 +708,10 @@
 				B0000000000000000000001e /* TurboCode/Models/TypeScriptPluginTranscript.swift in Sources */,
 				B0000000000000000000001f /* TurboCode/Models/UserDynamicProfile.swift in Sources */,
 				B00000000000000000000020 /* TurboCode/Models/Xcode/XcodeProject.swift in Sources */,
+				B000000000000000000000a2 /* TurboCode/Models/DynamicToolPackage.swift in Sources */,
 				B00000000000000000000021 /* TurboCode/Services/ACP/ACPAgentServer.swift in Sources */,
+				B000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift in Sources */,
+				B000000000000000000000a4 /* TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift in Sources */,
 				B00000000000000000000022 /* TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift in Sources */,
 				B00000000000000000000023 /* TurboCode/Services/ACP/ACPEventProjector.swift in Sources */,
 				B00000000000000000000024 /* TurboCode/Services/ACP/ACPRuntimeDriver.swift in Sources */,
@@ -853,6 +865,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = W8WM5JY5LX;
 				DRIVERKIT_DEPLOYMENT_TARGET = 27.0;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -923,6 +936,7 @@
 				COPY_PHASE_STRIP = NO;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = W8WM5JY5LX;
 				DRIVERKIT_DEPLOYMENT_TARGET = 27.0;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -958,7 +972,6 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = W8WM5JY5LX;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -982,7 +995,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.6;
+				MARKETING_VERSION = 0.61;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1015,7 +1028,6 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = W8WM5JY5LX;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -1039,7 +1051,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.6;
+				MARKETING_VERSION = 0.61;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1067,7 +1079,6 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = W8WM5JY5LX;
 				ENABLE_TESTING_SEARCH_PATHS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
@@ -1085,7 +1096,6 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = W8WM5JY5LX;
 				ENABLE_TESTING_SEARCH_PATHS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
@@ -1104,7 +1114,6 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = W8WM5JY5LX;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
@@ -1124,7 +1133,6 @@
 				CODE_SIGN_IDENTITY = "-";
 				CODE_SIGN_STYLE = Manual;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = W8WM5JY5LX;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 27.0;

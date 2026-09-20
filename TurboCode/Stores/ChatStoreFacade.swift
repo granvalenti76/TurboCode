@@ -179,6 +179,46 @@ extension ChatStore {
         modelRuntimeStore.activeBaseModelID
     }
 
+    var dynamicRoutingEnabled: Bool {
+        modelRuntimeStore.dynamicRoutingEnabled
+    }
+
+    var dynamicRoutingFeatureEnabled: Bool {
+        modelRuntimeStore.dynamicRoutingFeatureEnabled
+    }
+
+    var dynamicRoutingSupported: Bool {
+        modelRuntimeStore.dynamicRoutingSupported
+    }
+
+    var dynamicRoutingDecision: DynamicRoutingDecision? {
+        modelRuntimeStore.dynamicRoutingDecision
+    }
+
+    var isDynamicRouting: Bool { modelRuntimeStore.isDynamicRouting }
+
+    var dynamicRoutingPhase: DynamicRoutingPhase {
+        modelRuntimeStore.dynamicRoutingPhase
+    }
+
+    var dynamicRoutingPromptPreview: String {
+        modelRuntimeStore.dynamicRoutingPromptPreview
+    }
+
+    var dynamicRoutingPreviewToolIDs: [ToolCapabilityID] {
+        modelRuntimeStore.dynamicRoutingPreviewToolIDs
+    }
+
+    var dynamicRoutingPresentationRevision: Int {
+        modelRuntimeStore.dynamicRoutingPresentationRevision
+    }
+
+    var dynamicRoutingToolNames: [String] { modelRuntimeStore.dynamicRoutingToolNames }
+
+    var dynamicRoutingPresentedToolNames: [String] {
+        modelRuntimeStore.dynamicRoutingPresentedToolNames
+    }
+
     public var activeRemoteModel: RemoteModelConfig? {
         modelRuntimeStore.activeRemoteModel
     }

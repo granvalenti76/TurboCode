@@ -89,6 +89,11 @@ struct ChatContentView: View {
                         .padding(.trailing, 14)
                     }
                 }
+                .overlay(alignment: .bottom) {
+                    DynamicRoutingReceiptView()
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 12)
+                }
 
             if let approval = approvalStore.pendingApproval {
                 approvalBanner(

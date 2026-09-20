@@ -681,6 +681,54 @@ struct AgentSettingsView: View {
                 Toggle("Discover user skills", isOn: s.agentTuning.skills.discoversUserSkills)
             }
 
+            Section("Dynamic Routing") {
+                Toggle("Enable Dynamic Routing", isOn: Binding(
+                    get: { chatStore.dynamicRoutingFeatureEnabled },
+                    set: { enabled in
+                        Task {
+                            await chatStore.setDynamicRoutingFeatureEnabled(enabled)
+                        }
+                    }
+                ))
+                .disabled(!settings.anchorSignalAssets.isReady)
+
+                Text("Uses an optional on-device AI model to choose which tool calls are available for each response. TurboCode reuses the current model session when the tool set stays the same, preserving the KV cache whenever possible.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LabeledContent("Model") {
+                    HStack(spacing: 8) {
+                        if settings.anchorSignalAssets.state.isWorking {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(settings.anchorSignalAssets.state.title)
+                            .foregroundStyle(dynamicRoutingStatusColor)
+                    }
+                }
+
+                Text("Downloads 277 MB and uses approximately 487 MB after installation. CoreAI stores the device specialization in its managed cache.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if case .failed(let message) = settings.anchorSignalAssets.state {
+                    Label(message, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+
+                if !settings.anchorSignalAssets.isReady {
+                    Button(dynamicRoutingActionTitle) {
+                        Task {
+                            if await settings.anchorSignalAssets.installAndPrepare() {
+                                await chatStore.setDynamicRoutingFeatureEnabled(true)
+                            }
+                        }
+                    }
+                    .disabled(settings.anchorSignalAssets.state.isWorking)
+                }
+            }
+
             Section("Experimental") {
                 Toggle("Safari MCP", isOn: s.agentTuning.experimental.safariMCPEnabled)
 
@@ -725,6 +773,35 @@ struct AgentSettingsView: View {
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
             await chatStore.applyAgentTuning(settings.agentTuning)
+        }
+        .task {
+            settings.anchorSignalAssets.refreshStatus()
+            if !settings.anchorSignalAssets.isReady,
+               chatStore.dynamicRoutingFeatureEnabled {
+                await chatStore.setDynamicRoutingFeatureEnabled(false)
+            }
+        }
+    }
+
+    private var dynamicRoutingActionTitle: String {
+        switch settings.anchorSignalAssets.state {
+        case .needsPreparation:
+            "Prepare Model"
+        case .failed:
+            "Try Again"
+        default:
+            "Download and Enable"
+        }
+    }
+
+    private var dynamicRoutingStatusColor: Color {
+        switch settings.anchorSignalAssets.state {
+        case .ready:
+            .green
+        case .failed:
+            .red
+        default:
+            .secondary
         }
     }
 }

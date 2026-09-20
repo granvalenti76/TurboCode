@@ -147,6 +147,32 @@ struct ACPApplicationRuntimeAdapterTests {
         ) == .endTurn)
     }
 
+    @Test("shutdown interrupts and awaits an active provider turn")
+    func shutdownAwaitsActiveProviderTurn() async throws {
+        let backendSession = ACPControlledBackendSession(blockUntilCancelled: true)
+        let adapter = Self.makeAdapter(session: backendSession)
+        try await adapter.prepareSession(
+            sessionID: "session-1",
+            cwd: "/tmp/project",
+            mcpServers: []
+        )
+        let running = Task {
+            try await adapter.run(
+                turn: Self.turn(id: "shutdown-turn", prompt: "stop on EOF"),
+                updates: ACPUpdateChannel()
+            )
+        }
+        while await backendSession.requests.isEmpty {
+            await Task.yield()
+        }
+
+        await adapter.shutdown()
+
+        #expect(try await running.value == .cancelled)
+        #expect(await backendSession.interruptCount == 1)
+        await adapter.shutdown()
+    }
+
     @Test("a blocked session does not reject an independent session")
     func concurrentSessionIsolation() async throws {
         let firstSession = ACPControlledBackendSession(blockUntilCancelled: true)
@@ -386,6 +412,7 @@ private actor ACPControlledBackendSession: BackendSession {
     nonisolated let backend: ModelBackend = .llamaServer
     private(set) var requests: [String] = []
     private(set) var modelNames: [String] = []
+    private(set) var interruptCount = 0
     private var outcomes: [TurnOutcome]
     private let blockUntilCancelled: Bool
     private var cancellationRequested = false
@@ -439,6 +466,7 @@ private actor ACPControlledBackendSession: BackendSession {
     }
 
     func interrupt() async {
+        interruptCount += 1
         cancellationRequested = true
     }
 

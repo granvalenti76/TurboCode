@@ -318,6 +318,42 @@ public final class ChatStore {
         await profileSelectionCoordinator.selectDynamicProfile(id)
     }
 
+    /// Enables the experimental Llama-only router and rebuilds the released
+    /// provider session with the selected capability boundary.
+    func setDynamicRoutingEnabled(_ enabled: Bool) async {
+        guard !busy, !modelRuntimeStore.isDynamicRouting,
+              modelRuntimeStore.dynamicRoutingSupported || !enabled else {
+            return
+        }
+        guard modelRuntimeStore.setDynamicRoutingEnabled(enabled) else { return }
+        await profileSelectionCoordinator.rebuildSession(
+            discardingCapabilityContext: false
+        )
+    }
+
+    /// Enables the optional AnchorSignal product surface. Model installation
+    /// and specialization are completed by Settings before this command runs.
+    func setDynamicRoutingFeatureEnabled(_ enabled: Bool) async {
+        guard !busy, !modelRuntimeStore.isDynamicRouting else { return }
+        let wasActive = modelRuntimeStore.dynamicRoutingSupported
+            && modelRuntimeStore.dynamicRoutingEnabled
+        guard modelRuntimeStore.setDynamicRoutingFeatureEnabled(enabled) else {
+            return
+        }
+        if enabled {
+            // The Settings switch enables the feature itself. The composer can
+            // still return to Profile without uninstalling the prepared model.
+            _ = modelRuntimeStore.setDynamicRoutingEnabled(true)
+        }
+        let isActive = modelRuntimeStore.dynamicRoutingSupported
+            && modelRuntimeStore.dynamicRoutingEnabled
+        if wasActive || isActive {
+            await profileSelectionCoordinator.rebuildSession(
+                discardingCapabilityContext: false
+            )
+        }
+    }
+
     /// Selects a profile with `delegate_task` as one atomic runtime change.
     ///
     /// The historical global "orchestrator" mode is the on-device compatibility

@@ -7,6 +7,8 @@ import SwiftUI
 @MainActor
 @Observable
 public final class SettingsStore {
+    let anchorSignalAssets = AnchorSignalAssetManager()
+
     public var theme: ThemePreference = .system {
         didSet { UserDefaults.standard.set(theme.rawValue, forKey: "theme") }
     }
@@ -118,6 +120,7 @@ public final class SettingsStore {
         reloadAgentTuning()
         reloadRemoteModels()
         loadEditorialDeskCatalog()
+        anchorSignalAssets.refreshStatus()
         // Do not read provider secrets while restoring general settings. The
         // Provider pane loads this value only when the user opens it.
     }

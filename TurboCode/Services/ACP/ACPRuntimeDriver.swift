@@ -21,7 +21,11 @@ nonisolated final class ACPRuntimeDriver: ACPAgentDriver, @unchecked Sendable {
             cwd: cwd,
             mcpServers: mcpServers
         )
-        await state.insert(sessionID: sessionID, cwd: cwd)
+        guard await state.insert(sessionID: sessionID, cwd: cwd) else {
+            throw ACPApplicationRuntimeError.executionFailed(
+                "The ACP runtime is shutting down."
+            )
+        }
         return sessionID
     }
 
@@ -64,6 +68,7 @@ nonisolated final class ACPRuntimeDriver: ACPAgentDriver, @unchecked Sendable {
     }
 
     nonisolated func shutdown() async {
+        await state.shutdown()
         await runtime.shutdown()
     }
 
@@ -87,13 +92,21 @@ nonisolated final class ACPRuntimeDriver: ACPAgentDriver, @unchecked Sendable {
 
     private actor State {
         private var sessions: [String: String] = [:]
+        private var shutdownRequested = false
 
-        func insert(sessionID: String, cwd: String) {
+        func insert(sessionID: String, cwd: String) -> Bool {
+            guard !shutdownRequested else { return false }
             sessions[sessionID] = cwd
+            return true
         }
 
         func cwd(for sessionID: String) -> String? {
             sessions[sessionID]
+        }
+
+        func shutdown() {
+            shutdownRequested = true
+            sessions.removeAll()
         }
     }
 }

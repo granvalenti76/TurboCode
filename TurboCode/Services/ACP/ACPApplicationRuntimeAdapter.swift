@@ -158,25 +158,49 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
         )
         let llmRuntime = await makeLLMRuntime(configuration)
         let mcpRuntime = ACPMCPRuntime()
-        let mcpTools = try await mcpRuntime.start(
-            declarations: mcpServers,
-            cwd: cwd
-        )
-        let eventRouter = ACPSessionEventRouter(sessionID: sessionID)
-        await state.insert(
+        guard await state.beginPreparation(
             sessionID: sessionID,
-            cwd: cwd,
-            configuration: configuration,
-            agentRuntime: agentRuntime,
-            llmRuntime: llmRuntime,
-            mcpRuntime: mcpRuntime,
-            mcpTools: mcpTools,
-            eventRouter: eventRouter
-        )
+            mcpRuntime: mcpRuntime
+        ) else {
+            throw ACPApplicationRuntimeError.executionFailed(
+                "The ACP runtime is shutting down."
+            )
+        }
+        let mcpTools: [any Tool]
+        do {
+            mcpTools = try await mcpRuntime.start(
+                declarations: mcpServers,
+                cwd: cwd
+            )
+            guard !Task.isCancelled else { throw CancellationError() }
+            guard await state.insert(
+                sessionID: sessionID,
+                cwd: cwd,
+                configuration: configuration,
+                agentRuntime: agentRuntime,
+                llmRuntime: llmRuntime,
+                mcpRuntime: mcpRuntime,
+                mcpTools: mcpTools,
+                eventRouter: ACPSessionEventRouter(sessionID: sessionID)
+            ) else {
+                throw ACPApplicationRuntimeError.executionFailed(
+                    "The ACP runtime is shutting down."
+                )
+            }
+            await state.finishPreparation(sessionID: sessionID)
+            return
+        } catch {
+            await state.finishPreparation(sessionID: sessionID)
+            await mcpRuntime.stop()
+            throw error
+        }
     }
 
     func shutdown() async {
-        await state.shutdown()
+        let turnIDs = await state.shutdown()
+        for turnID in turnIDs {
+            await projector.finish(turnID: turnID)
+        }
     }
 
     func run(
@@ -764,6 +788,25 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
         }
 
         private var sessions: [String: Session] = [:]
+        private var preparingMCPRuntimes: [String: ACPMCPRuntime] = [:]
+        private var shutdownRequested = false
+
+        func beginPreparation(
+            sessionID: String,
+            mcpRuntime: ACPMCPRuntime
+        ) -> Bool {
+            guard !shutdownRequested,
+                  sessions[sessionID] == nil,
+                  preparingMCPRuntimes[sessionID] == nil else {
+                return false
+            }
+            preparingMCPRuntimes[sessionID] = mcpRuntime
+            return true
+        }
+
+        func finishPreparation(sessionID: String) {
+            preparingMCPRuntimes.removeValue(forKey: sessionID)
+        }
 
         func insert(
             sessionID: String,
@@ -774,7 +817,11 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
             mcpRuntime: ACPMCPRuntime,
             mcpTools: [any Tool],
             eventRouter: ACPSessionEventRouter
-        ) {
+        ) -> Bool {
+            guard !shutdownRequested,
+                  sessions[sessionID] == nil else {
+                return false
+            }
             sessions[sessionID] = Session(
                 cwd: cwd,
                 configuration: configuration,
@@ -786,6 +833,7 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
                 runtimeModelID: nil,
                 turnID: nil
             )
+            return true
         }
 
         func begin(sessionID: String, turnID: TurnID) -> TurnContext? {
@@ -887,12 +935,33 @@ nonisolated final class ACPApplicationRuntimeAdapter: ACPApplicationRuntime, @un
             sessions[sessionID] = session
         }
 
-        func shutdown() async {
-            let runtimes = sessions.values.map(\.mcpRuntime)
-            sessions.removeAll()
-            for runtime in runtimes {
+        /// Stops provider work before discarding session state. A late
+        /// preparation cannot be inserted after the shutdown flag is set, and
+        /// every active turn remains addressable until its provider operation
+        /// has unwound.
+        func shutdown() async -> [TurnID] {
+            guard !shutdownRequested else { return [] }
+            shutdownRequested = true
+            let activeSessions = Array(sessions.values)
+            let pendingMCPRuntimes = Array(preparingMCPRuntimes.values)
+            preparingMCPRuntimes.removeAll()
+
+            var turnIDs: [TurnID] = []
+            for session in activeSessions {
+                if let turnID = session.turnID {
+                    turnIDs.append(turnID)
+                    await session.llmRuntime.interrupt(turnID: turnID)
+                    await session.agentRuntime.cancelAndWaitForOperation()
+                    _ = await session.agentRuntime.apply(.cancel(turnID: turnID))
+                    await session.eventRouter.clear(turnID: turnID)
+                }
+                await session.mcpRuntime.stop()
+            }
+            for runtime in pendingMCPRuntimes {
                 await runtime.stop()
             }
+            sessions.removeAll()
+            return turnIDs
         }
     }
 }

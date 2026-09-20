@@ -1,4 +1,5 @@
 import Foundation
+import FoundationModels
 
 /// Owns model/profile selection, Codex connection transitions, and session
 /// rebuilds. Keeping cancellable selection and handoff tasks here prevents the
@@ -350,17 +351,21 @@ final class ProfileSelectionCoordinator {
         }
     }
 
+    @discardableResult
     func rebuildSession(
         keepingHistory: Bool = true,
         discardingCapabilityContext: Bool = false,
         restoringHistory: [FoundationModelsTranscriptEntry]? = nil,
         restoringProjection: TranscriptContextProjection? = nil,
         invalidatingComposerContext: Bool = true
-    ) async {
+    ) async -> Bool {
+        if !keepingHistory {
+            modelRuntime.resetDynamicRoutingSnapshot()
+        }
         if invalidatingComposerContext {
             statistics.invalidateContext()
+            presentation.setLlamaContextUsage(nil)
         }
-        presentation.setLlamaContextUsage(nil)
         _ = await agentRuntime.apply(
             .switchBackend(
                 RuntimeBackendSelection(
@@ -372,7 +377,7 @@ final class ProfileSelectionCoordinator {
         let configuration = modelRuntime.makeSessionConfiguration(
             workspaceRoot: workspace.root
         )
-        await llmRuntime.rebuildFoundationModelsSession(
+        let rebuilt = await llmRuntime.rebuildFoundationModelsSession(
             configuration: configuration,
             keepingHistory: keepingHistory,
             discardingCapabilityContext: discardingCapabilityContext,
@@ -380,6 +385,15 @@ final class ProfileSelectionCoordinator {
             restoringProjection: restoringProjection,
             events: responseCoordinator.modelSessionEvents
         )
+        if rebuilt, modelRuntime.dynamicRoutingEnabled,
+           let transcript = await llmRuntime.foundationModelsTranscript() {
+            let names = transcript.flatMap { entry -> [String] in
+                guard case .instructions(let instructions) = entry else { return [] }
+                return instructions.toolDefinitions.map(\.name)
+            }
+            modelRuntime.recordDynamicRoutingTools(names)
+        }
+        return rebuilt
     }
 
     /// Replaces only the released Foundation Models session after an
@@ -418,6 +432,7 @@ final class ProfileSelectionCoordinator {
 
     private var isBusy: Bool {
         runtimeProjection.hasActiveOperation || codexHandoffTask != nil
+            || modelRuntime.isDynamicRouting
     }
 
     private func cancelCodexSelection() {

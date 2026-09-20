@@ -11,6 +11,7 @@ struct InputFieldView: View {
     @FocusState private var isFocused: Bool
     @State private var composerSelection: TextSelection?
     @State private var selectedSlashCommandIndex = 0
+    @State private var showsDynamicRouting = false
 
     let compact: Bool
 
@@ -389,7 +390,7 @@ struct InputFieldView: View {
         .menuStyle(.borderlessButton)
         .font(AppTypography.controlEmphasized)
         .fixedSize()
-        .disabled(chatStore.busy)
+        .disabled(chatStore.busy || chatStore.isDynamicRouting)
     }
 
     /// Native submenus support hover and keyboard navigation without changing
@@ -493,7 +494,7 @@ struct InputFieldView: View {
         .controlSize(.regular)
         .clipShape(Circle())
         .disabled(
-            composer.messageText
+            chatStore.isDynamicRouting || composer.messageText
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .isEmpty
                 || (
@@ -509,6 +510,7 @@ struct InputFieldView: View {
     }
 
     private func sendComposerInput() {
+        guard !chatStore.isDynamicRouting else { return }
         if chatStore.busy {
             let text = composer.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !commandRouter.isLocalCommand(text),
@@ -594,6 +596,7 @@ struct InputFieldView: View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .firstTextBaseline, spacing: 20) {
                 branchMenu
+                dynamicRoutingControl
                 Spacer(minLength: 20)
                 ComposerStatisticsView(
                     statistics: presentation.composerSessionStatistics
@@ -604,7 +607,11 @@ struct InputFieldView: View {
             // Give the statistics their own row before compressing their
             // contents; an open inspector must not clip usage or the branch.
             VStack(alignment: .leading, spacing: 10) {
-                branchMenu
+                HStack {
+                    branchMenu
+                    dynamicRoutingControl
+                    Spacer(minLength: 0)
+                }
                 ComposerStatisticsView(
                     statistics: presentation.composerSessionStatistics
                 )
@@ -614,6 +621,107 @@ struct InputFieldView: View {
         .font(AppTypography.control)
         .padding(.horizontal, compact ? 16 : 20)
         .padding(.vertical, compact ? 7 : 8)
+        .animation(.easeInOut(duration: 0.18), value: chatStore.dynamicRoutingSupported)
+    }
+
+    @ViewBuilder
+    private var dynamicRoutingControl: some View {
+        if chatStore.dynamicRoutingSupported {
+            // Treat the router controls as one fixed-size unit so their
+            // transition cannot change the info bar's height or split them
+            // across the wide and compact ViewThatFits arrangements.
+            HStack(spacing: 12) {
+                HStack(spacing: 7) {
+                    Text("Tools")
+                        .foregroundStyle(.secondary)
+
+                    Picker("Tool selection", selection: Binding(
+                        get: { chatStore.dynamicRoutingEnabled },
+                        set: { enabled in
+                            Task { await chatStore.setDynamicRoutingEnabled(enabled) }
+                        }
+                    )) {
+                        Text("Profile").tag(false)
+                        Text("Auto").tag(true)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 126)
+                }
+
+                if chatStore.dynamicRoutingEnabled {
+                    Button {
+                        showsDynamicRouting.toggle()
+                    } label: {
+                        HStack(spacing: 4) {
+                            if chatStore.isDynamicRouting {
+                                ProgressView().controlSize(.mini)
+                                Text("Routing…")
+                            } else {
+                                Image(systemName: chatStore.dynamicRoutingDecision?.source == .fallback
+                                      ? "exclamationmark.triangle" : "square.grid.2x2")
+                                Text("\(chatStore.dynamicRoutingPresentedToolNames.count) tools")
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Show the latest routing decision and loaded tools")
+                    .accessibilityLabel("Automatic tool selection details")
+                    .popover(isPresented: $showsDynamicRouting, arrowEdge: .bottom) {
+                        dynamicRoutingDetails
+                    }
+                }
+            }
+            .controlSize(.small)
+            .fixedSize(horizontal: true, vertical: false)
+            .disabled(chatStore.busy || chatStore.isDynamicRouting)
+            .help("Use profile tools or choose tools automatically for each request")
+            .accessibilityHint("Profile uses the configured tool set. Auto selects tools for each request.")
+            .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .leading)))
+        }
+    }
+
+    private var dynamicRoutingDetails: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Automatic tool selection · Experimental", systemImage: "square.grid.2x2")
+                .font(.headline)
+            if chatStore.isDynamicRouting {
+                Text("Classifying your request before sending it to the model…")
+            } else if let decision = chatStore.dynamicRoutingDecision {
+                Text(decision.title).font(.title3.bold())
+                Text(decision.summary).foregroundStyle(.secondary)
+                LabeledContent("Classifier", value: decision.source == .model ? "AnchorSignal" : "Profile defaults")
+                LabeledContent("Routing time", value: "\(decision.latencyMilliseconds.formatted(.number.precision(.fractionLength(0)))) ms")
+                if decision.source == .model {
+                    LabeledContent("Similarity", value: decision.topScore.formatted(.number.precision(.fractionLength(3))))
+                    LabeledContent("Margin", value: decision.margin.formatted(.number.precision(.fractionLength(3))))
+                    Text("Similarity is a ranking score, not a confidence probability.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if let reason = decision.fallbackReason {
+                    Text("AnchorSignal unavailable: \(reason)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Divider()
+                Text("Selected tools (\(chatStore.dynamicRoutingPresentedToolNames.count))").font(.subheadline.bold())
+                if chatStore.dynamicRoutingPresentedToolNames.isEmpty {
+                    Text("No tools for this turn.").foregroundStyle(.secondary)
+                } else {
+                    ForEach(chatStore.dynamicRoutingPresentedToolNames, id: \.self) { name in
+                        Text(name).font(.system(.caption, design: .monospaced))
+                    }
+                }
+                Text("The session is reused when the tool set stays the same. Changing tools rebuilds the session.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Waiting for your first prompt. The session starts with no tools; a package is selected before each turn.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.callout)
+        .padding(18)
+        .frame(width: 340)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder
