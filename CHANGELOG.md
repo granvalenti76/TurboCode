@@ -5,6 +5,55 @@ All notable changes to TurboCode are documented in this file.
 The project follows Semantic Versioning while its public API and persisted
 formats continue to evolve before 1.0.
 
+## [0.61]
+
+TurboCode 0.61 introduces AnchorSignal dynamic routing for local models. It
+selects a bounded tool package for each request with a small on-device semantic
+model, while keeping profile permissions authoritative and avoiding unnecessary
+session rebuilds when the selected tools remain unchanged.
+
+### Features
+
+- Added AnchorSignal semantic routing for Apple on-device and supported local
+  Llama conversations. Requests are matched against compact tool categories by
+  cosine similarity, with a minimum similarity of `0.772` and the active
+  profile's allowlist retained as the capability boundary.
+- Added Profile and Auto tool-selection modes to the composer. A compact,
+  transient routing receipt reports the selected package and tool count without
+  occupying the inspector, and detailed status remains available from the
+  adjacent package control.
+- Added bounded tool packages for implementation, workspace inspection,
+  search, Git, Xcode, guidance, and conversation workflows. The Conversation
+  package can list the workspace and read or edit files when the active profile
+  permits those capabilities.
+- Added Dynamic Routing controls under Settings > Agents. TurboCode downloads
+  the pinned AnchorSignal model archive, verifies its size and SHA-256 digest,
+  installs it atomically under the TurboCode model directory, and prepares the
+  device specialization through CoreAI's managed model cache.
+- Added installation and readiness gating so Auto routing becomes available
+  only after the model files and CoreAI specialization pass validation,
+  including a real embedding smoke test.
+
+### Fixes
+
+- Fixed ACP client MCP setup and shutdown so standard environment entries are
+  parsed correctly, failed setup cannot leave child processes running, slow
+  requests do not block unrelated responses, and provider or permission work
+  cannot outlive session shutdown.
+- Kept composer layout stable when switching providers and now hides dynamic
+  routing controls with a short native transition for unsupported DeepSeek and
+  Codex conversations.
+- Removed the permanent AnchorSignal inspector and obsolete Metal animation,
+  which made the short routing step visually dominant.
+- Standardized routing diagnostics on cosine similarity and kept the visible
+  fallback threshold synchronized with the configured value.
+
+### Interventions
+
+- Centralized the Apple development-team setting at the project configuration
+  level so application and helper targets inherit the same signing identity.
+- Updated the application marketing version to 0.61.
+
 ## [0.6.0]
 
 TurboCode 0.6 expands the application into a more connected desktop agent
