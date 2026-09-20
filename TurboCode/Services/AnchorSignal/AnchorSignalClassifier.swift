@@ -7,7 +7,7 @@ nonisolated struct AnchorSignalConfiguration: Sendable {
     let maximumTokenCount: Int
 
     /// Reject weak rankings so the active profile keeps its normal tool set.
-    static let minimumConfidence = 0.8
+    static let minimumSimilarity = 0.772
 
     static var `default`: Self {
         let root = FileManager.default.homeDirectoryForCurrentUser
@@ -71,9 +71,9 @@ actor AnchorSignalClassifier {
             let selected = best.0
             let topScore = best.1
             let secondScore = ordered.dropFirst().first?.1 ?? 0
-            guard topScore >= AnchorSignalConfiguration.minimumConfidence else {
+            guard topScore >= AnchorSignalConfiguration.minimumSimilarity else {
                 return profileFallback(
-                    reason: "Similarity \(topScore.formatted(.number.precision(.fractionLength(3)))) is below the minimum 0.800.",
+                    reason: "Similarity \(topScore.formatted(.number.precision(.fractionLength(3)))) is below the minimum \(AnchorSignalConfiguration.minimumSimilarity.formatted(.number.precision(.fractionLength(3)))).",
                     started: started
                 )
             }

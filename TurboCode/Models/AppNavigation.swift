@@ -18,8 +18,6 @@ public enum AppRoute: String, Sendable, Hashable, CaseIterable {
 public enum RightPanelMode: String, Sendable, Hashable, CaseIterable {
     /// Transient operational state for the current delegated attempt.
     case activity
-    /// Transient visual receipt for the experimental Dynamic routing pass.
-    case routing
     case changes
     case commit
     /// A persisted directory snapshot selected from the conversation timeline.

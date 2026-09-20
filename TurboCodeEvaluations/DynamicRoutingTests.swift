@@ -62,7 +62,7 @@ struct DynamicRoutingTests {
         }
     }
 
-    @Test("Dynamic sessions expose exactly their package, including zero tools",
+    @Test("Dynamic sessions expose exactly their selected package",
           arguments: [Optional<DynamicToolPackage>.none, .conversation, .git, .coding])
     @MainActor
     func sessionToolDefinitionsMatchPackage(_ package: DynamicToolPackage?) throws {

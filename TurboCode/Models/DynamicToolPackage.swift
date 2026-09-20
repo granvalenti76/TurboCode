@@ -27,7 +27,7 @@ nonisolated enum DynamicToolPackage: String, CaseIterable, Codable, Sendable, Ha
     var summary: String {
         switch self {
         case .conversation:
-            "Answer without workspace tools."
+            "Answer with basic workspace reading and editing available."
         case .exploration:
             "Inspect files, search the workspace, and read repository structure."
         case .coding:
@@ -46,7 +46,7 @@ nonisolated enum DynamicToolPackage: String, CaseIterable, Codable, Sendable, Ha
     var classifierDescription: String {
         switch self {
         case .conversation:
-            "Conversation, explanations and text rewriting without accessing project files."
+            "Conversation, explanations and text rewriting with basic workspace access."
         case .exploration:
             "Read and search workspace files to understand the project."
         case .coding:
@@ -63,7 +63,7 @@ nonisolated enum DynamicToolPackage: String, CaseIterable, Codable, Sendable, Ha
     var toolIDs: Set<ToolCapabilityID> {
         switch self {
         case .conversation:
-            []
+            [.listWorkspace, .readFile, .editFile]
         case .exploration:
             [.listWorkspace, .fileSystem, .readFile, .searchWorkspace]
         case .coding:

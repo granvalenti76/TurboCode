@@ -318,7 +318,6 @@
 		A0000000000000000000009e /* TurboCode/ViewModels/GitDiffViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/ViewModels/GitDiffViewModel.swift; sourceTree = "<group>"; };
 		A0000000000000000000009f /* TurboCode/Diagnostics/AgentBenchmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Diagnostics/AgentBenchmark.swift; sourceTree = "<group>"; };
 		A000000000000000000000a0 /* TurboCode/Stores/TypeScriptPluginRuntimeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Stores/TypeScriptPluginRuntimeStore.swift; sourceTree = "<group>"; };
-		A000000000000000000000a4 /* TurboCode/Views/Inspector/DynamicRoutingInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Views/Inspector/DynamicRoutingInspectorView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -418,7 +417,6 @@
 				A000000000000000000000a2 /* TurboCode/Models/DynamicToolPackage.swift */,
 				A00000000000000000000021 /* TurboCode/Services/ACP/ACPAgentServer.swift */,
 				A000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift */,
-				A000000000000000000000a4 /* TurboCode/Views/Inspector/DynamicRoutingInspectorView.swift */,
 				A00000000000000000000022 /* TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift */,
 				A00000000000000000000023 /* TurboCode/Services/ACP/ACPEventProjector.swift */,
 				A00000000000000000000024 /* TurboCode/Services/ACP/ACPRuntimeDriver.swift */,

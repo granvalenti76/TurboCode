@@ -866,12 +866,6 @@ public final class ChatStore {
         promptText: String? = nil,
         visibleInTimeline: Bool
     ) async {
-        if modelRuntimeStore.dynamicRoutingEnabled,
-           modelRuntimeStore.dynamicRoutingSupported {
-            // Routing is transient and intentionally owns the inspector while
-            // the turn is admitted; the user can still close it manually.
-            workbenchStore.rightPanelMode = .routing
-        }
         _ = await messageSendCoordinator.send(
             displayText: text,
             promptText: promptText ?? text,

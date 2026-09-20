@@ -41,14 +41,14 @@ The prototype loads `TextEncoder.aimodel` and `tokenizer/tokenizer.json` from a
 user-provided external model directory lazily using CoreAI. The model asset is
 deliberately not bundled with the repository; provision it separately before
 enabling Dynamic routing. No Python conversion is needed at runtime. Missing or
-failed assets, and similarity below `0.800`, restore the configured profile’s
+failed assets, and similarity below `0.772`, restore the configured profile’s
 default tools, with the reason visible in the popover. Similarity scores are not
 confidence probabilities. The first request includes model loading; later
 requests reuse the encoder and cached package embeddings. Repeated tool sets
 keep the provider session; changed tool definitions can reduce KV-cache reuse.
 
 Semantic routing uses one short description per category and selects the highest
-cosine similarity when the score reaches `0.800`. There are no keyword gates or
+cosine similarity when the score reaches `0.772`. There are no keyword gates or
 capability penalties. The encoder's multilingual representations handle the
 request language.
 Both requests and category descriptions use the `query: ` prefix recommended by

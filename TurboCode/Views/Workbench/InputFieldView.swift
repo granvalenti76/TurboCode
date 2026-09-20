@@ -596,7 +596,7 @@ struct InputFieldView: View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .firstTextBaseline, spacing: 20) {
                 branchMenu
-                dynamicRoutingToggle
+                dynamicRoutingControl
                 Spacer(minLength: 20)
                 ComposerStatisticsView(
                     statistics: presentation.composerSessionStatistics
@@ -609,7 +609,7 @@ struct InputFieldView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
                     branchMenu
-                    dynamicRoutingToggle
+                    dynamicRoutingControl
                     Spacer(minLength: 0)
                 }
                 ComposerStatisticsView(
@@ -624,22 +624,30 @@ struct InputFieldView: View {
     }
 
     @ViewBuilder
-    private var dynamicRoutingToggle: some View {
+    private var dynamicRoutingControl: some View {
         if chatStore.dynamicRoutingSupported {
-            Toggle(isOn: Binding(
-                get: { chatStore.dynamicRoutingEnabled },
-                set: { enabled in
-                    Task { await chatStore.setDynamicRoutingEnabled(enabled) }
+            HStack(spacing: 7) {
+                Text("Tools")
+                    .foregroundStyle(.secondary)
+
+                Picker("Tool selection", selection: Binding(
+                    get: { chatStore.dynamicRoutingEnabled },
+                    set: { enabled in
+                        Task { await chatStore.setDynamicRoutingEnabled(enabled) }
+                    }
+                )) {
+                    Text("Profile").tag(false)
+                    Text("Auto").tag(true)
                 }
-            )) {
-                Label("Dynamic", systemImage: "wand.and.stars")
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 126)
             }
-            .toggleStyle(.button)
             .controlSize(.small)
+            .fixedSize()
             .disabled(chatStore.busy || chatStore.isDynamicRouting)
-            .help("Select workspace tools for each prompt")
-            .accessibilityLabel("Dynamic tool routing")
-            .accessibilityHint("Classifies each prompt before sending it to the model")
+            .help("Use profile tools or choose tools automatically for each request")
+            .accessibilityHint("Profile uses the configured tool set. Auto selects tools for each request.")
             if chatStore.dynamicRoutingEnabled {
                 Button {
                     showsDynamicRouting.toggle()
@@ -650,7 +658,7 @@ struct InputFieldView: View {
                             Text("Routing…")
                         } else {
                             Image(systemName: chatStore.dynamicRoutingDecision?.source == .fallback
-                                  ? "exclamationmark.triangle" : "arrow.triangle.branch")
+                                  ? "exclamationmark.triangle" : "square.grid.2x2")
                             Text("\(chatStore.dynamicRoutingPresentedToolNames.count) tools")
                         }
                     }
@@ -658,7 +666,7 @@ struct InputFieldView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .help("Show the latest routing decision and loaded tools")
-                .accessibilityLabel("Dynamic routing details")
+                .accessibilityLabel("Automatic tool selection details")
                 .popover(isPresented: $showsDynamicRouting, arrowEdge: .bottom) {
                     dynamicRoutingDetails
                 }
@@ -668,7 +676,7 @@ struct InputFieldView: View {
 
     private var dynamicRoutingDetails: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Dynamic routing · Experimental", systemImage: "arrow.triangle.branch")
+            Label("Automatic tool selection · Experimental", systemImage: "square.grid.2x2")
                 .font(.headline)
             if chatStore.isDynamicRouting {
                 Text("Classifying your request before sending it to the model…")
