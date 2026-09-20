@@ -621,56 +621,64 @@ struct InputFieldView: View {
         .font(AppTypography.control)
         .padding(.horizontal, compact ? 16 : 20)
         .padding(.vertical, compact ? 7 : 8)
+        .animation(.easeInOut(duration: 0.18), value: chatStore.dynamicRoutingSupported)
     }
 
     @ViewBuilder
     private var dynamicRoutingControl: some View {
         if chatStore.dynamicRoutingSupported {
-            HStack(spacing: 7) {
-                Text("Tools")
-                    .foregroundStyle(.secondary)
+            // Treat the router controls as one fixed-size unit so their
+            // transition cannot change the info bar's height or split them
+            // across the wide and compact ViewThatFits arrangements.
+            HStack(spacing: 12) {
+                HStack(spacing: 7) {
+                    Text("Tools")
+                        .foregroundStyle(.secondary)
 
-                Picker("Tool selection", selection: Binding(
-                    get: { chatStore.dynamicRoutingEnabled },
-                    set: { enabled in
-                        Task { await chatStore.setDynamicRoutingEnabled(enabled) }
+                    Picker("Tool selection", selection: Binding(
+                        get: { chatStore.dynamicRoutingEnabled },
+                        set: { enabled in
+                            Task { await chatStore.setDynamicRoutingEnabled(enabled) }
+                        }
+                    )) {
+                        Text("Profile").tag(false)
+                        Text("Auto").tag(true)
                     }
-                )) {
-                    Text("Profile").tag(false)
-                    Text("Auto").tag(true)
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 126)
                 }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .frame(width: 126)
+
+                if chatStore.dynamicRoutingEnabled {
+                    Button {
+                        showsDynamicRouting.toggle()
+                    } label: {
+                        HStack(spacing: 4) {
+                            if chatStore.isDynamicRouting {
+                                ProgressView().controlSize(.mini)
+                                Text("Routing…")
+                            } else {
+                                Image(systemName: chatStore.dynamicRoutingDecision?.source == .fallback
+                                      ? "exclamationmark.triangle" : "square.grid.2x2")
+                                Text("\(chatStore.dynamicRoutingPresentedToolNames.count) tools")
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Show the latest routing decision and loaded tools")
+                    .accessibilityLabel("Automatic tool selection details")
+                    .popover(isPresented: $showsDynamicRouting, arrowEdge: .bottom) {
+                        dynamicRoutingDetails
+                    }
+                }
             }
             .controlSize(.small)
-            .fixedSize()
+            .fixedSize(horizontal: true, vertical: false)
             .disabled(chatStore.busy || chatStore.isDynamicRouting)
             .help("Use profile tools or choose tools automatically for each request")
             .accessibilityHint("Profile uses the configured tool set. Auto selects tools for each request.")
-            if chatStore.dynamicRoutingEnabled {
-                Button {
-                    showsDynamicRouting.toggle()
-                } label: {
-                    HStack(spacing: 4) {
-                        if chatStore.isDynamicRouting {
-                            ProgressView().controlSize(.mini)
-                            Text("Routing…")
-                        } else {
-                            Image(systemName: chatStore.dynamicRoutingDecision?.source == .fallback
-                                  ? "exclamationmark.triangle" : "square.grid.2x2")
-                            Text("\(chatStore.dynamicRoutingPresentedToolNames.count) tools")
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Show the latest routing decision and loaded tools")
-                .accessibilityLabel("Automatic tool selection details")
-                .popover(isPresented: $showsDynamicRouting, arrowEdge: .bottom) {
-                    dynamicRoutingDetails
-                }
-            }
+            .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .leading)))
         }
     }
 
