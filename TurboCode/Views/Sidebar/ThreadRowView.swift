@@ -50,6 +50,17 @@ struct ThreadRowView: View {
 
                 Spacer()
 
+                // Cowork rows name their shared folder, the only Mac context
+                // a Cowork session has.
+                if thread.domain == .cowork, let folder = thread.coworkFolder {
+                    Label(URL(fileURLWithPath: folder).lastPathComponent, systemImage: "folder")
+                        .labelStyle(.titleAndIcon)
+                        .font(AppTypography.sidebarMetadata)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .help("Shares \(folder) read-only")
+                }
+
                 // Mode badge
                 if thread.mode == .plan {
                     Text("PLAN")

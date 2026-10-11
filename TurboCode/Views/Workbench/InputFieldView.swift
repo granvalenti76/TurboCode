@@ -361,7 +361,10 @@ struct InputFieldView: View {
     private var backendMenu: some View {
         Menu {
             ForEach(ComposerProfileMenu.defaults) { id in
+                // Codex executes on the Mac, so it cannot serve a Cowork
+                // session; message admission rejects it as a second barrier.
                 defaultProfileMenu(id)
+                    .disabled(isCoworkSession && id == .codex)
             }
             if !chatStore.dynamicProfiles.isEmpty {
                 Divider()
@@ -595,8 +598,7 @@ struct InputFieldView: View {
     private var bottomInfoBar: some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .firstTextBaseline, spacing: 20) {
-                branchMenu
-                dynamicRoutingControl
+                sessionContextControls
                 Spacer(minLength: 20)
                 ComposerStatisticsView(
                     statistics: presentation.composerSessionStatistics
@@ -608,8 +610,7 @@ struct InputFieldView: View {
             // contents; an open inspector must not clip usage or the branch.
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    branchMenu
-                    dynamicRoutingControl
+                    sessionContextControls
                     Spacer(minLength: 0)
                 }
                 ComposerStatisticsView(
@@ -622,6 +623,22 @@ struct InputFieldView: View {
         .padding(.horizontal, compact ? 16 : 20)
         .padding(.vertical, compact ? 7 : 8)
         .animation(.easeInOut(duration: 0.18), value: chatStore.dynamicRoutingSupported)
+    }
+
+    private var isCoworkSession: Bool { chatStore.activeDomain == .cowork }
+
+    /// Coding shows the workspace branch and tool routing. A Cowork session has
+    /// neither: it works in the VM with a fixed tool set.
+    @ViewBuilder
+    private var sessionContextControls: some View {
+        if isCoworkSession {
+            Label("Cowork VM", systemImage: "shippingbox")
+                .foregroundStyle(.secondary)
+                .help("This session works inside the isolated Cowork virtual machine")
+        } else {
+            branchMenu
+            dynamicRoutingControl
+        }
     }
 
     @ViewBuilder

@@ -171,7 +171,8 @@ private extension Conversation {
             isArchived: isArchived,
             workspace: workspace,
             mode: mode,
-            domain: domain
+            domain: domain,
+            coworkFolder: coworkFolder
         )
     }
 }

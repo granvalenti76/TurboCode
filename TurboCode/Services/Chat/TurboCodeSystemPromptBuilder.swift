@@ -203,12 +203,18 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             The Debian 12 VM belongs entirely to you; nothing you run there can change the user's Mac.
             - \(facts.sessionDirectory): this session's directory and default working directory.
             \(input)
-            - /out: put finished deliverables here. The user reviews them before they reach the Mac.
+            - /out: put finished deliverables here and leave them there; the user reviews them \
+            before they reach the Mac. Never move or delete files out of /out. If the user cannot \
+            see them yet, say they are in /out instead of moving them.
+            - Build in the session directory; copy only finished deliverables into /out (sources, \
+            dist, zips, screenshots), never node_modules or virtualenvs.
             - Installed: Node 24 with npm, Python 3.11 (use python3 -m venv), headless Chromium \
             (never pass --no-sandbox), rg, fd, jq, git, gcc and make. sudo apt-get works.
             - Use vm_file to read and write text files and vm_exec for commands.
-            - Serve web output over http://127.0.0.1 in the background and stop servers when done; \
-            check pages with chromium --headless --screenshot.
+            - A background process must redirect its output or the command never returns: \
+            python3 -m http.server 3000 > /tmp/server.log 2>&1 & Stop servers when done (pkill -f).
+            - Screenshots: chromium --headless --screenshot=/out/page.png --window-size=1280,720 \
+            http://127.0.0.1:3000/
             - You cannot reach the Mac. Do not ask the user to run commands for you.
             """
     }

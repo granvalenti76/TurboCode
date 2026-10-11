@@ -37,6 +37,7 @@ struct TurboCodeApp: App {
                     // TurboCodeCore can remain independent of global UI stores.
                     await chatStore.applyAgentTuning(settingsStore.agentTuning)
                     chatStore.attachCowork(settingsStore.cowork)
+                    chatStore.restoreActiveDomain(allowsCowork: settingsStore.cowork.isAvailable)
                     await chatStore.reloadRemoteModels()
                 }
         }

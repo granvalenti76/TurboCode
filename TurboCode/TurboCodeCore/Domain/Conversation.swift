@@ -18,6 +18,9 @@ nonisolated public struct Conversation: Identifiable, Sendable, Hashable {
     /// Fixed at creation. A session never changes domain, because the domain
     /// decides whether its tools may touch the Mac or only the Cowork VM.
     public let domain: SessionDomain
+    /// Cowork only: the Mac folder shared read-only with the VM at `/work`.
+    /// `nil` shares nothing. Ignored for Coding sessions.
+    public var coworkFolder: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -28,7 +31,8 @@ nonisolated public struct Conversation: Identifiable, Sendable, Hashable {
         isArchived: Bool = false,
         workspace: String? = nil,
         mode: ConversationMode = .agent,
-        domain: SessionDomain = .coding
+        domain: SessionDomain = .coding,
+        coworkFolder: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -39,6 +43,7 @@ nonisolated public struct Conversation: Identifiable, Sendable, Hashable {
         self.workspace = workspace
         self.mode = mode
         self.domain = domain
+        self.coworkFolder = coworkFolder
     }
 }
 

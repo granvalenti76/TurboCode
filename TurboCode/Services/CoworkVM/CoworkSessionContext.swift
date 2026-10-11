@@ -148,3 +148,13 @@ nonisolated enum CoworkAdmission: Equatable {
         return hasContext ? .allowed : .rejected(unavailableMessage)
     }
 }
+
+nonisolated enum CoworkFolderError: LocalizedError {
+    case agentIsWorking
+
+    var errorDescription: String? {
+        switch self {
+        case .agentIsWorking: "Wait for the agent to finish before changing the shared folder."
+        }
+    }
+}

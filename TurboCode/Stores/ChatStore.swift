@@ -450,6 +450,54 @@ public final class ChatStore {
         await conversationLifecycleCoordinator.openThread(id)
     }
 
+    // MARK: Coding | Cowork
+
+    private static let activeDomainKey = "activeSessionDomain"
+
+    public var activeDomain: SessionDomain { conversationStore.activeDomain }
+
+    /// The open session, if any, as an immutable value for presentation.
+    public var activeConversation: Conversation? {
+        guard let id = conversationStore.activeThreadID else { return nil }
+        return conversationStore.threads.first { $0.id == id }
+    }
+
+    /// Switches the sidebar domain. The open session belongs to the other
+    /// domain, so the most recent session of the new domain opens instead, or
+    /// a new empty one when the domain has none yet.
+    public func setActiveDomain(_ domain: SessionDomain) async {
+        guard domain != conversationStore.activeDomain else { return }
+        conversationStore.activeDomain = domain
+        UserDefaults.standard.set(domain.rawValue, forKey: Self.activeDomainKey)
+        selectedProject = nil
+        if let recent = sortedThreads.first {
+            await openThread(recent.id)
+        } else {
+            await createThread()
+        }
+    }
+
+    /// Restores the last sidebar domain at launch; `allowsCowork` is false
+    /// when Cowork is disabled or not installed, which forces Coding.
+    public func restoreActiveDomain(allowsCowork: Bool) {
+        let saved = UserDefaults.standard.string(forKey: Self.activeDomainKey)
+            .flatMap(SessionDomain.init(rawValue:)) ?? .coding
+        conversationStore.activeDomain = allowsCowork ? saved : .coding
+    }
+
+    /// Attaches (or with `nil` detaches) the Mac folder the active Cowork
+    /// session shares read-only. The session is rebuilt so its instructions
+    /// state whether /work exists; the VM remounts on its next command.
+    public func setCoworkFolder(_ folder: URL?) async throws {
+        guard let conversation = activeConversation, conversation.domain == .cowork else { return }
+        // Remounting restarts the VM, which would kill a running command.
+        guard !busy else { throw CoworkFolderError.agentIsWorking }
+        let path = try folder.map { try CoworkMountPlan.validatedInputFolder($0) }
+        conversationStore.setCoworkFolder(path, for: conversation.id)
+        await persistConversationMetadata(for: conversation.id)
+        _ = await profileSelectionCoordinator.rebuildSession()
+    }
+
     public func createThread(title: String = "New Chat", mode: ConversationMode = .agent) async {
         await conversationLifecycleCoordinator.createThread(
             title: title,

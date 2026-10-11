@@ -219,7 +219,8 @@ private extension ConversationSnapshot {
             isArchived: stored.isArchived,
             workspace: stored.workspacePath,
             mode: stored.mode,
-            domain: stored.domain
+            domain: stored.domain,
+            coworkFolder: stored.coworkFolder
         )
         modelBackend = stored.modelBackend
         blocks = stored.blocks.map(ChatBlock.init)
@@ -250,6 +251,7 @@ private extension ConversationSnapshot {
             steering: steering
         )
         storedSession.statistics = statistics
+        storedSession.coworkFolder = conversation.coworkFolder
         return storedSession
     }
 }

@@ -148,6 +148,22 @@ nonisolated enum CoworkMountPlan {
     }
 
     static let inputGuestPath = "/work"
+
+    /// The single rule for which Mac folder may be shared, used both when the
+    /// user attaches a folder and when the VM boots. Returns the resolved path.
+    static func validatedInputFolder(
+        _ folder: URL,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) throws -> String {
+        let path = folder.standardizedFileURL.resolvingSymlinksInPath().path
+        let home = homeDirectory.standardizedFileURL.resolvingSymlinksInPath().path
+        // Sharing the whole disk or the whole home folder would expose keys,
+        // credentials, and other projects, even read-only.
+        guard path != "/", path != home, path.hasPrefix("/") else {
+            throw CoworkVMError.unsafeInputFolder(path)
+        }
+        return path
+    }
     static let outboxGuestPath = "/out"
 
     static func shares(
@@ -156,13 +172,7 @@ nonisolated enum CoworkMountPlan {
     ) throws -> [Share] {
         var shares: [Share] = []
         if let input = configuration.inputFolder {
-            let path = input.standardizedFileURL.resolvingSymlinksInPath().path
-            let home = homeDirectory.standardizedFileURL.resolvingSymlinksInPath().path
-            // Sharing the whole disk or the whole home folder would expose
-            // keys, credentials, and other projects, even read-only.
-            guard path != "/", path != home, path.hasPrefix("/") else {
-                throw CoworkVMError.unsafeInputFolder(path)
-            }
+            let path = try validatedInputFolder(input, homeDirectory: homeDirectory)
             shares.append(Share(hostPath: path, guestPath: inputGuestPath, readOnly: true))
         }
         shares.append(Share(

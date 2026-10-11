@@ -83,15 +83,32 @@ final class CoworkStore: CoworkSessionProviding {
         )
     }
 
-    /// Cowork sessions share the one VM; each keeps its own guest directory.
-    /// Input folders and per-session outboxes arrive with the session UI.
+    /// Cowork sessions share the one VM; each keeps its own guest directory
+    /// and may share one Mac folder read-only. A folder that no longer exists
+    /// or fails validation is simply not shared, never widened.
     func sessionContext(for conversation: Conversation) -> CoworkSessionContext? {
         guard conversation.domain == .cowork, isAvailable else { return nil }
         return CoworkSessionContext(
             runtime: runtime,
-            configuration: configuration(),
+            configuration: configuration(inputFolder: Self.shareableFolder(conversation.coworkFolder)),
             sessionID: conversation.id
         )
+    }
+
+    /// The folder URL to mount, or `nil` when it is missing or not allowed.
+    nonisolated static func shareableFolder(
+        _ path: String?,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL? {
+        guard let path else { return nil }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              let validated = try? CoworkMountPlan.validatedInputFolder(
+                URL(fileURLWithPath: path, isDirectory: true),
+                homeDirectory: homeDirectory
+              ) else { return nil }
+        return URL(fileURLWithPath: validated, isDirectory: true)
     }
 
     func refreshStatus() {
