@@ -7,7 +7,9 @@ import Foundation
 /// Containerization stays behind this protocol (see
 /// `ContainerizationCoworkRuntime`), so the pre-1.0 dependency is confined to
 /// one adapter and every caller can be tested with a fake runtime.
-protocol CoworkVMRuntime: Sendable {
+/// `nonisolated` is required: the app target defaults to MainActor, and VM
+/// work must never be funneled through the main thread.
+nonisolated protocol CoworkVMRuntime: Sendable {
     /// Boots the VM, or restarts it when the requested configuration differs
     /// from the running one. The writable layer persists across restarts.
     func start(_ configuration: CoworkVMConfiguration) async throws
@@ -19,6 +21,18 @@ protocol CoworkVMRuntime: Sendable {
     /// installed, so the next start boots a clean guest without downloads.
     func reset() async throws
     func state() async -> CoworkVMState
+}
+
+/// Installation steps that need Containerization's image store. Implemented
+/// next to the runtime adapter so the dependency stays in one file.
+nonisolated protocol CoworkImageProvisioning: Sendable {
+    /// Fetches the pinned `vminit` image and writes the init filesystem.
+    func prepareInitFilesystem() async throws
+    /// Pulls the pinned guest image into the content store. `progress`
+    /// receives a 0...1 fraction when the registry reports sizes.
+    func pullImage(progress: @escaping @Sendable (Double?) -> Void) async throws
+    /// Unpacks the pinned image into the read-only base rootfs, atomically.
+    func unpackBaseRootfs(progress: @escaping @Sendable (Double?) -> Void) async throws
 }
 
 // MARK: - Values

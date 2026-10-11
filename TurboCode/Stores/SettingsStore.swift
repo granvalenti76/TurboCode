@@ -8,6 +8,8 @@ import SwiftUI
 @Observable
 public final class SettingsStore {
     let anchorSignalAssets = AnchorSignalAssetManager()
+    /// Owns the single Cowork VM; created once with the app's settings.
+    let cowork = CoworkStore()
 
     public var theme: ThemePreference = .system {
         didSet { UserDefaults.standard.set(theme.rawValue, forKey: "theme") }

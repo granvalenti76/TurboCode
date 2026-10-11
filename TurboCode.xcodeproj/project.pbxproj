@@ -17,6 +17,7 @@
 		5EC0A003300A000100C554D4 /* Containerization in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC0A002300A000100C554D4 /* Containerization */; };
 		5EC0A005300A000100C554D4 /* ContainerizationOCI in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC0A004300A000100C554D4 /* ContainerizationOCI */; };
 		5EC0A007300A000100C554D4 /* ContainerizationEXT4 in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC0A006300A000100C554D4 /* ContainerizationEXT4 */; };
+		5EC0A009300A000100C554D4 /* ContainerizationExtras in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC0A008300A000100C554D4 /* ContainerizationExtras */; };
 		B00000000000000000000001 /* TurboCode/Diagnostics/AgentDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000001 /* TurboCode/Diagnostics/AgentDiagnostics.swift */; };
 		B00000000000000000000003 /* TurboCode/Models/ACP/ACPProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000003 /* TurboCode/Models/ACP/ACPProtocol.swift */; };
 		B00000000000000000000004 /* TurboCode/Models/AgentActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000004 /* TurboCode/Models/AgentActivity.swift */; };
@@ -350,6 +351,7 @@
 				5EC0A003300A000100C554D4 /* Containerization in Frameworks */,
 				5EC0A005300A000100C554D4 /* ContainerizationOCI in Frameworks */,
 				5EC0A007300A000100C554D4 /* ContainerizationEXT4 in Frameworks */,
+				5EC0A009300A000100C554D4 /* ContainerizationExtras in Frameworks */,
 			);
 		};
 		000000000000000230000000 /* Frameworks */ = {
@@ -559,6 +561,7 @@
 				5EC0A002300A000100C554D4 /* Containerization */,
 				5EC0A004300A000100C554D4 /* ContainerizationOCI */,
 				5EC0A006300A000100C554D4 /* ContainerizationEXT4 */,
+				5EC0A008300A000100C554D4 /* ContainerizationExtras */,
 			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* TurboCode.app */;
@@ -1263,6 +1266,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 5EC0A001300A000100C554D4 /* XCRemoteSwiftPackageReference "containerization" */;
 			productName = ContainerizationEXT4;
+		};
+		5EC0A008300A000100C554D4 /* ContainerizationExtras */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5EC0A001300A000100C554D4 /* XCRemoteSwiftPackageReference "containerization" */;
+			productName = ContainerizationExtras;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

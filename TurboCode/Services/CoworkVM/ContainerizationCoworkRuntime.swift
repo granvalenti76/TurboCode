@@ -1,7 +1,9 @@
 import Containerization
 import ContainerizationEXT4
+import ContainerizationExtras
 import ContainerizationOCI
 import Foundation
+import Synchronization
 import SystemPackage
 
 /// `CoworkVMRuntime` backed by Apple Containerization 0.49.0.
@@ -226,4 +228,82 @@ private nonisolated final class StreamWriter: Writer, Sendable {
     }
 
     func close() throws {}
+}
+
+// MARK: - Installation
+
+/// `CoworkImageProvisioning` backed by Containerization's image store.
+/// Registry access happens only here, and only for the pinned references.
+nonisolated struct ContainerizationCoworkProvisioner: CoworkImageProvisioning {
+    /// Sparse capacity of the read-only base; the 0.62 image uses ≈1.4 GB.
+    static let baseRootfsBytes: UInt64 = 4 * 1_024 * 1_024 * 1_024
+
+    let descriptor: CoworkImageDescriptor
+    let layout: CoworkSandboxLayout
+
+    init(descriptor: CoworkImageDescriptor = .current, layout: CoworkSandboxLayout = .init()) {
+        self.descriptor = descriptor
+        self.layout = layout
+    }
+
+    func prepareInitFilesystem() async throws {
+        // ContainerManager reads `<store>/initfs.ext4`; the installer deletes
+        // it whenever the pinned init reference changes.
+        let initPath = layout.imageStore.appendingPathComponent("initfs.ext4")
+        guard !FileManager.default.fileExists(atPath: initPath.path) else { return }
+        let store = try ImageStore(path: layout.imageStore)
+        let initImage = try await store.getInitImage(reference: descriptor.initReference)
+        _ = try await initImage.initBlock(at: initPath, for: .linuxArm)
+    }
+
+    func pullImage(progress: @escaping @Sendable (Double?) -> Void) async throws {
+        let store = try ImageStore(path: layout.imageStore)
+        let tracker = ProgressTracker(report: progress)
+        _ = try await store.pull(reference: descriptor.imageReference, progress: tracker.handle)
+    }
+
+    func unpackBaseRootfs(progress: @escaping @Sendable (Double?) -> Void) async throws {
+        let fileManager = FileManager.default
+        let destination = layout.baseRootfs(for: descriptor)
+        guard !fileManager.fileExists(atPath: destination.path) else { return }
+        try fileManager.createDirectory(at: layout.vmDirectory, withIntermediateDirectories: true)
+        // Unpack beside the destination and rename, so an interrupted unpack
+        // never leaves a base rootfs that looks installed.
+        let staging = layout.vmDirectory.appendingPathComponent(".staging-\(UUID().uuidString).ext4")
+        defer { try? fileManager.removeItem(at: staging) }
+        let store = try ImageStore(path: layout.imageStore)
+        let image = try await store.get(reference: descriptor.imageReference, pull: false)
+        let tracker = ProgressTracker(report: progress)
+        _ = try await EXT4Unpacker(capacityInBytes: Self.baseRootfsBytes)
+            .unpack(image, for: .current, at: staging, progress: tracker.handle)
+        try Task.checkCancellation()
+        try fileManager.moveItem(at: staging, to: destination)
+    }
+}
+
+/// Folds Containerization progress events into a single 0...1 fraction.
+private nonisolated final class ProgressTracker: Sendable {
+    private let totals = Mutex<(done: Int64, total: Int64)>((0, 0))
+    private let report: @Sendable (Double?) -> Void
+
+    init(report: @escaping @Sendable (Double?) -> Void) {
+        self.report = report
+    }
+
+    var handle: ProgressHandler {
+        { [self] events in
+            let fraction: Double? = totals.withLock { totals in
+                for event in events {
+                    switch event {
+                    case .addSize(let size): totals.done += size
+                    case .addTotalSize(let size): totals.total += size
+                    default: break
+                    }
+                }
+                guard totals.total > 0 else { return nil }
+                return min(1, Double(totals.done) / Double(totals.total))
+            }
+            report(fraction)
+        }
+    }
 }

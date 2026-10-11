@@ -21,10 +21,10 @@ nonisolated struct CoworkImageDescriptor: Sendable, Equatable {
     let containerizationVersion: String
 
     static let current = Self(
-        version: "0.62.0-rc.1",
-        imageReference: "ghcr.io/granvalenti76/turbocode-cowork-image@sha256:d8bc5c895aea414201b41ffd48759fea8c44745cea94d6fe2e421b0042d3d35d",
-        kernelURL: URL(string: "https://github.com/granvalenti76/TurboCode-Cowork-Image/releases/download/v0.62.0-rc.1/vmlinux-arm64")!,
-        kernelSHA256: "e572c4e1fbaf7053fb79b49d2ff1601617c264639dfada96f28ef5d44d516647",
+        version: "0.62.0-rc.2",
+        imageReference: "ghcr.io/granvalenti76/turbocode-cowork-image@sha256:4967fff7e795b9c340db0ea44210e9d5bdaa7c73a4b62f42e7ba75c2fd8952d9",
+        kernelURL: URL(string: "https://github.com/granvalenti76/TurboCode-Cowork-Image/releases/download/v0.62.0-rc.2/vmlinux-arm64")!,
+        kernelSHA256: "dd5455bcfa49c0cc42c534426cb9e49b2b9bb6ab5bdb43ec2d6cb59e60e7a534",
         kernelSizeBytes: 29_354_496,
         kernelVersion: "6.18.5",
         initReference: "ghcr.io/apple/containerization/vminit@sha256:91d814732cd59fa993b50ad0925685ee1766fca436d75077a6bcbb79c21222c0",

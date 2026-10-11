@@ -29,6 +29,10 @@ struct SettingsTabView: View {
                 .tabItem { Label("Agents", systemImage: "wand.and.stars") }
                 .tag(SettingsSection.agents)
 
+            CoworkSettingsView()
+                .tabItem { Label("Cowork", systemImage: "shippingbox") }
+                .tag(SettingsSection.cowork)
+
             ShortcutSettingsView()
                 .tabItem { Label("Shortcuts", systemImage: "keyboard") }
                 .tag(SettingsSection.shortcuts)
