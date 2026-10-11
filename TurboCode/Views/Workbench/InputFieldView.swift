@@ -12,6 +12,7 @@ struct InputFieldView: View {
     @State private var composerSelection: TextSelection?
     @State private var selectedSlashCommandIndex = 0
     @State private var showsDynamicRouting = false
+    @State private var coworkDeliverableCount = 0
 
     let compact: Bool
 
@@ -627,14 +628,39 @@ struct InputFieldView: View {
 
     private var isCoworkSession: Bool { chatStore.activeDomain == .cowork }
 
+    private var deliverablesRefreshKey: String {
+        "\(chatStore.activeThreadId ?? "")|\(chatStore.busy)|\(chatStore.coworkExportPresentation == nil)"
+    }
+
     /// Coding shows the workspace branch and tool routing. A Cowork session has
     /// neither: it works in the VM with a fixed tool set.
     @ViewBuilder
     private var sessionContextControls: some View {
         if isCoworkSession {
-            Label("Cowork VM", systemImage: "shippingbox")
-                .foregroundStyle(.secondary)
-                .help("This session works inside the isolated Cowork virtual machine")
+            HStack(spacing: 14) {
+                Label("Cowork VM", systemImage: "shippingbox")
+                    .foregroundStyle(.secondary)
+                    .help("This session works inside the isolated Cowork virtual machine")
+                // Always-visible entry to the reviewed export; it never copies
+                // anything by itself.
+                if coworkDeliverableCount > 0 {
+                    Button {
+                        chatStore.presentCoworkExport()
+                    } label: {
+                        Label(
+                            "\(coworkDeliverableCount) in /out · Review & Export",
+                            systemImage: "square.and.arrow.down.on.square"
+                        )
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Review the session's deliverables and copy approved files to your Mac")
+                }
+            }
+            // Recount when the session changes, when a turn ends, and when the
+            // export review closes (it may have cleared the outbox).
+            .task(id: deliverablesRefreshKey) {
+                coworkDeliverableCount = await chatStore.coworkDeliverableCount()
+            }
         } else {
             branchMenu
             dynamicRoutingControl

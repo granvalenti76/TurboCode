@@ -510,6 +510,17 @@ public final class ChatStore {
         )
     }
 
+    /// Exportable files in the active Cowork session's outbox, counted off the
+    /// main actor with the same exclusions as the export review.
+    func coworkDeliverableCount() async -> Int {
+        guard let conversation = activeConversation, conversation.domain == .cowork,
+              let provider = profileSelectionCoordinator.coworkProvider else { return 0 }
+        let outbox = provider.outbox(for: conversation)
+        return await Task.detached(priority: .utility) {
+            CoworkExportPlanner.deliverables(in: outbox).count
+        }.value
+    }
+
     var coworkExportPresentation: CoworkExportPresentation? {
         get { workbenchStore.coworkExport }
         set { workbenchStore.coworkExport = newValue }

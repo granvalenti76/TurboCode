@@ -39,11 +39,12 @@ nonisolated enum ToolCapabilityID: String, CaseIterable, Codable, Sendable, Hash
     /// profile, default or custom, can ever receive them.
     case vmExec = "vm_exec"
     case vmFile = "vm_file"
+    case vmExport = "vm_export"
 
     var id: String { rawValue }
 
     /// Whether the capability belongs to the Cowork VM rather than the Mac.
-    var isCoworkVMTool: Bool { self == .vmExec || self == .vmFile }
+    var isCoworkVMTool: Bool { self == .vmExec || self == .vmFile || self == .vmExport }
 
     /// Most capability identifiers equal their model-facing function name.
     /// Search keeps its historical persisted ID while exposing the replacement
@@ -309,6 +310,14 @@ nonisolated enum ModelToolCatalog {
             category: .execution,
             systemImage: "doc.on.doc",
             hasNativePresentation: false
+        ),
+        .init(
+            id: .vmExport,
+            name: "VM Deliverables",
+            summary: "Report the finished files in /out that the user can review and export.",
+            category: .execution,
+            systemImage: "shippingbox",
+            hasNativePresentation: false
         )
     ]
 
@@ -326,7 +335,8 @@ nonisolated enum ModelToolCatalog {
             (.turboCodeGuide, .always),
             (.loadSkill, .skills),
             (.vmExec, .coworkVM),
-            (.vmFile, .coworkVM)
+            (.vmFile, .coworkVM),
+            (.vmExport, .coworkVM)
         ]
         let assignments = memberships.map { id, requirement in
             assignment(id: id, requirement: requirement, tier: tier, context: context)
@@ -405,7 +415,7 @@ nonisolated enum ModelToolCatalog {
         case .safariMCP: .safariMCP
         case .xcodeMCP: .xcodeMCP
         case .delegateTask, .callPowerfulModel: .delegateModel
-        case .vmExec, .vmFile: .coworkVM
+        case .vmExec, .vmFile, .vmExport: .coworkVM
         }
     }
 

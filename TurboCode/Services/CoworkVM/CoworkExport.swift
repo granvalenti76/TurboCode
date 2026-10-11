@@ -165,6 +165,28 @@ nonisolated enum CoworkExportPlanner {
         )
     }
 
+    /// The files an export would offer, without a destination or hashing:
+    /// what `vm_export` reports and the composer counts. Same exclusions and
+    /// link rules as `plan`.
+    static func deliverables(in outbox: URL) -> [(path: String, size: Int64)] {
+        let root = outbox.standardizedFileURL.resolvingSymlinksInPath()
+        let keys: [URLResourceKey] = [.isSymbolicLinkKey, .isRegularFileKey, .isDirectoryKey, .fileSizeKey]
+        guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: keys) else {
+            return []
+        }
+        var files: [(path: String, size: Int64)] = []
+        for case let url as URL in enumerator {
+            guard let values = try? url.resourceValues(forKeys: Set(keys)) else { continue }
+            if excludedNames.contains(url.lastPathComponent) {
+                if values.isDirectory == true { enumerator.skipDescendants() }
+                continue
+            }
+            guard values.isSymbolicLink != true, values.isRegularFile == true else { continue }
+            files.append((relativePath(of: url, in: root), Int64(values.fileSize ?? 0)))
+        }
+        return files.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+    }
+
     static func relativePath(of url: URL, in root: URL) -> String {
         let path = url.standardizedFileURL.path
         return path.hasPrefix(root.path + "/") ? String(path.dropFirst(root.path.count + 1)) : url.lastPathComponent

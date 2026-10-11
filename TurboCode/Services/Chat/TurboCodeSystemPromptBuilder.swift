@@ -208,6 +208,8 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             see them yet, say they are in /out instead of moving them.
             - Build in the session directory; copy only finished deliverables into /out (sources, \
             dist, zips, screenshots), never node_modules or virtualenvs.
+            - When the deliverables are complete, call vm_export and tell the user to choose \
+            Review & Export to copy them to the Mac.
             - Installed: Node 24 with npm, Python 3.11 (use python3 -m venv), headless Chromium \
             (never pass --no-sandbox), rg, fd, jq, git, gcc and make. sudo apt-get works.
             - Use vm_file to read and write text files and vm_exec for commands.

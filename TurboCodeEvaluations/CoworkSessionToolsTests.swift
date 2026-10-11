@@ -10,7 +10,7 @@ import Testing
 struct CoworkSessionToolsTests {
     /// Every capability that can read or change the Mac.
     static let hostCapabilities: Set<ToolCapabilityID> = Set(ToolCapabilityID.allCases)
-        .subtracting([.vmExec, .vmFile, .turboCodeGuide, .loadSkill])
+        .subtracting([.vmExec, .vmFile, .vmExport, .turboCodeGuide, .loadSkill])
 
     // MARK: Catalog boundary
 
@@ -32,7 +32,7 @@ struct CoworkSessionToolsTests {
                     let plan = ModelToolCatalog.plan(
                         profile: profile, tier: tier, context: context, selectedIDs: selection
                     )
-                    #expect(plan.registeredIDs.isDisjoint(with: [.vmExec, .vmFile]),
+                    #expect(plan.registeredIDs.allSatisfy { !$0.isCoworkVMTool },
                             "\(profile) \(tier) selection: \(selection == nil ? "default" : "all")")
                 }
             }
@@ -51,7 +51,7 @@ struct CoworkSessionToolsTests {
         )
         for tier in [ModelToolTier.onDevice, .standard, .enhanced] {
             let plan = ModelToolCatalog.coworkPlan(tier: tier, context: context)
-            #expect(plan.registeredIDs.isSuperset(of: [.vmExec, .vmFile]))
+            #expect(plan.registeredIDs.isSuperset(of: [.vmExec, .vmFile, .vmExport]))
             #expect(plan.registeredIDs.isDisjoint(with: Self.hostCapabilities))
         }
     }
@@ -102,7 +102,7 @@ struct CoworkSessionToolsTests {
             Issue.record("Expected session instructions")
             return
         }
-        #expect(Set(instructions.toolDefinitions.map(\.name)) == ["turbocode_guide", "vm_exec", "vm_file"])
+        #expect(Set(instructions.toolDefinitions.map(\.name)) == ["turbocode_guide", "vm_exec", "vm_file", "vm_export"])
     }
 
     // MARK: Admission
@@ -214,6 +214,41 @@ struct CoworkSessionToolsTests {
         #expect(receipt.block.deletions == 1)
         #expect(receipt.block.reviewFiles?.first?.originalText == "Hello\nold line\n")
         #expect(receipt.block.reviewFiles?.first?.modifiedText == "Hello\nnew line\n")
+    }
+
+    @Test("vm_export lists exportable deliverables without build folders or links")
+    func vmExportListsDeliverables() async throws {
+        let outbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("VMExport-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: outbox) }
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: outbox.appendingPathComponent("site/node_modules/x"), withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: outbox.appendingPathComponent("site/node_modules/x/index.js"))
+        try Data("<h1>hi</h1>".utf8).write(to: outbox.appendingPathComponent("site/index.html"))
+        try Data("png".utf8).write(to: outbox.appendingPathComponent("shot.png"))
+        try fileManager.createSymbolicLink(
+            at: outbox.appendingPathComponent("hosts"), withDestinationURL: URL(fileURLWithPath: "/etc/hosts")
+        )
+        let context = CoworkSessionContext(
+            runtime: RecordingRuntime(),
+            configuration: CoworkVMConfiguration(outbox: outbox),
+            sessionID: "session-1"
+        )
+
+        #expect(CoworkExportPlanner.deliverables(in: outbox).map(\.path) == ["shot.png", "site/index.html"])
+        let output = try await VMExportTool(context: context).call(arguments: VMExportArguments(summary: nil))
+        #expect(output.hasPrefix("2 deliverables"))
+        #expect(output.contains("- site/index.html"))
+        #expect(!output.contains("node_modules"))
+        #expect(!output.contains("hosts"))
+
+        let empty = CoworkSessionContext(
+            runtime: RecordingRuntime(),
+            configuration: CoworkVMConfiguration(outbox: outbox.appendingPathComponent("missing")),
+            sessionID: "session-2"
+        )
+        #expect(try await VMExportTool(context: empty).call(arguments: VMExportArguments(summary: nil))
+            .hasPrefix("No deliverables"))
     }
 
     @Test("vm_file rejects oversized writes before reaching the VM")
