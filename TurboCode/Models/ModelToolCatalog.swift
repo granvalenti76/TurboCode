@@ -34,8 +34,16 @@ nonisolated enum ToolCapabilityID: String, CaseIterable, Codable, Sendable, Hash
     case createSkill = "create_skill"
     case delegateTask = "delegate_task"
     case callPowerfulModel = "call_powerful_model"
+    /// Cowork VM tools. They act only inside the managed Linux VM and are
+    /// registered exclusively by `ModelToolCatalog.coworkPlan`; no Coding
+    /// profile, default or custom, can ever receive them.
+    case vmExec = "vm_exec"
+    case vmFile = "vm_file"
 
     var id: String { rawValue }
+
+    /// Whether the capability belongs to the Cowork VM rather than the Mac.
+    var isCoworkVMTool: Bool { self == .vmExec || self == .vmFile }
 
     /// Most capability identifiers equal their model-facing function name.
     /// Search keeps its historical persisted ID while exposing the replacement
@@ -71,6 +79,8 @@ nonisolated enum ToolAvailabilityRequirement: Sendable, Hashable {
     case repositoryMap
     case capableWorkspace
     case xcodeMCP
+    /// Registered only in Cowork sessions, never from profile membership.
+    case coworkVM
 }
 
 nonisolated struct ToolAccessContext: Sendable, Hashable {
@@ -281,8 +291,47 @@ nonisolated enum ModelToolCatalog {
         )
     ]
 
+    /// Kept out of `descriptors` so Coding profile editors and the Tools list,
+    /// which enumerate host capabilities, never offer VM tools.
+    static let coworkDescriptors: [ToolCapabilityDescriptor] = [
+        .init(
+            id: .vmExec,
+            name: "VM Command",
+            summary: "Run a shell command inside the isolated Cowork VM.",
+            category: .execution,
+            systemImage: "terminal",
+            hasNativePresentation: false
+        ),
+        .init(
+            id: .vmFile,
+            name: "VM Files",
+            summary: "Read, write, and list files inside the isolated Cowork VM.",
+            category: .execution,
+            systemImage: "doc.on.doc",
+            hasNativePresentation: false
+        )
+    ]
+
+    static var allDescriptors: [ToolCapabilityDescriptor] { descriptors + coworkDescriptors }
+
     static func descriptor(for id: ToolCapabilityID) -> ToolCapabilityDescriptor {
-        descriptors.first(where: { $0.id == id })!
+        allDescriptors.first(where: { $0.id == id })!
+    }
+
+    /// The fixed tool surface of a Cowork session. The domain decides the
+    /// tools; the active profile only chooses the model. Every capability that
+    /// can read or change the Mac is absent by construction.
+    static func coworkPlan(tier: ModelToolTier, context: ToolAccessContext) -> ModelToolPlan {
+        let memberships: [(ToolCapabilityID, ToolAvailabilityRequirement)] = [
+            (.turboCodeGuide, .always),
+            (.loadSkill, .skills),
+            (.vmExec, .coworkVM),
+            (.vmFile, .coworkVM)
+        ]
+        let assignments = memberships.map { id, requirement in
+            assignment(id: id, requirement: requirement, tier: tier, context: context)
+        }
+        return ModelToolPlan(profile: .standalone, tier: tier, assignments: assignments)
     }
 
     /// The worker catalog is intentionally separate from coordinator tools.
@@ -300,8 +349,10 @@ nonisolated enum ModelToolCatalog {
     ) -> ModelToolPlan {
         let profileMembership = membership(for: profile)
         var memberships = selectedIDs.map { ids in
+            // VM tools are filtered even from explicit selections: callers
+            // commonly pass `Set(ToolCapabilityID.allCases)` as "everything".
             return ToolCapabilityID.allCases
-                .filter { ids.contains($0) }
+                .filter { ids.contains($0) && !$0.isCoworkVMTool }
                 .map { ($0, requirement(for: $0)) }
         } ?? profileMembership
         // Built-in profiles always retain the product skill authoring surface.
@@ -354,6 +405,7 @@ nonisolated enum ModelToolCatalog {
         case .safariMCP: .safariMCP
         case .xcodeMCP: .xcodeMCP
         case .delegateTask, .callPowerfulModel: .delegateModel
+        case .vmExec, .vmFile: .coworkVM
         }
     }
 

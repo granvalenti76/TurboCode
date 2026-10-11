@@ -64,6 +64,9 @@ nonisolated struct ModelSessionConfiguration: Sendable {
     /// Activated external tools are an immutable process-backed snapshot. The
     /// active profile still decides which of these bindings enter a session.
     let activePluginTools: [TypeScriptPluginToolBinding]
+    /// Non-nil exactly for Cowork sessions. When present the session gets the
+    /// fixed VM tool plan and no host workspace, plugin, or MCP capability.
+    let cowork: CoworkSessionContext?
 
     init(
         backend: ModelBackend,
@@ -85,7 +88,8 @@ nonisolated struct ModelSessionConfiguration: Sendable {
         delegateWorkers: [ModelWorkerConfiguration] = [],
         dropsCompletedToolCalls: Bool,
         workspaceInstructions: WorkspaceInstructions?,
-        activePluginTools: [TypeScriptPluginToolBinding] = []
+        activePluginTools: [TypeScriptPluginToolBinding] = [],
+        cowork: CoworkSessionContext? = nil
     ) {
         self.backend = backend
         self.activeRemoteModel = activeRemoteModel
@@ -107,6 +111,7 @@ nonisolated struct ModelSessionConfiguration: Sendable {
         self.dropsCompletedToolCalls = dropsCompletedToolCalls
         self.workspaceInstructions = workspaceInstructions
         self.activePluginTools = activePluginTools
+        self.cowork = cowork
     }
 }
 
@@ -315,6 +320,22 @@ nonisolated enum ModelSessionFactory {
             mode: configuration.orchestratorMode,
             activeProfile: configuration.activeDynamicProfile
         )
+
+        // Cowork is decided by the session's domain before any profile, routing,
+        // or orchestration rule: those exist for host tools a Cowork session
+        // must never receive.
+        if let cowork = configuration.cowork {
+            return makeCoworkSession(
+                configuration: configuration,
+                cowork: cowork,
+                activeModel: activeModel,
+                activeCapabilities: activeCapabilities,
+                temperature: temperature,
+                samplingMode: samplingMode,
+                history: history,
+                events: events
+            )
+        }
 
         // Dynamic routing intentionally creates a toolless first session. The
         // application classifies the user request before rebuilding this
@@ -596,6 +617,96 @@ nonisolated enum ModelSessionFactory {
         )
     }
 
+    /// A standalone session whose only capabilities are the Cowork plan. The
+    /// tool list is exclusive, so `StandaloneProfile` registers nothing else.
+    private static func makeCoworkSession(
+        configuration: ModelSessionConfiguration,
+        cowork: CoworkSessionContext,
+        activeModel: any LanguageModel,
+        activeCapabilities: ResolvedModelCapabilities,
+        temperature: Double?,
+        samplingMode: GenerationOptions.SamplingMode?,
+        history: [Transcript.Entry],
+        events: ModelSessionEvents
+    ) -> LanguageModelSession {
+        let plan = activeCapabilities.toolAccess == .none
+            ? nil
+            : ModelToolCatalog.coworkPlan(
+                tier: activeCapabilities.toolAccess,
+                context: toolContext(for: configuration, repositoryMap: nil)
+            )
+        let instructions = coworkSystemPrompt(for: configuration, cowork: cowork, plan: plan)
+        guard let plan else {
+            return makeToollessSession(
+                instructions: instructions,
+                model: activeModel,
+                temperature: temperature,
+                samplingMode: samplingMode,
+                reasoningLevel: activeCapabilities.reasoningLevel,
+                history: history
+            )
+        }
+        let tools = toolInstances(
+            for: plan,
+            configuration: configuration,
+            receiptRegistry: events.toolReceiptRegistry,
+            requestApproval: events.requestApproval
+        )
+        return LanguageModelSession(
+            profile: StandaloneProfile(
+                instructions: instructions,
+                diskSkills: configuration.availableSkills,
+                workspaceRoot: "",
+                model: activeModel,
+                temperature: temperature,
+                samplingMode: samplingMode,
+                reasoningLevel: activeCapabilities.reasoningLevel,
+                dropsCompletedToolCalls: configuration.dropsCompletedToolCalls,
+                executionPolicy: configuration.agentTuning.execution,
+                gitPolicy: configuration.agentTuning.git,
+                toolReceiptRegistry: events.toolReceiptRegistry,
+                toolPlan: plan,
+                usesExclusiveToolSelection: true,
+                supplementalTools: tools,
+                safariSkillActivations: nil,
+                onToolStart: { call in
+                    await events.toolStarted(call, configuration.backend, .coordinator)
+                },
+                onToolEnd: { call, output in
+                    await events.toolFinished(call, output, configuration.backend, .coordinator)
+                }
+            ),
+            history: history
+        )
+    }
+
+    /// Cowork instructions: no host workspace path and no AGENTS.md, because a
+    /// Cowork session never works on the Mac's files.
+    static func coworkSystemPrompt(
+        for configuration: ModelSessionConfiguration,
+        cowork: CoworkSessionContext,
+        plan: ModelToolPlan?
+    ) -> String {
+        let toolIDs = plan?.assignments.filter(\.isRegistered).map(\.id) ?? []
+        return TurboCodeSystemPromptBuilder.build(
+            TurboCodeSystemPromptContext(
+                role: .standalone,
+                backend: configuration.backend,
+                workspaceRoot: "",
+                agentTuning: configuration.agentTuning,
+                toolIDs: toolIDs,
+                toolNames: toolIDs.map(\.runtimeName),
+                availableSkills: configuration.availableSkills,
+                workspaceInstructions: nil,
+                reasoningEffort: promptReasoningEffort(for: configuration, backend: configuration.backend),
+                cowork: CoworkPromptFacts(
+                    sessionDirectory: cowork.sessionDirectory,
+                    sharesInputFolder: cowork.configuration.inputFolder != nil
+                )
+            )
+        )
+    }
+
     private static func makeToollessSession(
         instructions: String,
         model: any LanguageModel,
@@ -724,8 +835,15 @@ nonisolated enum ModelSessionFactory {
                 )
             case .delegateTask, .callPowerfulModel:
                 return nil
+            case .vmExec:
+                return configuration.cowork.map { VMExecTool(context: $0) }
+            case .vmFile:
+                return configuration.cowork.map { VMFileTool(context: $0) }
             }
         }
+        // TypeScript plugins run on the Mac through Node, so a Cowork session
+        // never receives them.
+        guard configuration.cowork == nil else { return tools }
         // Dynamic packages currently describe native tools only. External
         // catalogs must not silently widen a routed (including empty) package.
         guard !configuration.dynamicRoutingEnabled,

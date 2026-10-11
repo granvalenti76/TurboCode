@@ -72,6 +72,9 @@ actor ContainerizationCoworkRuntime: CoworkVMRuntime {
                 config.user = User(uid: 0, gid: 0, username: "root")
                 config.environmentVariables = Self.environment(home: "/root", extra: request.environment)
             }
+            if let input = request.stdin {
+                config.stdin = DataReaderStream(data: input)
+            }
             config.stdout = StreamWriter(continuation: continuation, kind: .stdout)
             config.stderr = StreamWriter(continuation: continuation, kind: .stderr)
         }
@@ -205,6 +208,18 @@ actor ContainerizationCoworkRuntime: CoworkVMRuntime {
         ]
         values.merge(extra) { _, new in new }
         return values.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
+    }
+}
+
+/// Feeds a fixed buffer to a guest process's standard input, then closes it.
+private nonisolated struct DataReaderStream: ReaderStream {
+    let data: Data
+
+    func stream() -> AsyncStream<Data> {
+        AsyncStream { continuation in
+            if !data.isEmpty { continuation.yield(data) }
+            continuation.finish()
+        }
     }
 }
 

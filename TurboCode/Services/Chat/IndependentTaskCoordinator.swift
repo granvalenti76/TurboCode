@@ -76,6 +76,11 @@ final class IndependentTaskCoordinator {
     func run(goal: String) async {
         guard !runtimeProjection.hasActiveOperation else { return }
         await lifecycle.ensureActiveThread()
+        // Independent tasks build host-tool workers; Cowork has no such path yet.
+        guard !profiles.isActiveThreadCowork else {
+            presentation.errorMessage = CoworkAdmission.independentTaskMessage
+            return
+        }
         let command = "/task \(goal)"
         let envelope: AgentTaskEnvelope
         do {

@@ -71,6 +71,10 @@ nonisolated struct CoworkExecRequest: Sendable, Equatable {
     var user: User = .agent
     var timeout: Duration = .seconds(120)
     var environment: [String: String] = [:]
+    /// Bytes delivered on standard input, then closed. File writes use this
+    /// instead of embedding content in the script, so no shell quoting can
+    /// corrupt or inject into what the model wrote.
+    var stdin: Data?
 
     /// Rejects requests the adapter must never forward: empty scripts,
     /// relative guest paths, and unbounded or non-positive timeouts.

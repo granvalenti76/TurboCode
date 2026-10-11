@@ -113,9 +113,15 @@ final class MessageSendCoordinator {
 
         await compactOnDeviceContextIfNeeded()
         await lifecycle.ensureActiveThread()
+        if case .rejected(let message) = profiles.coworkAdmission() {
+            presentation.errorMessage = message
+            return false
+        }
         // Route after thread/session initialization and before turn admission.
         // This also covers callers that already provide a resolved prompt.
-        if modelRuntime.dynamicRoutingEnabled, modelRuntime.dynamicRoutingSupported {
+        // Cowork sessions have a fixed VM tool plan and are never routed.
+        if modelRuntime.dynamicRoutingEnabled, modelRuntime.dynamicRoutingSupported,
+           !profiles.isActiveThreadCowork {
             do {
                 if try await modelRuntime.routeDynamicTools(for: promptText) {
                     // Keep the last valid context/cache/session snapshot visible

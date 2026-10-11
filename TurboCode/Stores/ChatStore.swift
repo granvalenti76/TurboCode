@@ -816,6 +816,12 @@ public final class ChatStore {
         await messageSendCoordinator.reloadSkills()
     }
 
+    /// App composition connects the Settings-owned Cowork store here, the same
+    /// way it synchronizes agent tuning, so chat code never reaches Settings.
+    func attachCowork(_ provider: any CoworkSessionProviding) {
+        profileSelectionCoordinator.coworkProvider = provider
+    }
+
     func applyAgentTuning(_ value: AgentTuningConfig) async {
         await messageSendCoordinator.applyAgentTuning(value)
         let enabled = modelRuntimeStore.agentTuning.experimental.thirdPartyPluginsEnabled

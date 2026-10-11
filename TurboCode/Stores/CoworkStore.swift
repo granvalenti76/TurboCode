@@ -8,7 +8,7 @@ import Observation
 /// port; nothing here is reachable from tools directly.
 @MainActor
 @Observable
-final class CoworkStore {
+final class CoworkStore: CoworkSessionProviding {
     enum Phase: Equatable {
         case notInstalled
         case installing(CoworkInstallStep, fraction: Double?)
@@ -80,6 +80,17 @@ final class CoworkStore {
             networkEnabled: networkEnabled,
             inputFolder: inputFolder,
             outbox: layout.outbox
+        )
+    }
+
+    /// Cowork sessions share the one VM; each keeps its own guest directory.
+    /// Input folders and per-session outboxes arrive with the session UI.
+    func sessionContext(for conversation: Conversation) -> CoworkSessionContext? {
+        guard conversation.domain == .cowork, isAvailable else { return nil }
+        return CoworkSessionContext(
+            runtime: runtime,
+            configuration: configuration(),
+            sessionID: conversation.id
         )
     }
 
