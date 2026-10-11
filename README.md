@@ -185,6 +185,27 @@ on-device latency, token, tool-call, and outcome statistics.
 
 ![TurboCode Tools view comparing model profiles and their runtime capabilities](.github/assets/turbocode-tools.png)
 
+## Cowork
+
+Cowork is a second, peer mode for work beyond Swift development: React and
+other web apps, Python scripts, documents, rendered pages, and screenshots. It
+runs in an isolated Debian 12 Linux VM managed by TurboCode through Apple
+Containerization, with Node.js 24, Python 3.11, headless Chromium, and common
+command-line tools.
+
+- Enable it in **Settings › Cowork**; the first installation downloads about
+  760 MB, uses about 2.2 GB, and verifies the guest with a self-test.
+- Switch between **Coding** and **Cowork** at the top of the sidebar.
+- Share one Mac folder per session from the toolbar; the VM can read it but
+  never change it.
+- The agent places results in `/out`. **Review & Export** lists every file,
+  shows diffs for conflicts, and copies only what you approve. Exported files
+  are not executable and carry the macOS quarantine attribute.
+- Commands never fall back to the Mac shell, and no credentials or Mac
+  environment variables enter the VM. Codex is not available in Cowork.
+
+See [CONFIGURATION.md](CONFIGURATION.md#cowork) for settings and files.
+
 ## TypeScript plugins
 
 TypeScript plugins are optional extensions for users who want to add typed
@@ -267,6 +288,7 @@ default and can be enabled from **Settings → Agents → Experimental**.
 - Xcode 27 beta with the full suite installed
 - Swift 6
 - Node.js 24 or later for TypeScript plugins
+- A Mac with Apple silicon and about 2.2 GB of free space for Cowork
 - A Mac capable of running Apple Foundation Models for the on-device profile
 - An optional local model server or remote provider credential for other
   profiles

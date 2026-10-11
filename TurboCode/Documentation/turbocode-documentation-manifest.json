@@ -1,5 +1,5 @@
 {
-  "version": "1.7.0",
+  "version": "1.8.0",
   "documents": [
     {
       "id": "capabilities",
@@ -49,6 +49,13 @@
       "summary": "How to create, build, install, discover, and use Node 24 or newer TypeScript plugins, tools, and widgets.",
       "file": "turbocode-typescript-plugins.md",
       "keywords": ["TypeScript", "plugin", "plugins", "extension", "create", "build", "install", "Node", "npm", "SDK", "widget", "transcript", "session", "JSON-RPC"]
+    },
+    {
+      "id": "cowork",
+      "title": "Cowork",
+      "summary": "How Cowork runs multi-purpose work in an isolated Linux VM: enabling it, sessions, shared folders, and reviewed export of deliverables.",
+      "file": "turbocode-cowork.md",
+      "keywords": ["Cowork", "VM", "virtual machine", "macchina virtuale", "Linux", "React", "Python", "export", "esporta", "deliverables", "out", "shared folder", "cartella condivisa"]
     }
   ]
 }
