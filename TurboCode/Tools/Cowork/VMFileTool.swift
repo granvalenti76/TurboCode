@@ -24,7 +24,7 @@ struct VMFileArguments {
 /// paths are single-quoted, so neither can be interpreted by the shell.
 struct VMFileTool: Tool {
     typealias Arguments = VMFileArguments
-    typealias Output = String
+    typealias Output = ToolCommandOutput
 
     static let maximumWriteBytes = 1_048_576
     static let defaultLineCount = 200
@@ -32,6 +32,14 @@ struct VMFileTool: Tool {
     static let maximumListEntries = 400
 
     let context: CoworkSessionContext
+    /// When present, text writes publish a display-only diff receipt; the
+    /// widget shows it like an edit_file change but offers no Mac actions.
+    let receiptRegistry: ToolReceiptRegistry?
+
+    init(context: CoworkSessionContext, receiptRegistry: ToolReceiptRegistry? = nil) {
+        self.context = context
+        self.receiptRegistry = receiptRegistry
+    }
 
     var name: String { ToolCapabilityID.vmFile.rawValue }
     var description: String {
@@ -45,21 +53,21 @@ struct VMFileTool: Tool {
     }
     var includesSchemaInInstructions: Bool { true }
 
-    func call(arguments: VMFileArguments) async throws -> String {
+    func call(arguments: VMFileArguments) async throws -> ToolCommandOutput {
         let path = context.guestPath(arguments.path)
         do {
             switch arguments.action.lowercased().trimmingCharacters(in: .whitespaces) {
             case "read":
-                return try await read(path: path, arguments: arguments)
+                return .plain(try await read(path: path, arguments: arguments))
             case "write":
                 return try await write(path: path, content: arguments.content)
             case "list":
-                return try await list(path: path, depth: arguments.depth)
+                return .plain(try await list(path: path, depth: arguments.depth))
             default:
-                return "Unknown action \"\(arguments.action)\". Use read, write, or list."
+                return .plain("Unknown action \"\(arguments.action)\". Use read, write, or list.")
             }
         } catch let error as CoworkVMError {
-            return "The file operation did not run: \(error.localizedDescription)"
+            return .plain("The file operation did not run: \(error.localizedDescription)")
         }
     }
 
@@ -84,18 +92,60 @@ struct VMFileTool: Tool {
         return ([header] + lines).joined(separator: "\n")
     }
 
-    private func write(path: String, content: String?) async throws -> String {
-        guard let content else { return "Write needs content." }
+    private func write(path: String, content: String?) async throws -> ToolCommandOutput {
+        guard let content else { return .plain("Write needs content.") }
         let data = Data(content.utf8)
         guard data.count <= Self.maximumWriteBytes else {
-            return "Content is \(data.count) bytes; the limit is \(Self.maximumWriteBytes). Write smaller files or generate them with vm_exec."
+            return .plain("Content is \(data.count) bytes; the limit is \(Self.maximumWriteBytes). Write smaller files or generate them with vm_exec.")
         }
+        let previous = try await previousText(at: path)
         let result = try await context.run("""
             mkdir -p -- "$(dirname -- \(CoworkShell.quote(path)))" && cat > \(CoworkShell.quote(path))
             """, stdin: data)
-        guard result.exitCode == 0 else { return CoworkOutputFormatter.render(result) }
+        guard result.exitCode == 0 else { return .plain(CoworkOutputFormatter.render(result)) }
         let lineCount = content.split(separator: "\n", omittingEmptySubsequences: false).count
-        return "Wrote \(data.count) bytes (\(lineCount) lines) to \(path)."
+        let text = "Wrote \(data.count) bytes (\(lineCount) lines) to \(path)."
+        guard case .reviewable(let original) = previous,
+              UnifiedTextDiff.reviewableText(data) != nil else { return .plain(text) }
+        let block = UnifiedTextDiff.reviewBlock(
+            path: displayPath(path),
+            original: original,
+            modified: content,
+            root: context.sessionDirectory,
+            location: .coworkVM
+        )
+        return await .recording(
+            .diffPatch(DiffPatchReceipt(transactionID: UUID().uuidString, block: block)),
+            text: text,
+            in: receiptRegistry
+        )
+    }
+
+    private enum PreviousContent {
+        /// `nil` means the file did not exist, so the diff is a creation.
+        case reviewable(String?)
+        /// Binary or oversized: the write proceeds without a diff.
+        case unreviewable
+    }
+
+    /// Reads at most one byte over the review limit so oversized files are
+    /// detected without transferring them.
+    private func previousText(at path: String) async throws -> PreviousContent {
+        let result = try await context.run("""
+            if [ -f \(CoworkShell.quote(path)) ]; then head -c \(UnifiedTextDiff.maximumBytes + 1) -- \(CoworkShell.quote(path)); else exit 3; fi
+            """)
+        switch result.exitCode {
+        case 3: return .reviewable(nil)
+        case 0: return UnifiedTextDiff.reviewableText(result.stdout).map { .reviewable($0) } ?? .unreviewable
+        default: return .unreviewable
+        }
+    }
+
+    /// Paths inside the session directory are shown relative to it, as the
+    /// agent usually names them.
+    private func displayPath(_ path: String) -> String {
+        let prefix = context.sessionDirectory + "/"
+        return path.hasPrefix(prefix) ? String(path.dropFirst(prefix.count)) : path
     }
 
     private func list(path: String, depth: Int?) async throws -> String {

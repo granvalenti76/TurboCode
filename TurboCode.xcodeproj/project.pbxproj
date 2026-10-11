@@ -157,6 +157,7 @@
 		B000000000000000000000a7 /* TurboCode/Services/CoworkVM/CoworkSessionContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a7 /* TurboCode/Services/CoworkVM/CoworkSessionContext.swift */; };
 		B000000000000000000000a8 /* TurboCode/Tools/Cowork/VMExecTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a8 /* TurboCode/Tools/Cowork/VMExecTool.swift */; };
 		B000000000000000000000a9 /* TurboCode/Tools/Cowork/VMFileTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a9 /* TurboCode/Tools/Cowork/VMFileTool.swift */; };
+		B000000000000000000000aa /* TurboCode/Services/Workspace/UnifiedTextDiff.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000aa /* TurboCode/Services/Workspace/UnifiedTextDiff.swift */; };
 		C10000000000000000000000 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 /* End PBXBuildFile section */
 
@@ -334,6 +335,7 @@
 		A000000000000000000000a7 /* TurboCode/Services/CoworkVM/CoworkSessionContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/CoworkVM/CoworkSessionContext.swift; sourceTree = "<group>"; };
 		A000000000000000000000a8 /* TurboCode/Tools/Cowork/VMExecTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/Cowork/VMExecTool.swift; sourceTree = "<group>"; };
 		A000000000000000000000a9 /* TurboCode/Tools/Cowork/VMFileTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/Cowork/VMFileTool.swift; sourceTree = "<group>"; };
+		A000000000000000000000aa /* TurboCode/Services/Workspace/UnifiedTextDiff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Workspace/UnifiedTextDiff.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -443,6 +445,7 @@
 				A000000000000000000000a7 /* TurboCode/Services/CoworkVM/CoworkSessionContext.swift */,
 				A000000000000000000000a8 /* TurboCode/Tools/Cowork/VMExecTool.swift */,
 				A000000000000000000000a9 /* TurboCode/Tools/Cowork/VMFileTool.swift */,
+				A000000000000000000000aa /* TurboCode/Services/Workspace/UnifiedTextDiff.swift */,
 				A00000000000000000000022 /* TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift */,
 				A00000000000000000000023 /* TurboCode/Services/ACP/ACPEventProjector.swift */,
 				A00000000000000000000024 /* TurboCode/Services/ACP/ACPRuntimeDriver.swift */,
@@ -745,6 +748,7 @@
 				B000000000000000000000a7 /* TurboCode/Services/CoworkVM/CoworkSessionContext.swift in Sources */,
 				B000000000000000000000a8 /* TurboCode/Tools/Cowork/VMExecTool.swift in Sources */,
 				B000000000000000000000a9 /* TurboCode/Tools/Cowork/VMFileTool.swift in Sources */,
+				B000000000000000000000aa /* TurboCode/Services/Workspace/UnifiedTextDiff.swift in Sources */,
 				B00000000000000000000022 /* TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift in Sources */,
 				B00000000000000000000023 /* TurboCode/Services/ACP/ACPEventProjector.swift in Sources */,
 				B00000000000000000000024 /* TurboCode/Services/ACP/ACPRuntimeDriver.swift in Sources */,

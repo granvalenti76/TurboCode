@@ -184,10 +184,36 @@ struct CoworkSessionToolsTests {
         ))
 
         #expect(output.hasPrefix("Wrote"))
-        let request = try #require(await runtime.requests.first)
+        // The first exec reads the previous version for the diff; the write
+        // is the one carrying stdin.
+        let request = try #require(await runtime.requests.first { $0.stdin != nil })
         #expect(request.stdin == Data(content.utf8))
         #expect(!request.script.contains("whoami"))
         #expect(request.script.contains("'/home/cowork/sessions/session-1/notes/draft.md'"))
+    }
+
+    @Test("A text write publishes a display-only Cowork diff receipt")
+    func vmFileWritePublishesCoworkDiff() async throws {
+        let runtime = RecordingRuntime(stdout: "Hello\nold line\n")
+        let registry = ToolReceiptRegistry()
+        let tool = VMFileTool(context: Self.context(runtime: runtime), receiptRegistry: registry)
+
+        let output = try await tool.call(arguments: VMFileArguments(
+            action: "write", path: "notes/draft.md", content: "Hello\nnew line\n",
+            startLine: nil, lineCount: nil, depth: nil
+        ))
+
+        let token = try #require(output.receiptToken)
+        guard case .diffPatch(let receipt) = try #require(await registry.take(token)) else {
+            Issue.record("Expected a diff receipt")
+            return
+        }
+        #expect(receipt.block.isCoworkVM)
+        #expect(receipt.block.files.first?.path == "notes/draft.md")
+        #expect(receipt.block.additions == 1)
+        #expect(receipt.block.deletions == 1)
+        #expect(receipt.block.reviewFiles?.first?.originalText == "Hello\nold line\n")
+        #expect(receipt.block.reviewFiles?.first?.modifiedText == "Hello\nnew line\n")
     }
 
     @Test("vm_file rejects oversized writes before reaching the VM")

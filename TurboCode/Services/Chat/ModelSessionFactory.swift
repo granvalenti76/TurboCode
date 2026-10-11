@@ -838,7 +838,7 @@ nonisolated enum ModelSessionFactory {
             case .vmExec:
                 return configuration.cowork.map { VMExecTool(context: $0) }
             case .vmFile:
-                return configuration.cowork.map { VMFileTool(context: $0) }
+                return configuration.cowork.map { VMFileTool(context: $0, receiptRegistry: receiptRegistry) }
             }
         }
         // TypeScript plugins run on the Mac through Node, so a Cowork session
