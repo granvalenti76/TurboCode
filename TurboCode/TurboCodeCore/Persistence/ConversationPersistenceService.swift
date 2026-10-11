@@ -25,8 +25,12 @@ nonisolated struct ConversationPersistenceService: Sendable {
         defaultModelBackend: String
     ) async throws {
         let existing = try await repository.load(id: conversation.id)
+        // The persisted domain wins over the caller's value. A metadata edit
+        // (rename, pin, archive) built from a default-initialized Conversation
+        // must never turn a Cowork session into a Coding session with host tools.
+        let persistedDomain = existing?.conversation.domain ?? conversation.domain
         let snapshot = ConversationSnapshot(
-            conversation: conversation,
+            conversation: conversation.withDomain(persistedDomain),
             modelBackend: existing?.modelBackend ?? defaultModelBackend,
             blocks: existing?.blocks ?? [],
             transcript: existing?.transcript,
@@ -150,4 +154,24 @@ nonisolated struct ConversationExportItem: Sendable {
 nonisolated struct WorkspacePersistenceRemoval: Sendable, Equatable {
     let deletedConversationIDs: Set<String>
     let deletionErrors: [String]
+}
+
+private extension Conversation {
+    /// `domain` is immutable on `Conversation`, so the persistence layer
+    /// rebuilds the value when it restores the stored domain. Keep this list in
+    /// sync with `Conversation`'s stored properties.
+    nonisolated func withDomain(_ domain: SessionDomain) -> Conversation {
+        guard domain != self.domain else { return self }
+        return Conversation(
+            id: id,
+            title: title,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            isPinned: isPinned,
+            isArchived: isArchived,
+            workspace: workspace,
+            mode: mode,
+            domain: domain
+        )
+    }
 }

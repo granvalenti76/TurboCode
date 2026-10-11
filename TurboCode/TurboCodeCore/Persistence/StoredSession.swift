@@ -6,8 +6,9 @@ import FoundationModels
 /// A full persisted session: metadata, structured timeline blocks, and the
 /// optional semantic transcript required to rebuild a provider session.
 ///
-/// Schema 1 is intentionally unchanged during the 0.3.7 extraction. Moving
-/// ownership must remain rollback-safe and must not migrate a user's JSON.
+/// Schema 1 only grows through optional keys. Older sessions must decode
+/// without migration, and an older TurboCode must still read newer files by
+/// ignoring keys it does not know, so a downgrade never loses a session.
 nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiable {
     public static let currentSchemaVersion = 1
 
@@ -23,6 +24,9 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
     public var isPinned: Bool
     public var isArchived: Bool
     public var mode: ConversationMode
+    /// Added in 0.62. Sessions written before Cowork have no key and decode
+    /// as `.coding`, which is exactly how they ran in 0.61.
+    public let domain: SessionDomain
     public var modelBackend: String
     public var blocks: [StoredBlock]
     /// Optional so sessions written before transcript persistence remain
@@ -42,6 +46,7 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
                 createdAt: Date = .now, updatedAt: Date = .now,
                 isPinned: Bool = false, isArchived: Bool = false,
                 mode: ConversationMode = .agent,
+                domain: SessionDomain = .coding,
                 modelBackend: String = "Llama-server",
                 blocks: [StoredBlock] = [], transcript: Transcript? = nil,
                 contextProjection: TranscriptContextProjection = .empty,
@@ -51,6 +56,7 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
         self.workspacePath = workspacePath; self.createdAt = createdAt
         self.updatedAt = updatedAt; self.modelBackend = modelBackend
         self.isPinned = isPinned; self.isArchived = isArchived; self.mode = mode
+        self.domain = domain
         self.blocks = blocks
         self.transcript = transcript
         self.contextProjection = contextProjection
@@ -60,7 +66,7 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, id, title, projectName, workspacePath
-        case createdAt, updatedAt, isPinned, isArchived, mode
+        case createdAt, updatedAt, isPinned, isArchived, mode, domain
         case modelBackend, blocks, transcript, contextProjection
         case steering, statistics
     }
@@ -78,6 +84,7 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
         isPinned = try values.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
         isArchived = try values.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
         mode = try values.decodeIfPresent(ConversationMode.self, forKey: .mode) ?? .agent
+        domain = try values.decodeIfPresent(SessionDomain.self, forKey: .domain) ?? .coding
         modelBackend = try values.decode(String.self, forKey: .modelBackend)
         blocks = try values.decodeIfPresent([StoredBlock].self, forKey: .blocks) ?? []
         transcript = try values.decodeIfPresent(Transcript.self, forKey: .transcript)

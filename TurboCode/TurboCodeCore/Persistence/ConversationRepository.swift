@@ -218,7 +218,8 @@ private extension ConversationSnapshot {
             isPinned: stored.isPinned,
             isArchived: stored.isArchived,
             workspace: stored.workspacePath,
-            mode: stored.mode
+            mode: stored.mode,
+            domain: stored.domain
         )
         modelBackend = stored.modelBackend
         blocks = stored.blocks.map(ChatBlock.init)
@@ -241,6 +242,7 @@ private extension ConversationSnapshot {
             isPinned: conversation.isPinned,
             isArchived: conversation.isArchived,
             mode: conversation.mode,
+            domain: conversation.domain,
             modelBackend: modelBackend,
             blocks: blocks.map(StoredBlock.init),
             transcript: transcript,
