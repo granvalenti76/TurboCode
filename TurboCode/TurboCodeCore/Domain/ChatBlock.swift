@@ -187,6 +187,12 @@ nonisolated public struct DiffPatchBlock: Sendable, Hashable, Codable {
     public var reviewFiles: [DiffReviewFileSnapshot]?
     public var status: DiffPatchStatus
     public var errorMessage: String?
+    /// Where the change happened. `nil` (every receipt before 0.62) means the
+    /// Mac workspace. Cowork receipts are display-only: their widget offers no
+    /// Undo or Git review, because those actions operate on the Mac.
+    public var location: DiffPatchLocation?
+
+    public var isCoworkVM: Bool { location == .coworkVM }
 
     public var additions: Int { files.reduce(0) { $0 + $1.additions } }
     public var deletions: Int { files.reduce(0) { $0 + $1.deletions } }
@@ -214,6 +220,11 @@ nonisolated public struct DiffPatchFileChange: Identifiable, Sendable, Hashable,
     public let deletions: Int
 
     public var id: String { path }
+}
+
+nonisolated public enum DiffPatchLocation: String, Sendable, Hashable, Codable {
+    case workspace
+    case coworkVM
 }
 
 nonisolated public enum DiffPatchStatus: String, Sendable, Hashable, Codable {

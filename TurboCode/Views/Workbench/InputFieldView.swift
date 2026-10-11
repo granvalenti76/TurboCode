@@ -12,6 +12,7 @@ struct InputFieldView: View {
     @State private var composerSelection: TextSelection?
     @State private var selectedSlashCommandIndex = 0
     @State private var showsDynamicRouting = false
+    @State private var coworkDeliverableCount = 0
 
     let compact: Bool
 
@@ -361,7 +362,10 @@ struct InputFieldView: View {
     private var backendMenu: some View {
         Menu {
             ForEach(ComposerProfileMenu.defaults) { id in
+                // Codex executes on the Mac, so it cannot serve a Cowork
+                // session; message admission rejects it as a second barrier.
                 defaultProfileMenu(id)
+                    .disabled(isCoworkSession && id == .codex)
             }
             if !chatStore.dynamicProfiles.isEmpty {
                 Divider()
@@ -595,8 +599,7 @@ struct InputFieldView: View {
     private var bottomInfoBar: some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .firstTextBaseline, spacing: 20) {
-                branchMenu
-                dynamicRoutingControl
+                sessionContextControls
                 Spacer(minLength: 20)
                 ComposerStatisticsView(
                     statistics: presentation.composerSessionStatistics
@@ -608,8 +611,7 @@ struct InputFieldView: View {
             // contents; an open inspector must not clip usage or the branch.
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    branchMenu
-                    dynamicRoutingControl
+                    sessionContextControls
                     Spacer(minLength: 0)
                 }
                 ComposerStatisticsView(
@@ -622,6 +624,47 @@ struct InputFieldView: View {
         .padding(.horizontal, compact ? 16 : 20)
         .padding(.vertical, compact ? 7 : 8)
         .animation(.easeInOut(duration: 0.18), value: chatStore.dynamicRoutingSupported)
+    }
+
+    private var isCoworkSession: Bool { chatStore.activeDomain == .cowork }
+
+    private var deliverablesRefreshKey: String {
+        "\(chatStore.activeThreadId ?? "")|\(chatStore.busy)|\(chatStore.coworkExportPresentation == nil)"
+    }
+
+    /// Coding shows the workspace branch and tool routing. A Cowork session has
+    /// neither: it works in the VM with a fixed tool set.
+    @ViewBuilder
+    private var sessionContextControls: some View {
+        if isCoworkSession {
+            HStack(spacing: 14) {
+                Label("Cowork VM", systemImage: "shippingbox")
+                    .foregroundStyle(.secondary)
+                    .help("This session works inside the isolated Cowork virtual machine")
+                // Always-visible entry to the reviewed export; it never copies
+                // anything by itself.
+                if coworkDeliverableCount > 0 {
+                    Button {
+                        chatStore.presentCoworkExport()
+                    } label: {
+                        Label(
+                            "\(coworkDeliverableCount) in /out · Review & Export",
+                            systemImage: "square.and.arrow.down.on.square"
+                        )
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Review the session's deliverables and copy approved files to your Mac")
+                }
+            }
+            // Recount when the session changes, when a turn ends, and when the
+            // export review closes (it may have cleared the outbox).
+            .task(id: deliverablesRefreshKey) {
+                coworkDeliverableCount = await chatStore.coworkDeliverableCount()
+            }
+        } else {
+            branchMenu
+            dynamicRoutingControl
+        }
     }
 
     @ViewBuilder

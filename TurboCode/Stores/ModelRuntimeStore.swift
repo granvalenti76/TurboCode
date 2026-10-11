@@ -569,17 +569,26 @@ final class ModelRuntimeStore {
     /// Loading workspace instructions here also advances the revision observed
     /// by the configuration facade, but no provider object is built or retained.
     func makeSessionConfiguration(
-        workspaceRoot: String
+        workspaceRoot: String,
+        cowork: CoworkSessionContext? = nil
     ) -> ModelSessionConfiguration {
-        let workspaceInstructions = WorkspaceInstructionsLoader.load(
-            from: workspaceRoot
-        )
-        workspaceInstructionsRevision = workspaceInstructions?.revision
+        // A Cowork session never sees the host workspace: no root, no
+        // AGENTS.md, no dynamic routing, and no host-side plugins.
+        let workspaceRoot = cowork == nil ? workspaceRoot : ""
+        let workspaceInstructions = cowork == nil
+            ? WorkspaceInstructionsLoader.load(from: workspaceRoot)
+            : nil
+        // Cowork configurations load no instructions; keeping the Coding
+        // revision intact avoids a spurious rebuild on every Cowork turn.
+        if cowork == nil {
+            workspaceInstructionsRevision = workspaceInstructions?.revision
+        }
         let delegateModel = delegateRemoteModel
         let sessionSkills = resolvedMarkdownSkills
         // Disable the override on failure so the factory follows its existing
         // profile path, rather than interpreting nil as the initial empty session.
-        let usesDynamicTools = dynamicRoutingEnabled && dynamicRoutingSupported
+        let usesDynamicTools = cowork == nil
+            && dynamicRoutingEnabled && dynamicRoutingSupported
             && dynamicRoutingDecision?.source != .fallback
         return ModelSessionConfiguration(
             backend: activeBackend,
@@ -603,9 +612,10 @@ final class ModelRuntimeStore {
             delegateWorkers: resolvedDelegateWorkers,
             dropsCompletedToolCalls: shouldDropCompletedToolCalls,
             workspaceInstructions: workspaceInstructions,
-            activePluginTools: agentTuning.experimental.thirdPartyPluginsEnabled
+            activePluginTools: cowork == nil && agentTuning.experimental.thirdPartyPluginsEnabled
                 ? activePluginTools
-                : []
+                : [],
+            cowork: cowork
         )
     }
 

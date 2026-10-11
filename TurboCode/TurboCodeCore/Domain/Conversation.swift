@@ -15,6 +15,12 @@ nonisolated public struct Conversation: Identifiable, Sendable, Hashable {
     public var isArchived: Bool
     public var workspace: String?
     public var mode: ConversationMode
+    /// Fixed at creation. A session never changes domain, because the domain
+    /// decides whether its tools may touch the Mac or only the Cowork VM.
+    public let domain: SessionDomain
+    /// Cowork only: the Mac folder shared read-only with the VM at `/work`.
+    /// `nil` shares nothing. Ignored for Coding sessions.
+    public var coworkFolder: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -24,7 +30,9 @@ nonisolated public struct Conversation: Identifiable, Sendable, Hashable {
         isPinned: Bool = false,
         isArchived: Bool = false,
         workspace: String? = nil,
-        mode: ConversationMode = .agent
+        mode: ConversationMode = .agent,
+        domain: SessionDomain = .coding,
+        coworkFolder: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -34,10 +42,24 @@ nonisolated public struct Conversation: Identifiable, Sendable, Hashable {
         self.isArchived = isArchived
         self.workspace = workspace
         self.mode = mode
+        self.domain = domain
+        self.coworkFolder = coworkFolder
     }
 }
 
 nonisolated public enum ConversationMode: String, Codable, Sendable, Hashable, CaseIterable {
     case agent
     case plan
+}
+
+/// Where a session's work is allowed to execute.
+///
+/// This axis is independent of `ConversationMode`: `agent`/`plan` describes
+/// how the conversation proceeds, while the domain describes the execution
+/// boundary. `coding` sessions use the host workspace tools; `cowork` sessions
+/// execute only inside the managed Linux VM and reach the Mac only through an
+/// approved export (see PRODUCT.md, Cowork Domain).
+nonisolated public enum SessionDomain: String, Codable, Sendable, Hashable, CaseIterable {
+    case coding
+    case cowork
 }

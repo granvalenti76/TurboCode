@@ -18,7 +18,7 @@ struct DiffPatchWidget: View {
     }
 
     private var canReviewInGitInspector: Bool {
-        FileManager.default.fileExists(
+        !patch.isCoworkVM && FileManager.default.fileExists(
             atPath: URL(fileURLWithPath: patch.workspaceRoot)
                 .appendingPathComponent(".git")
                 .path
@@ -93,7 +93,9 @@ struct DiffPatchWidget: View {
 
             Spacer(minLength: 8)
 
-            if patch.status == .applied {
+            // Undo and Git review act on the Mac workspace; a Cowork VM write
+            // is display-only evidence of what changed inside the guest.
+            if patch.status == .applied, !patch.isCoworkVM {
                 Button {
                     chatStore.undoDiffPatch(blockID)
                 } label: {

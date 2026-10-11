@@ -10,9 +10,20 @@ import Observation
 @Observable
 final class ConversationStore {
     var threads: [Conversation] = []
-    var activeThreadID: String?
+    /// Selecting a session always moves the sidebar to that session's domain,
+    /// so a Cowork session is never shown under Coding or the reverse.
+    var activeThreadID: String? {
+        didSet {
+            guard let activeThreadID,
+                  let thread = threads.first(where: { $0.id == activeThreadID }) else { return }
+            activeDomain = thread.domain
+        }
+    }
     var search: String = ""
     var showsArchivedThreads = false
+    /// The sidebar's Coding | Cowork selection. New sessions are created in
+    /// this domain and the chat list shows only this domain's sessions.
+    var activeDomain: SessionDomain = .coding
 
     /// Inserts a new active catalog entry. ChatStore initializes the matching
     /// empty timeline and model session as one separate coordinated transition.
@@ -20,9 +31,18 @@ final class ConversationStore {
     func createThread(
         title: String,
         workspace: String?,
-        mode: ConversationMode
+        mode: ConversationMode,
+        domain: SessionDomain? = nil
     ) -> Conversation {
-        let thread = Conversation(title: title, workspace: workspace, mode: mode)
+        let domain = domain ?? activeDomain
+        // Cowork never works in a Mac workspace; keeping it nil also keeps the
+        // session out of the Coding project groups.
+        let thread = Conversation(
+            title: title,
+            workspace: domain == .cowork ? nil : workspace,
+            mode: mode,
+            domain: domain
+        )
         threads.insert(thread, at: 0)
         activeThreadID = thread.id
         return thread
@@ -90,6 +110,14 @@ final class ConversationStore {
 
     /// Marks activity by stable identity so streaming completion cannot update
     /// a different row after catalog ordering or navigation changes.
+    /// Attaches or detaches the Mac folder a Cowork session shares read-only.
+    func setCoworkFolder(_ path: String?, for id: String) {
+        guard let index = threads.firstIndex(where: { $0.id == id }),
+              threads[index].domain == .cowork else { return }
+        threads[index].coworkFolder = path
+        threads[index].updatedAt = .now
+    }
+
     func touchThread(id: String) {
         guard let index = threads.firstIndex(where: { $0.id == id }) else { return }
         threads[index].updatedAt = .now
@@ -118,6 +146,7 @@ final class ConversationStore {
     func sortedThreads(selectedProject: String?) -> [Conversation] {
         let query = search.lowercased().trimmingCharacters(in: .whitespaces)
         return threads
+            .filter { $0.domain == activeDomain }
             .filter { showsArchivedThreads || !$0.isArchived }
             .filter { thread in
                 guard let selectedProject else {

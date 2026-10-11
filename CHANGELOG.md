@@ -5,6 +5,57 @@ All notable changes to TurboCode are documented in this file.
 The project follows Semantic Versioning while its public API and persisted
 formats continue to evolve before 1.0.
 
+## [0.62]
+
+TurboCode 0.62 introduces Cowork, a multi-purpose mode that runs builds,
+scripts, documents, and web artifacts inside an isolated Linux virtual machine.
+Coding remains unchanged: Cowork is a peer mode, activated once from Settings,
+and its results reach the Mac only through a reviewed export.
+
+### Features
+
+- Added Cowork, backed by one persistent Debian 12 VM managed through Apple
+  Containerization 0.49.0 with Node.js 24, Python 3.11, headless Chromium, and
+  common command-line tools. The guest boots in about 0.4 seconds.
+- Added **Settings › Cowork** to enable Cowork, install and verify the pinned
+  guest with staged, cancellable progress, choose processors, memory, and
+  network access, reset the VM, and remove Cowork.
+- Added the **Coding | Cowork** switch to the sidebar. Sessions are created in
+  the selected mode, lists never mix modes, and each session keeps its mode.
+- Added per-session shared folders, mounted read-only at `/work` from a
+  toolbar menu.
+- Added the `vm_exec`, `vm_file`, and `vm_export` tools. Cowork sessions
+  receive only these tools plus the product guide and Markdown skills.
+- Added **Review & Export**: a per-file review of the session's `/out` folder
+  with Skip, Replace, and Keep Both decisions, text diffs for conflicts, and a
+  composer shortcut that appears when deliverables are waiting.
+- Cowork file writes appear in the chat with the existing diff widget, without
+  Undo or Git actions.
+- Added a Cowork page to the built-in product guide.
+
+### Safety
+
+- Cowork commands never fall back to the Mac shell. Codex, which executes on
+  the Mac, is not available in Cowork sessions.
+- The VM sees only the shared folder (read-only) and its own outbox; sharing
+  the disk root or home folder is refused.
+- Exports re-verify every file before copying, never follow symbolic links,
+  exclude build folders, report files that changed after review, strip execute
+  permission, and set the macOS quarantine attribute.
+- The guest kernel, image, and init filesystem are pinned by digest and the
+  kernel is verified by SHA-256 before installation.
+
+### Interventions
+
+- Added the `com.apple.security.virtualization` entitlement to the app target
+  and linked `apple/containerization` pinned to exactly 0.49.0. The ACP helper
+  does not link Containerization.
+- Session files gain optional `domain` and `coworkFolder` keys; diff receipts
+  gain an optional `location`. Older sessions decode unchanged.
+- The guest image is built and published by
+  [TurboCode-Cowork-Image](https://github.com/granvalenti76/TurboCode-Cowork-Image).
+- Updated the application marketing version to 0.62.
+
 ## [0.61]
 
 TurboCode 0.61 introduces AnchorSignal dynamic routing for local models. It

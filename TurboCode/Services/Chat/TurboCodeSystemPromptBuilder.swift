@@ -22,6 +22,9 @@ nonisolated struct TurboCodeSystemPromptContext: Sendable {
     /// contract provides the product-level reasoning control.
     let reasoningEffort: ReasoningEffort?
     let workers: [AgentTaskWorkerDescriptor]
+    /// Present only for Cowork sessions. Replaces the coding identity and adds
+    /// the VM contract; Cowork sessions have no host workspace section.
+    let cowork: CoworkPromptFacts?
 
     init(
         role: TurboCodeSystemPromptRole,
@@ -33,7 +36,8 @@ nonisolated struct TurboCodeSystemPromptContext: Sendable {
         availableSkills: [TurboCodeSkillDefinition],
         workspaceInstructions: WorkspaceInstructions?,
         reasoningEffort: ReasoningEffort? = nil,
-        workers: [AgentTaskWorkerDescriptor] = []
+        workers: [AgentTaskWorkerDescriptor] = [],
+        cowork: CoworkPromptFacts? = nil
     ) {
         self.role = role
         self.backend = backend
@@ -45,7 +49,14 @@ nonisolated struct TurboCodeSystemPromptContext: Sendable {
         self.workspaceInstructions = workspaceInstructions
         self.reasoningEffort = reasoningEffort
         self.workers = workers
+        self.cowork = cowork
     }
+}
+
+/// Facts the Cowork prompt states about the VM a session will use.
+nonisolated struct CoworkPromptFacts: Sendable, Equatable {
+    let sessionDirectory: String
+    let sharesInputFolder: Bool
 }
 
 /// Builds the shared TurboCode prompt with volatile workspace content outside
@@ -59,7 +70,7 @@ nonisolated enum TurboCodeSystemPromptBuilder {
     static func build(_ context: TurboCodeSystemPromptContext) -> String {
         let tools = Set(context.toolIDs)
         var sections = [
-            identitySection,
+            context.cowork == nil ? identitySection : coworkIdentitySection,
             TurboCodePersonality.default.prompt,
             behaviorSection(for: context)
         ]
@@ -110,6 +121,10 @@ nonisolated enum TurboCodeSystemPromptBuilder {
                 integrations (including MCP), plugin tools, and ordinary tools are
                 separate capabilities and are not Markdown skills.
                 """)
+        }
+
+        if let cowork = context.cowork {
+            sections.append(coworkSection(cowork))
         }
 
         if context.role == .orchestrator {
@@ -168,6 +183,43 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         You are TurboCode, a native macOS coding agent. Work with the user until
         their requested outcome is handled.
         """
+
+    private static let coworkIdentitySection = """
+        Role:
+        You are TurboCode in a Cowork session: a multi-purpose agent that builds
+        artifacts, runs scripts, and produces documents inside an isolated Linux
+        VM. Work with the user until their requested outcome is handled.
+        """
+
+    /// Kept short for small local context windows. It is the agent's map of
+    /// the VM: where to work, what is read-only, where deliverables go, and
+    /// which tools are already installed.
+    private static func coworkSection(_ facts: CoworkPromptFacts) -> String {
+        let input = facts.sharesInputFolder
+            ? "- /work: the user's shared folder, read-only. Copy files before changing them."
+            : "- No user folder is shared in this session; /work is absent."
+        return """
+            Cowork VM:
+            The Debian 12 VM belongs entirely to you; nothing you run there can change the user's Mac.
+            - \(facts.sessionDirectory): this session's directory and default working directory.
+            \(input)
+            - /out: put finished deliverables here and leave them there; the user reviews them \
+            before they reach the Mac. Never move or delete files out of /out. If the user cannot \
+            see them yet, say they are in /out instead of moving them.
+            - Build in the session directory; copy only finished deliverables into /out (sources, \
+            dist, zips, screenshots), never node_modules or virtualenvs.
+            - When the deliverables are complete, call vm_export and tell the user to choose \
+            Review & Export to copy them to the Mac.
+            - Installed: Node 24 with npm, Python 3.11 (use python3 -m venv), headless Chromium \
+            (never pass --no-sandbox), rg, fd, jq, git, gcc and make. sudo apt-get works.
+            - Use vm_file to read and write text files and vm_exec for commands.
+            - A background process must redirect its output or the command never returns: \
+            python3 -m http.server 3000 > /tmp/server.log 2>&1 & Stop servers when done (pkill -f).
+            - Screenshots: chromium --headless --screenshot=/out/page.png --window-size=1280,720 \
+            http://127.0.0.1:3000/
+            - You cannot reach the Mac. Do not ask the user to run commands for you.
+            """
+    }
 
     private static func behaviorSection(
         for context: TurboCodeSystemPromptContext

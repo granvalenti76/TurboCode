@@ -75,6 +75,13 @@ struct WorkbenchSplitView: View {
         .sheet(item: diffPatchReviewBinding) { presentation in
             DiffPatchReviewSheet(patch: presentation.patch)
         }
+        // Cowork deliverables reach the Mac only through this review.
+        .sheet(item: Binding(
+            get: { chatStore.coworkExportPresentation },
+            set: { chatStore.coworkExportPresentation = $0 }
+        )) { presentation in
+            CoworkExportSheet(presentation: presentation)
+        }
         // Transcript inspection belongs to the window-level conversation
         // document, not to a recycled row inside the lazy message timeline.
         .sheet(item: transcriptSheetBinding) { presentation in
@@ -107,6 +114,11 @@ struct WorkbenchSplitView: View {
             // sizing, spacing, and Liquid Glass grouping. Fixed label frames
             // and outer padding inflate the group inside the unified title bar.
             ToolbarItemGroup(placement: .principal) {
+                // Editorial Desk and the project terminal work in the Mac
+                // workspace; a Cowork session shows its shared folder instead.
+                if chatStore.activeDomain == .cowork {
+                    CoworkFolderToolbarMenu()
+                } else {
                 Button {
                     chatStore.presentEditorialDesk()
                 } label: {
@@ -157,6 +169,7 @@ struct WorkbenchSplitView: View {
                     : chatStore.terminalPresented
                         ? "Close project terminal"
                         : "Open project terminal")
+                }
             }
 
             // Match the central group with native sizing and glass. Transcript

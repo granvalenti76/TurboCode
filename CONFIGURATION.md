@@ -163,6 +163,57 @@ rebuilds only that ACP session before its next turn.
 See [ACP_AGENT_SETUP.md](ACP_AGENT_SETUP.md) for the complete registration and
 smoke-check procedure.
 
+## Cowork
+
+Cowork runs multi-purpose work in one managed Linux VM built on Apple
+Containerization. It is configured in **Settings › Cowork**; nothing about it
+lives in `config.json` or `models.json`.
+
+| Setting | Stored as (`UserDefaults`) | Default |
+|---|---|---|
+| Enable Cowork | `coworkEnabled` | off |
+| Processors | `coworkCPUs` | 4 |
+| Memory (GB) | `coworkMemoryGiB` | 4 |
+| Network access | `coworkNetworkEnabled` | on |
+| Sidebar mode (Coding or Cowork) | `activeSessionDomain` | Coding |
+
+Resource and network changes apply the next time the VM starts. The VM
+restarts automatically (about 0.4 s) when a session with a different shared
+folder or resource configuration needs it.
+
+### Files
+
+Everything lives under `~/.turbocode/cowork/`; deleting the folder (or
+**Remove Cowork…**) uninstalls Cowork. Sessions are kept.
+
+| Path | Contents |
+|---|---|
+| `installed.json` | Pins of the installed guest and the time its self-test passed |
+| `kernel/vmlinux-<sha>` | Guest kernel, verified by SHA-256 before installation |
+| `store/` | Containerization content store: OCI image, init filesystem |
+| `vm/base-<digest>.ext4` | Read-only root filesystem unpacked from the pinned image |
+| `vm/writable.ext4` | Persistent writable layer; **Reset VM…** deletes it |
+| `outbox/<session>/` | A session's `/out` folder: deliverables waiting for review |
+
+### Guest image
+
+The kernel, image, and init filesystem are pinned by digest in
+`CoworkImageDescriptor`. They come from
+[TurboCode-Cowork-Image](https://github.com/granvalenti76/TurboCode-Cowork-Image)
+releases, but TurboCode never reads a release at runtime: a new guest always
+requires a TurboCode change. When the pinned image changes, the next
+installation discards the old base and the writable layer.
+
+The app target carries the `com.apple.security.virtualization` entitlement
+required by Virtualization.framework. The ACP helper does not link
+Containerization.
+
+### Session keys
+
+Session files in `~/.turbocode/sessions/` gain two optional keys: `domain`
+(`coding` or `cowork`; absent means `coding`) and `coworkFolder` (the Mac
+folder shared read-only at `/work`). Older TurboCode versions ignore both.
+
 ## Agent Tuning Schema Version 1
 
 ```json

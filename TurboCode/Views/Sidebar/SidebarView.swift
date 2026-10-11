@@ -20,6 +20,7 @@ private struct SidebarWindowBackdrop: NSViewRepresentable {
 
 struct SidebarView: View {
     @Environment(ChatStore.self) private var chatStore
+    @Environment(SettingsStore.self) private var settings
     @State private var isSessionSearchPresented = false
     @State private var workspacePendingRemoval: String?
     @State private var workspacePathsBeingRemoved: Set<String> = []
@@ -32,9 +33,14 @@ struct SidebarView: View {
     var body: some View {
         VStack(spacing: 0) {
             headerView
+            domainPicker
             List {
                 primaryActionsSection
-                projectsSection
+                // Cowork never works in Mac workspaces, so project groups
+                // belong to Coding only.
+                if chatStore.activeDomain == .coding {
+                    projectsSection
+                }
                 chatsSection
                 utilitiesSection
             }
@@ -107,7 +113,34 @@ struct SidebarView: View {
         }
         .padding(.horizontal, 16)
         .padding(.top, 16)
-        .padding(.bottom, 10)
+        .padding(.bottom, settings.cowork.isAvailable ? 6 : 10)
+        // Disabling or removing Cowork must never leave the sidebar showing
+        // Cowork sessions that can no longer run.
+        .onChange(of: settings.cowork.isAvailable, initial: true) { _, available in
+            if !available, chatStore.activeDomain == .cowork {
+                Task { await chatStore.setActiveDomain(.coding) }
+            }
+        }
+    }
+
+    /// Coding | Cowork, shown only once Cowork is enabled and installed.
+    @ViewBuilder
+    private var domainPicker: some View {
+        if settings.cowork.isAvailable {
+            Picker("Mode", selection: Binding(
+                get: { chatStore.activeDomain },
+                set: { domain in Task { await chatStore.setActiveDomain(domain) } }
+            )) {
+                Text("Coding").tag(SessionDomain.coding)
+                Text("Cowork").tag(SessionDomain.cowork)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .disabled(chatStore.busy)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+            .help("Coding works in your Mac workspace. Cowork works in an isolated Linux VM.")
+        }
     }
 
     // MARK: - Primary Actions

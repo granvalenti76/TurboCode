@@ -14,6 +14,10 @@
 		5E77E52930081E4000C3E506 /* Media.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5E77E52830081E4000C3E506 /* Media.xcassets */; };
 		5E77E54130081E4000C3E506 /* TurboCodeSDK in Resources */ = {isa = PBXBuildFile; fileRef = 5E77E54030081E4000C3E506 /* TurboCodeSDK */; };
 		5E9A1003300A000100C554D4 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 5E9A1002300A000100C554D4 /* SwiftTerm */; };
+		5EC0A003300A000100C554D4 /* Containerization in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC0A002300A000100C554D4 /* Containerization */; };
+		5EC0A005300A000100C554D4 /* ContainerizationOCI in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC0A004300A000100C554D4 /* ContainerizationOCI */; };
+		5EC0A007300A000100C554D4 /* ContainerizationEXT4 in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC0A006300A000100C554D4 /* ContainerizationEXT4 */; };
+		5EC0A009300A000100C554D4 /* ContainerizationExtras in Frameworks */ = {isa = PBXBuildFile; productRef = 5EC0A008300A000100C554D4 /* ContainerizationExtras */; };
 		B00000000000000000000001 /* TurboCode/Diagnostics/AgentDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000001 /* TurboCode/Diagnostics/AgentDiagnostics.swift */; };
 		B00000000000000000000003 /* TurboCode/Models/ACP/ACPProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000003 /* TurboCode/Models/ACP/ACPProtocol.swift */; };
 		B00000000000000000000004 /* TurboCode/Models/AgentActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000004 /* TurboCode/Models/AgentActivity.swift */; };
@@ -148,6 +152,14 @@
 		B000000000000000000000a2 /* TurboCode/Models/DynamicToolPackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a2 /* TurboCode/Models/DynamicToolPackage.swift */; };
 		B000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift */; };
 		B000000000000000000000a4 /* TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a4 /* TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift */; };
+		B000000000000000000000a5 /* TurboCode/Services/Integrity/FileDigest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a5 /* TurboCode/Services/Integrity/FileDigest.swift */; };
+		B000000000000000000000a6 /* TurboCode/Services/CoworkVM/CoworkVMRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a6 /* TurboCode/Services/CoworkVM/CoworkVMRuntime.swift */; };
+		B000000000000000000000a7 /* TurboCode/Services/CoworkVM/CoworkSessionContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a7 /* TurboCode/Services/CoworkVM/CoworkSessionContext.swift */; };
+		B000000000000000000000a8 /* TurboCode/Tools/Cowork/VMExecTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a8 /* TurboCode/Tools/Cowork/VMExecTool.swift */; };
+		B000000000000000000000a9 /* TurboCode/Tools/Cowork/VMFileTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000a9 /* TurboCode/Tools/Cowork/VMFileTool.swift */; };
+		B000000000000000000000aa /* TurboCode/Services/Workspace/UnifiedTextDiff.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000aa /* TurboCode/Services/Workspace/UnifiedTextDiff.swift */; };
+		B000000000000000000000ab /* TurboCode/Tools/Cowork/VMExportTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000ab /* TurboCode/Tools/Cowork/VMExportTool.swift */; };
+		B000000000000000000000ac /* TurboCode/Services/CoworkVM/CoworkExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000ac /* TurboCode/Services/CoworkVM/CoworkExport.swift */; };
 		C10000000000000000000000 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 /* End PBXBuildFile section */
 
@@ -320,6 +332,14 @@
 		A000000000000000000000a2 /* TurboCode/Models/DynamicToolPackage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/DynamicToolPackage.swift; sourceTree = "<group>"; };
 		A000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift; sourceTree = "<group>"; };
 		A000000000000000000000a4 /* TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift; sourceTree = "<group>"; };
+		A000000000000000000000a5 /* TurboCode/Services/Integrity/FileDigest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Integrity/FileDigest.swift; sourceTree = "<group>"; };
+		A000000000000000000000a6 /* TurboCode/Services/CoworkVM/CoworkVMRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/CoworkVM/CoworkVMRuntime.swift; sourceTree = "<group>"; };
+		A000000000000000000000a7 /* TurboCode/Services/CoworkVM/CoworkSessionContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/CoworkVM/CoworkSessionContext.swift; sourceTree = "<group>"; };
+		A000000000000000000000a8 /* TurboCode/Tools/Cowork/VMExecTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/Cowork/VMExecTool.swift; sourceTree = "<group>"; };
+		A000000000000000000000a9 /* TurboCode/Tools/Cowork/VMFileTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/Cowork/VMFileTool.swift; sourceTree = "<group>"; };
+		A000000000000000000000aa /* TurboCode/Services/Workspace/UnifiedTextDiff.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Workspace/UnifiedTextDiff.swift; sourceTree = "<group>"; };
+		A000000000000000000000ab /* TurboCode/Tools/Cowork/VMExportTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/Cowork/VMExportTool.swift; sourceTree = "<group>"; };
+		A000000000000000000000ac /* TurboCode/Services/CoworkVM/CoworkExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/CoworkVM/CoworkExport.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -342,6 +362,10 @@
 				5E5203BF3004E70900C554D4 /* MarkdownUI in Frameworks */,
 				5E5203CD30053A3A00C554D4 /* FoundationModelsUtilities in Frameworks */,
 				5E9A1003300A000100C554D4 /* SwiftTerm in Frameworks */,
+				5EC0A003300A000100C554D4 /* Containerization in Frameworks */,
+				5EC0A005300A000100C554D4 /* ContainerizationOCI in Frameworks */,
+				5EC0A007300A000100C554D4 /* ContainerizationEXT4 in Frameworks */,
+				5EC0A009300A000100C554D4 /* ContainerizationExtras in Frameworks */,
 			);
 		};
 		000000000000000230000000 /* Frameworks */ = {
@@ -420,6 +444,14 @@
 				A00000000000000000000021 /* TurboCode/Services/ACP/ACPAgentServer.swift */,
 				A000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift */,
 				A000000000000000000000a4 /* TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift */,
+				A000000000000000000000a5 /* TurboCode/Services/Integrity/FileDigest.swift */,
+				A000000000000000000000a6 /* TurboCode/Services/CoworkVM/CoworkVMRuntime.swift */,
+				A000000000000000000000a7 /* TurboCode/Services/CoworkVM/CoworkSessionContext.swift */,
+				A000000000000000000000a8 /* TurboCode/Tools/Cowork/VMExecTool.swift */,
+				A000000000000000000000a9 /* TurboCode/Tools/Cowork/VMFileTool.swift */,
+				A000000000000000000000aa /* TurboCode/Services/Workspace/UnifiedTextDiff.swift */,
+				A000000000000000000000ab /* TurboCode/Tools/Cowork/VMExportTool.swift */,
+				A000000000000000000000ac /* TurboCode/Services/CoworkVM/CoworkExport.swift */,
 				A00000000000000000000022 /* TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift */,
 				A00000000000000000000023 /* TurboCode/Services/ACP/ACPEventProjector.swift */,
 				A00000000000000000000024 /* TurboCode/Services/ACP/ACPRuntimeDriver.swift */,
@@ -547,6 +579,10 @@
 				5E5203BE3004E70900C554D4 /* MarkdownUI */,
 				5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */,
 				5E9A1002300A000100C554D4 /* SwiftTerm */,
+				5EC0A002300A000100C554D4 /* Containerization */,
+				5EC0A004300A000100C554D4 /* ContainerizationOCI */,
+				5EC0A006300A000100C554D4 /* ContainerizationEXT4 */,
+				5EC0A008300A000100C554D4 /* ContainerizationExtras */,
 			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* TurboCode.app */;
@@ -628,6 +664,7 @@
 			packageReferences = (
 				5E5203BD3004E70900C554D4 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 				5E9A1001300A000100C554D4 /* XCRemoteSwiftPackageReference "SwiftTerm" */,
+				5EC0A001300A000100C554D4 /* XCRemoteSwiftPackageReference "containerization" */,
 				5E5203CB30053A3A00C554D4 /* XCLocalSwiftPackageReference "Vendor/foundation-models-utilities" */,
 			);
 			preferredProjectObjectVersion = 90;
@@ -712,6 +749,14 @@
 				B00000000000000000000021 /* TurboCode/Services/ACP/ACPAgentServer.swift in Sources */,
 				B000000000000000000000a3 /* TurboCode/Services/AnchorSignal/AnchorSignalClassifier.swift in Sources */,
 				B000000000000000000000a4 /* TurboCode/Services/AnchorSignal/AnchorSignalAssetManager.swift in Sources */,
+				B000000000000000000000a5 /* TurboCode/Services/Integrity/FileDigest.swift in Sources */,
+				B000000000000000000000a6 /* TurboCode/Services/CoworkVM/CoworkVMRuntime.swift in Sources */,
+				B000000000000000000000a7 /* TurboCode/Services/CoworkVM/CoworkSessionContext.swift in Sources */,
+				B000000000000000000000a8 /* TurboCode/Tools/Cowork/VMExecTool.swift in Sources */,
+				B000000000000000000000a9 /* TurboCode/Tools/Cowork/VMFileTool.swift in Sources */,
+				B000000000000000000000aa /* TurboCode/Services/Workspace/UnifiedTextDiff.swift in Sources */,
+				B000000000000000000000ab /* TurboCode/Tools/Cowork/VMExportTool.swift in Sources */,
+				B000000000000000000000ac /* TurboCode/Services/CoworkVM/CoworkExport.swift in Sources */,
 				B00000000000000000000022 /* TurboCode/Services/ACP/ACPApplicationRuntimeAdapter.swift in Sources */,
 				B00000000000000000000023 /* TurboCode/Services/ACP/ACPEventProjector.swift in Sources */,
 				B00000000000000000000024 /* TurboCode/Services/ACP/ACPRuntimeDriver.swift in Sources */,
@@ -968,6 +1013,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				AUTOMATION_APPLE_EVENTS = NO;
+				CODE_SIGN_ENTITLEMENTS = TurboCode/TurboCode.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
@@ -995,7 +1041,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.61;
+				MARKETING_VERSION = 0.62;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1024,6 +1070,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				AUTOMATION_APPLE_EVENTS = NO;
+				CODE_SIGN_ENTITLEMENTS = TurboCode/TurboCode.entitlements;
 				CODE_SIGN_IDENTITY = "-";
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
@@ -1051,7 +1098,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.61;
+				MARKETING_VERSION = 0.62;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1207,6 +1254,14 @@
 				version = 1.18.0;
 			};
 		};
+		5EC0A001300A000100C554D4 /* XCRemoteSwiftPackageReference "containerization" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/containerization.git";
+			requirement = {
+				kind = exactVersion;
+				version = 0.49.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1224,6 +1279,26 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 5E9A1001300A000100C554D4 /* XCRemoteSwiftPackageReference "SwiftTerm" */;
 			productName = SwiftTerm;
+		};
+		5EC0A002300A000100C554D4 /* Containerization */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5EC0A001300A000100C554D4 /* XCRemoteSwiftPackageReference "containerization" */;
+			productName = Containerization;
+		};
+		5EC0A004300A000100C554D4 /* ContainerizationOCI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5EC0A001300A000100C554D4 /* XCRemoteSwiftPackageReference "containerization" */;
+			productName = ContainerizationOCI;
+		};
+		5EC0A006300A000100C554D4 /* ContainerizationEXT4 */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5EC0A001300A000100C554D4 /* XCRemoteSwiftPackageReference "containerization" */;
+			productName = ContainerizationEXT4;
+		};
+		5EC0A008300A000100C554D4 /* ContainerizationExtras */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5EC0A001300A000100C554D4 /* XCRemoteSwiftPackageReference "containerization" */;
+			productName = ContainerizationExtras;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

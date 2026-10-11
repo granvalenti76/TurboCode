@@ -36,6 +36,8 @@ struct TurboCodeApp: App {
                     // App composition explicitly synchronizes runtime inputs so
                     // TurboCodeCore can remain independent of global UI stores.
                     await chatStore.applyAgentTuning(settingsStore.agentTuning)
+                    chatStore.attachCowork(settingsStore.cowork)
+                    chatStore.restoreActiveDomain(allowsCowork: settingsStore.cowork.isAvailable)
                     await chatStore.reloadRemoteModels()
                 }
         }

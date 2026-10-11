@@ -225,10 +225,44 @@ on-device orchestrator. It remains implemented for compatibility, but new
 custom profiles that include **Delegate Task** should use the safer, structured
 route.
 
+## Cowork VM tools
+
+Cowork sessions have a fixed tool surface: the product guide, Markdown skills
+when installed, and the three tools below. They act only inside the isolated
+Cowork Linux VM. No Coding profile, default or custom, can include them, and a
+Cowork session never receives workspace, Git, Xcode, SwiftPM, MCP, plugin, or
+delegation tools that could read or change the Mac.
+
+### `vm_exec`
+
+Runs a bash command inside the Cowork VM as the unprivileged `cowork` user.
+Commands start in the session's own directory under `/home/cowork/sessions/`.
+The VM boots on first use and output keeps its beginning and end when long.
+There is no per-command approval: the VM is the boundary, any shared Mac folder
+is mounted read-only at `/work`, and deliverables in `/out` reach the Mac only
+through an approved export.
+
+### `vm_file`
+
+Reads numbered line ranges, writes whole files, or lists a directory tree inside
+the Cowork VM. Relative paths start at the session directory. File content is
+delivered on standard input, so it is written exactly as given without shell
+interpretation. Writes are limited to 1 MB; larger artifacts are generated with
+`vm_exec`.
+
+### `vm_export`
+
+Declares the session's work finished and returns the files in `/out` that the
+user will be offered, with sizes. It copies nothing: deliverables reach the Mac
+only when the user opens **Review & Export** (from the toolbar folder menu or
+the composer) and approves each file. Build folders such as `node_modules`,
+`.venv`, and `.git` and symbolic links are never offered.
+
 ## Why a tool may be unavailable
 
 A tool can be absent because no workspace is selected, the current model has no
 tool-calling support, its tool tier is intentionally constrained, no matching
 skill is installed, no worker is configured, or the custom profile did not
-include that capability. A tool being implemented by TurboCode does not mean it
-is automatically exposed to every model session.
+include that capability. Cowork VM tools exist only in Cowork sessions, and
+only after Cowork is enabled and installed in Settings. A tool being implemented
+by TurboCode does not mean it is automatically exposed to every model session.

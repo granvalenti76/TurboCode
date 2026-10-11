@@ -10,6 +10,15 @@ struct DiffPatchReviewPresentation: Identifiable {
     let patch: DiffPatchBlock
 }
 
+/// One Cowork export review for one session. Built from immutable values so
+/// the sheet keeps working if the sidebar selection changes underneath it.
+struct CoworkExportPresentation: Identifiable {
+    let id = UUID()
+    let sessionTitle: String
+    let outbox: URL
+    let defaultDestination: URL?
+}
+
 /// Distinguishes document creation from the two workspace-file entry points.
 /// Ordinary Markdown must never pass through the authentic-draft loader.
 nonisolated enum EditorialDeskOpening: Equatable, Sendable {
@@ -60,6 +69,7 @@ final class WorkbenchStore {
     var inspectedGitCommit: GitCommitBlock?
     var inspectedWorkspaceListingID: String?
     var inspectedDiffPatchReview: DiffPatchReviewPresentation?
+    var coworkExport: CoworkExportPresentation?
     var editorialDeskPresentation: EditorialDeskPresentation?
     var transcriptSheetPresentation: TranscriptSheetPresentation?
 

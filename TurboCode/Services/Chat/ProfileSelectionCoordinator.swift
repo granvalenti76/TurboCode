@@ -18,6 +18,9 @@ final class ProfileSelectionCoordinator {
     private let responseCoordinator: ChatResponseCoordinator
     private let statistics: ComposerSessionStatisticsStore
 
+    /// Attached by app composition (`ChatStore.attachCowork`). Weak because
+    /// Settings owns the Cowork store; without it every session is Coding.
+    weak var coworkProvider: (any CoworkSessionProviding)?
     private var codexSelectionTask: Task<Void, Never>?
     private var codexHandoffTask: Task<Void, Never>?
     private var codexHandoffID: UUID?
@@ -48,6 +51,30 @@ final class ProfileSelectionCoordinator {
         self.runtimeProjection = runtimeProjection
         self.responseCoordinator = responseCoordinator
         self.statistics = statistics
+    }
+
+    // MARK: Cowork
+
+    var isActiveThreadCowork: Bool { activeConversation?.domain == .cowork }
+
+    /// The VM context for the active conversation, or `nil` for Coding.
+    func activeCoworkContext() -> CoworkSessionContext? {
+        activeConversation.flatMap { coworkProvider?.sessionContext(for: $0) }
+    }
+
+    /// Every entry point that starts a turn asks this first. A rejected Cowork
+    /// turn never falls back to a Coding session with host tools.
+    func coworkAdmission() -> CoworkAdmission {
+        CoworkAdmission.evaluate(
+            domain: activeConversation?.domain ?? .coding,
+            backend: modelRuntime.activeBackend,
+            hasContext: activeCoworkContext() != nil
+        )
+    }
+
+    private var activeConversation: Conversation? {
+        guard let id = conversations.activeThreadID else { return nil }
+        return conversations.threads.first { $0.id == id }
     }
 
     func setOrchestratorMode(_ mode: OrchestratorMode) async {
@@ -375,7 +402,8 @@ final class ProfileSelectionCoordinator {
             )
         )
         let configuration = modelRuntime.makeSessionConfiguration(
-            workspaceRoot: workspace.root
+            workspaceRoot: workspace.root,
+            cowork: activeCoworkContext()
         )
         let rebuilt = await llmRuntime.rebuildFoundationModelsSession(
             configuration: configuration,
@@ -404,7 +432,8 @@ final class ProfileSelectionCoordinator {
         _ history: [FoundationModelsTranscriptEntry]
     ) async -> Bool {
         let configuration = modelRuntime.makeSessionConfiguration(
-            workspaceRoot: workspace.root
+            workspaceRoot: workspace.root,
+            cowork: activeCoworkContext()
         )
         return await llmRuntime.rebuildFoundationModelsSession(
             configuration: configuration,
