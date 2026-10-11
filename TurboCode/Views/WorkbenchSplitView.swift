@@ -75,6 +75,13 @@ struct WorkbenchSplitView: View {
         .sheet(item: diffPatchReviewBinding) { presentation in
             DiffPatchReviewSheet(patch: presentation.patch)
         }
+        // Cowork deliverables reach the Mac only through this review.
+        .sheet(item: Binding(
+            get: { chatStore.coworkExportPresentation },
+            set: { chatStore.coworkExportPresentation = $0 }
+        )) { presentation in
+            CoworkExportSheet(presentation: presentation)
+        }
         // Transcript inspection belongs to the window-level conversation
         // document, not to a recycled row inside the lazy message timeline.
         .sheet(item: transcriptSheetBinding) { presentation in

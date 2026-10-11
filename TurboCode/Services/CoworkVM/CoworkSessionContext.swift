@@ -16,11 +16,17 @@ nonisolated struct CoworkSessionContext: Sendable {
     /// The session's private working directory inside the guest. The ID is
     /// reduced to a safe path component because it becomes a guest path.
     var sessionDirectory: String {
+        "\(Self.sessionsRoot)/\(Self.safeComponent(sessionID))"
+    }
+
+    /// Session IDs become guest and host path components (session directory,
+    /// per-session outbox), so only letters, digits, "-" and "_" survive.
+    static func safeComponent(_ sessionID: String) -> String {
         let safe = sessionID.unicodeScalars
             .filter { CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_" }
             .map(String.init)
             .joined()
-        return "\(Self.sessionsRoot)/\(safe.isEmpty ? "default" : safe)"
+        return safe.isEmpty ? "default" : safe
     }
 
     /// Resolves a model-supplied guest path. Relative paths start at the
@@ -130,6 +136,8 @@ nonisolated enum CoworkOutputFormatter {
 protocol CoworkSessionProviding: AnyObject {
     /// `nil` when the conversation is not Cowork or Cowork is not ready.
     func sessionContext(for conversation: Conversation) -> CoworkSessionContext?
+    /// The host folder holding the conversation's deliverables (`/out`).
+    func outbox(for conversation: Conversation) -> URL
 }
 
 /// Why a Cowork turn cannot run. There is no fallback to Coding.

@@ -24,9 +24,15 @@ nonisolated struct CoworkSandboxLayout: Sendable, Equatable {
     /// Deleting it is the "Reset VM" action; the base image stays installed.
     var writableLayer: URL { vmDirectory.appendingPathComponent("writable.ext4") }
 
-    /// Host staging area the guest may write to (mounted at `/out`). Files
-    /// reach the user's folders only through the approved export.
+    /// Parent of every session outbox. Files placed directly here predate
+    /// per-session outboxes and remain reachable from Finder.
     var outbox: URL { root.appendingPathComponent("outbox", isDirectory: true) }
+
+    /// The host folder a session's guest sees at `/out`. Each session gets its
+    /// own, so one session can never export another session's deliverables.
+    func outbox(forSession sessionID: String) -> URL {
+        outbox.appendingPathComponent(CoworkSessionContext.safeComponent(sessionID), isDirectory: true)
+    }
 
     /// Kernel files are named by digest so a new pin never overwrites the
     /// kernel a running VM booted from.

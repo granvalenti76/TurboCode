@@ -73,14 +73,20 @@ final class CoworkStore: CoworkSessionProviding {
 
     /// The configuration the VM boots with. Resource changes apply on the next
     /// start, because the runtime restarts when the configuration differs.
-    func configuration(inputFolder: URL? = nil) -> CoworkVMConfiguration {
+    func configuration(inputFolder: URL? = nil, sessionID: String? = nil) -> CoworkVMConfiguration {
         CoworkVMConfiguration(
             cpus: cpus,
             memoryBytes: UInt64(memoryGiB) * 1_073_741_824,
             networkEnabled: networkEnabled,
             inputFolder: inputFolder,
-            outbox: layout.outbox
+            // The installer's self-test has no session and uses the parent.
+            outbox: sessionID.map { layout.outbox(forSession: $0) } ?? layout.outbox
         )
+    }
+
+    /// The host folder holding a session's deliverables (`/out` in the VM).
+    func outbox(for conversation: Conversation) -> URL {
+        layout.outbox(forSession: conversation.id)
     }
 
     /// Cowork sessions share the one VM; each keeps its own guest directory
@@ -90,7 +96,10 @@ final class CoworkStore: CoworkSessionProviding {
         guard conversation.domain == .cowork, isAvailable else { return nil }
         return CoworkSessionContext(
             runtime: runtime,
-            configuration: configuration(inputFolder: Self.shareableFolder(conversation.coworkFolder)),
+            configuration: configuration(
+                inputFolder: Self.shareableFolder(conversation.coworkFolder),
+                sessionID: conversation.id
+            ),
             sessionID: conversation.id
         )
     }

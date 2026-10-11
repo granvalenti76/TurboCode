@@ -24,10 +24,8 @@ struct CoworkFolderToolbarMenu: View {
                 Button("Share a Folder…") { chooseFolder() }
             }
             Divider()
-            // Interim until the approved export: the user opens what the agent
-            // wrote to /out and copies it themselves; the agent never writes
-            // into the user's folders.
-            Button("Show Deliverables in Finder") { showDeliverables() }
+            // The only way deliverables reach the Mac: a reviewed export.
+            Button("Review & Export Deliverables…") { chatStore.presentCoworkExport() }
         } label: {
             Label(title, systemImage: symbol)
                 .labelStyle(.titleAndIcon)
@@ -87,12 +85,6 @@ struct CoworkFolderToolbarMenu: View {
         if let sharedPath { panel.directoryURL = URL(fileURLWithPath: sharedPath) }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         apply(url)
-    }
-
-    private func showDeliverables() {
-        let outbox = CoworkSandboxLayout().outbox
-        try? FileManager.default.createDirectory(at: outbox, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(outbox)
     }
 
     private func apply(_ folder: URL?) {

@@ -498,6 +498,23 @@ public final class ChatStore {
         _ = await profileSelectionCoordinator.rebuildSession()
     }
 
+    /// Opens the export review for the active Cowork session. The default
+    /// destination is the session's shared folder when it still exists.
+    func presentCoworkExport() {
+        guard let conversation = activeConversation, conversation.domain == .cowork,
+              let provider = profileSelectionCoordinator.coworkProvider else { return }
+        workbenchStore.coworkExport = CoworkExportPresentation(
+            sessionTitle: conversation.title,
+            outbox: provider.outbox(for: conversation),
+            defaultDestination: CoworkStore.shareableFolder(conversation.coworkFolder)
+        )
+    }
+
+    var coworkExportPresentation: CoworkExportPresentation? {
+        get { workbenchStore.coworkExport }
+        set { workbenchStore.coworkExport = newValue }
+    }
+
     public func createThread(title: String = "New Chat", mode: ConversationMode = .agent) async {
         await conversationLifecycleCoordinator.createThread(
             title: title,
