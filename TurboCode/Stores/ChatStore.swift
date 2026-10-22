@@ -571,9 +571,16 @@ public final class ChatStore {
         await sessionCoordinator.persistMetadata(id: threadID)
     }
 
-    /// Loads all session files and populates the thread list.
+    /// Loads all session files and populates the thread list. Unreadable
+    /// files are reported rather than silently missing from the sidebar.
     public func restoreSessions() async {
-        await sessionCoordinator.restoreCatalog()
+        let unreadable = await sessionCoordinator.restoreCatalog()
+        guard !unreadable.isEmpty else { return }
+        let subject = unreadable.count == 1
+            ? "1 saved conversation could not be read and was"
+            : "\(unreadable.count) saved conversations could not be read and were"
+        presentationViewModel.errorMessage = subject
+            + " left untouched in ~/.turbocode/sessions."
     }
 
     /// Fully restores a past session with its blocks.

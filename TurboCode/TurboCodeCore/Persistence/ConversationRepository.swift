@@ -43,12 +43,29 @@ nonisolated struct ConversationSnapshot: Sendable {
     }
 }
 
+/// One session file that could not be decoded during a catalog scan.
+nonisolated struct UnreadableSessionFile: Sendable, Equatable {
+    let fileName: String
+    let reason: String
+}
+
+/// Result of a catalog scan. Unreadable files are reported, never modified,
+/// so one corrupt or newer-format file cannot hide every other conversation.
+nonisolated struct ConversationCatalogLoad: Sendable {
+    let snapshots: [ConversationSnapshot]
+    let unreadableSessions: [UnreadableSessionFile]
+}
+
 /// Persistence contract for conversations. Keeping this boundary protocol-based
 /// lets a host coordinate presentation without knowing where sessions are stored.
 nonisolated protocol ConversationRepository: Sendable {
     func save(_ snapshot: ConversationSnapshot) async throws
     func load(id: String) async throws -> ConversationSnapshot?
+    /// Readable sessions only; unreadable rows are skipped, not fatal.
     func list() async throws -> [ConversationSnapshot]
+    /// Readable sessions plus the files that had to be skipped. Throws only
+    /// when the storage location itself cannot be enumerated.
+    func loadCatalog() async throws -> ConversationCatalogLoad
     func delete(id: String) async throws
     func append(
         id: String,
@@ -58,6 +75,11 @@ nonisolated protocol ConversationRepository: Sendable {
 }
 
 extension ConversationRepository {
+    /// In-memory repositories have no undecodable rows to report.
+    func loadCatalog() async throws -> ConversationCatalogLoad {
+        ConversationCatalogLoad(snapshots: try await list(), unreadableSessions: [])
+    }
+
     /// Default composition keeps lightweight test repositories source
     /// compatible. Disk storage overrides this as one actor-isolated update.
     func append(
@@ -98,27 +120,51 @@ actor DiskConversationRepository: ConversationRepository {
     func load(id: String) throws -> ConversationSnapshot? {
         let url = try fileURL(for: id)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        let stored = try JSONDecoder().decode(
-            StoredSession.self,
-            from: Data(contentsOf: url)
-        )
-        return ConversationSnapshot(stored)
+        return try decodeSnapshot(at: url)
     }
 
     func list() throws -> [ConversationSnapshot] {
+        try scanCatalog().snapshots
+    }
+
+    /// Declared `async` on purpose: a synchronous actor method would lose
+    /// overload resolution to the protocol extension's async default in
+    /// `await` call sites, silently dropping the unreadable-file report.
+    func loadCatalog() async throws -> ConversationCatalogLoad {
+        try scanCatalog()
+    }
+
+    /// Decodes every session file independently. A failure is recorded and
+    /// the file is left exactly as found: moving or rewriting it here could
+    /// destroy a session that a newer TurboCode or a fixed decoder can read.
+    private func scanCatalog() throws -> ConversationCatalogLoad {
         try createDirectoryIfNeeded()
-        return try FileManager.default.contentsOfDirectory(
+        let urls = try FileManager.default.contentsOfDirectory(
             at: directoryURL,
             includingPropertiesForKeys: nil
         )
         .filter { $0.pathExtension == "json" }
-        .map { url in
-            let stored = try JSONDecoder().decode(
-                StoredSession.self,
-                from: Data(contentsOf: url)
-            )
-            return ConversationSnapshot(stored)
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        var snapshots: [ConversationSnapshot] = []
+        var unreadable: [UnreadableSessionFile] = []
+        for url in urls {
+            do {
+                snapshots.append(try decodeSnapshot(at: url))
+            } catch {
+                print("[TurboCode] Skipped unreadable session \(url.lastPathComponent): \(error)")
+                unreadable.append(
+                    UnreadableSessionFile(
+                        fileName: url.lastPathComponent,
+                        reason: error.localizedDescription
+                    )
+                )
+            }
         }
+        return ConversationCatalogLoad(
+            snapshots: snapshots,
+            unreadableSessions: unreadable
+        )
     }
 
     func delete(id: String) throws {
@@ -141,6 +187,23 @@ actor DiskConversationRepository: ConversationRepository {
                 transcriptEntries: transcriptEntries
             )
         )
+    }
+
+    /// Shared by single loads and catalog scans so both apply the same
+    /// recovery rules. Recovered provider fields are logged because the next
+    /// save replaces them with the rebuilt, timeline-derived history.
+    private func decodeSnapshot(at url: URL) throws -> ConversationSnapshot {
+        let stored = try JSONDecoder().decode(
+            StoredSession.self,
+            from: Data(contentsOf: url)
+        )
+        if !stored.recoveredFields.isEmpty {
+            print(
+                "[TurboCode] Session \(stored.id): discarded undecodable "
+                    + stored.recoveredFields.joined(separator: ", ")
+            )
+        }
+        return ConversationSnapshot(stored)
     }
 
     private var encoder: JSONEncoder {

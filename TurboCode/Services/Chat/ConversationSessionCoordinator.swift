@@ -110,9 +110,14 @@ final class ConversationSessionCoordinator {
         await persistMetadataOnly(id: id, failureLabel: "generated title")
     }
 
-    func restoreCatalog() async {
-        guard let catalog = try? await persistence.loadCatalog() else { return }
-        conversations.restoreCatalog(catalog)
+    /// Returns the session files that exist but could not be decoded. They
+    /// stay out of the catalog, and on disk exactly as found, so no later
+    /// save can replace them with an empty timeline.
+    @discardableResult
+    func restoreCatalog() async -> [UnreadableSessionFile] {
+        guard let catalog = try? await persistence.loadCatalog() else { return [] }
+        conversations.restoreCatalog(catalog.conversations)
+        return catalog.unreadableSessions
     }
 
     func load(id: String) async -> ConversationSnapshot? {

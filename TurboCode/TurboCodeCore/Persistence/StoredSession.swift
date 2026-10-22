@@ -7,8 +7,18 @@ import FoundationModels
 /// optional semantic transcript required to rebuild a provider session.
 ///
 /// Schema 1 only grows through optional keys. Older sessions must decode
-/// without migration, and an older TurboCode must still read newer files by
-/// ignoring keys it does not know, so a downgrade never loses a session.
+/// without migration, and an older TurboCode ignores keys it does not know.
+/// A downgrade is not lossless, however: a new enum case (mode, domain,
+/// steering state) makes the older decoder reject the value, and a release
+/// that predates a key silently ignores its meaning (0.61 has no `domain`).
+///
+/// Metadata and timeline blocks are required: if they cannot be decoded the
+/// whole session is unreadable and its file must be left untouched. The
+/// provider-side fields (`transcript`, `contextProjection`, `steering`,
+/// `statistics`) are recoverable: an undecodable value falls back to empty so
+/// the visible history still opens, and the field is listed in
+/// `recoveredFields`. Foundation Models owns the `Transcript` encoding, so an
+/// OS update must never be able to make a whole conversation unreadable.
 nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiable {
     public static let currentSchemaVersion = 1
 
@@ -42,6 +52,10 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
     /// Pending steering survives relaunch as recoverable metadata. The runtime
     /// must explicitly rebind it before any provider delivery is attempted.
     var steering: SteeringQueueSnapshot
+    /// Coding keys of recoverable fields that were present but undecodable
+    /// and therefore fell back to their empty value. Never persisted: the next
+    /// save writes the recovered values, replacing the undecodable originals.
+    public private(set) var recoveredFields: [String] = []
 
     public init(id: String = UUID().uuidString, title: String,
                 projectName: String, workspacePath: String? = nil,
@@ -90,19 +104,48 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
         coworkFolder = try values.decodeIfPresent(String.self, forKey: .coworkFolder)
         modelBackend = try values.decode(String.self, forKey: .modelBackend)
         blocks = try values.decodeIfPresent([StoredBlock].self, forKey: .blocks) ?? []
-        transcript = try values.decodeIfPresent(Transcript.self, forKey: .transcript)
-        contextProjection = try values.decodeIfPresent(
-            TranscriptContextProjection.self,
-            forKey: .contextProjection
-        ) ?? .empty
-        steering = try values.decodeIfPresent(
-            SteeringQueueSnapshot.self,
-            forKey: .steering
-        ) ?? .empty
-        statistics = try values.decodeIfPresent(
-            ComposerSessionStatistics.self,
-            forKey: .statistics
+        var recovered: [String] = []
+        transcript = Self.decodeRecoverable(
+            Transcript.self,
+            forKey: .transcript,
+            in: values,
+            recovered: &recovered
         )
+        contextProjection = Self.decodeRecoverable(
+            TranscriptContextProjection.self,
+            forKey: .contextProjection,
+            in: values,
+            recovered: &recovered
+        ) ?? .empty
+        steering = Self.decodeRecoverable(
+            SteeringQueueSnapshot.self,
+            forKey: .steering,
+            in: values,
+            recovered: &recovered
+        ) ?? .empty
+        statistics = Self.decodeRecoverable(
+            ComposerSessionStatistics.self,
+            forKey: .statistics,
+            in: values,
+            recovered: &recovered
+        )
+        recoveredFields = recovered
+    }
+
+    /// Decodes a provider-side field without letting its failure reject the
+    /// session. A missing key is the normal legacy case and is not recorded.
+    private static func decodeRecoverable<Value: Decodable>(
+        _ type: Value.Type,
+        forKey key: CodingKeys,
+        in values: KeyedDecodingContainer<CodingKeys>,
+        recovered: inout [String]
+    ) -> Value? {
+        do {
+            return try values.decodeIfPresent(type, forKey: key)
+        } catch {
+            recovered.append(key.stringValue)
+            return nil
+        }
     }
 
     public func hash(into hasher: inout Hasher) {

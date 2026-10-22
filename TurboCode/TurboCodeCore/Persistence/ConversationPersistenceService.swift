@@ -41,8 +41,14 @@ nonisolated struct ConversationPersistenceService: Sendable {
         try await repository.save(snapshot)
     }
 
-    func loadCatalog() async throws -> [Conversation] {
-        try await repository.list().map(\.conversation)
+    /// Readable conversations plus the number of session files that were
+    /// skipped, so the host can say that history exists but could not open.
+    func loadCatalog() async throws -> ConversationCatalog {
+        let load = try await repository.loadCatalog()
+        return ConversationCatalog(
+            conversations: load.snapshots.map(\.conversation),
+            unreadableSessions: load.unreadableSessions
+        )
     }
 
     func load(id: String) async throws -> ConversationSnapshot? {
@@ -124,6 +130,12 @@ nonisolated struct ConversationPersistenceService: Sendable {
             deletionErrors: deletionErrors
         )
     }
+}
+
+/// Catalog metadata applied by the host after the durable scan completes.
+nonisolated struct ConversationCatalog: Sendable {
+    let conversations: [Conversation]
+    let unreadableSessions: [UnreadableSessionFile]
 }
 
 /// JSON payload prepared for the sidebar's native export actions.
