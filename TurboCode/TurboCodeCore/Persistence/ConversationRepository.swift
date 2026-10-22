@@ -111,7 +111,9 @@ extension ConversationRepository {
         blocks: [ChatBlock],
         transcriptEntries: [Transcript.Entry]
     ) async throws {
-        guard let existing = try await load(id: id) else { return }
+        guard let existing = try await load(id: id) else {
+            throw ConversationRepositoryError.sessionNotFound(id)
+        }
         try await save(
             existing.appending(
                 blocks: blocks,
@@ -206,7 +208,11 @@ actor DiskConversationRepository: ConversationRepository {
         blocks: [ChatBlock],
         transcriptEntries: [Transcript.Entry]
     ) async throws {
-        guard let existing = try load(id: id) else { return }
+        // A missing file used to drop the background result silently; failing
+        // lets the caller log it instead of reporting a successful delivery.
+        guard let existing = try load(id: id) else {
+            throw ConversationRepositoryError.sessionNotFound(id)
+        }
         try save(
             existing.appending(
                 blocks: blocks,
@@ -355,6 +361,7 @@ private extension Conversation {
 
 nonisolated enum ConversationRepositoryError: Error, Equatable, Sendable {
     case invalidSessionID(String)
+    case sessionNotFound(String)
 }
 
 private extension ConversationSnapshot {

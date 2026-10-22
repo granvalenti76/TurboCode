@@ -193,6 +193,37 @@ struct SessionPersistenceRobustnessTests {
         #expect(try Data(contentsOf: url) == damagedBytes)
     }
 
+    @Test("A session written by a newer schema is unreadable, not downgraded")
+    func newerSchemaIsUnreadable() async throws {
+        let directoryURL = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        let repository = DiskConversationRepository(directoryURL: directoryURL)
+        try await repository.save(snapshot(id: "future"))
+        try rewriteSession(id: "future", in: directoryURL) { object in
+            object["schemaVersion"] = StoredSession.currentSchemaVersion + 1
+        }
+
+        let catalog = try await repository.loadCatalog()
+
+        #expect(catalog.snapshots.isEmpty)
+        #expect(catalog.unreadableSessions.map(\.fileName) == ["future.json"])
+    }
+
+    @Test("Appending to a session without a file reports the miss")
+    func appendToMissingSessionThrows() async throws {
+        let directoryURL = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        let repository = DiskConversationRepository(directoryURL: directoryURL)
+
+        await #expect(throws: ConversationRepositoryError.sessionNotFound("missing")) {
+            try await repository.append(
+                id: "missing",
+                blocks: [ChatBlock(kind: .assistant, text: "Background")],
+                transcriptEntries: []
+            )
+        }
+    }
+
     // MARK: - Helpers
 
     private func snapshot(

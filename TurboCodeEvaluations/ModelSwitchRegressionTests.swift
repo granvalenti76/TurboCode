@@ -79,6 +79,78 @@ struct ModelSwitchRegressionTests {
         #expect(repaired.count == current.count)
     }
 
+    @Test("Interrupted turn repair drops tool calls that never produced output")
+    func interruptedTurnRepairDropsIncompleteToolExchange() {
+        let text: (String) -> Transcript.Segment = {
+            .text(Transcript.TextSegment(content: $0))
+        }
+        let call: (String) -> Transcript.ToolCall = { id in
+            Transcript.ToolCall(
+                id: id,
+                toolName: "read_file",
+                arguments: GeneratedContent(properties: ["filePath": "README.md"])
+            )
+        }
+        let baseline: [Transcript.Entry] = [
+            .prompt(Transcript.Prompt(segments: [text("Earlier request")]))
+        ]
+        let completed = call("completed")
+        let current = baseline + [
+            .prompt(Transcript.Prompt(segments: [text("Interrupted request")])),
+            .toolCalls(Transcript.ToolCalls([completed])),
+            .toolOutput(Transcript.ToolOutput(
+                id: completed.id,
+                toolName: completed.toolName,
+                segments: [text("file contents")]
+            )),
+            .toolCalls(Transcript.ToolCalls([call("cut-off")]))
+        ]
+
+        let repaired = SessionRebuildHistory.reconcilingInterruptedTurn(
+            baseline: baseline,
+            current: current,
+            prompt: "Interrupted request",
+            reasoning: "",
+            response: ""
+        )
+
+        let callIDs = repaired.flatMap { entry -> [String] in
+            guard case .toolCalls(let calls) = entry else { return [] }
+            return calls.map(\.id)
+        }
+        #expect(callIDs == ["completed"])
+        #expect(repaired.count == current.count - 1)
+    }
+
+    @Test("Interrupted turn repair ignores a provider history that no longer extends the baseline")
+    func interruptedTurnRepairIgnoresRewrittenHistory() {
+        let text: (String) -> Transcript.Segment = {
+            .text(Transcript.TextSegment(content: $0))
+        }
+        let baseline: [Transcript.Entry] = [
+            .prompt(Transcript.Prompt(segments: [text("Earlier request")])),
+            .response(Transcript.Response(assetIDs: [], segments: [text("Earlier response")]))
+        ]
+        // Same length or longer, but not the same entries (for example after
+        // a compaction replaced the history mid-turn).
+        let rewritten: [Transcript.Entry] = [
+            .prompt(Transcript.Prompt(segments: [text("Compacted summary")])),
+            .response(Transcript.Response(assetIDs: [], segments: [text("Ack")])),
+            .response(Transcript.Response(assetIDs: [], segments: [text("Stray")]))
+        ]
+
+        let repaired = SessionRebuildHistory.reconcilingInterruptedTurn(
+            baseline: baseline,
+            current: rewritten,
+            prompt: "Interrupted request",
+            reasoning: "",
+            response: "Partial response"
+        )
+
+        #expect(Array(repaired.prefix(2)).map(\.id) == baseline.map(\.id))
+        #expect(repaired.count == 4)
+    }
+
     @Test("Interrupted turn rebuild does not replay repaired history")
     func interruptedTurnRebuildDoesNotReplayHistory() {
         let text: (String) -> Transcript.Segment = {

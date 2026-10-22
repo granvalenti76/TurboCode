@@ -119,6 +119,12 @@ nonisolated enum SessionRebuildHistory {
     /// before Foundation Models committed a complete transcript entry set.
     /// Existing turn-local entries win so completed tool calls are retained;
     /// only missing prompt, reasoning, and partial response entries are added.
+    ///
+    /// The provider delta is trusted only when `current` still starts with the
+    /// exact baseline entries (by identity); a rewritten history yields no
+    /// delta rather than misaligned entries. Tool exchanges cut off by the
+    /// interruption are dropped: a call without its output is rejected by
+    /// OpenAI-compatible servers on the next request.
     static func reconcilingInterruptedTurn(
         baseline: [Transcript.Entry],
         current: [Transcript.Entry],
@@ -126,10 +132,12 @@ nonisolated enum SessionRebuildHistory {
         reasoning: String,
         response: String
     ) -> [Transcript.Entry] {
-        let currentDelta = current.count >= baseline.count
+        let extendsBaseline = current.count >= baseline.count
+            && current.prefix(baseline.count).map(\.id) == baseline.map(\.id)
+        let currentDelta = extendsBaseline
             ? Array(current.dropFirst(baseline.count))
             : []
-        var turnEntries = currentDelta
+        var turnEntries = droppingIncompleteToolExchanges(currentDelta)
 
         let containsPrompt = turnEntries.contains { entry in
             if case .prompt = entry { return true }
@@ -173,6 +181,31 @@ nonisolated enum SessionRebuildHistory {
         }
 
         return baseline + turnEntries
+    }
+
+    /// Keeps only tool-call entries whose every call has an output, and only
+    /// outputs whose call survived, so the history stays provider-valid.
+    static func droppingIncompleteToolExchanges(
+        _ entries: [Transcript.Entry]
+    ) -> [Transcript.Entry] {
+        let outputIDs = Set(entries.compactMap { entry -> String? in
+            guard case .toolOutput(let output) = entry else { return nil }
+            return output.id
+        })
+        var keptCallIDs: Set<String> = []
+        let withoutIncompleteCalls = entries.filter { entry in
+            guard case .toolCalls(let calls) = entry else { return true }
+            let ids = calls.map(\.id)
+            guard !ids.isEmpty, ids.allSatisfy(outputIDs.contains) else {
+                return false
+            }
+            keptCallIDs.formUnion(ids)
+            return true
+        }
+        return withoutIncompleteCalls.filter { entry in
+            guard case .toolOutput(let output) = entry else { return true }
+            return keptCallIDs.contains(output.id)
+        }
     }
 
     private static func promptEntry(_ text: String) -> Transcript.Prompt {

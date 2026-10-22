@@ -91,6 +91,17 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
         let values = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try values.decodeIfPresent(Int.self, forKey: .schemaVersion)
             ?? Self.currentSchemaVersion
+        // A newer schema may carry meaning this build cannot represent.
+        // Rejecting it makes the file "unreadable", which the catalog skips
+        // and every write path refuses, instead of a lossy downgrade rewrite.
+        guard schemaVersion <= Self.currentSchemaVersion else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .schemaVersion,
+                in: values,
+                debugDescription: "Session schema \(schemaVersion) is newer than "
+                    + "the supported schema \(Self.currentSchemaVersion)."
+            )
+        }
         id = try values.decode(String.self, forKey: .id)
         title = try values.decode(String.self, forKey: .title)
         projectName = try values.decode(String.self, forKey: .projectName)
