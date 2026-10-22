@@ -88,6 +88,34 @@ struct SteeringStateTests {
         #expect(!resumed)
     }
 
+    @Test("A failed request can be recovered into the next turn")
+    func recoversFailedRequest() {
+        var state = SteeringState()
+        let context = makeContext()
+        let request = state.enqueue(text: "Retry this constraint", context: context)!
+        let batch = state.claimBatch(for: context, intent: .sendNow)!
+        let failed = state.fail(
+            batch,
+            failure: TurnFailure(code: "test", message: "Rejected", isRecoverable: true)
+        )
+        #expect(failed)
+        #expect(state.requests.first?.state == .failed)
+
+        let nextTurn = SteeringContext(
+            conversationID: context.conversationID,
+            originTurnID: TurnID(rawValue: "next-turn"),
+            contextGeneration: context.contextGeneration,
+            workspaceRoot: context.workspaceRoot,
+            providerSelection: context.providerSelection
+        )
+        let recovered = state.recover(request.id, in: nextTurn)
+
+        #expect(recovered)
+        #expect(state.requests.first?.state == .queued)
+        #expect(state.requests.first?.context == nextTurn)
+        #expect(state.requests.first?.failure == nil)
+    }
+
     private func makeContext() -> SteeringContext {
         SteeringContext(
             conversationID: "conversation",
