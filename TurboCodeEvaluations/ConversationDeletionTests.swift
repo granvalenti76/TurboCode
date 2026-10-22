@@ -165,6 +165,61 @@ struct ConversationDeletionTests {
         #expect(store.workbenchStore.inspectedWorkspaceListingID == nil)
     }
 
+    @Test("Deleting the active chat never adopts an unreadable successor")
+    func activeDeletionSkipsUnreadableSuccessor() async {
+        let deleted = Conversation(id: "deleted", title: "Deleted")
+        let broken = Conversation(id: "broken", title: "Broken")
+        let repository = DeletionConversationRepository(
+            snapshots: [makeSnapshot(deleted), makeSnapshot(broken)],
+            unreadableIDs: [broken.id]
+        )
+        let store = ChatStore(conversationRepository: repository)
+        store.conversationStore.threads = [deleted, broken]
+        store.conversationStore.activeThreadID = deleted.id
+        store.timelineStore.restore([
+            ChatBlock(kind: .assistant, text: "Deleted timeline")
+        ])
+
+        await store.deleteThread(id: deleted.id)
+        // A later context change runs the persistence checkpoint.
+        await store.createThread()
+
+        #expect(store.threads.contains { $0.id == broken.id })
+        #expect(store.activeThreadId != broken.id)
+        #expect(store.presentationViewModel.errorMessage?.contains("Could not open") == true)
+        #expect(!repository.savedIDs.contains(broken.id))
+    }
+
+    @Test("Opening an unreadable session keeps the current chat and its file")
+    func unreadableRestoreKeepsCurrentChat() async {
+        let current = Conversation(id: "current", title: "Current")
+        let broken = Conversation(id: "broken", title: "Broken")
+        let repository = DeletionConversationRepository(
+            snapshots: [makeSnapshot(current), makeSnapshot(broken)],
+            unreadableIDs: [broken.id]
+        )
+        let store = ChatStore(conversationRepository: repository)
+        store.conversationStore.threads = [current, broken]
+        store.conversationStore.activeThreadID = current.id
+        store.timelineStore.restore([
+            ChatBlock(kind: .assistant, text: "Current timeline")
+        ])
+
+        await store.restoreSession(id: broken.id)
+
+        #expect(store.activeThreadId == current.id)
+        #expect(store.blocks.map(\.text) == ["Current timeline"])
+        let message = store.presentationViewModel.errorMessage
+        #expect(message?.contains("Could not open “Broken”") == true)
+
+        // Even if a caller forces the unreadable thread active, the session
+        // coordinator refuses to save the visible timeline over its file.
+        store.conversationStore.activeThreadID = broken.id
+        store.timelineStore.reset()
+        await store.persistSession(for: broken.id)
+        #expect(!repository.savedIDs.contains(broken.id))
+    }
+
     private func makeSnapshot(_ conversation: Conversation) -> ConversationSnapshot {
         ConversationSnapshot(
             conversation: conversation,
@@ -177,6 +232,7 @@ struct ConversationDeletionTests {
 
 private enum DeletionRepositoryError: Error, Sendable {
     case denied
+    case unreadable
 }
 
 /// Locked storage lets two ChatStore instances exercise the same persistence
@@ -184,24 +240,37 @@ private enum DeletionRepositoryError: Error, Sendable {
 private final class DeletionConversationRepository: ConversationRepository, @unchecked Sendable {
     private let lock = NSLock()
     private var snapshots: [String: ConversationSnapshot]
+    private var recordedSaveIDs: [String] = []
     private let deletionFailure: DeletionRepositoryError?
+    /// IDs whose stored file exists but cannot be decoded.
+    private let unreadableIDs: Set<String>
 
     init(
         snapshots: [ConversationSnapshot],
-        deletionFailure: DeletionRepositoryError? = nil
+        deletionFailure: DeletionRepositoryError? = nil,
+        unreadableIDs: Set<String> = []
     ) {
         self.snapshots = Dictionary(
             uniqueKeysWithValues: snapshots.map { ($0.conversation.id, $0) }
         )
         self.deletionFailure = deletionFailure
+        self.unreadableIDs = unreadableIDs
+    }
+
+    var savedIDs: [String] {
+        lock.withLock { recordedSaveIDs }
     }
 
     func save(_ snapshot: ConversationSnapshot) throws {
-        lock.withLock { snapshots[snapshot.conversation.id] = snapshot }
+        lock.withLock {
+            recordedSaveIDs.append(snapshot.conversation.id)
+            snapshots[snapshot.conversation.id] = snapshot
+        }
     }
 
     func load(id: String) throws -> ConversationSnapshot? {
-        lock.withLock { snapshots[id] }
+        if unreadableIDs.contains(id) { throw DeletionRepositoryError.unreadable }
+        return lock.withLock { snapshots[id] }
     }
 
     func list() throws -> [ConversationSnapshot] {
