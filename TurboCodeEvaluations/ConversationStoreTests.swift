@@ -61,6 +61,41 @@ struct ConversationStoreTests {
         #expect(store.sortedThreads(selectedProject: nil).map(\.id) == ["general"])
     }
 
+    @Test("Deleting a chat selects the newest visible chat of the same domain")
+    func deletionSuccessorStaysInDomain() {
+        let store = ConversationStore()
+        let base = Date(timeIntervalSince1970: 1_000)
+        store.threads = [
+            Conversation(id: "coding-newest", title: "Coding", updatedAt: base.addingTimeInterval(50)),
+            Conversation(
+                id: "cowork-archived",
+                title: "Archived",
+                updatedAt: base.addingTimeInterval(40),
+                isArchived: true,
+                domain: .cowork
+            ),
+            Conversation(id: "cowork-old", title: "Old", updatedAt: base, domain: .cowork),
+            Conversation(
+                id: "cowork-recent",
+                title: "Recent",
+                updatedAt: base.addingTimeInterval(30),
+                domain: .cowork
+            ),
+            Conversation(
+                id: "cowork-active",
+                title: "Active",
+                updatedAt: base.addingTimeInterval(60),
+                domain: .cowork
+            )
+        ]
+        store.activeThreadID = "cowork-active"
+
+        let successor = store.removeThread(id: "cowork-active")
+
+        #expect(successor == "cowork-recent")
+        #expect(store.activeThreadID == nil)
+    }
+
     @Test("Metadata mutations preserve identity and update the catalog")
     func metadataMutationsUpdateCatalog() {
         let store = ConversationStore()

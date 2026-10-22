@@ -74,7 +74,9 @@ final class ConversationSessionCoordinator {
             return
         }
         let backend = modelRuntime.activeBackend
+        let modelBackend = modelRuntime.persistedModelIdentifier
         let composerStatistics = statistics.activeStatistics
+        let blocks = timeline.blocks
         let steering = await runtime.steeringSnapshot
         let transcript = backend == .codex
             ? nil
@@ -82,10 +84,14 @@ final class ConversationSessionCoordinator {
         let contextProjection = backend == .codex
             ? TranscriptContextProjection.empty
             : await llmRuntime.foundationModelsContextProjection() ?? .empty
+        // The awaits above can interleave with a thread switch. Provider state
+        // read after it would belong to the next conversation, so skip this
+        // checkpoint; the switch's own barrier checkpoint already saved it.
+        guard conversations.activeThreadID == id else { return }
         let snapshot = ConversationSnapshot(
             conversation: conversation,
-            modelBackend: modelRuntime.persistedModelIdentifier,
-            blocks: timeline.blocks,
+            modelBackend: modelBackend,
+            blocks: blocks,
             // Codex persists its own rollout. Saving an unrelated Foundation
             // Models transcript would contaminate a later Codex restoration.
             transcript: transcript,
