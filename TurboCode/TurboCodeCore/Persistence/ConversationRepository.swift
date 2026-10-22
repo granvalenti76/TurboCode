@@ -72,12 +72,36 @@ nonisolated protocol ConversationRepository: Sendable {
         blocks: [ChatBlock],
         transcriptEntries: [Transcript.Entry]
     ) async throws
+    /// Replaces catalog metadata while keeping the stored timeline,
+    /// transcript, and domain. Implementations must read and write as one
+    /// isolated step: a concurrent `append` landing between a separate load
+    /// and save would otherwise be overwritten with the older timeline.
+    func updateMetadata(
+        _ conversation: Conversation,
+        defaultModelBackend: String
+    ) async throws
 }
 
 extension ConversationRepository {
     /// In-memory repositories have no undecodable rows to report.
     func loadCatalog() async throws -> ConversationCatalogLoad {
         ConversationCatalogLoad(snapshots: try await list(), unreadableSessions: [])
+    }
+
+    /// Default composition keeps lightweight test repositories source
+    /// compatible. It is not atomic; disk storage overrides it as one
+    /// actor-isolated update.
+    func updateMetadata(
+        _ conversation: Conversation,
+        defaultModelBackend: String
+    ) async throws {
+        try await save(
+            ConversationSnapshot.mergingMetadata(
+                conversation,
+                onto: try await load(id: conversation.id),
+                defaultModelBackend: defaultModelBackend
+            )
+        )
     }
 
     /// Default composition keeps lightweight test repositories source
@@ -175,16 +199,34 @@ actor DiskConversationRepository: ConversationRepository {
 
     /// Load, merge, and atomic replacement stay inside the repository actor so
     /// an inactive thread cannot lose a completion to an overlapping save.
+    /// `async` (with no suspension inside) makes this override win overload
+    /// resolution against the non-atomic protocol extension default.
     func append(
         id: String,
         blocks: [ChatBlock],
         transcriptEntries: [Transcript.Entry]
-    ) throws {
+    ) async throws {
         guard let existing = try load(id: id) else { return }
         try save(
             existing.appending(
                 blocks: blocks,
                 transcriptEntries: transcriptEntries
+            )
+        )
+    }
+
+    /// Same isolation rule as `append`: there is no suspension point between
+    /// reading the stored session and replacing it. An unreadable file makes
+    /// `load` throw, so it is never rewritten with an empty timeline.
+    func updateMetadata(
+        _ conversation: Conversation,
+        defaultModelBackend: String
+    ) async throws {
+        try save(
+            ConversationSnapshot.mergingMetadata(
+                conversation,
+                onto: try load(id: conversation.id),
+                defaultModelBackend: defaultModelBackend
             )
         )
     }
@@ -263,6 +305,50 @@ private extension ConversationSnapshot {
             contextProjection: contextProjection,
             steering: steering,
             statistics: statistics
+        )
+    }
+}
+
+private extension ConversationSnapshot {
+    /// Applies catalog metadata (title, pin, archive, mode, workspace) to the
+    /// stored session. The persisted domain wins over the caller's value: a
+    /// metadata edit built from a default-initialized Conversation must never
+    /// turn a Cowork session into a Coding session with host tools.
+    nonisolated static func mergingMetadata(
+        _ conversation: Conversation,
+        onto existing: ConversationSnapshot?,
+        defaultModelBackend: String
+    ) -> ConversationSnapshot {
+        let persistedDomain = existing?.conversation.domain ?? conversation.domain
+        return ConversationSnapshot(
+            conversation: conversation.withDomain(persistedDomain),
+            modelBackend: existing?.modelBackend ?? defaultModelBackend,
+            blocks: existing?.blocks ?? [],
+            transcript: existing?.transcript,
+            contextProjection: existing?.contextProjection ?? .empty,
+            steering: existing?.steering ?? .empty,
+            statistics: existing?.statistics
+        )
+    }
+}
+
+private extension Conversation {
+    /// `domain` is immutable on `Conversation`, so the persistence layer
+    /// rebuilds the value when it restores the stored domain. Keep this list in
+    /// sync with `Conversation`'s stored properties.
+    nonisolated func withDomain(_ domain: SessionDomain) -> Conversation {
+        guard domain != self.domain else { return self }
+        return Conversation(
+            id: id,
+            title: title,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            isPinned: isPinned,
+            isArchived: isArchived,
+            workspace: workspace,
+            mode: mode,
+            domain: domain,
+            coworkFolder: coworkFolder
         )
     }
 }

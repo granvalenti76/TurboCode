@@ -118,6 +118,81 @@ struct SessionPersistenceRobustnessTests {
         #expect(catalog.unreadableSessions.map(\.fileName) == ["blocks.json"])
     }
 
+    @Test("Metadata updates never drop a concurrent background append")
+    func metadataUpdatesKeepConcurrentAppends() async throws {
+        let directoryURL = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        let repository = DiskConversationRepository(directoryURL: directoryURL)
+        let persistence = ConversationPersistenceService(repository: repository)
+        // A large timeline widens each decode/encode, as long sessions do.
+        let base = snapshot(id: "race")
+        let original = ConversationSnapshot(
+            conversation: base.conversation,
+            modelBackend: base.modelBackend,
+            blocks: base.blocks + [
+                ChatBlock(kind: .tool, text: String(repeating: "output line\n", count: 40_000))
+            ],
+            transcript: nil
+        )
+        try await repository.save(original)
+        let appended = (0..<150).map {
+            ChatBlock(kind: .assistant, text: "Background result \($0)")
+        }
+        // Every task sleeps until the same instant so their repository calls
+        // genuinely interleave instead of completing one after another.
+        let start = ContinuousClock.now + .milliseconds(200)
+
+        // Interleave background completions with title/pin edits, as title
+        // generation and delegated tasks do for an inactive conversation.
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for (index, block) in appended.enumerated() {
+                group.addTask {
+                    try await Task.sleep(until: start)
+                    try await persistence.append(
+                        id: "race",
+                        blocks: [block],
+                        transcriptEntries: []
+                    )
+                }
+                group.addTask {
+                    try await Task.sleep(until: start)
+                    try await persistence.saveMetadata(
+                        Conversation(id: "race", title: "Title \(index)"),
+                        defaultModelBackend: ModelBackend.foundationApple.rawValue
+                    )
+                }
+            }
+            try await group.waitForAll()
+        }
+
+        let loadedSnapshot = try await repository.load(id: "race")
+        let loaded = try #require(loadedSnapshot)
+        #expect(loaded.blocks.count == original.blocks.count + appended.count)
+        #expect(Set(loaded.blocks.map(\.id)).isSuperset(of: appended.map(\.id)))
+    }
+
+    @Test("A metadata update never rewrites an unreadable session")
+    func metadataUpdateLeavesUnreadableSessionUntouched() async throws {
+        let directoryURL = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+        let repository = DiskConversationRepository(directoryURL: directoryURL)
+        try await repository.save(snapshot(id: "damaged"))
+        try rewriteSession(id: "damaged", in: directoryURL) { object in
+            object["blocks"] = "not blocks"
+        }
+        let url = directoryURL.appendingPathComponent("damaged.json")
+        let damagedBytes = try Data(contentsOf: url)
+        let persistence = ConversationPersistenceService(repository: repository)
+
+        await #expect(throws: (any Error).self) {
+            try await persistence.saveMetadata(
+                Conversation(id: "damaged", title: "Renamed"),
+                defaultModelBackend: ModelBackend.foundationApple.rawValue
+            )
+        }
+        #expect(try Data(contentsOf: url) == damagedBytes)
+    }
+
     // MARK: - Helpers
 
     private func snapshot(
