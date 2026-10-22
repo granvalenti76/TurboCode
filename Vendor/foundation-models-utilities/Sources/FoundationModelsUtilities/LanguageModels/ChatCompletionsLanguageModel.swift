@@ -284,6 +284,13 @@ public struct ChatCompletionsLanguageModel: Sendable, LanguageModel {
       )
     }
 
+    /// TurboCode: joins a streamed tool-call id/name fragment, ignoring a
+    /// delta that merely repeats the value already latched for that index.
+    public static func mergeToolCallFragment(_ existing: String, _ fragment: String?) -> String {
+      guard let fragment, !fragment.isEmpty, fragment != existing else { return existing }
+      return existing + fragment
+    }
+
     private static func processChunks<ChunkSequence: AsyncSequence>(
       _ chunks: ChunkSequence,
       into channel: LanguageModelExecutorGenerationChannel,
@@ -319,9 +326,13 @@ public struct ChatCompletionsLanguageModel: Sendable, LanguageModel {
           if let toolCallDeltas = delta.toolCalls {
             for toolCallDelta in toolCallDeltas {
               let existing = toolCallRouting[toolCallDelta.index] ?? (id: "", name: "")
+              // TurboCode: some OpenAI-compatible servers repeat the full id
+              // and name in every delta. Concatenating those would produce
+              // "call_xcall_x"; identical repeats are ignored, while genuinely
+              // split fragments are still joined.
               let routing = (
-                id: existing.id + (toolCallDelta.id ?? ""),
-                name: existing.name + (toolCallDelta.function?.name ?? "")
+                id: Self.mergeToolCallFragment(existing.id, toolCallDelta.id),
+                name: Self.mergeToolCallFragment(existing.name, toolCallDelta.function?.name)
               )
               toolCallRouting[toolCallDelta.index] = routing
 

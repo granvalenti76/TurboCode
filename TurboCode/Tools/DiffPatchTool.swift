@@ -604,8 +604,14 @@ actor DiffPatchService: DiffPatchApplying {
         process.standardInput = input
         process.standardOutput = output
         process.standardError = error
+        let stdoutDrain: PipeDrain
+        let stderrDrain: PipeDrain
         do {
             try process.run()
+            // Drain before feeding stdin: BSD patch reports per file while it
+            // reads, and a full 64 KB output pipe would block it and us.
+            stdoutDrain = PipeDrain(output)
+            stderrDrain = PipeDrain(error)
             // BSD patch treats a space as the end of an unquoted header path unless
             // the path is terminated by a tab. Generated patches omit timestamps,
             // so add that delimiter to keep workspace paths with spaces intact.
@@ -616,8 +622,8 @@ actor DiffPatchService: DiffPatchApplying {
         } catch {
             return (-1, error.localizedDescription)
         }
-        let stdout = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        let stderr = String(decoding: error.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        let stdout = String(decoding: stdoutDrain.wait(), as: UTF8.self)
+        let stderr = String(decoding: stderrDrain.wait(), as: UTF8.self)
         let detail = [stdout, stderr]
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -656,8 +662,13 @@ actor DiffPatchService: DiffPatchApplying {
         process.standardOutput = output
         process.standardError = error
 
+        let stderrDrain: PipeDrain
         do {
             try process.run()
+            // Both pipes are drained concurrently; an unread pipe that fills
+            // its buffer would leave git blocked and `waitUntilExit` hanging.
+            _ = PipeDrain(output)
+            stderrDrain = PipeDrain(error)
             try input.fileHandleForWriting.write(contentsOf: Data(patch.utf8))
             try input.fileHandleForWriting.close()
             process.waitUntilExit()
@@ -665,8 +676,31 @@ actor DiffPatchService: DiffPatchApplying {
             return (-1, error.localizedDescription)
         }
 
-        let stderr = String(data: error.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stderr = String(decoding: stderrDrain.wait(), as: UTF8.self)
         return (process.terminationStatus, stderr.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+}
+
+/// Reads a child-process pipe to EOF on a background queue. Created only
+/// after `Process.run()` succeeds, when the parent no longer holds the write
+/// end, so EOF is guaranteed once the child exits.
+nonisolated private final class PipeDrain: @unchecked Sendable {
+    private let group = DispatchGroup()
+    // Written once on the drain queue; read only after `group.wait()`.
+    private var data = Data()
+
+    init(_ pipe: Pipe) {
+        let handle = pipe.fileHandleForReading
+        group.enter()
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            data = handle.readDataToEndOfFile()
+            group.leave()
+        }
+    }
+
+    func wait() -> Data {
+        group.wait()
+        return data
     }
 }
 

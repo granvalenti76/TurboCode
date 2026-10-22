@@ -16,5 +16,10 @@ between turns, and canonical bytes prevent that implementation detail from
 invalidating provider-side prefix caches such as llama.cpp's KV cache. This
 does not change the JSON request semantics or the order of tool arrays.
 
+Streamed tool-call deltas latch the call `id` and function `name` per index.
+Some OpenAI-compatible servers repeat both in every delta; upstream
+concatenated them (`call_xcall_x`). The compatibility copy ignores a fragment
+identical to the latched value and still joins genuinely split fragments.
+
 Remove this directory and restore the remote Xcode package reference after
 Apple publishes an upstream release compatible with Xcode 27 beta 5 or later.
