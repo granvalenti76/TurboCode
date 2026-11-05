@@ -130,8 +130,11 @@ nonisolated protocol AgentTaskWorkerExecuting: Sendable {
     ) async throws -> String
 }
 
-/// Applies timeout, cancellation, validation, and result mapping around a
-/// provider worker. Provider adapters cannot bypass these terminal outcomes.
+/// Applies cancellation, validation, and result mapping around a provider
+/// worker. Provider adapters cannot bypass these terminal outcomes.
+///
+/// A worker has no time limit: a slow local model can need many minutes for a
+/// correct result, so only the user's Stop or a real failure ends the task.
 nonisolated struct BoundedAgentTaskRunner: AgentTaskRunning {
     private let worker: any AgentTaskWorkerExecuting
     private let verifier: (any AgentTaskVerificationRunning)?
@@ -165,7 +168,7 @@ nonisolated struct BoundedAgentTaskRunner: AgentTaskRunning {
                 verificationStarted: events.verificationStarted,
                 verificationFinished: events.verificationFinished
             )
-            let content = try await executeWithTimeout(
+            let content = try await executeUntilCancelled(
                 envelope: validated,
                 context: context,
                 events: trackedEvents
@@ -277,12 +280,6 @@ nonisolated struct BoundedAgentTaskRunner: AgentTaskRunning {
                     detail: receipt.summary
                 )
             )
-        } catch AgentTaskWorkerError.timedOut {
-            return failureResult(
-                envelope: envelope,
-                reason: .timedOut,
-                detail: "The worker exceeded the task timeout."
-            )
         } catch AgentTaskWorkerError.toolLimitReached {
             return failureResult(
                 envelope: envelope,
@@ -318,8 +315,10 @@ nonisolated struct BoundedAgentTaskRunner: AgentTaskRunning {
         }
     }
 
+    /// Runs the worker unstructured so cancellation returns at once, even when
+    /// a provider stream is slow to observe it.
     @MainActor
-    private func executeWithTimeout(
+    private func executeUntilCancelled(
         envelope: AgentTaskEnvelope,
         context: AgentTaskRunContext,
         events: AgentTaskRunnerEvents
@@ -341,25 +340,12 @@ nonisolated struct BoundedAgentTaskRunner: AgentTaskRunning {
             }
             await race.resolve(result)
         }
-        let timeoutTask = Task {
-            do {
-                try await Task.sleep(for: .seconds(envelope.budget.timeoutSeconds))
-            } catch {
-                return
-            }
-            workerTask.cancel()
-            await race.resolve(.failure(AgentTaskWorkerError.timedOut))
-        }
 
         return try await withTaskCancellationHandler {
-            defer {
-                workerTask.cancel()
-                timeoutTask.cancel()
-            }
+            defer { workerTask.cancel() }
             return try await race.value()
         } onCancel: {
             workerTask.cancel()
-            timeoutTask.cancel()
             Task {
                 await race.resolve(.failure(CancellationError()))
             }
@@ -495,8 +481,8 @@ nonisolated enum DelegatedWorkerToolPolicy {
     }
 }
 
-/// Resolves an unstructured worker/timeout race exactly once. The loser is
-/// cancelled by the runner, so the timeout path never waits for a stuck stream.
+/// Resolves an unstructured worker/cancellation race exactly once. The worker is
+/// cancelled by the runner, so the cancelled path never waits for a stuck stream.
 private actor AgentTaskFirstResult<Value: Sendable> {
     private var result: Result<Value, Error>?
     private var continuation: CheckedContinuation<Value, Error>?
@@ -519,7 +505,6 @@ private actor AgentTaskFirstResult<Value: Sendable> {
 }
 
 nonisolated enum AgentTaskWorkerError: LocalizedError, Sendable, Equatable {
-    case timedOut
     case toolLimitReached
     case toolNotAllowed(String)
     case pathOutsideScope(String)
@@ -527,8 +512,6 @@ nonisolated enum AgentTaskWorkerError: LocalizedError, Sendable, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .timedOut:
-            "The worker timed out."
         case .toolLimitReached:
             "The worker reached its tool-call limit."
         case .toolNotAllowed(let name):

@@ -165,12 +165,13 @@ smoke-check procedure.
 
 ## Model request time limits
 
-Requests to a language model have no time limit, on any provider. A model can
-stay silent for minutes while it processes a prompt, so TurboCode does not treat
-that silence as a failure. Connection errors still end the turn; otherwise press
-**Stop** to end a request. If a server disappears without closing the connection,
-the turn waits until you press Stop. This is separate from the task budget of
-delegated workers and from the command timeouts of tools.
+Requests to a language model have no time limit, on any provider, and neither
+do delegated workers. A model can stay silent for minutes while it processes a
+prompt, so TurboCode does not treat that silence as a failure. Connection errors
+still end the turn; otherwise press **Stop** to end a request. If a server
+disappears without closing the connection, the turn waits until you press Stop.
+Tool commands keep their own timeouts, including the Xcode verification that
+follows a delegated task.
 
 ## Cowork
 

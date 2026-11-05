@@ -45,9 +45,11 @@ nonisolated struct AgentVerificationParameters: Codable, Sendable, Hashable {
     }
 }
 
-/// Application-owned watchdog plus the legacy decoded tool budget.
+/// Verification command limit plus the legacy decoded tool budget.
 ///
-/// The timeout still prevents a lost provider stream from running forever.
+/// `timeoutSeconds` bounds only the Xcode verification command that follows a
+/// worker. It never interrupts the worker itself, which ends only on Stop or a
+/// real failure, because a slow local model may legitimately need much longer.
 /// `maximumToolCalls` remains Codable for stored/version-2 envelopes, but the
 /// production worker no longer uses it to interrupt a model's normal loop.
 nonisolated struct DelegationBudget: Codable, Sendable, Hashable {
@@ -277,6 +279,8 @@ nonisolated struct AgentVerificationResult: Codable, Sendable, Hashable {
 /// Machine-readable reason for a non-successful task result.
 nonisolated enum AgentTaskFailureReason: String, Codable, Sendable, Hashable {
     case workerFailed = "worker_failed"
+    /// Not produced by workers anymore. Kept so results stored before the worker
+    /// time limit was removed still decode and display as a failure.
     case timedOut = "timed_out"
     case cancelled
     case toolNotAllowed = "tool_not_allowed"
