@@ -75,7 +75,11 @@ final class MessageSendCoordinator {
 
     func preparePrompt(for text: String) async -> String? {
         await refreshSkillsIfNeeded()
+        // Cowork configurations never load AGENTS.md and therefore never
+        // update the stored revision. Checking them would report a change on
+        // every send, rebuilding the session and blanking composer context.
         if modelRuntime.activeBackend != .codex,
+           !profiles.isActiveThreadCowork,
            modelRuntime.workspaceInstructionsChanged(in: workspace.root) {
             // Session instructions are immutable. Replace only the stale
             // capability prefix while preserving visible conversation history.

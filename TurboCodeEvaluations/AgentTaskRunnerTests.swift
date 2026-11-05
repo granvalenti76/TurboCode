@@ -33,26 +33,27 @@ struct AgentTaskRunnerTests {
         #expect(failed.failureReason == .workerFailed)
     }
 
-    @Test("Runner timeout cancels a suspended worker")
-    func timesOutWorker() async throws {
+    /// A slow local model must be able to finish: the budget's `timeoutSeconds`
+    /// bounds only the verification command, never the worker.
+    @Test("A worker outlasting the budget timeout still completes")
+    func workerIsNotInterruptedByBudgetTimeout() async throws {
         let envelope = try makeEnvelope(
             budget: DelegationBudget(timeoutSeconds: 1, maximumToolCalls: 2)
         )
         let runner = BoundedAgentTaskRunner(
-            worker: ScriptedAgentTaskWorker(behavior: .suspended)
+            worker: ScriptedAgentTaskWorker(
+                behavior: .delayedContent(.milliseconds(1_500), "Finished slowly.")
+            )
         )
 
-        let clock = ContinuousClock()
-        let startedAt = clock.now
         let result = await runner.run(
             envelope: envelope,
             context: makeContext(),
             events: .none
         )
 
-        #expect(result.outcome == .failed)
-        #expect(result.failureReason == .timedOut)
-        #expect(startedAt.duration(to: clock.now) < .seconds(2))
+        #expect(result.outcome == .completed)
+        #expect(result.technicalSummary == "Finished slowly.")
     }
 
     @Test("Caller cancellation produces a cancelled terminal result")
@@ -245,6 +246,7 @@ struct AgentTaskRunnerTests {
 private struct ScriptedAgentTaskWorker: AgentTaskWorkerExecuting {
     enum Behavior: Sendable {
         case content(String)
+        case delayedContent(Duration, String)
         case failure
         case suspended
     }
@@ -265,6 +267,9 @@ private struct ScriptedAgentTaskWorker: AgentTaskWorkerExecuting {
     ) async throws -> String {
         switch behavior {
         case .content(let value):
+            return value
+        case .delayedContent(let delay, let value):
+            try await Task.sleep(for: delay)
             return value
         case .failure:
             throw Failure.expected

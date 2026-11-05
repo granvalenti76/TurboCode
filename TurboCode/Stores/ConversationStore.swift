@@ -123,13 +123,20 @@ final class ConversationStore {
         threads[index].updatedAt = .now
     }
 
-    /// Applies a deletion only after the persistence use case succeeds.
+    /// Applies a deletion only after the persistence use case succeeds and
+    /// returns the successor to open: the first chat the sidebar would show
+    /// in the removed chat's domain. Archived chats and the other domain are
+    /// never chosen, so deleting a Cowork chat cannot jump to a Coding one.
     func removeThread(id: String) -> String? {
+        let removedDomain = threads.first { $0.id == id }?.domain ?? activeDomain
         threads.removeAll { $0.id == id }
         if activeThreadID == id {
             activeThreadID = nil
         }
-        return threads.first?.id
+        return threads
+            .filter { $0.domain == removedDomain && !$0.isArchived }
+            .sorted(by: Self.sidebarOrder)
+            .first?.id
     }
 
     /// Applies only repository-confirmed removals. A failed durable deletion
@@ -160,10 +167,13 @@ final class ConversationStore {
                 } == selectedProject
             }
             .filter { query.isEmpty || $0.title.lowercased().contains(query) }
-            .sorted { first, second in
-                if first.isPinned != second.isPinned { return first.isPinned }
-                return first.updatedAt > second.updatedAt
-            }
+            .sorted(by: Self.sidebarOrder)
+    }
+
+    /// Pinned chats first, then the most recently updated.
+    private static func sidebarOrder(_ first: Conversation, _ second: Conversation) -> Bool {
+        if first.isPinned != second.isPinned { return first.isPinned }
+        return first.updatedAt > second.updatedAt
     }
 
     private func setArchived(_ isArchived: Bool, for id: String) {

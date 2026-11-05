@@ -571,9 +571,16 @@ public final class ChatStore {
         await sessionCoordinator.persistMetadata(id: threadID)
     }
 
-    /// Loads all session files and populates the thread list.
+    /// Loads all session files and populates the thread list. Unreadable
+    /// files are reported rather than silently missing from the sidebar.
     public func restoreSessions() async {
-        await sessionCoordinator.restoreCatalog()
+        let unreadable = await sessionCoordinator.restoreCatalog()
+        guard !unreadable.isEmpty else { return }
+        let subject = unreadable.count == 1
+            ? "1 saved conversation could not be read and was"
+            : "\(unreadable.count) saved conversations could not be read and were"
+        presentationViewModel.errorMessage = subject
+            + " left untouched in ~/.turbocode/sessions."
     }
 
     /// Fully restores a past session with its blocks.
@@ -683,8 +690,30 @@ public final class ChatStore {
         _ = await agentRuntime.removeSteering(id)
     }
 
+    /// Recovers a paused or failed steering request. During a live turn it is
+    /// rebound to that turn. With no turn running there is nothing to steer,
+    /// so the text is sent as an ordinary message instead; if that send is not
+    /// admitted the text returns to the composer rather than being lost.
     func recoverSteering(_ id: SteeringRequestID) async {
-        _ = await agentRuntime.recoverSteering(id)
+        if await agentRuntime.recoverSteering(id) { return }
+        guard !busy,
+              let request = await agentRuntime.steeringSnapshot.requests
+                .first(where: { $0.id == id }),
+              [.paused, .failed].contains(request.state),
+              await agentRuntime.removeSteering(id) else { return }
+        // The admitted turn persists the session, including the shorter queue.
+        guard let promptText = await messageSendCoordinator.preparePrompt(
+            for: request.text
+        ), await messageSendCoordinator.send(
+            displayText: request.text,
+            promptText: promptText,
+            visibleInTimeline: true
+        ) else {
+            if composerViewModel.messageText.isEmpty {
+                composerViewModel.messageText = request.text
+            }
+            return
+        }
     }
 
     /// Sends all valid inline annotations as one explicit user request. The

@@ -43,21 +43,67 @@ nonisolated struct ConversationSnapshot: Sendable {
     }
 }
 
+/// One session file that could not be decoded during a catalog scan.
+nonisolated struct UnreadableSessionFile: Sendable, Equatable {
+    let fileName: String
+    let reason: String
+}
+
+/// Result of a catalog scan. Unreadable files are reported, never modified,
+/// so one corrupt or newer-format file cannot hide every other conversation.
+nonisolated struct ConversationCatalogLoad: Sendable {
+    let snapshots: [ConversationSnapshot]
+    let unreadableSessions: [UnreadableSessionFile]
+}
+
 /// Persistence contract for conversations. Keeping this boundary protocol-based
 /// lets a host coordinate presentation without knowing where sessions are stored.
 nonisolated protocol ConversationRepository: Sendable {
     func save(_ snapshot: ConversationSnapshot) async throws
     func load(id: String) async throws -> ConversationSnapshot?
+    /// Readable sessions only; unreadable rows are skipped, not fatal.
     func list() async throws -> [ConversationSnapshot]
+    /// Readable sessions plus the files that had to be skipped. Throws only
+    /// when the storage location itself cannot be enumerated.
+    func loadCatalog() async throws -> ConversationCatalogLoad
     func delete(id: String) async throws
     func append(
         id: String,
         blocks: [ChatBlock],
         transcriptEntries: [Transcript.Entry]
     ) async throws
+    /// Replaces catalog metadata while keeping the stored timeline,
+    /// transcript, and domain. Implementations must read and write as one
+    /// isolated step: a concurrent `append` landing between a separate load
+    /// and save would otherwise be overwritten with the older timeline.
+    func updateMetadata(
+        _ conversation: Conversation,
+        defaultModelBackend: String
+    ) async throws
 }
 
 extension ConversationRepository {
+    /// In-memory repositories have no undecodable rows to report.
+    func loadCatalog() async throws -> ConversationCatalogLoad {
+        ConversationCatalogLoad(snapshots: try await list(), unreadableSessions: [])
+    }
+
+    /// Default composition keeps lightweight test repositories source
+    /// compatible. It is not atomic; disk storage overrides it as one
+    /// actor-isolated update.
+    func updateMetadata(
+        _ conversation: Conversation,
+        defaultModelBackend: String
+    ) async throws {
+        try await save(
+            ConversationSnapshot.mergingMetadata(
+                conversation,
+                onto: try await load(id: conversation.id),
+                defaultModelBackend: defaultModelBackend
+            )
+        )
+    }
+
     /// Default composition keeps lightweight test repositories source
     /// compatible. Disk storage overrides this as one actor-isolated update.
     func append(
@@ -65,7 +111,9 @@ extension ConversationRepository {
         blocks: [ChatBlock],
         transcriptEntries: [Transcript.Entry]
     ) async throws {
-        guard let existing = try await load(id: id) else { return }
+        guard let existing = try await load(id: id) else {
+            throw ConversationRepositoryError.sessionNotFound(id)
+        }
         try await save(
             existing.appending(
                 blocks: blocks,
@@ -98,27 +146,51 @@ actor DiskConversationRepository: ConversationRepository {
     func load(id: String) throws -> ConversationSnapshot? {
         let url = try fileURL(for: id)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        let stored = try JSONDecoder().decode(
-            StoredSession.self,
-            from: Data(contentsOf: url)
-        )
-        return ConversationSnapshot(stored)
+        return try decodeSnapshot(at: url)
     }
 
     func list() throws -> [ConversationSnapshot] {
+        try scanCatalog().snapshots
+    }
+
+    /// Declared `async` on purpose: a synchronous actor method would lose
+    /// overload resolution to the protocol extension's async default in
+    /// `await` call sites, silently dropping the unreadable-file report.
+    func loadCatalog() async throws -> ConversationCatalogLoad {
+        try scanCatalog()
+    }
+
+    /// Decodes every session file independently. A failure is recorded and
+    /// the file is left exactly as found: moving or rewriting it here could
+    /// destroy a session that a newer TurboCode or a fixed decoder can read.
+    private func scanCatalog() throws -> ConversationCatalogLoad {
         try createDirectoryIfNeeded()
-        return try FileManager.default.contentsOfDirectory(
+        let urls = try FileManager.default.contentsOfDirectory(
             at: directoryURL,
             includingPropertiesForKeys: nil
         )
         .filter { $0.pathExtension == "json" }
-        .map { url in
-            let stored = try JSONDecoder().decode(
-                StoredSession.self,
-                from: Data(contentsOf: url)
-            )
-            return ConversationSnapshot(stored)
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        var snapshots: [ConversationSnapshot] = []
+        var unreadable: [UnreadableSessionFile] = []
+        for url in urls {
+            do {
+                snapshots.append(try decodeSnapshot(at: url))
+            } catch {
+                print("[TurboCode] Skipped unreadable session \(url.lastPathComponent): \(error)")
+                unreadable.append(
+                    UnreadableSessionFile(
+                        fileName: url.lastPathComponent,
+                        reason: error.localizedDescription
+                    )
+                )
+            }
         }
+        return ConversationCatalogLoad(
+            snapshots: snapshots,
+            unreadableSessions: unreadable
+        )
     }
 
     func delete(id: String) throws {
@@ -129,18 +201,57 @@ actor DiskConversationRepository: ConversationRepository {
 
     /// Load, merge, and atomic replacement stay inside the repository actor so
     /// an inactive thread cannot lose a completion to an overlapping save.
+    /// `async` (with no suspension inside) makes this override win overload
+    /// resolution against the non-atomic protocol extension default.
     func append(
         id: String,
         blocks: [ChatBlock],
         transcriptEntries: [Transcript.Entry]
-    ) throws {
-        guard let existing = try load(id: id) else { return }
+    ) async throws {
+        // A missing file used to drop the background result silently; failing
+        // lets the caller log it instead of reporting a successful delivery.
+        guard let existing = try load(id: id) else {
+            throw ConversationRepositoryError.sessionNotFound(id)
+        }
         try save(
             existing.appending(
                 blocks: blocks,
                 transcriptEntries: transcriptEntries
             )
         )
+    }
+
+    /// Same isolation rule as `append`: there is no suspension point between
+    /// reading the stored session and replacing it. An unreadable file makes
+    /// `load` throw, so it is never rewritten with an empty timeline.
+    func updateMetadata(
+        _ conversation: Conversation,
+        defaultModelBackend: String
+    ) async throws {
+        try save(
+            ConversationSnapshot.mergingMetadata(
+                conversation,
+                onto: try load(id: conversation.id),
+                defaultModelBackend: defaultModelBackend
+            )
+        )
+    }
+
+    /// Shared by single loads and catalog scans so both apply the same
+    /// recovery rules. Recovered provider fields are logged because the next
+    /// save replaces them with the rebuilt, timeline-derived history.
+    private func decodeSnapshot(at url: URL) throws -> ConversationSnapshot {
+        let stored = try JSONDecoder().decode(
+            StoredSession.self,
+            from: Data(contentsOf: url)
+        )
+        if !stored.recoveredFields.isEmpty {
+            print(
+                "[TurboCode] Session \(stored.id): discarded undecodable "
+                    + stored.recoveredFields.joined(separator: ", ")
+            )
+        }
+        return ConversationSnapshot(stored)
     }
 
     private var encoder: JSONEncoder {
@@ -204,8 +315,53 @@ private extension ConversationSnapshot {
     }
 }
 
+private extension ConversationSnapshot {
+    /// Applies catalog metadata (title, pin, archive, mode, workspace) to the
+    /// stored session. The persisted domain wins over the caller's value: a
+    /// metadata edit built from a default-initialized Conversation must never
+    /// turn a Cowork session into a Coding session with host tools.
+    nonisolated static func mergingMetadata(
+        _ conversation: Conversation,
+        onto existing: ConversationSnapshot?,
+        defaultModelBackend: String
+    ) -> ConversationSnapshot {
+        let persistedDomain = existing?.conversation.domain ?? conversation.domain
+        return ConversationSnapshot(
+            conversation: conversation.withDomain(persistedDomain),
+            modelBackend: existing?.modelBackend ?? defaultModelBackend,
+            blocks: existing?.blocks ?? [],
+            transcript: existing?.transcript,
+            contextProjection: existing?.contextProjection ?? .empty,
+            steering: existing?.steering ?? .empty,
+            statistics: existing?.statistics
+        )
+    }
+}
+
+private extension Conversation {
+    /// `domain` is immutable on `Conversation`, so the persistence layer
+    /// rebuilds the value when it restores the stored domain. Keep this list in
+    /// sync with `Conversation`'s stored properties.
+    nonisolated func withDomain(_ domain: SessionDomain) -> Conversation {
+        guard domain != self.domain else { return self }
+        return Conversation(
+            id: id,
+            title: title,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            isPinned: isPinned,
+            isArchived: isArchived,
+            workspace: workspace,
+            mode: mode,
+            domain: domain,
+            coworkFolder: coworkFolder
+        )
+    }
+}
+
 nonisolated enum ConversationRepositoryError: Error, Equatable, Sendable {
     case invalidSessionID(String)
+    case sessionNotFound(String)
 }
 
 private extension ConversationSnapshot {

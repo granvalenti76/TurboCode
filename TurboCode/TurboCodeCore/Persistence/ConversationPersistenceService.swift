@@ -20,29 +20,26 @@ nonisolated struct ConversationPersistenceService: Sendable {
     /// Rewrites catalog metadata while preserving the durable timeline and
     /// transcript. This is essential for inactive conversations, whose content
     /// must never be replaced with whichever timeline is currently visible.
+    /// The merge runs inside the repository so it is atomic with respect to
+    /// background `append` calls; see `ConversationRepository.updateMetadata`.
     func saveMetadata(
         _ conversation: Conversation,
         defaultModelBackend: String
     ) async throws {
-        let existing = try await repository.load(id: conversation.id)
-        // The persisted domain wins over the caller's value. A metadata edit
-        // (rename, pin, archive) built from a default-initialized Conversation
-        // must never turn a Cowork session into a Coding session with host tools.
-        let persistedDomain = existing?.conversation.domain ?? conversation.domain
-        let snapshot = ConversationSnapshot(
-            conversation: conversation.withDomain(persistedDomain),
-            modelBackend: existing?.modelBackend ?? defaultModelBackend,
-            blocks: existing?.blocks ?? [],
-            transcript: existing?.transcript,
-            contextProjection: existing?.contextProjection ?? .empty,
-            steering: existing?.steering ?? .empty,
-            statistics: existing?.statistics
+        try await repository.updateMetadata(
+            conversation,
+            defaultModelBackend: defaultModelBackend
         )
-        try await repository.save(snapshot)
     }
 
-    func loadCatalog() async throws -> [Conversation] {
-        try await repository.list().map(\.conversation)
+    /// Readable conversations plus the number of session files that were
+    /// skipped, so the host can say that history exists but could not open.
+    func loadCatalog() async throws -> ConversationCatalog {
+        let load = try await repository.loadCatalog()
+        return ConversationCatalog(
+            conversations: load.snapshots.map(\.conversation),
+            unreadableSessions: load.unreadableSessions
+        )
     }
 
     func load(id: String) async throws -> ConversationSnapshot? {
@@ -126,6 +123,12 @@ nonisolated struct ConversationPersistenceService: Sendable {
     }
 }
 
+/// Catalog metadata applied by the host after the durable scan completes.
+nonisolated struct ConversationCatalog: Sendable {
+    let conversations: [Conversation]
+    let unreadableSessions: [UnreadableSessionFile]
+}
+
 /// JSON payload prepared for the sidebar's native export actions.
 nonisolated struct ConversationExportItem: Sendable {
     let id: String
@@ -154,25 +157,4 @@ nonisolated struct ConversationExportItem: Sendable {
 nonisolated struct WorkspacePersistenceRemoval: Sendable, Equatable {
     let deletedConversationIDs: Set<String>
     let deletionErrors: [String]
-}
-
-private extension Conversation {
-    /// `domain` is immutable on `Conversation`, so the persistence layer
-    /// rebuilds the value when it restores the stored domain. Keep this list in
-    /// sync with `Conversation`'s stored properties.
-    nonisolated func withDomain(_ domain: SessionDomain) -> Conversation {
-        guard domain != self.domain else { return self }
-        return Conversation(
-            id: id,
-            title: title,
-            createdAt: createdAt,
-            updatedAt: updatedAt,
-            isPinned: isPinned,
-            isArchived: isArchived,
-            workspace: workspace,
-            mode: mode,
-            domain: domain,
-            coworkFolder: coworkFolder
-        )
-    }
 }

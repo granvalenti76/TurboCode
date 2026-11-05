@@ -226,16 +226,18 @@ nonisolated struct SteeringState: Codable, Hashable, Sendable {
         return true
     }
 
-    /// Rebinds a paused request to a newly admitted conversational turn. This
-    /// is an explicit recovery action; restored text never follows a new turn
-    /// automatically across a context generation boundary.
+    /// Rebinds a paused or failed request to a newly admitted conversational
+    /// turn. This is an explicit recovery action; restored text never follows
+    /// a new turn automatically across a context generation boundary. Failed
+    /// requests are included because the queue UI offers the same "Riprendi"
+    /// action for both states.
     mutating func recover(
         _ id: SteeringRequestID,
         in context: SteeringContext
     ) -> Bool {
         guard context.contextGeneration == contextGeneration,
               let index = requests.firstIndex(where: { $0.id == id }),
-              requests[index].state == .paused else {
+              [.paused, .failed].contains(requests[index].state) else {
             return false
         }
         requests[index].context = context

@@ -111,11 +111,33 @@ final class ConversationLifecycleCoordinator {
         }
     }
 
-    private func restoreSettledSession(id: String) async {
+    /// Result consumed by deletion, which may only fall back to an empty
+    /// draft when the successor genuinely has no durable file yet.
+    private enum RestoreOutcome {
+        case restored
+        case missing
+        case unreadable
+    }
+
+    @discardableResult
+    private func restoreSettledSession(id: String) async -> RestoreOutcome {
         let startedAt = Date()
-        guard let snapshot = await sessions.load(id: id),
-              conversations.threads.contains(where: { $0.id == id }) else {
-            return
+        let snapshot: ConversationSnapshot
+        switch await sessions.load(id: id) {
+        case .loaded(let loaded):
+            snapshot = loaded
+        case .missing:
+            return .missing
+        case .unreadable(let reason):
+            // The current context stays installed; activating this thread with
+            // an empty timeline would let the next checkpoint overwrite it.
+            let title = conversations.conversation(id: id)?.title ?? "the conversation"
+            presentation.errorMessage = "Could not open “\(title)”: \(reason) "
+                + "The saved file was left untouched."
+            return .unreadable
+        }
+        guard conversations.threads.contains(where: { $0.id == id }) else {
+            return .missing
         }
 
         workbench.dismissWorkspaceListingInspector()
@@ -163,6 +185,7 @@ final class ConversationLifecycleCoordinator {
                 )
             )
         )
+        return .restored
     }
 
     /// Deletes durable state before changing the observable catalog. Removing
@@ -207,12 +230,18 @@ final class ConversationLifecycleCoordinator {
         reviewDrafts.discardAll()
 
         if let nextThreadID {
-            await restoreSettledSession(id: nextThreadID)
-            if conversations.activeThreadID == nil {
+            switch await restoreSettledSession(id: nextThreadID) {
+            case .restored:
+                break
+            case .missing:
                 // A new draft may not have reached disk yet. It remains a valid
                 // catalog selection but starts with a fresh provider context.
                 conversations.activeThreadID = nextThreadID
                 _ = await runtime.apply(.switchThread(threadID: nextThreadID))
+                await profiles.rebuildSession(keepingHistory: false)
+            case .unreadable:
+                // Never adopt an unreadable successor as an empty draft: it
+                // would be saved over its own file. Leave no thread selected.
                 await profiles.rebuildSession(keepingHistory: false)
             }
         } else {
