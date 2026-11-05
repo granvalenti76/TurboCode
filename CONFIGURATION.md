@@ -163,6 +163,15 @@ rebuilds only that ACP session before its next turn.
 See [ACP_AGENT_SETUP.md](ACP_AGENT_SETUP.md) for the complete registration and
 smoke-check procedure.
 
+## Model request time limits
+
+Requests to a language model have no time limit, on any provider. A model can
+stay silent for minutes while it processes a prompt, so TurboCode does not treat
+that silence as a failure. Connection errors still end the turn; otherwise press
+**Stop** to end a request. If a server disappears without closing the connection,
+the turn waits until you press Stop. This is separate from the task budget of
+delegated workers and from the command timeouts of tools.
+
 ## Cowork
 
 Cowork runs multi-purpose work in one managed Linux VM built on Apple

@@ -96,7 +96,11 @@ nonisolated final class RemoteReasoningRequestAdapter: URLProtocol,
 
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
-        let session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: queue)
+        let session = URLSession(
+            configuration: ModelRequestTransport.sessionConfiguration(),
+            delegate: self,
+            delegateQueue: queue
+        )
         self.session = session
         dataTask = session.dataTask(with: mutable as URLRequest)
         dataTask?.resume()

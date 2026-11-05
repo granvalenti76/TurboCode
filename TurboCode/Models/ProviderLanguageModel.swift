@@ -78,15 +78,13 @@ struct ProviderLanguageModel: LanguageModel {
                 headers["Authorization"] = "Bearer \(apiKey)"
             }
 
-            var sessionConfiguration: URLSessionConfiguration?
+            let sessionConfiguration = ModelRequestTransport.sessionConfiguration()
             if configuration.model.reasoningTransport == .deepseekThinking {
                 headers[DeepSeekRequestAdapter.adapterHeader] = "deepseek"
                 headers[DeepSeekRequestAdapter.reasoningHeader] = reasoningEffort(
                     request.contextOptions.reasoningLevel
                 )
-                let value = URLSessionConfiguration.ephemeral
-                value.protocolClasses = [DeepSeekRequestAdapter.self]
-                sessionConfiguration = value
+                sessionConfiguration.protocolClasses = [DeepSeekRequestAdapter.self]
             } else if let directive = configuration.model.reasoningConfiguration
                 .requestDirective(for: configuration.reasoningEffort) {
                 headers[RemoteReasoningRequestAdapter.adapterHeader] = "token-budget"
@@ -94,9 +92,7 @@ struct ProviderLanguageModel: LanguageModel {
                 case .disabled: "disabled"
                 case .tokenBudget(let tokens): String(tokens)
                 }
-                let value = URLSessionConfiguration.ephemeral
-                value.protocolClasses = [RemoteReasoningRequestAdapter.self]
-                sessionConfiguration = value
+                sessionConfiguration.protocolClasses = [RemoteReasoningRequestAdapter.self]
             }
 
             let baseModel = ChatCompletionsLanguageModel(
@@ -123,6 +119,31 @@ struct ProviderLanguageModel: LanguageModel {
             @unknown default: "medium"
             }
         }
+    }
+}
+
+/// Transport settings shared by every request sent to a language model.
+///
+/// A model can legitimately stay silent for minutes: `llama-server` may send no
+/// bytes while it processes a prompt, and slow local models make that wait
+/// longer than the 60-second `URLSession` default. That silence is normal work,
+/// not a network failure, so the application applies no time limit of its own.
+/// Real connection failures still surface as errors, and the user ends a slow
+/// request with Stop, which cancels the task and closes the connection.
+///
+/// The tradeoff is deliberate: a host that disappears without closing the
+/// connection leaves the request waiting until the user presses Stop.
+nonisolated enum ModelRequestTransport {
+    /// Returns a new configuration with both `URLSession` time limits disabled.
+    ///
+    /// Forwarding `URLProtocol` adapters own a second session, and each session
+    /// enforces its own limit. The outer session and the adapter's inner session
+    /// must both use this configuration, or the 60-second default still applies.
+    static func sessionConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = .infinity
+        configuration.timeoutIntervalForResource = .infinity
+        return configuration
     }
 }
 
@@ -169,7 +190,11 @@ nonisolated final class DeepSeekRequestAdapter: URLProtocol, URLSessionDataDeleg
 
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
-        let session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: queue)
+        let session = URLSession(
+            configuration: ModelRequestTransport.sessionConfiguration(),
+            delegate: self,
+            delegateQueue: queue
+        )
         self.session = session
         dataTask = session.dataTask(with: mutable as URLRequest)
         dataTask?.resume()
