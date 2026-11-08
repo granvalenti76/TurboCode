@@ -5,6 +5,70 @@ All notable changes to TurboCode are documented in this file.
 The project follows Semantic Versioning while its public API and persisted
 formats continue to evolve before 1.0.
 
+## [0.63] - Unreleased
+
+TurboCode 0.63 lets local models see images dropped on the main view, removes
+the time limits that interrupted slow local models, and hardens how sessions are
+saved, restored, and recovered.
+
+### Features
+
+- Added image input for Llama-server and Apple on-device models. Dropping PNG,
+  JPEG, HEIC, WebP, GIF, or TIFF files on the main view adds thumbnails to the
+  composer, up to four images of at most 20 MB each.
+- When the active model has no vision support, a dropped image shows a brief
+  notice instead of being added. Support is read from the new `supportsVision`
+  key or, when it is absent, from the running llama-server. Other backends and
+  Cowork sessions do not accept images.
+- Sent images appear as thumbnails in the conversation.
+
+### Fixes
+
+- Removed the time limit from model requests. Slow local models no longer fail
+  with "The request timed out." after a minute of silence during normal work.
+- Removed the 300-second limit from delegated and powerful-model workers, which
+  could cancel a slow local model in the middle of correct work. Stop still
+  cancels both requests and workers at once.
+- One unreadable session file no longer empties the sidebar. Unreadable files
+  are reported and never moved or rewritten, and an undecodable provider
+  transcript no longer makes a conversation impossible to open.
+- A background result arriving during a title, pin, or rename update is no
+  longer lost.
+- An unreadable session is no longer overwritten by an empty timeline after the
+  active chat is deleted, and opening one now reports the problem.
+- Switching threads during a save can no longer write one conversation's content
+  into another's file.
+- Deleting the active chat now opens the next chat in sidebar order within the
+  same mode, skipping archived chats, so the sidebar no longer flips between
+  Coding and Cowork.
+- Resuming a failed steering request, or one left over from an earlier launch,
+  now sends it instead of doing nothing.
+- Interrupting a turn no longer leaves tool calls without output in the history,
+  which OpenAI-compatible servers rejected on the next request.
+- Sessions written by a newer TurboCode are no longer decoded and rewritten with
+  data loss; they are treated as unreadable and protected from writes.
+- Appending a background result to a session without a file now reports an error
+  instead of dropping the result while claiming success.
+- Cowork sessions no longer rebuild the provider session on every send, which
+  added latency and cleared the composer's context statistics.
+- Large patches can no longer hang an edit once their output fills the pipe
+  buffer.
+- Servers that repeat tool-call ids and names in every stream chunk no longer
+  produce corrupted values such as `call_xcall_x`.
+
+### Interventions
+
+- `models.json` entries gain an optional `supportsVision` key. Existing files
+  decode unchanged; see `CONFIGURATION.md`.
+- Image bytes are never written to disk. Stored sessions keep only an
+  `[Image: name]` marker in the message text, and a rebuilt session replaces
+  earlier images with a text placeholder.
+- A provider host that disappears without closing its connection now waits until
+  Stop, for both requests and workers.
+- The vendored `foundation-models-utilities` package carries a tool-call delta
+  patch, documented in its `README-TurboCode.md`.
+- Updated the application marketing version to 0.63.
+
 ## [0.62]
 
 TurboCode 0.62 introduces Cowork, a multi-purpose mode that runs builds,
