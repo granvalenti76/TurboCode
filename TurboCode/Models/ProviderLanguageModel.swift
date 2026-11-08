@@ -26,15 +26,14 @@ struct ProviderLanguageModel: LanguageModel {
     }
 
     var capabilities: LanguageModelCapabilities {
-        if configuration.supportsGuidedGeneration && configuration.supportsReasoning {
-            LanguageModelCapabilities([.vision, .toolCalling, .reasoning, .guidedGeneration])
-        } else if configuration.supportsGuidedGeneration {
-            LanguageModelCapabilities([.vision, .toolCalling, .guidedGeneration])
-        } else if configuration.supportsReasoning {
-            LanguageModelCapabilities([.vision, .toolCalling, .reasoning])
-        } else {
-            LanguageModelCapabilities([.vision, .toolCalling])
-        }
+        var capabilities: [LanguageModelCapabilities.Capability] = [.toolCalling]
+        // An unset value stays declared: whether llama-server accepts images is
+        // only known from an async probe, which this synchronous property cannot
+        // run. Composer admission (`ModelVisionSupport`) is the real gate.
+        if configuration.supportsVision != false { capabilities.append(.vision) }
+        if configuration.supportsReasoning { capabilities.append(.reasoning) }
+        if configuration.supportsGuidedGeneration { capabilities.append(.guidedGeneration) }
+        return LanguageModelCapabilities(capabilities)
     }
 
     var executorConfiguration: Executor.Configuration {

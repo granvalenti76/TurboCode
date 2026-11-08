@@ -657,6 +657,33 @@ public final class ChatStore {
         await sendMessage(text, promptText: promptText, visibleInTimeline: true)
     }
 
+    /// Sends a composer turn carrying images. Callers check
+    /// `activeModelSupportsImages()` first, so the draft survives a refusal.
+    func sendMessage(_ text: String, images: [ComposerImageAttachment]) async {
+        presentationViewModel.clearCompactionNotice()
+        guard let promptText = await messageSendCoordinator.preparePrompt(
+            for: text
+        ) else { return }
+        await sendMessage(
+            text,
+            promptText: promptText,
+            imageAttachments: images,
+            visibleInTimeline: true
+        )
+    }
+
+    /// Asked at drop and again at send, since the user can switch model or the
+    /// local server can restart with another one while images wait in the draft.
+    func activeModelSupportsImages() async -> Bool {
+        await ModelVisionSupport.resolve(
+            backend: activeBackend,
+            isCowork: profileSelectionCoordinator.isActiveThreadCowork,
+            remoteModel: activeRemoteModel,
+            systemModelSupportsVision: { ModelVisionSupport.systemModelSupportsVision() },
+            probeServer: { await LlamaServerRuntimeProbe.supportsVision(from: $0) }
+        )
+    }
+
     /// Captures a correction for the active conversational turn. The runtime
     /// decides whether the current operation is steerable; `busy` is not used
     /// as an admission shortcut.
@@ -998,11 +1025,13 @@ public final class ChatStore {
     private func sendMessage(
         _ text: String,
         promptText: String? = nil,
+        imageAttachments: [ComposerImageAttachment] = [],
         visibleInTimeline: Bool
     ) async {
         _ = await messageSendCoordinator.send(
             displayText: text,
             promptText: promptText ?? text,
+            imageAttachments: imageAttachments,
             visibleInTimeline: visibleInTimeline
         )
     }

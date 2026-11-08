@@ -64,6 +64,27 @@ run the focused suite with the test-runner environment variable:
 TEST_RUNNER_TURBOCODE_EVALUATE_ANCHORSIGNAL=1 xcodebuild test -project TurboCode.xcodeproj -scheme TurboCodeEvaluations -destination 'platform=macOS' -only-testing:TurboCodeEvaluations/DynamicRoutingTests
 ```
 
+## Image input capability
+
+Images dropped on the main view are offered only to models that can read them.
+Llama-server entries in `models.json` may declare this explicitly:
+
+```json
+{
+  "supportsVision": true
+}
+```
+
+When `supportsVision` is absent, TurboCode asks the running server through
+`modalities.vision` on its `/props` endpoint, so the answer follows the model
+actually loaded. Set the value for OpenAI-compatible servers without that
+endpoint. Apple on-device uses the system model's reported capability. Other
+backends and Cowork sessions do not accept images.
+
+Images are resized to at most 1568 px on the longest edge and are never written
+to disk. Stored sessions keep only a `[Image: name]` marker in the message text,
+and a rebuilt session replaces earlier images with a text placeholder.
+
 ## Repository map model capability
 
 Each entry in `models.json` may declare the context budget and repository-map

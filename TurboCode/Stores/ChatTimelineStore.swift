@@ -56,12 +56,21 @@ final class ChatTimelineStore {
     /// order tool receipts ahead of the eventual assistant answer.
     func beginResponse(
         displayText: String?,
+        imageThumbnails: [ChatImageThumbnail] = [],
         placeholderID: String,
         model: String
     ) {
         isFirstMessage = false
         if let displayText {
-            blocks.append(ChatBlock(kind: .user, text: displayText))
+            var userBlock = ChatBlock(
+                kind: .user,
+                text: ChatImageReference.appending(
+                    fileNames: imageThumbnails.map(\.fileName),
+                    to: displayText
+                )
+            )
+            userBlock.imageThumbnails = imageThumbnails
+            blocks.append(userBlock)
         }
         blocks.append(
             ChatBlock(

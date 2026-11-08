@@ -26,12 +26,14 @@ final class ChatResponsePresenter {
 
     func beginResponse(
         displayText: String?,
+        imageThumbnails: [ChatImageThumbnail] = [],
         placeholderID: String,
         model: String,
         turnID: TurnID
     ) {
         timeline.beginResponse(
             displayText: displayText,
+            imageThumbnails: imageThumbnails,
             placeholderID: placeholderID,
             model: model
         )

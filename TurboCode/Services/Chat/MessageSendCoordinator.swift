@@ -105,6 +105,7 @@ final class MessageSendCoordinator {
     func send(
         displayText: String,
         promptText: String,
+        imageAttachments: [ComposerImageAttachment] = [],
         visibleInTimeline: Bool
     ) async -> Bool {
         guard !displayText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -164,6 +165,7 @@ final class MessageSendCoordinator {
                     await performNative(
                         displayText: displayText,
                         promptText: promptText,
+                        imageAttachments: imageAttachments,
                         visibleInTimeline: visibleInTimeline,
                         turnID: turnID
                     )
@@ -468,6 +470,7 @@ final class MessageSendCoordinator {
     private func performNative(
         displayText: String,
         promptText: String,
+        imageAttachments: [ComposerImageAttachment],
         visibleInTimeline: Bool,
         turnID: TurnID
     ) async {
@@ -490,6 +493,7 @@ final class MessageSendCoordinator {
             serverURL: backend == .llamaServer
                 ? modelRuntime.activeRemoteModel?.url
                 : nil,
+            imageAttachments: imageAttachments,
             contextChanged: { [weak self] usage in
                 guard let self, modelRuntime.activeBackend == .llamaServer else { return }
                 presentation.setLlamaContextUsage(usage)

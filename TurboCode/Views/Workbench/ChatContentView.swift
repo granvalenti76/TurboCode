@@ -7,6 +7,8 @@ struct ChatContentView: View {
     @Environment(ChatPresentationViewModel.self) private var presentation
     @Environment(SettingsStore.self) private var settings
     @Environment(ApprovalStore.self) private var approvalStore
+    @Environment(ComposerViewModel.self) private var composer
+    @State private var isImageDropTargeted = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,6 +27,39 @@ struct ChatContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.4), value: chatStore.isFirstMessage)
+        .contentShape(Rectangle())
+        .dropDestination(for: URL.self) { urls, _ in
+            guard !urls.isEmpty else { return false }
+            acceptDroppedFiles(urls)
+            return true
+        } isTargeted: { isImageDropTargeted = $0 }
+        .overlay {
+            if isImageDropTargeted {
+                Rectangle()
+                    .strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 2)
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    /// Decoding runs off the main actor so a large image never stalls the UI.
+    /// The returned attachments join the draft that exists when decoding ends.
+    private func acceptDroppedFiles(_ urls: [URL]) {
+        let existingCount = composer.imageAttachments.count
+        Task {
+            let store = chatStore
+            let outcome = await Task.detached {
+                await ComposerImageIntake.process(
+                    urls: urls,
+                    existingCount: existingCount,
+                    supportsVision: { await store.activeModelSupportsImages() }
+                )
+            }.value
+            composer.addImages(outcome.attachments)
+            if let notice = outcome.notice {
+                composer.showImageNotice(notice)
+            }
+        }
     }
 
     private func errorBanner(_ message: String) -> some View {

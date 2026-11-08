@@ -545,6 +545,7 @@ final class ChatResponseCoordinator {
         workspaceRoot: String,
         modelName: String,
         serverURL: String? = nil,
+        imageAttachments: [ComposerImageAttachment] = [],
         contextChanged: @escaping @MainActor @Sendable (LlamaContextUsage?) -> Void = { _ in },
         usageChanged: @escaping @MainActor @Sendable (Usage?, ContextUsage?) -> Void = { _, _ in }
     ) async -> Result {
@@ -566,6 +567,7 @@ final class ChatResponseCoordinator {
         )
         presenter.beginResponse(
             displayText: visibleInTimeline ? displayText : nil,
+            imageThumbnails: imageAttachments.map(\.thumbnail),
             placeholderID: placeholderID,
             model: modelName,
             turnID: turnID
@@ -619,6 +621,7 @@ final class ChatResponseCoordinator {
                 mode: mode,
                 workspaceKind: workspaceKind,
                 serverURL: serverURL,
+                imageAttachments: imageAttachments,
                 diagnosticsChanged: { [weak self] runID in
                     guard let self, await self.ownsTurn(turnID) else { return }
                     self.diagnostics.activateRun(runID)

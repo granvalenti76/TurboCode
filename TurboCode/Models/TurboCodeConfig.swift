@@ -746,6 +746,9 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
     public var reasoningConfiguration: RemoteReasoningConfiguration
     public var supportsReasoning: Bool
     public var supportsGuidedGeneration: Bool
+    /// Explicit image-input override. `nil` asks llama-server's `/props`, which
+    /// reflects the model actually loaded; set a value for servers without it.
+    public var supportsVision: Bool?
     public var contextWindowTokens: Int
     public var repositoryMap: RemoteRepositoryMapCapability
     public var credential: String?
@@ -770,6 +773,7 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
         reasoningConfiguration: RemoteReasoningConfiguration = .serverManaged,
         supportsReasoning: Bool = true,
         supportsGuidedGeneration: Bool = true,
+        supportsVision: Bool? = nil,
         contextWindowTokens: Int = 32_768,
         repositoryMap: RemoteRepositoryMapCapability = .compact,
         credential: String? = nil,
@@ -782,6 +786,7 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
         self.reasoningConfiguration = reasoningConfiguration
         self.supportsReasoning = supportsReasoning
         self.supportsGuidedGeneration = supportsGuidedGeneration
+        self.supportsVision = supportsVision
         self.contextWindowTokens = contextWindowTokens
         self.repositoryMap = repositoryMap
         self.credential = credential; self.enabled = enabled
@@ -790,7 +795,7 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
     private enum CodingKeys: String, CodingKey {
         case id, name, url, modelName, temperature, provider, role
         case reasoningTransport, reasoningConfiguration
-        case supportsReasoning, supportsGuidedGeneration
+        case supportsReasoning, supportsGuidedGeneration, supportsVision
         case contextWindowTokens, repositoryMap
         case credential, enabled
     }
@@ -816,6 +821,7 @@ nonisolated public struct RemoteModelConfig: Codable, Hashable, Sendable, Identi
             ?? (role != .pcc)
         supportsGuidedGeneration = try values.decodeIfPresent(Bool.self, forKey: .supportsGuidedGeneration)
             ?? (provider != .deepseek)
+        supportsVision = try values.decodeIfPresent(Bool.self, forKey: .supportsVision)
         contextWindowTokens = try values.decodeIfPresent(Int.self, forKey: .contextWindowTokens)
             ?? (provider == .deepseek ? 128_000 : 32_768)
         repositoryMap = try values.decodeIfPresent(

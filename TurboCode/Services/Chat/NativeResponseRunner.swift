@@ -39,6 +39,8 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
         let serverURL: String?
         /// Session-owned relay installed for this request only.
         let reasoningStreamRelay: ReasoningStreamRelay?
+        /// Images belonging to this prompt only. Empty keeps the plain text path.
+        var imageAttachments: [ComposerImageAttachment] = []
     }
 
     enum Outcome {
@@ -148,7 +150,15 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
         }
 
         do {
-            for try await snapshot in session.streamResponse(to: request.prompt) {
+            let stream = request.imageAttachments.isEmpty
+                ? session.streamResponse(to: request.prompt)
+                : session.streamResponse(
+                    to: ComposerImageAttachment.prompt(
+                        text: request.prompt,
+                        attachments: request.imageAttachments
+                    )
+                )
+            for try await snapshot in stream {
                 try Task.checkCancellation()
 
                 if request.backend == .foundationApple, let runID {
@@ -355,8 +365,29 @@ private actor ReasoningStreamProjection {
 /// Reads only server-owned runtime metadata. A failed probe is intentionally
 /// ignored: inference must remain available when an older llama-server build
 /// omits the endpoint or the local server is restarting.
-private enum LlamaServerRuntimeProbe {
+nonisolated enum LlamaServerRuntimeProbe {
     static func contextSize(from baseURL: String?) async -> Int? {
+        guard let object = await props(from: baseURL),
+              let settings = object["default_generation_settings"] as? [String: Any],
+              let value = settings["n_ctx"] as? NSNumber else {
+            return nil
+        }
+        return value.intValue > 0 ? value.intValue : nil
+    }
+
+    /// A failed probe reports no vision: an unreachable server could not accept
+    /// the image anyway, and the failure mode is a notice rather than a bad turn.
+    static func supportsVision(from baseURL: String?) async -> Bool {
+        guard let object = await props(from: baseURL) else { return false }
+        return supportsVision(inProps: object)
+    }
+
+    static func supportsVision(inProps object: [String: Any]) -> Bool {
+        let modalities = object["modalities"] as? [String: Any]
+        return (modalities?["vision"] as? Bool) ?? false
+    }
+
+    private static func props(from baseURL: String?) async -> [String: Any]? {
         guard let baseURL,
               let base = URL(string: baseURL) else { return nil }
 
@@ -368,14 +399,10 @@ private enum LlamaServerRuntimeProbe {
 
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               let httpResponse = response as? HTTPURLResponse,
-              (200..<300).contains(httpResponse.statusCode),
-              let object = try? JSONSerialization.jsonObject(with: data)
-                as? [String: Any],
-              let settings = object["default_generation_settings"] as? [String: Any],
-              let value = settings["n_ctx"] as? NSNumber else {
+              (200..<300).contains(httpResponse.statusCode) else {
             return nil
         }
-        return value.intValue > 0 ? value.intValue : nil
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 }
 
@@ -406,6 +433,7 @@ actor NativeBackendSession: BackendSession {
     private let workspaceKind: String
     private let serverURL: String?
     private let reasoningStreamRelay: ReasoningStreamRelay?
+    private let imageAttachments: [ComposerImageAttachment]
     private let diagnosticsChanged: @MainActor @Sendable (String?) async -> Void
     private let contextChanged: @MainActor @Sendable (
         LlamaContextUsage?
@@ -426,6 +454,7 @@ actor NativeBackendSession: BackendSession {
         workspaceKind: String,
         serverURL: String? = nil,
         reasoningStreamRelay: ReasoningStreamRelay? = nil,
+        imageAttachments: [ComposerImageAttachment] = [],
         diagnosticsChanged: @escaping @MainActor @Sendable (
             String?
         ) async -> Void = { _ in },
@@ -446,6 +475,7 @@ actor NativeBackendSession: BackendSession {
         self.workspaceKind = workspaceKind
         self.serverURL = serverURL
         self.reasoningStreamRelay = reasoningStreamRelay
+        self.imageAttachments = imageAttachments
         self.diagnosticsChanged = diagnosticsChanged
         self.contextChanged = contextChanged
         self.usageChanged = usageChanged
@@ -463,6 +493,7 @@ actor NativeBackendSession: BackendSession {
         let workspaceKind = self.workspaceKind
         let serverURL = self.serverURL
         let reasoningStreamRelay = self.reasoningStreamRelay
+        let imageAttachments = self.imageAttachments
         let diagnosticsChanged = self.diagnosticsChanged
         let contextChanged = self.contextChanged
         let usageChanged = self.usageChanged
@@ -488,7 +519,8 @@ actor NativeBackendSession: BackendSession {
                     mode: mode,
                     workspaceKind: workspaceKind,
                     serverURL: serverURL,
-                    reasoningStreamRelay: reasoningStreamRelay
+                    reasoningStreamRelay: reasoningStreamRelay,
+                    imageAttachments: imageAttachments
                 ),
                 events: NativeResponseRunner.Events(
                     diagnosticsChanged: diagnosticsChanged,
