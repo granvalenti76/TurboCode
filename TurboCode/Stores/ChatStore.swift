@@ -677,7 +677,6 @@ public final class ChatStore {
     func activeModelSupportsImages() async -> Bool {
         await ModelVisionSupport.resolve(
             backend: activeBackend,
-            isCowork: profileSelectionCoordinator.isActiveThreadCowork,
             remoteModel: activeRemoteModel,
             systemModelSupportsVision: { ModelVisionSupport.systemModelSupportsVision() },
             probeServer: { await LlamaServerRuntimeProbe.supportsVision(from: $0) }

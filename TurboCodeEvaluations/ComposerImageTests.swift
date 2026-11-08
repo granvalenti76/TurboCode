@@ -69,16 +69,30 @@ struct ComposerImageTests {
         #expect(!refused)
     }
 
-    @Test("Other backends and Cowork sessions never accept images")
+    @Test("Backends outside image input never accept images")
     func unsupportedRoutesAreRefused() async {
         let model = makeModel(supportsVision: true)
         let codex = await resolve(.codex, model: model, probe: true, system: true)
         let premium = await resolve(.premium, model: model, probe: true, system: true)
-        let cowork = await resolve(.llamaServer, model: model, probe: true, system: true, isCowork: true)
 
         #expect(!codex)
         #expect(!premium)
-        #expect(!cowork)
+    }
+
+    /// Image input stays independent of VM services: an image travels in the
+    /// model prompt, so this adapter must never reach the Cowork runtime.
+    @Test("Image handling source has no dependency on the Cowork VM")
+    func imageHandlingStaysOutsideTheVM() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("TurboCode/Models/ComposerImageAttachment.swift"),
+            encoding: .utf8
+        )
+        for forbidden in ["CoworkVMRuntime", "import Containerization", "VMFileTool", "VMExecTool"] {
+            #expect(!source.contains(forbidden))
+        }
     }
 
     // MARK: Loading
@@ -284,12 +298,10 @@ struct ComposerImageTests {
         _ backend: ModelBackend,
         model: RemoteModelConfig?,
         probe: Bool,
-        system: Bool = false,
-        isCowork: Bool = false
+        system: Bool = false
     ) async -> Bool {
         await ModelVisionSupport.resolve(
             backend: backend,
-            isCowork: isCowork,
             remoteModel: model,
             systemModelSupportsVision: { system },
             probeServer: { _ in probe }

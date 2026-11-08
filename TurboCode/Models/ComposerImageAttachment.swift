@@ -230,17 +230,16 @@ extension ComposerImageAttachment {
 /// Answers whether the active model can receive images right now.
 nonisolated enum ModelVisionSupport {
     /// Only the two backends this feature was validated on accept images.
-    /// Cowork has a fixed VM tool plan and is excluded with its own focused rule.
+    /// Coding and Cowork answer alike: an image goes to the model in the prompt
+    /// and never enters the VM, so the Cowork file boundary is not involved.
     /// An unset `supportsVision` falls back to asking llama-server, because the
     /// model behind one configured endpoint can change between launches.
     static func resolve(
         backend: ModelBackend,
-        isCowork: Bool,
         remoteModel: RemoteModelConfig?,
         systemModelSupportsVision: @Sendable () -> Bool,
         probeServer: @Sendable (String) async -> Bool
     ) async -> Bool {
-        guard !isCowork else { return false }
         switch backend {
         case .foundationApple:
             return systemModelSupportsVision()

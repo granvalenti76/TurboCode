@@ -18,8 +18,10 @@ saved, restored, and recovered.
   composer, up to four images of at most 20 MB each.
 - When the active model has no vision support, a dropped image shows a brief
   notice instead of being added. Support is read from the new `supportsVision`
-  key or, when it is absent, from the running llama-server. Other backends and
-  Cowork sessions do not accept images.
+  key or, when it is absent, from the running llama-server. Other backends do
+  not accept images.
+- Image input also works in Cowork sessions. The image reaches only the model
+  and is not copied into the VM.
 - Sent images appear as thumbnails in the conversation.
 
 ### Fixes

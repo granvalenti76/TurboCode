@@ -79,7 +79,11 @@ When `supportsVision` is absent, TurboCode asks the running server through
 `modalities.vision` on its `/props` endpoint, so the answer follows the model
 actually loaded. Set the value for OpenAI-compatible servers without that
 endpoint. Apple on-device uses the system model's reported capability. Other
-backends and Cowork sessions do not accept images.
+backends do not accept images.
+
+Coding and Cowork sessions follow the same rule. In Cowork the image reaches
+only the model: it is not copied into the VM, so `vm_exec` and `vm_file` cannot
+open it unless the file is also in the shared folder.
 
 Images are resized to at most 1568 px on the longest edge and are never written
 to disk. Stored sessions keep only a `[Image: name]` marker in the message text,
