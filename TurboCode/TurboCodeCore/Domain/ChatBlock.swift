@@ -1,5 +1,12 @@
 import Foundation
 
+/// Small preview of an image the user sent with a message.
+nonisolated struct ChatImageThumbnail: Identifiable, Sendable, Hashable {
+    let id: UUID
+    let fileName: String
+    let jpegData: Data
+}
+
 // MARK: - ChatBlock — a single message or event block in the timeline
 
 /// Immutable timeline data emitted by the core and rendered by an arbitrary
@@ -21,6 +28,9 @@ nonisolated public struct ChatBlock: Identifiable, Sendable, Hashable {
     public var pluginWidget: TypeScriptPluginWidgetReceipt?
     public var editorialPublication: EditorialPublicationBlock?
     var steeringDelivery: SteeringDeliveryMetadata?
+    /// Live-session previews only. `StoredBlock` deliberately has no counterpart:
+    /// image bytes are not persisted, and the file names survive in `text`.
+    var imageThumbnails: [ChatImageThumbnail] = []
 
     public init(
         id: String = UUID().uuidString,

@@ -67,7 +67,15 @@ struct ChatBlockView: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 4) {
-                Text(block.text)
+                if !block.imageThumbnails.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(block.imageThumbnails) { thumbnail in
+                            ImageThumbnailView(thumbnail: thumbnail, size: 96)
+                        }
+                    }
+                }
+
+                Text(userBubbleText)
                     .font(AppTypography.chatBody(size: max(13, chatFontSize - 1)))
                     .foregroundStyle(AppTypography.chatForeground)
                     .textSelection(.enabled)
@@ -82,7 +90,7 @@ struct ChatBlockView: View {
                     .contextMenu {
                         Button("Copy") {
                             NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(block.text, forType: .string)
+                            NSPasteboard.general.setString(userBubbleText, forType: .string)
                         }
                     }
 
@@ -93,6 +101,15 @@ struct ChatBlockView: View {
             }
             .frame(maxWidth: 600, alignment: .trailing)
         }
+    }
+
+    /// The stored image marker shows only once the thumbnails are gone, after
+    /// the session is reloaded from disk.
+    private var userBubbleText: String {
+        ChatImageReference.removing(
+            fileNames: block.imageThumbnails.map(\.fileName),
+            from: block.text
+        )
     }
 
     // MARK: - Assistant Bubble (left-aligned)

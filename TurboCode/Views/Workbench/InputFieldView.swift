@@ -13,6 +13,7 @@ struct InputFieldView: View {
     @State private var selectedSlashCommandIndex = 0
     @State private var showsDynamicRouting = false
     @State private var coworkDeliverableCount = 0
+    @State private var isSubmittingImages = false
 
     let compact: Bool
 
@@ -26,6 +27,13 @@ struct InputFieldView: View {
     var body: some View {
         VStack(spacing: 0) {
             SteeringQueueView()
+            if let notice = composer.imageNotice {
+                Label(notice, systemImage: "photo")
+                    .font(AppTypography.metadata)
+                    .foregroundStyle(.secondary)
+                    .padding(.bottom, 6)
+                    .transition(.opacity)
+            }
             composerCard
                 .background(
                     Color(nsColor: .textBackgroundColor),
@@ -41,6 +49,7 @@ struct InputFieldView: View {
         .padding(.horizontal, 24)
         .padding(.top, 6)
         .padding(.bottom, compact ? 16 : 12)
+        .animation(.easeInOut(duration: 0.2), value: composer.imageNotice)
     }
 
     // MARK: - Composer Card
@@ -78,6 +87,10 @@ struct InputFieldView: View {
         // Keep the invitation workspace-oriented; the active profile and tools
         // provide specialization without narrowing what users think they can ask.
         return VStack(alignment: .leading, spacing: 8) {
+            if !composer.imageAttachments.isEmpty {
+                imageAttachmentRow
+            }
+
             TextField(
                 "What would you like to do in this project?",
                 text: Binding(
@@ -125,6 +138,28 @@ struct InputFieldView: View {
 
             if isFocused && !chatStore.busy && !slashSuggestions.isEmpty {
                 slashCommandMenu
+            }
+        }
+    }
+
+    /// A SwiftUI `TextField` cannot host inline images, so thumbnails sit in
+    /// their own row inside the same card, directly above the text.
+    private var imageAttachmentRow: some View {
+        HStack(spacing: 8) {
+            ForEach(composer.imageAttachments) { attachment in
+                ImageThumbnailView(thumbnail: attachment.thumbnail, size: 56)
+                    .overlay(alignment: .topTrailing) {
+                        Button {
+                            composer.removeImage(id: attachment.id)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(.white, .black.opacity(0.6))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(3)
+                        .accessibilityLabel("Remove image \(attachment.fileName)")
+                    }
             }
         }
     }
@@ -538,12 +573,39 @@ struct InputFieldView: View {
             isFocused = true
             return
         }
+        if !composer.imageAttachments.isEmpty {
+            sendComposerInputWithImages(text)
+            return
+        }
         // Clear the shared draft before starting inference so recovery drafts
         // and ordinary composer input follow the same lifecycle.
         composer.reset()
         Task {
             if await commandRouter.execute(text) == false {
                 await chatStore.sendMessage(text)
+            }
+        }
+    }
+
+    /// Rechecks vision before clearing anything: the model may have changed since
+    /// the drop, and a refusal must leave both the text and the images in place.
+    /// Images are taken only after the router declines the text, because a local
+    /// command never reaches the model and must leave them in the draft.
+    private func sendComposerInputWithImages(_ text: String) {
+        guard !isSubmittingImages else { return }
+        isSubmittingImages = true
+        let generation = composer.editGeneration
+        Task {
+            defer { isSubmittingImages = false }
+            guard await chatStore.activeModelSupportsImages() else {
+                composer.showImageNotice(ComposerImageNotice.visionUnsupported)
+                return
+            }
+            // Text typed during the probe is not what the user chose to send.
+            guard composer.editGeneration == generation else { return }
+            composer.reset()
+            if await commandRouter.execute(text) == false {
+                await chatStore.sendMessage(text, images: composer.takeImages())
             }
         }
     }

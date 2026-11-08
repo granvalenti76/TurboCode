@@ -113,6 +113,25 @@ nonisolated enum SessionRebuildHistory {
                 return true
             }
         }
+        .map(replacingImageAttachments)
+    }
+
+    /// Rebuilds may target a different model, and a server without vision rejects
+    /// any request whose history holds an image, which would break every later
+    /// turn in the conversation. The image is dropped for all rebuilds because the
+    /// target's support is only known asynchronously. Keeping the entry `id` lets
+    /// interrupted-turn repair still match this history against its baseline.
+    private static func replacingImageAttachments(
+        in entry: Transcript.Entry
+    ) -> Transcript.Entry {
+        guard case .prompt(var prompt) = entry else { return entry }
+        var didReplace = false
+        prompt.segments = prompt.segments.map { segment in
+            guard case .attachment = segment else { return segment }
+            didReplace = true
+            return textSegment("[Image no longer available]")
+        }
+        return didReplace ? .prompt(prompt) : entry
     }
 
     /// Repairs the semantic history of a provider turn that was cancelled
