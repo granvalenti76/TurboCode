@@ -263,6 +263,16 @@ nonisolated struct SteeringState: Codable, Hashable, Sendable {
         return true
     }
 
+    /// Drops the queue when the runtime leaves its conversation. The transition
+    /// barrier has already checkpointed these requests into that conversation's
+    /// file, so reopening it brings them back; keeping them would show them in
+    /// the next conversation and save them into its file too. The sequence keeps
+    /// advancing so a later request can never reuse an earlier position.
+    mutating func discardRequestsForContextChange() {
+        guard activeDelivery == nil else { return }
+        requests = []
+    }
+
     func requests(for batch: SteeringDeliveryBatch) -> [SteeringRequest] {
         batch.requestIDs.compactMap { id in
             requests.first(where: { $0.id == id })

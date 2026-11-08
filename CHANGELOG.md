@@ -43,6 +43,9 @@ saved, restored, and recovered.
   Coding and Cowork.
 - Resuming a failed steering request, or one left over from an earlier launch,
   now sends it instead of doing nothing.
+- Steering requests no longer follow you into a new session or get saved into
+  it. They stay with their own conversation and return when it is reopened.
+  Requests already copied into a session must be removed by hand.
 - Interrupting a turn no longer leaves tool calls without output in the history,
   which OpenAI-compatible servers rejected on the next request.
 - Sessions written by a newer TurboCode are no longer decoded and rewritten with

@@ -59,6 +59,38 @@ struct SteeringStateTests {
         #expect(state.activeDelivery == nil)
     }
 
+    @Test("Steering does not follow the runtime into another conversation")
+    func switchingConversationDiscardsQueue() async {
+        let runtime = AgentRuntime(activeThreadID: "old-thread")
+        var seeded = SteeringState()
+        _ = seeded.enqueue(text: "Old correction", context: makeContext())
+        await runtime.restoreSteering(seeded.snapshot)
+        let saved = await runtime.steeringSnapshot
+
+        #expect(await runtime.apply(.switchThread(threadID: "new-thread")))
+        #expect(await runtime.steeringSnapshot.requests.isEmpty)
+        #expect(await runtime.snapshot.steering.requests.isEmpty)
+
+        // Reopening the original conversation reinstalls its saved queue.
+        #expect(await runtime.apply(.restore(threadID: "old-thread")))
+        await runtime.restoreSteering(saved)
+        #expect(await runtime.steeringSnapshot.requests.map(\.text) == ["Old correction"])
+    }
+
+    @Test("Re-selecting the current conversation keeps its steering")
+    func reselectingConversationKeepsQueue() async {
+        let runtime = AgentRuntime(activeThreadID: "thread")
+        var seeded = SteeringState()
+        _ = seeded.enqueue(text: "Keep this", context: makeContext())
+        await runtime.restoreSteering(seeded.snapshot)
+
+        #expect(await runtime.apply(.switchThread(threadID: "thread")))
+
+        let requests = await runtime.steeringSnapshot.requests
+        #expect(requests.map(\.text) == ["Keep this"])
+        #expect(requests.first?.state == .paused)
+    }
+
     @Test("Uncertain delivery is not automatically retryable")
     func doesNotRetryUncertainDelivery() {
         var state = SteeringState()

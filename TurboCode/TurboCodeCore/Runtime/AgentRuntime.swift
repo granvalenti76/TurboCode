@@ -172,7 +172,10 @@ actor AgentRuntime {
         case .switchThread(let threadID):
             return await resetContext(
                 activeThreadID: threadID,
-                backend: snapshot.backend
+                backend: snapshot.backend,
+                // Steering belongs to one conversation. Re-selecting the current
+                // thread keeps its queue, which is only paused as on any reset.
+                discardingSteering: threadID != snapshot.activeThreadID
             )
         case .switchBackend(let selection):
             return await resetContext(
@@ -469,12 +472,16 @@ actor AgentRuntime {
     private func resetContext(
         activeThreadID: String?,
         backend: ModelBackend,
+        discardingSteering: Bool = false,
         at date: Date = Date()
     ) async -> Bool {
         guard snapshot.turn?.outcome != nil || snapshot.turn == nil else {
             return false
         }
         guard steeringState.advanceContextGeneration() else { return false }
+        if discardingSteering {
+            steeringState.discardRequestsForContextChange()
+        }
         turnReducer.reset()
         activeSteeringContext = nil
         contextOperationKind = nil
