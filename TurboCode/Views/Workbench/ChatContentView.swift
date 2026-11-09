@@ -91,14 +91,21 @@ struct ChatContentView: View {
         VStack(spacing: 24) {
             Spacer()
 
-            VStack(spacing: 8) {
-                Text("What should we build in TurboCode?")
-                    .font(AppTypography.emptyStateTitle)
-                    .foregroundStyle(.primary)
+            // Studio (the Cowork domain) explains itself above the composer;
+            // Coding keeps its plain prompt and must not change with it.
+            if chatStore.activeDomain == .cowork {
+                StudioHomeView()
+                    .frame(maxWidth: min(CGFloat(settings.maxChatWidth), 720))
+            } else {
+                VStack(spacing: 8) {
+                    Text("What should we build in TurboCode?")
+                        .font(AppTypography.emptyStateTitle)
+                        .foregroundStyle(.primary)
 
-                Text("Ask anything or describe what you want to create")
-                    .font(AppTypography.emptyStateSubtitle)
-                    .foregroundStyle(.secondary)
+                    Text("Ask anything or describe what you want to create")
+                        .font(AppTypography.emptyStateSubtitle)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             InputFieldView(compact: true)
