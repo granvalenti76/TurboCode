@@ -507,6 +507,36 @@ public final class ChatStore {
         _ = await profileSelectionCoordinator.rebuildSession()
     }
 
+    /// The facade extension lives in another file and cannot reach the
+    /// private coordinator, so the session's skill catalog is exposed here.
+    var activeSkillCatalog: [TurboCodeSkillDefinition] {
+        profileSelectionCoordinator.activeSkillCatalog()
+    }
+
+    /// Turns a built-in connector on or off for the active session and
+    /// rebuilds the session, because its tool list is fixed when it is built.
+    /// Refused while the agent works: a rebuild would cut the running turn.
+    /// Returns whether the change was applied.
+    ///
+    /// A new chat has no session until its first message. The session is
+    /// created here instead, so a connector can be chosen before writing
+    /// anything rather than after a throwaway first message.
+    @discardableResult
+    func setConnector(_ id: String, enabled: Bool) async -> Bool {
+        guard !busy else { return false }
+        if activeConversation == nil { await ensureActiveThread() }
+        guard let conversation = activeConversation,
+              let connector = MCPConnectorCatalog.connector(id: id),
+              connector.domains.contains(conversation.domain) else { return false }
+        conversationStore.setConnectors(
+            MCPConnectorCatalog.ids(conversation.connectors, setting: id, enabled: enabled),
+            for: conversation.id
+        )
+        await persistConversationMetadata(for: conversation.id)
+        _ = await profileSelectionCoordinator.rebuildSession()
+        return true
+    }
+
     /// Opens the export review for the active Cowork session. The default
     /// destination is the session's shared folder when it still exists.
     func presentCoworkExport() {

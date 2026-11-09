@@ -40,7 +40,9 @@ nonisolated struct ModelSessionConfiguration: Sendable {
     let orchestratorMode: OrchestratorMode
     let workspaceRoot: String
     let agentTuning: AgentTuningConfig
-    let availableSkills: [TurboCodeSkillDefinition]
+    /// Mutable only so the caller that knows the conversation can add the
+    /// skills of its enabled connectors before the session is built.
+    var availableSkills: [TurboCodeSkillDefinition]
     /// Pre-resolved on the application actor so concurrent session assembly
     /// never reaches through `TurboCodeConfig.shared` for a global dependency.
     let documentationStore: ProductDocumentationStore
@@ -67,6 +69,10 @@ nonisolated struct ModelSessionConfiguration: Sendable {
     /// Non-nil exactly for Cowork sessions. When present the session gets the
     /// fixed VM tool plan and no host workspace, plugin, or MCP capability.
     let cowork: CoworkSessionContext?
+    /// The connectors the user enabled for this session, already limited to
+    /// the session's domain. Set by the caller that knows the conversation;
+    /// background and delegated sessions keep the empty default.
+    var connectors: [MCPConnector] = []
 
     init(
         backend: ModelBackend,
@@ -419,7 +425,8 @@ nonisolated enum ModelSessionFactory {
                     .xcodeMCP,
                     .writeOnDevice,
                     .createSkill,
-                    .safariMCP
+                    .safariMCP,
+                    .connector
                 ],
             repositoryMapContextTokens: activeRemoteConfiguration?.contextWindowTokens
                 ?? 32_768,
@@ -824,6 +831,18 @@ nonisolated enum ModelSessionFactory {
                     client: .shared,
                     enabled: configuration.agentTuning.experimental.xcodeMCPEnabled
                 )
+            case .connector:
+                guard !configuration.connectors.isEmpty else { return nil }
+                let backend = configuration.backend
+                let remoteModel = configuration.activeRemoteModel
+                return ConnectorTool(connectors: configuration.connectors) {
+                    await ModelVisionSupport.resolve(
+                        backend: backend,
+                        remoteModel: remoteModel,
+                        systemModelSupportsVision: { ModelVisionSupport.systemModelSupportsVision() },
+                        probeServer: { await LlamaServerRuntimeProbe.supportsVision(from: $0) }
+                    )
+                }
             case .loadSkill:
                 guard !configuration.availableSkills.isEmpty else { return nil }
                 return LoadSkillTool(skills: configuration.availableSkills)
@@ -1057,6 +1076,7 @@ nonisolated enum ModelSessionFactory {
             hasSkills: !configuration.availableSkills.isEmpty,
             safariMCPEnabled: configuration.agentTuning.experimental.safariMCPEnabled,
             xcodeMCPEnabled: configuration.agentTuning.experimental.xcodeMCPEnabled,
+            hasSessionConnectors: !configuration.connectors.isEmpty,
             hasDelegateModel: configuration.delegateRemoteModel.enabled,
             repositoryMapDetail: repositoryMap?.detail
         )

@@ -30,6 +30,10 @@ nonisolated enum ToolCapabilityID: String, CaseIterable, Codable, Sendable, Hash
     case removeFile = "remove_file"
     case safariMCP = "safari_mcp"
     case xcodeMCP = "xcode_mcp"
+    /// Gateway to the connectors the user turned on for one session. It is
+    /// registered from the session, never from profile membership, and is the
+    /// only capability besides the VM tools a Cowork session can receive.
+    case connector
     case loadSkill = "load_skill"
     case createSkill = "create_skill"
     case delegateTask = "delegate_task"
@@ -83,6 +87,8 @@ nonisolated enum ToolAvailabilityRequirement: Sendable, Hashable {
     case repositoryMap
     case capableWorkspace
     case xcodeMCP
+    /// Registered only while the session has at least one connector enabled.
+    case connectors
     /// Registered only in Cowork sessions, never from profile membership.
     case coworkVM
 }
@@ -92,6 +98,8 @@ nonisolated struct ToolAccessContext: Sendable, Hashable {
     let hasSkills: Bool
     let safariMCPEnabled: Bool
     let xcodeMCPEnabled: Bool
+    /// Whether the user enabled at least one connector for the session.
+    let hasSessionConnectors: Bool
     let hasDelegateModel: Bool
     let repositoryMapDetail: RepositoryMapDetail?
 
@@ -100,6 +108,7 @@ nonisolated struct ToolAccessContext: Sendable, Hashable {
         hasSkills: Bool,
         safariMCPEnabled: Bool = false,
         xcodeMCPEnabled: Bool = false,
+        hasSessionConnectors: Bool = false,
         hasDelegateModel: Bool,
         repositoryMapDetail: RepositoryMapDetail?
     ) {
@@ -107,6 +116,7 @@ nonisolated struct ToolAccessContext: Sendable, Hashable {
         self.hasSkills = hasSkills
         self.safariMCPEnabled = safariMCPEnabled
         self.xcodeMCPEnabled = xcodeMCPEnabled
+        self.hasSessionConnectors = hasSessionConnectors
         self.hasDelegateModel = hasDelegateModel
         self.repositoryMapDetail = repositoryMapDetail
     }
@@ -262,6 +272,14 @@ nonisolated enum ModelToolCatalog {
             hasNativePresentation: false
         ),
         .init(
+            id: .connector,
+            name: "Connectors",
+            summary: "Work with another app through a connector enabled for the session.",
+            category: .execution,
+            systemImage: "powerplug",
+            hasNativePresentation: false
+        ),
+        .init(
             id: .loadSkill,
             name: "Load Skill",
             summary: "Load a matching workspace skill on demand.",
@@ -341,8 +359,12 @@ nonisolated enum ModelToolCatalog {
     /// The fixed tool surface of a Cowork session. The domain decides the
     /// tools; the active profile only chooses the model. Every capability that
     /// can read or change the Mac is absent by construction.
+    ///
+    /// The one addition is the connector gateway, and only for a session whose
+    /// user enabled a connector: it reaches a named app through that app's own
+    /// MCP operations, not the Mac's shell or files.
     static func coworkPlan(tier: ModelToolTier, context: ToolAccessContext) -> ModelToolPlan {
-        let memberships: [(ToolCapabilityID, ToolAvailabilityRequirement)] = [
+        var memberships: [(ToolCapabilityID, ToolAvailabilityRequirement)] = [
             (.turboCodeGuide, .always),
             (.loadSkill, .skills),
             (.vmExec, .coworkVM),
@@ -353,6 +375,9 @@ nonisolated enum ModelToolCatalog {
             // cannot see.
             (.vmViewImage, .coworkVM)
         ]
+        if context.hasSessionConnectors {
+            memberships.append((.connector, .connectors))
+        }
         let assignments = memberships.map { id, requirement in
             assignment(id: id, requirement: requirement, tier: tier, context: context)
         }
@@ -403,7 +428,17 @@ nonisolated enum ModelToolCatalog {
            !memberships.contains(where: { $0.0 == .xcodeMCP }) {
             memberships.append((.xcodeMCP, .xcodeMCP))
         }
+        // Connectors are a per-session choice, so unlike the global opt-ins
+        // above they also join a custom profile's explicit selection: the
+        // session switch would otherwise do nothing there. Delegated workers
+        // stay bounded to workspace-scoped operations.
+        if context.hasSessionConnectors,
+           profile != .delegate,
+           !memberships.contains(where: { $0.0 == .connector }) {
+            memberships.append((.connector, .connectors))
+        }
         let assignments = memberships.compactMap { id, requirement -> ModelToolAssignment? in
+            if profile == .delegate, id == .connector { return nil }
             if profile == .delegate, id == .safariMCP { return nil }
             if profile == .delegate, id == .xcodeMCP { return nil }
             if requirement == .repositoryMap,
@@ -429,6 +464,7 @@ nonisolated enum ModelToolCatalog {
         case .loadSkill: .skills
         case .safariMCP: .safariMCP
         case .xcodeMCP: .xcodeMCP
+        case .connector: .connectors
         case .delegateTask, .callPowerfulModel: .delegateModel
         case .vmExec, .vmFile, .vmExport, .vmViewImage: .coworkVM
         }
@@ -519,6 +555,12 @@ nonisolated enum ModelToolCatalog {
                 id: id,
                 isRegistered: false,
                 unavailableReason: "Enable Safari MCP in Settings > Agents > Experimental"
+            )
+        case .connectors where !context.hasSessionConnectors:
+            return .init(
+                id: id,
+                isRegistered: false,
+                unavailableReason: "Turn on a connector for the session in Connectors"
             )
         case .xcodeMCP where !context.xcodeMCPEnabled:
             return .init(

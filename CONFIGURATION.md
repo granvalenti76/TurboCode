@@ -204,6 +204,21 @@ disappears without closing the connection, the turn waits until you press Stop.
 Tool commands keep their own timeouts, including the Xcode verification that
 follows a delegated task.
 
+## Connectors
+
+Connectors are built in; there is no file to edit and no endpoint to
+configure. Each one talks to a named app over MCP on `127.0.0.1` and is turned
+on per session from **Connectors** in the sidebar. The choice is saved with the
+session (`connectors` in the session file) and is empty by default.
+
+| Connector | App endpoint | Available in |
+| --- | --- | --- |
+| Prassitele | `http://127.0.0.1:48765/mcp` (Agent › Agent Server (MCP) in the app) | Coding, Studio |
+| Safari | `safaridriver --mcp`, the Safari MCP switch in **Settings › Agents** | Coding |
+
+Safari keeps its single switch for all Coding sessions; the Connectors page
+shows the same value.
+
 ## Studio
 
 Studio runs multi-purpose work in one managed Linux VM built on Apple

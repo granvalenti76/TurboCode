@@ -23,6 +23,8 @@ struct MainStageView: View {
                 ToolsView()
             case .artifacts:
                 CoworkArtifactsLibraryView()
+            case .connectors:
+                ConnectorsView()
             case .skills:
                 // Custom Profiles is presented modally over the current route;
                 // this fallback keeps restored legacy state on a working canvas.

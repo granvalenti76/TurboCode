@@ -225,13 +225,29 @@ on-device orchestrator. It remains implemented for compatibility, but new
 custom profiles that include **Delegate Task** should use the safer, structured
 route.
 
+### `connector`
+
+The gateway to the built-in connectors, such as Prassitele. A connector lets
+the model work with one named app on your Mac through the operations that app
+publishes over MCP on the loopback interface (`127.0.0.1`). It is registered
+only for a session in which you turned a connector on in **Connectors**, and it
+reaches only the connectors enabled for that session. Use `list_tools` first,
+then `call` with an exact advertised tool name and a JSON object.
+
+Turning a connector on is the approval: its calls are not confirmed one by one.
+Images a connector returns, such as a view of a sculpture, are shown to models
+with vision and left out for the others. The gateway is never passed to
+delegated workers and is not available to the Codex backend.
+
 ## Studio VM tools
 
 Studio sessions have a fixed tool surface: the product guide, Markdown skills
-when installed, and the three tools below. They act only inside the isolated
+when installed, and the tools below. They act only inside the isolated
 Studio Linux VM. No Coding profile, default or custom, can include them, and a
-Studio session never receives workspace, Git, Xcode, SwiftPM, MCP, plugin, or
-delegation tools that could read or change the Mac.
+Studio session never receives workspace, Git, Xcode, SwiftPM, Safari, Xcode
+MCP, plugin, or delegation tools that could read or change the Mac. The one
+exception is `connector`, and only in a session where you enabled a connector:
+it talks to a named app, not to the Mac's shell or files.
 
 ### `vm_exec`
 

@@ -21,6 +21,12 @@ nonisolated public struct Conversation: Identifiable, Sendable, Hashable {
     /// Cowork only: the Mac folder shared read-only with the VM at `/work`.
     /// `nil` shares nothing. Ignored for Coding sessions.
     public var coworkFolder: String?
+    /// Identifiers of the connectors the user turned on for this session.
+    /// Empty by default: a connector lets the model drive another app, so a
+    /// session never gains one without an explicit choice. Identifiers that
+    /// no longer name a built-in connector are ignored when the session is
+    /// built.
+    public var connectors: [String]
 
     public init(
         id: String = UUID().uuidString,
@@ -32,7 +38,8 @@ nonisolated public struct Conversation: Identifiable, Sendable, Hashable {
         workspace: String? = nil,
         mode: ConversationMode = .agent,
         domain: SessionDomain = .coding,
-        coworkFolder: String? = nil
+        coworkFolder: String? = nil,
+        connectors: [String] = []
     ) {
         self.id = id
         self.title = title
@@ -44,6 +51,7 @@ nonisolated public struct Conversation: Identifiable, Sendable, Hashable {
         self.mode = mode
         self.domain = domain
         self.coworkFolder = coworkFolder
+        self.connectors = connectors
     }
 }
 

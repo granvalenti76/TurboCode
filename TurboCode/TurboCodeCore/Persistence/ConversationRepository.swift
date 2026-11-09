@@ -354,7 +354,8 @@ private extension Conversation {
             workspace: workspace,
             mode: mode,
             domain: domain,
-            coworkFolder: coworkFolder
+            coworkFolder: coworkFolder,
+            connectors: connectors
         )
     }
 }
@@ -376,7 +377,8 @@ private extension ConversationSnapshot {
             workspace: stored.workspacePath,
             mode: stored.mode,
             domain: stored.domain,
-            coworkFolder: stored.coworkFolder
+            coworkFolder: stored.coworkFolder,
+            connectors: stored.connectors ?? []
         )
         modelBackend = stored.modelBackend
         blocks = stored.blocks.map(ChatBlock.init)
@@ -408,6 +410,9 @@ private extension ConversationSnapshot {
         )
         storedSession.statistics = statistics
         storedSession.coworkFolder = conversation.coworkFolder
+        // Written only when used, so sessions without connectors keep the
+        // exact file shape they had before the field existed.
+        storedSession.connectors = conversation.connectors.isEmpty ? nil : conversation.connectors
         return storedSession
     }
 }

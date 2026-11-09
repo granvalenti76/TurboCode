@@ -32,6 +32,22 @@ appear above the cards and open the session that made them.
 Studio works with the on-device, Llama, and DeepSeek profiles. Codex runs its
 own shell on the Mac, so it is not available in Studio.
 
+## Connectors
+
+**Connectors** in the sidebar lists the built-in connectors. Turn one on to let
+the current session work with that app, for example to block out a sculpture in
+Prassitele. A connector is off until you turn it on, the choice belongs to that
+session only, and it cannot be changed while the agent is working. The app must
+be running on this Mac with its MCP server on; the page shows whether it
+answers. A connector gives the model that app's own operations and nothing
+else: it is not a way out of the VM for commands or files.
+
+You can also turn a connector on from the home view of a new Studio session,
+before writing the first message. A connector may bring a skill with it:
+Prassitele adds `prassitele-sculpting`, its method for blocking out a head or a
+bust. The skill is only made available; the model loads it when a request
+calls for it.
+
 ## What the agent can do
 
 The VM is a Debian 12 system with Node.js 24, Python 3.11, headless Chromium,

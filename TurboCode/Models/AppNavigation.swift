@@ -13,6 +13,8 @@ public enum AppRoute: String, Sendable, Hashable, CaseIterable {
     /// The library of files Cowork sessions placed in their outboxes. Offered
     /// only in the Cowork domain; Coding results live in the workspace.
     case artifacts
+    /// The built-in connectors and their switch for the active session.
+    case connectors
 }
 
 // MARK: - Right Panel Mode

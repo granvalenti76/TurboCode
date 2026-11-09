@@ -41,12 +41,46 @@ struct StudioHomeView: View {
                     }
                 }
             }
+
+            connectorRow
         }
         // Other sessions keep working while this one is still empty; reload
         // when a turn ends so their new files show up here too.
         .task(id: chatStore.busy) {
             recents = StudioHomeContent.recentArtifacts(in: await chatStore.coworkArtifactLibrary())
             revision += 1
+        }
+    }
+
+    /// The connectors a Studio session may use, as switches for the session
+    /// about to start, so enabling one does not need a trip to Connectors.
+    @ViewBuilder
+    private var connectorRow: some View {
+        let connectors = MCPConnectorCatalog.all.filter { $0.domains.contains(.cowork) }
+        if !connectors.isEmpty {
+            HStack(spacing: 8) {
+                Text("Connectors")
+                    .font(AppTypography.metadata)
+                    .foregroundStyle(.secondary)
+                ForEach(connectors) { connector in
+                    Toggle(isOn: Binding(
+                        get: { chatStore.activeConversation?.connectors.contains(connector.id) == true },
+                        set: { enabled in Task { await chatStore.setConnector(connector.id, enabled: enabled) } }
+                    )) {
+                        Label(connector.name, systemImage: connector.systemImage)
+                            .font(AppTypography.metadata)
+                    }
+                    .toggleStyle(.button)
+                    .controlSize(.small)
+                    .disabled(chatStore.busy)
+                    .help(connector.summary)
+                    .accessibilityHint("Turns the connector on or off for this session")
+                }
+                Button("All connectors") { chatStore.setRoute(.connectors) }
+                    .buttonStyle(.link)
+                    .font(AppTypography.metadata)
+                Spacer(minLength: 0)
+            }
         }
     }
 

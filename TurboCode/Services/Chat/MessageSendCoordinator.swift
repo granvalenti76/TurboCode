@@ -85,7 +85,9 @@ final class MessageSendCoordinator {
             // capability prefix while preserving visible conversation history.
             await profiles.rebuildSession()
         }
-        return modelRuntime.resolvedPrompt(for: text)
+        // Resolved against the conversation's catalog, not the global one,
+        // so `/name` also activates a skill offered by an enabled connector.
+        return ModelRuntimeStore.resolvedPrompt(for: text, skills: profiles.activeSkillCatalog())
     }
 
     /// Records an application-owned file receipt without entering the model

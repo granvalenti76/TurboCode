@@ -251,11 +251,13 @@ struct SidebarView: View {
 
     private enum UtilityItem: CaseIterable {
         case tools
+        case connectors
         case skills
 
         var label: String {
             switch self {
             case .tools: "Tools"
+            case .connectors: "Connectors"
             case .skills: "Profiles"
             }
         }
@@ -264,12 +266,14 @@ struct SidebarView: View {
             // Tools is a capability catalog and matrix, so a neutral grid is
             // more faithful than a physical construction or settings metaphor.
             case .tools: return "square.grid.2x2"
+            case .connectors: return "powerplug"
             case .skills: return "doc.text"
             }
         }
         var route: AppRoute {
             switch self {
             case .tools: .tools
+            case .connectors: .connectors
             case .skills: .skills
             }
         }
