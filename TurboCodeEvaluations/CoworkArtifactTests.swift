@@ -93,6 +93,67 @@ struct CoworkArtifactTests {
         #expect(CoworkArtifactCatalog.selection(current: "page.png", previous: before, updated: []) == nil)
     }
 
+    // MARK: Live previews
+
+    @Test("Only servers listening on every interface above the system ports are offered")
+    func probeOffersReachableServers() {
+        let output = """
+        00000000:0BB8
+        0100007F:1F90
+        00000000:0035
+        00000000000000000000000000000000:1435
+        00000000000000000000000001000000:2328
+        00000000:0BB8
+        ---
+        192.168.64.3 fd00::3
+
+        """
+
+        let previews = CoworkLivePreviewProbe.parse(output)
+
+        // 3000 on 0.0.0.0 and 5173 on [::]; loopback 8080 and 9000 and the
+        // DNS port 53 are left out, and the duplicate is listed once.
+        #expect(previews.map(\.port) == [3000, 5173])
+        #expect(previews.first?.url?.absoluteString == "http://192.168.64.3:3000/")
+        #expect(previews.first?.id == "/live/3000")
+    }
+
+    @Test("Without a guest IPv4 address or with unexpected output nothing is offered")
+    func probeNeedsAnAddress() {
+        #expect(CoworkLivePreviewProbe.parse("00000000:0BB8\n---\n\n").isEmpty)
+        #expect(CoworkLivePreviewProbe.parse("00000000:0BB8\n---\nfd00::3\n").isEmpty)
+        #expect(CoworkLivePreviewProbe.parse("---\n192.168.64.3\n").isEmpty)
+        #expect(CoworkLivePreviewProbe.parse("bash: awk: command not found").isEmpty)
+        #expect(CoworkLivePreviewProbe.parse("").isEmpty)
+    }
+
+    @Test("A server that starts takes the preview; a file keeps it otherwise")
+    func liveSelectionFollowsARunningServer() {
+        let server = CoworkLivePreview(port: 3000, host: "192.168.64.3")
+        let other = CoworkLivePreview(port: 5173, host: "192.168.64.3")
+        let page = CoworkArtifact(relativePath: "index.html", size: 1)
+        func select(_ current: String?, _ previous: [CoworkLivePreview]?, _ updated: [CoworkLivePreview]) -> String? {
+            CoworkLivePreviewSelection.selection(
+                current: current, previousLive: previous, updatedLive: updated, artifact: page
+            )
+        }
+
+        // First load with nothing chosen: the running server is the current work.
+        #expect(select(nil, nil, [server]) == server.id)
+        // A server started during the session takes over from a file.
+        #expect(select(page.id, [], [server]) == server.id)
+        #expect(select(server.id, [server], [server, other]) == other.id)
+        // Nothing new: the selection stays, whether server or file.
+        #expect(select(server.id, [server], [server]) == server.id)
+        #expect(select(page.id, [server], [server]) == page.id)
+        // The server stopped: fall back to the file.
+        #expect(select(server.id, [server], []) == page.id)
+        // No file at all: any running server is better than an empty panel.
+        #expect(CoworkLivePreviewSelection.selection(
+            current: "gone.png", previousLive: [server], updatedLive: [server], artifact: nil
+        ) == server.id)
+    }
+
     @Test("An artifact path resolves inside the outbox or not at all")
     func fileURLStaysInsideTheOutbox() throws {
         let outbox = try Self.makeOutbox()

@@ -66,6 +66,65 @@ struct ChatArchitectureTests {
         #expect(workbench.consumeProfileCreationRequest() == nil)
     }
 
+    @Test("Visiting the Artifacts library keeps the Artifacts inspector for the way back")
+    @MainActor
+    func artifactsInspectorSurvivesTheLibrary() {
+        let workbench = WorkbenchStore()
+        workbench.rightPanelMode = .artifacts
+
+        workbench.setRoute(.artifacts)
+        #expect(workbench.rightPanelMode == nil)
+        workbench.setRoute(.chat)
+        #expect(workbench.rightPanelMode == .artifacts)
+
+        // Another destination closes the inspector for good, as before.
+        workbench.setRoute(.tools)
+        workbench.setRoute(.chat)
+        #expect(workbench.rightPanelMode == nil)
+
+        // A different inspector is not replaced by Artifacts on return.
+        workbench.rightPanelMode = .changes
+        workbench.setRoute(.artifacts)
+        workbench.setRoute(.chat)
+        #expect(workbench.rightPanelMode == nil)
+    }
+
+    @Test("Expanding the Artifacts preview retracts the inspector and collapsing restores it")
+    @MainActor
+    func expandedArtifactsPreviewReturnsToTheInspector() {
+        let workbench = WorkbenchStore()
+        workbench.rightPanelMode = .artifacts
+
+        workbench.setCoworkArtifactsExpanded(true)
+        #expect(workbench.coworkArtifactsExpanded)
+        #expect(workbench.rightPanelMode == nil)
+        #expect(workbench.route == .chat)
+
+        workbench.setCoworkArtifactsExpanded(false)
+        #expect(!workbench.coworkArtifactsExpanded)
+        #expect(workbench.rightPanelMode == .artifacts)
+
+        // The toolbar button also returns the preview to the inspector.
+        workbench.setCoworkArtifactsExpanded(true)
+        workbench.toggleRightPanel(.artifacts)
+        #expect(!workbench.coworkArtifactsExpanded)
+        #expect(workbench.rightPanelMode == .artifacts)
+
+        // Leaving the chat ends the expanded preview; the library still leads
+        // back to the inspector, another destination does not.
+        workbench.setCoworkArtifactsExpanded(true)
+        workbench.setRoute(.artifacts)
+        #expect(!workbench.coworkArtifactsExpanded)
+        workbench.setRoute(.chat)
+        #expect(workbench.rightPanelMode == .artifacts)
+
+        workbench.setCoworkArtifactsExpanded(true)
+        workbench.setRoute(.tools)
+        workbench.setRoute(.chat)
+        #expect(!workbench.coworkArtifactsExpanded)
+        #expect(workbench.rightPanelMode == nil)
+    }
+
     @Test("Public shell enums contain only implemented release surfaces")
     func publicShellContainsOnlyImplementedSurfaces() {
         // These exact lists are the release-boundary tripwire: a new case must

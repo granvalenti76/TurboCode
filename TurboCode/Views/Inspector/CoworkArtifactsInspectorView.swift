@@ -5,13 +5,17 @@ import WebKit
 
 // MARK: - Cowork Artifacts Inspector
 
-/// Shows the files the active Cowork session placed in `/out` and a preview
-/// of the selected one, so the user can follow the work beside the chat.
+/// Shows what the active Cowork session made, beside the chat: one large
+/// preview, and under it a strip of thumbnails to move between items.
 ///
-/// The layout reads top to bottom in the order the user thinks: what this
-/// session produced (title and count), which file (the list), and what it
-/// looks like (the preview). The list stays visible above the preview so
-/// switching file is one click and never hides what else exists.
+/// The preview comes first because it is what the user opened the panel for;
+/// a single thin bar names it and holds the two actions. The strip uses the
+/// same thumbnails as the Artifacts library, so an item is recognizable in
+/// both places. Two kinds of item appear, in this order:
+///
+/// - servers the agent left running in the VM, opened as a live page, because
+///   a modern web build needs to be served rather than opened from a file;
+/// - the files the session placed in `/out`.
 ///
 /// The inspector only reads the session's outbox folder on the Mac. It never
 /// copies a file into the user's folders: that remains the job of
@@ -19,27 +23,35 @@ import WebKit
 struct CoworkArtifactsInspectorView: View {
     @Environment(ChatStore.self) private var chatStore
 
+    /// `true` when this same view is drawn over the chat for a larger
+    /// preview. Only the expand control changes; the content and the strip
+    /// are identical so the user does not relearn anything.
+    var isExpanded = false
+
     @State private var listing: CoworkArtifactListing?
-    @State private var selectedID: CoworkArtifact.ID?
+    @State private var livePreviews: [CoworkLivePreview] = []
     /// Bumped on every reload so a preview re-reads a file the agent rewrote
     /// in place, which keeps the same path and therefore the same identity.
     @State private var revision = 0
 
-    /// Rows beyond this scroll, so a build with many files cannot push the
-    /// preview out of the panel.
-    private static let maximumVisibleRows = 6
-    private static let rowHeight: CGFloat = 30
+    /// An artifact's relative path or a live preview's ID; the two never
+    /// collide. Stored per session outside the view, because the inspector is
+    /// rebuilt each time it opens and must come back to the same item.
+    private var selectedID: String? { chatStore.coworkArtifactSelection }
 
     var body: some View {
         VStack(spacing: 0) {
-            if let listing, !listing.artifacts.isEmpty {
-                header(listing)
-                Divider()
-                artifactList(listing)
-                Divider()
-                if let artifact = listing.artifacts.first(where: { $0.id == selectedID }),
-                   let url = CoworkArtifactCatalog.fileURL(for: artifact, in: listing.outbox) {
-                    previewTitle(artifact)
+            if let listing, !(listing.artifacts.isEmpty && livePreviews.isEmpty) {
+                if let live = livePreviews.first(where: { $0.id == selectedID }), let url = live.url {
+                    titleBar(name: live.title, detail: "Live · \(live.host)")
+                    Divider()
+                    CoworkLiveWebView(url: url, revision: revision)
+                } else if let artifact = listing.artifacts.first(where: { $0.id == selectedID }),
+                          let url = CoworkArtifactCatalog.fileURL(for: artifact, in: listing.outbox) {
+                    titleBar(
+                        name: artifact.name,
+                        detail: "\(artifact.kind.title) · \(artifact.size.formatted(.byteCount(style: .file)))"
+                    )
                     Divider()
                     CoworkArtifactPreview(
                         artifact: artifact,
@@ -48,23 +60,25 @@ struct CoworkArtifactsInspectorView: View {
                         revision: revision
                     )
                 } else {
+                    titleBar(name: "Artifacts", detail: "")
+                    Divider()
                     ContentUnavailableView(
                         "Select an artifact",
                         systemImage: "square.stack.3d.up",
-                        description: Text("Choose a file above to preview it.")
+                        description: Text("Choose an item below to preview it.")
                     )
                 }
+                Divider()
+                strip(listing)
             } else if listing == nil {
-                ContentUnavailableView(
+                emptyState(
                     "No Cowork session",
-                    systemImage: "square.stack.3d.up",
-                    description: Text("Artifacts are the files a Cowork session creates.")
+                    "Artifacts are the pages and files a Cowork session creates."
                 )
             } else {
-                ContentUnavailableView(
+                emptyState(
                     "No artifacts yet",
-                    systemImage: "square.stack.3d.up",
-                    description: Text("Files the agent puts in /out appear here as it works.")
+                    "Files the agent puts in /out and servers it leaves running appear here."
                 )
             }
         }
@@ -78,29 +92,36 @@ struct CoworkArtifactsInspectorView: View {
         "\(chatStore.activeThreadId ?? "")|\(chatStore.busy)|\(chatStore.coworkExportPresentation == nil)"
     }
 
-    // MARK: Header
-
-    private func header(_ listing: CoworkArtifactListing) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "square.stack.3d.up.fill")
-                .foregroundStyle(.blue)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Artifacts")
-                    .font(.system(size: 15, weight: .semibold))
-
-                HStack(spacing: 6) {
-                    Text(listing.artifacts.count == 1 ? "1 file" : "\(listing.artifacts.count) files")
-                    Text("·")
-                    Text("/out")
-                        .fontDesign(.monospaced)
-                    Text("·")
-                    Text(totalSize(of: listing))
+    /// Without items there is no title bar, so the expanded view offers its
+    /// own way back; otherwise it would cover the chat with no exit.
+    private func emptyState(_ title: String, _ message: String) -> some View {
+        ContentUnavailableView {
+            Label(title, systemImage: "square.stack.3d.up")
+        } description: {
+            Text(message)
+        } actions: {
+            if isExpanded {
+                Button("Return to Inspector") {
+                    chatStore.setCoworkArtifactsExpanded(false)
                 }
+                .keyboardShortcut(.cancelAction)
+            }
+        }
+    }
+
+    // MARK: Title bar
+
+    /// The only bar above the preview: what is shown, then the two actions.
+    private func titleBar(name: String, detail: String) -> some View {
+        HStack(spacing: 8) {
+            Text(name)
+                .font(AppTypography.controlEmphasized)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Text(detail)
                 .font(AppTypography.metadata)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            }
 
             Spacer(minLength: 8)
 
@@ -113,77 +134,100 @@ struct CoworkArtifactsInspectorView: View {
             .help("Reload the artifacts and the preview")
             .accessibilityLabel("Reload artifacts")
 
+            // Expanding only moves the preview over the chat; the same button
+            // (or Escape) brings it back to the inspector at its previous size.
+            if isExpanded {
+                Button {
+                    chatStore.setCoworkArtifactsExpanded(false)
+                } label: {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                }
+                .buttonStyle(.borderless)
+                .keyboardShortcut(.cancelAction)
+                .help("Return the preview to the inspector")
+                .accessibilityLabel("Return to inspector")
+            } else {
+                Button {
+                    chatStore.setCoworkArtifactsExpanded(true)
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                }
+                .buttonStyle(.borderless)
+                .help("Show the preview in the main view")
+                .accessibilityLabel("Expand preview")
+            }
+
             // Named, not an icon: it is the one action here that leaves the
             // inspector, and the only way a file reaches the Mac.
             Button("Export…") {
                 chatStore.presentCoworkExport()
             }
             .controlSize(.small)
-            .help("Review the session's deliverables and copy approved files to your Mac")
+            .disabled(listing?.artifacts.isEmpty != false)
+            .help("Review the session's files and copy approved ones to your Mac")
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .frame(height: 36)
     }
 
-    // MARK: List
+    // MARK: Strip
 
-    private func artifactList(_ listing: CoworkArtifactListing) -> some View {
-        List(listing.artifacts, selection: $selectedID) { artifact in
-            HStack(spacing: 8) {
-                Image(systemName: artifact.kind.symbolName)
-                    .foregroundStyle(artifact.kind.tint)
-                    .frame(width: 16)
-
-                Text(artifact.name)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-
-                if let folder = artifact.folder {
-                    Text(folder)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
+    private func strip(_ listing: CoworkArtifactListing) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 10) {
+                    // Running servers first: they are the live state of the
+                    // work, while the files are what was set aside in /out.
+                    ForEach(livePreviews) { live in
+                        CoworkArtifactStripItem(
+                            label: ":\(String(live.port))",
+                            isSelected: live.id == selectedID,
+                            help: "Live server in the Cowork VM, \(live.host):\(String(live.port))",
+                            accessibilityLabel: "\(live.title), live server"
+                        ) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(.quaternary.opacity(0.5))
+                                Image(systemName: "dot.radiowaves.left.and.right")
+                                    .font(.system(size: 17, weight: .light))
+                                    .foregroundStyle(.green)
+                            }
+                        } select: {
+                            chatStore.coworkArtifactSelection = live.id
+                        }
+                        .id(live.id)
+                    }
+                    ForEach(listing.artifacts) { artifact in
+                        CoworkArtifactStripItem(
+                            label: artifact.name,
+                            isSelected: artifact.id == selectedID,
+                            help: artifact.relativePath,
+                            accessibilityLabel: "\(artifact.name), \(artifact.kind.title)"
+                        ) {
+                            CoworkArtifactThumbnailView(
+                                artifact: artifact,
+                                fileURL: CoworkArtifactCatalog.fileURL(for: artifact, in: listing.outbox),
+                                revision: revision,
+                                symbolSize: 17,
+                                cornerRadius: 6
+                            )
+                        } select: {
+                            chatStore.coworkArtifactSelection = artifact.id
+                        }
+                        .id(artifact.id)
+                    }
                 }
-
-                Spacer(minLength: 8)
-
-                Text(artifact.size.formatted(.byteCount(style: .file)))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             }
-            .font(.system(size: 12))
-            .help(artifact.relativePath)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(artifact.name), \(artifact.kind.title)")
+            // Keep the shown item in view when the selection moves by itself,
+            // for example to a file the agent just created.
+            .onChange(of: selectedID) { _, id in
+                guard let id else { return }
+                withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .center) }
+            }
         }
-        .listStyle(.inset)
-        .environment(\.defaultMinListRowHeight, Self.rowHeight)
-        .frame(height: CGFloat(min(listing.artifacts.count, Self.maximumVisibleRows)) * Self.rowHeight + 8)
-    }
-
-    // MARK: Preview title
-
-    /// Names what the preview below shows, so the two halves of the panel
-    /// read as "this file" and "its content" even when the list has scrolled.
-    private func previewTitle(_ artifact: CoworkArtifact) -> some View {
-        HStack(spacing: 6) {
-            Text(artifact.name)
-                .font(AppTypography.controlEmphasized)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 8)
-            Text("\(artifact.kind.title) · \(artifact.size.formatted(.byteCount(style: .file)))")
-                .font(AppTypography.metadata)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
         .background(.bar)
-    }
-
-    private func totalSize(of listing: CoworkArtifactListing) -> String {
-        listing.artifacts.reduce(Int64(0)) { $0 + $1.size }.formatted(.byteCount(style: .file))
     }
 
     private func reload() async {
@@ -193,16 +237,70 @@ struct CoworkArtifactsInspectorView: View {
                 artifacts: CoworkArtifactCatalog.displayOrdered($0.artifacts)
             )
         }
-        // Compare against the same session only: after switching session the
-        // previous list says nothing about what is new.
-        let previous = listing?.outbox == updated?.outbox ? listing?.artifacts : nil
-        selectedID = CoworkArtifactCatalog.selection(
+        let updatedLive = await chatStore.coworkLivePreviews()
+        // Compare against the same session only: after switching session, or
+        // on a freshly opened inspector, the previous list says nothing about
+        // what is new.
+        let sameSession = listing != nil && listing?.outbox == updated?.outbox
+        chatStore.coworkArtifactSelection = CoworkLivePreviewSelection.selection(
             current: selectedID,
-            previous: previous,
-            updated: updated?.artifacts ?? []
-        )?.id
+            previousLive: sameSession ? livePreviews : nil,
+            updatedLive: updatedLive,
+            artifact: CoworkArtifactCatalog.selection(
+                current: selectedID,
+                previous: sameSession ? listing?.artifacts : nil,
+                updated: updated?.artifacts ?? []
+            )
+        )
         listing = updated
+        livePreviews = updatedLive
         revision += 1
+    }
+}
+
+/// One item of the inspector strip: a small thumbnail with its name, ringed
+/// when it is the one shown above.
+private struct CoworkArtifactStripItem<Thumbnail: View>: View {
+    let label: String
+    let isSelected: Bool
+    let help: String
+    let accessibilityLabel: String
+    @ViewBuilder let thumbnail: () -> Thumbnail
+    let select: () -> Void
+
+    @State private var isHovered = false
+
+    private static var width: CGFloat { 64 }
+
+    var body: some View {
+        Button(action: select) {
+            VStack(spacing: 4) {
+                thumbnail()
+                    .frame(width: Self.width, height: 48)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(
+                                isSelected
+                                    ? AnyShapeStyle(Color.accentColor)
+                                    : isHovered ? AnyShapeStyle(.secondary) : AnyShapeStyle(.separator),
+                                lineWidth: isSelected ? 2 : 1
+                            )
+                    }
+                Text(label)
+                    .font(AppTypography.metadata)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(width: Self.width)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help(help)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }
 
@@ -239,15 +337,6 @@ extension CoworkArtifact.Kind {
     }
 }
 
-private extension CoworkArtifact {
-    /// The folder inside `/out`, shown beside the name so two files called
-    /// `index.html` can be told apart. `nil` at the top level.
-    var folder: String? {
-        let folder = (relativePath as NSString).deletingLastPathComponent
-        return folder.isEmpty ? nil : folder
-    }
-}
-
 // MARK: - Preview
 
 /// Shared by the inspector and the Artifacts library, so a file looks the same
@@ -269,14 +358,15 @@ struct CoworkArtifactPreview: View {
                 CoworkArtifactWebView(fileURL: fileURL, outbox: outbox, revision: revision)
             case .image:
                 if let image = NSImage(contentsOf: fileURL) {
-                    ScrollView([.horizontal, .vertical]) {
-                        Image(nsImage: image)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .padding(12)
-                            .accessibilityLabel(artifact.name)
-                    }
+                    // Fitted to the panel: inside a scroll view the image would
+                    // keep its pixel size and show only its top-left corner.
+                    // The expand control is how the user gets a larger view.
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(12)
+                        .accessibilityLabel(artifact.name)
                 } else {
                     unavailable("This image couldn't be read.")
                 }
@@ -364,6 +454,42 @@ private struct CoworkArtifactPDFView: NSViewRepresentable {
     final class Coordinator {
         var revision: Int
         init(revision: Int) { self.revision = revision }
+    }
+}
+
+/// Shows a server running in the VM. It is a plain page load of the guest's
+/// address: no script bridge into the app and no persistent website data.
+private struct CoworkLiveWebView: NSViewRepresentable {
+    let url: URL
+    let revision: Int
+
+    func makeNSView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        load(in: webView, coordinator: context.coordinator)
+        return webView
+    }
+
+    /// Reloads when a turn ends, so the page shows what the agent just changed
+    /// even when the server does not push updates itself.
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        guard context.coordinator.loadedURL != url || context.coordinator.revision != revision else { return }
+        load(in: webView, coordinator: context.coordinator)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    private func load(in webView: WKWebView, coordinator: Coordinator) {
+        coordinator.loadedURL = url
+        coordinator.revision = revision
+        webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
+    }
+
+    final class Coordinator {
+        var loadedURL: URL?
+        var revision = -1
     }
 }
 

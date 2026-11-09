@@ -9,7 +9,16 @@ struct MainStageView: View {
         VStack(spacing: 0) {
             switch chatStore.route {
             case .chat:
-                ChatContentView()
+                // The expanded Artifacts preview is drawn over the chat rather
+                // than in its place: the conversation view stays alive, so
+                // expanding and collapsing cannot disturb the session.
+                ZStack {
+                    ChatContentView()
+                    if chatStore.coworkArtifactsExpanded {
+                        CoworkArtifactsInspectorView(isExpanded: true)
+                            .background(Color(nsColor: .windowBackgroundColor))
+                    }
+                }
             case .tools:
                 ToolsView()
             case .artifacts:

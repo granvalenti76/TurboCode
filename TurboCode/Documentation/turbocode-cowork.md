@@ -47,6 +47,20 @@ The VM sees it at `/work` and can read it but never change it. Sharing your
 whole disk or home folder is refused. Without a shared folder the VM sees
 nothing of your Mac.
 
+## Look at the work
+
+**Artifacts** in the sidebar opens a grid of the files your Cowork sessions
+placed in `/out`, grouped by session. Choose a card to preview it at full size;
+**Open Session** returns to the chat that made it. The Artifacts button in the
+toolbar shows the active session's files in the inspector beside the chat, and
+follows new files as the agent creates them.
+
+The inspector also lists servers the agent left running in the VM, marked
+**Live**, and opens them as a page. A server appears only when it listens on
+`0.0.0.0`; ask the agent to start it that way if it is missing.
+
+Looking at an artifact never copies it to your Mac.
+
 ## Get the results
 
 The agent puts finished files in `/out`. When files are waiting, the composer

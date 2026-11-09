@@ -70,6 +70,28 @@ final class WorkbenchStore {
     var inspectedWorkspaceListingID: String?
     var inspectedDiffPatchReview: DiffPatchReviewPresentation?
     var coworkExport: CoworkExportPresentation?
+    /// The artifact or live preview last shown for each Cowork session, by
+    /// session ID. Kept here rather than in the inspector view because the
+    /// inspector is rebuilt whenever it closes, and the user expects to find
+    /// what they were looking at when they come back.
+    var coworkArtifactSelection: [String: String] = [:]
+    /// Whether the Artifacts inspector was open when the user went to the
+    /// Artifacts library, so returning to the chat shows it again.
+    private var reopensArtifactsInspector = false
+    /// Whether the Artifacts preview covers the chat instead of sitting in the
+    /// inspector. The chat stays in the view hierarchy underneath, so the
+    /// session, its scroll position, and a running turn are untouched; this
+    /// is only where the preview is drawn.
+    private(set) var coworkArtifactsExpanded = false
+
+    /// Moves the Artifacts preview between the inspector and the main view.
+    /// The two are never shown together: expanding retracts the inspector,
+    /// and collapsing brings it back so the user ends where they started.
+    func setCoworkArtifactsExpanded(_ expanded: Bool) {
+        guard expanded != coworkArtifactsExpanded else { return }
+        coworkArtifactsExpanded = expanded
+        rightPanelMode = expanded ? nil : .artifacts
+    }
     var editorialDeskPresentation: EditorialDeskPresentation?
     var transcriptSheetPresentation: TranscriptSheetPresentation?
 
@@ -82,8 +104,25 @@ final class WorkbenchStore {
             return
         }
         isCustomProfilesPresented = false
+        // The library and the inspector are two views of the same artifacts:
+        // visiting the library is not a reason to lose the inspector. Any
+        // other destination closes it for good, as before.
+        let leavesInspectorForLibrary = self.route == .chat && route == .artifacts
+            && rightPanelMode == .artifacts
         self.route = route
-        if route != .chat {
+        if route == .chat {
+            if reopensArtifactsInspector, rightPanelMode == nil {
+                rightPanelMode = .artifacts
+            }
+            reopensArtifactsInspector = false
+        } else {
+            // The expanded preview belongs to the chat it covers. Going to the
+            // library from it counts as leaving the inspector, so the way back
+            // ends in the inspector rather than over the chat.
+            reopensArtifactsInspector = leavesInspectorForLibrary
+                || (coworkArtifactsExpanded && route == .artifacts)
+                || (reopensArtifactsInspector && route == .artifacts)
+            coworkArtifactsExpanded = false
             rightPanelMode = nil
             // The terminal utility area accompanies the chat canvas. Terminate
             // its process instead of leaving an invisible shell behind.
@@ -104,6 +143,13 @@ final class WorkbenchStore {
     }
 
     func toggleRightPanel(_ mode: RightPanelMode) {
+        // Any inspector choice ends the expanded preview: the Artifacts button
+        // returns it to the inspector, another inspector replaces it.
+        if coworkArtifactsExpanded {
+            coworkArtifactsExpanded = false
+            rightPanelMode = mode
+            return
+        }
         rightPanelMode = rightPanelMode == mode ? nil : mode
     }
 

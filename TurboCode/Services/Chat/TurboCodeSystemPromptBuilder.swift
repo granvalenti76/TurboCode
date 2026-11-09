@@ -214,7 +214,13 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             (never pass --no-sandbox), rg, fd, jq, git, gcc and make. sudo apt-get works.
             - Use vm_file to read and write text files and vm_exec for commands.
             - A background process must redirect its output or the command never returns: \
-            python3 -m http.server 3000 > /tmp/server.log 2>&1 & Stop servers when done (pkill -f).
+            python3 -m http.server 3000 > /tmp/server.log 2>&1 &
+            - The user looks at your work in the Artifacts panel, which shows the files in /out \
+            and the servers you leave running. Review & Export only copies files to the Mac; do \
+            not send the user there to look at a result.
+            - A server is visible there when it listens on 0.0.0.0 (vite and similar: \
+            --host 0.0.0.0). Leave running the one the user should see; stop the others (pkill -f).
+            - Put a page the user should keep in /out as well, with the files it needs.
             - Screenshots: chromium --headless --screenshot=/out/page.png --window-size=1280,720 \
             http://127.0.0.1:3000/
             - If you can see images, check a screenshot or picture with vm_view_image before \

@@ -1,5 +1,3 @@
-import AppKit
-import QuickLookThumbnailing
 import SwiftUI
 
 // MARK: - Cowork Artifacts Library
@@ -159,10 +157,14 @@ struct CoworkArtifactsLibraryView: View {
 
                 Spacer(minLength: 8)
 
-                Button("Open Session") {
-                    Task { await chatStore.openThread(opened.group.sessionID) }
+                Button("Show in Session") {
+                    Task {
+                        await chatStore.showCoworkArtifact(
+                            opened.artifact.id, inSession: opened.group.sessionID
+                        )
+                    }
                 }
-                .help("Go to the session that created this file")
+                .help("Open the session with this file in the Artifacts inspector")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -202,10 +204,7 @@ private struct CoworkArtifactCard: View {
     let revision: Int
     let open: () -> Void
 
-    @State private var thumbnail: NSImage?
     @State private var isHovered = false
-
-    private static let thumbnailSize = CGSize(width: 440, height: 330)
 
     var body: some View {
         Button(action: open) {
@@ -233,50 +232,17 @@ private struct CoworkArtifactCard: View {
         .accessibilityLabel("\(artifact.name), \(artifact.kind.title)")
         .accessibilityHint("Opens a preview")
         .accessibilityAddTraits(.isButton)
-        // Regenerate when the agent rewrote the file in place.
-        .task(id: "\(artifact.id)|\(revision)") { await loadThumbnail() }
     }
 
     private var thumbnailView: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(.quaternary.opacity(0.5))
-            if let thumbnail {
-                Image(nsImage: thumbnail)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(6)
-            } else {
-                Image(systemName: artifact.kind.symbolName)
-                    .font(.system(size: 30, weight: .light))
-                    .foregroundStyle(artifact.kind.tint)
+        CoworkArtifactThumbnailView(artifact: artifact, fileURL: fileURL, revision: revision)
+            .aspectRatio(4 / 3, contentMode: .fit)
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(
+                        isHovered ? AnyShapeStyle(Color.accentColor.opacity(0.7)) : AnyShapeStyle(.separator),
+                        lineWidth: isHovered ? 1.5 : 1
+                    )
             }
-        }
-        .aspectRatio(4 / 3, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(
-                    isHovered ? AnyShapeStyle(Color.accentColor.opacity(0.7)) : AnyShapeStyle(.separator),
-                    lineWidth: isHovered ? 1.5 : 1
-                )
-        }
-    }
-
-    /// Asks Quick Look for a real thumbnail only. When the system has none for
-    /// the type, the card keeps the kind symbol instead of a generic document
-    /// icon, which says more about what the file is.
-    private func loadThumbnail() async {
-        guard let fileURL, artifact.kind != .other else { return }
-        let request = QLThumbnailGenerator.Request(
-            fileAt: fileURL,
-            size: Self.thumbnailSize,
-            scale: NSScreen.main?.backingScaleFactor ?? 2,
-            representationTypes: .thumbnail
-        )
-        guard let representation = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request) else {
-            return
-        }
-        thumbnail = representation.nsImage
     }
 }

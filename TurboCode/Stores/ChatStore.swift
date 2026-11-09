@@ -473,6 +473,12 @@ public final class ChatStore {
         // The artifact library belongs to Cowork; leaving the domain must not
         // strand the main view on a destination the sidebar no longer offers.
         if route == .artifacts { setRoute(.chat) }
+        if domain != .cowork {
+            workbenchStore.setCoworkArtifactsExpanded(false)
+            if workbenchStore.rightPanelMode == .artifacts {
+                workbenchStore.rightPanelMode = nil
+            }
+        }
         if let recent = sortedThreads.first {
             await openThread(recent.id)
         } else {
@@ -534,6 +540,48 @@ public final class ChatStore {
         return await Task.detached(priority: .utility) {
             CoworkArtifactListing(outbox: outbox, artifacts: CoworkArtifactCatalog.artifacts(in: outbox))
         }.value
+    }
+
+    /// What the Artifacts inspector shows for the active session: an
+    /// artifact's path or a live preview's ID.
+    var coworkArtifactSelection: String? {
+        get { activeThreadId.flatMap { workbenchStore.coworkArtifactSelection[$0] } }
+        set {
+            guard let id = activeThreadId else { return }
+            workbenchStore.coworkArtifactSelection[id] = newValue
+        }
+    }
+
+    /// Whether the Artifacts preview currently covers the chat.
+    var coworkArtifactsExpanded: Bool { workbenchStore.coworkArtifactsExpanded }
+
+    /// Shows the Artifacts preview over the chat, or returns it to the
+    /// inspector. The session underneath is not touched either way.
+    func setCoworkArtifactsExpanded(_ expanded: Bool) {
+        workbenchStore.setCoworkArtifactsExpanded(expanded)
+    }
+
+    /// Goes from the library to the session that made an artifact, with that
+    /// artifact open beside the chat.
+    func showCoworkArtifact(_ artifactID: String, inSession sessionID: String) async {
+        workbenchStore.coworkArtifactSelection[sessionID] = artifactID
+        await openThread(sessionID)
+        workbenchStore.rightPanelMode = .artifacts
+    }
+
+    /// Servers the agent left listening in the VM that the Mac can open.
+    ///
+    /// Asked only while the VM already runs with this session's configuration:
+    /// running a command boots the VM, or restarts it when another session's
+    /// configuration is active, and looking at the inspector must never do
+    /// either. A stopped VM has no servers anyway.
+    func coworkLivePreviews() async -> [CoworkLivePreview] {
+        guard let conversation = activeConversation, conversation.domain == .cowork,
+              let context = profileSelectionCoordinator.coworkProvider?.sessionContext(for: conversation),
+              await context.runtime.state() == .running(context.configuration),
+              let result = try? await context.run(CoworkLivePreviewProbe.script, timeout: .seconds(10)),
+              result.exitCode == 0 else { return [] }
+        return CoworkLivePreviewProbe.parse(String(decoding: result.stdout, as: UTF8.self))
     }
 
     /// Every Cowork session that has artifacts, most recently used first, for

@@ -190,9 +190,12 @@ struct WorkbenchSplitView: View {
                 // in the VM outbox rather than in a Mac workspace.
                 if chatStore.activeDomain == .cowork {
                     Toggle(isOn: Binding(
-                        get: { chatStore.rightPanelMode == .artifacts },
+                        // Lit while expanded too: the preview is still shown,
+                        // and pressing it returns the preview to the inspector.
+                        get: { chatStore.rightPanelMode == .artifacts || chatStore.coworkArtifactsExpanded },
                         set: { isPresented in
-                            if isPresented != (chatStore.rightPanelMode == .artifacts) {
+                            if chatStore.coworkArtifactsExpanded
+                                || isPresented != (chatStore.rightPanelMode == .artifacts) {
                                 chatStore.toggleRightPanel(.artifacts)
                             }
                         }

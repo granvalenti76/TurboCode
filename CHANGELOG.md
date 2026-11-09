@@ -27,6 +27,14 @@ saved, restored, and recovered.
   picture they downloaded. PNG, JPEG, GIF, and WebP files up to 10 MB are
   accepted.
 - Sent images appear as thumbnails in the conversation.
+- Cowork has an Artifacts library. The sidebar item opens a grid of the files
+  each session placed in `/out`, with thumbnails and a full-size preview, and
+  a toolbar button shows the active session's artifacts in the inspector
+  beside the chat. Previews only read the session outbox; copying to the Mac
+  still goes through Review & Export.
+- The Artifacts inspector also lists servers the agent left running in the VM
+  and opens them as a live page. A server must listen on `0.0.0.0` to be
+  reachable from the Mac.
 
 ### Fixes
 
