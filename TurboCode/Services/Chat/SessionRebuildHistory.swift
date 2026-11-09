@@ -121,17 +121,39 @@ nonisolated enum SessionRebuildHistory {
     /// turn in the conversation. The image is dropped for all rebuilds because the
     /// target's support is only known asynchronously. Keeping the entry `id` lets
     /// interrupted-turn repair still match this history against its baseline.
+    ///
+    /// Images arrive in two kinds of entry: a prompt the user attached them to,
+    /// and the output of a tool that showed one to the model. Both are covered,
+    /// because either is enough for the server to refuse the request.
     private static func replacingImageAttachments(
         in entry: Transcript.Entry
     ) -> Transcript.Entry {
-        guard case .prompt(var prompt) = entry else { return entry }
+        switch entry {
+        case .prompt(var prompt):
+            guard let segments = replacingImageAttachments(in: prompt.segments) else { return entry }
+            prompt.segments = segments
+            return .prompt(prompt)
+        case .toolOutput(var output):
+            guard let segments = replacingImageAttachments(in: output.segments) else { return entry }
+            output.segments = segments
+            return .toolOutput(output)
+        default:
+            return entry
+        }
+    }
+
+    /// Returns `nil` when nothing was replaced, so untouched entries are passed
+    /// through as the same value.
+    private static func replacingImageAttachments(
+        in segments: [Transcript.Segment]
+    ) -> [Transcript.Segment]? {
         var didReplace = false
-        prompt.segments = prompt.segments.map { segment in
+        let replaced = segments.map { segment in
             guard case .attachment = segment else { return segment }
             didReplace = true
             return textSegment("[Image no longer available]")
         }
-        return didReplace ? .prompt(prompt) : entry
+        return didReplace ? replaced : nil
     }
 
     /// Repairs the semantic history of a provider turn that was cancelled

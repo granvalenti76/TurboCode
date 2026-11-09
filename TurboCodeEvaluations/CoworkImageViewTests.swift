@@ -125,6 +125,57 @@ struct CoworkImageViewTests {
 
     @Test("The viewed image reaches the server as a JPEG data URL inside the tool message")
     func toolResultCarriesImageOnTheWire() async throws {
+        let (session, bodies) = try await viewImageInSession()
+
+        // The first request made the model call the tool; the second one
+        // carries the tool's result back to the server.
+        #expect(bodies.count == 2)
+        let lastBody = try #require(bodies.last)
+        let body = try #require(try JSONSerialization.jsonObject(with: lastBody) as? [String: Any])
+        let messages = try #require(body["messages"] as? [[String: Any]])
+        let toolMessage = try #require(messages.last { $0["role"] as? String == "tool" })
+        #expect(toolMessage["tool_call_id"] as? String == "call_view")
+        let content = try #require(toolMessage["content"] as? [[String: Any]])
+        let imageURL = content.compactMap { $0["image_url"] as? [String: Any] }.first?["url"] as? String
+
+        #expect(content.compactMap { $0["text"] as? String }.joined().contains("Image /out/page.png:"))
+        #expect(imageURL?.hasPrefix("data:image/jpeg;base64,") == true)
+        _ = session
+    }
+
+    // MARK: Session rebuild
+
+    @Test("Rebuilt history drops a viewed image from the tool output and keeps its text and identity")
+    func rebuildReplacesImagesInToolOutput() async throws {
+        let (session, _) = try await viewImageInSession()
+        let originalOutput = try #require(Self.toolOutputs(in: Array(session.transcript)).first)
+        #expect(originalOutput.segments.contains { if case .attachment = $0 { true } else { false } })
+
+        let rebuilt = SessionRebuildHistory.prepare(
+            session.transcript,
+            keepingHistory: true,
+            discardingCapabilityContext: false
+        )
+        let rebuiltOutput = try #require(Self.toolOutputs(in: rebuilt).first)
+
+        // A single remaining attachment would make a server without vision
+        // reject every later turn of the conversation.
+        #expect(!rebuiltOutput.segments.contains { if case .attachment = $0 { true } else { false } })
+        #expect(rebuiltOutput.id == originalOutput.id)
+        let text = rebuiltOutput.segments.compactMap { segment -> String? in
+            if case .text(let text) = segment { return text.content }
+            return nil
+        }.joined(separator: "\n")
+        #expect(text.contains("Image /out/page.png:"))
+        #expect(text.contains("[Image no longer available]"))
+    }
+
+    // MARK: Helpers
+
+    /// Runs one real tool round trip against a captured URL loading boundary:
+    /// the stub asks for `vm_view_image`, the session runs the tool, and the
+    /// result is sent back. No external server or VM is involved.
+    private func viewImageInSession() async throws -> (LanguageModelSession, [Data]) {
         let runtime = BinaryRuntime(stdout: try Self.pngData(width: 64, height: 64))
         let tool = VMViewImageTool(context: Self.context(runtime: runtime)) { true }
         let host = "tool-image-wire-\(UUID().uuidString.lowercased()).invalid"
@@ -140,23 +191,15 @@ struct CoworkImageViewTests {
 
         _ = try await session.respond(to: "Look at /out/page.png")
 
-        // The first request made the model call the tool; the second one
-        // carries the tool's result back to the server.
-        let bodies = ToolImageWireURLProtocol.bodies(forHost: host)
-        #expect(bodies.count == 2)
-        let lastBody = try #require(bodies.last)
-        let body = try #require(try JSONSerialization.jsonObject(with: lastBody) as? [String: Any])
-        let messages = try #require(body["messages"] as? [[String: Any]])
-        let toolMessage = try #require(messages.last { $0["role"] as? String == "tool" })
-        #expect(toolMessage["tool_call_id"] as? String == "call_view")
-        let content = try #require(toolMessage["content"] as? [[String: Any]])
-        let imageURL = content.compactMap { $0["image_url"] as? [String: Any] }.first?["url"] as? String
-
-        #expect(content.compactMap { $0["text"] as? String }.joined().contains("Image /out/page.png:"))
-        #expect(imageURL?.hasPrefix("data:image/jpeg;base64,") == true)
+        return (session, ToolImageWireURLProtocol.bodies(forHost: host))
     }
 
-    // MARK: Helpers
+    static func toolOutputs(in entries: [Transcript.Entry]) -> [Transcript.ToolOutput] {
+        entries.compactMap { entry in
+            if case .toolOutput(let output) = entry { return output }
+            return nil
+        }
+    }
 
     static func context(runtime: BinaryRuntime) -> CoworkSessionContext {
         CoworkSessionContext(
