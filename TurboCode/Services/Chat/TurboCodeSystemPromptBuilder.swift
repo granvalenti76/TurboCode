@@ -217,6 +217,8 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             python3 -m http.server 3000 > /tmp/server.log 2>&1 & Stop servers when done (pkill -f).
             - Screenshots: chromium --headless --screenshot=/out/page.png --window-size=1280,720 \
             http://127.0.0.1:3000/
+            - If you can see images, check a screenshot or picture with vm_view_image before \
+            describing it.
             - You cannot reach the Mac. Do not ask the user to run commands for you.
             """
     }

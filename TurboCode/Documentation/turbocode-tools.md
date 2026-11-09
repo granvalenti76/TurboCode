@@ -258,6 +258,15 @@ only when the user opens **Review & Export** (from the toolbar folder menu or
 the composer) and approves each file. Build folders such as `node_modules`,
 `.venv`, and `.git` and symbolic links are never offered.
 
+### `vm_view_image`
+
+Shows the model an image file from the VM, such as a Chromium screenshot or a
+downloaded picture, so it can check its own work. It accepts PNG, JPEG, GIF, and
+WebP files up to 10 MB and resizes them like images dropped on the composer.
+The image goes only to the model: nothing is copied to the Mac, and it does not
+replace **Review & Export**. A model without vision receives a short text
+answer instead of the image.
+
 ## Why a tool may be unavailable
 
 A tool can be absent because no workspace is selected, the current model has no

@@ -22,6 +22,10 @@ saved, restored, and recovered.
   not accept images.
 - Image input also works in Cowork sessions. The image reaches only the model
   and is not copied into the VM.
+- Cowork models with vision can look at images inside the VM with the new
+  `vm_view_image` tool, so they can check a screenshot they rendered or a
+  picture they downloaded. PNG, JPEG, GIF, and WebP files up to 10 MB are
+  accepted.
 - Sent images appear as thumbnails in the conversation.
 
 ### Fixes

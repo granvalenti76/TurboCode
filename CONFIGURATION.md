@@ -85,9 +85,15 @@ Coding and Cowork sessions follow the same rule. In Cowork the image reaches
 only the model: it is not copied into the VM, so `vm_exec` and `vm_file` cannot
 open it unless the file is also in the shared folder.
 
+The opposite direction uses the `vm_view_image` tool: a Cowork model with
+vision can look at a PNG, JPEG, GIF, or WebP file of at most 10 MB that exists
+in the VM, for example a screenshot it rendered. The same vision rule decides
+whether the image is returned, and it is asked again on every call.
+
 Images are resized to at most 1568 px on the longest edge and are never written
 to disk. Stored sessions keep only a `[Image: name]` marker in the message text,
-and a rebuilt session replaces earlier images with a text placeholder.
+and a rebuilt session replaces earlier images, including those a tool showed
+the model, with a text placeholder.
 
 ## Repository map model capability
 

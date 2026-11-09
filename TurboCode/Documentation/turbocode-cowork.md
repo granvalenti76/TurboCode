@@ -29,11 +29,13 @@ own shell on the Mac, so it is not available in Cowork.
 ## What the agent can do
 
 The VM is a Debian 12 system with Node.js 24, Python 3.11, headless Chromium,
-`rg`, `fd`, `jq`, `git`, and compilers. The agent uses three tools:
+`rg`, `fd`, `jq`, `git`, and compilers. The agent uses four tools:
 
 - `vm_exec` runs commands in the VM as an unprivileged user.
 - `vm_file` reads, writes, and lists files; writes appear in the chat as a diff.
 - `vm_export` reports the finished files waiting for your review.
+- `vm_view_image` lets a model with vision look at a screenshot or picture it
+  created or downloaded in the VM.
 
 Each session has its own working directory in the VM. The VM itself is shared
 by all Cowork sessions and keeps installed packages until you reset it.
