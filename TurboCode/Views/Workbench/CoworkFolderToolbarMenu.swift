@@ -33,7 +33,7 @@ struct CoworkFolderToolbarMenu: View {
         .disabled(chatStore.busy)
         .help(help)
         .alert(
-            "Cowork",
+            "Studio",
             isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
         ) {
             Button("OK", role: .cancel) {}
@@ -66,7 +66,7 @@ struct CoworkFolderToolbarMenu: View {
 
     private var help: String {
         guard let sharedPath else {
-            return "Share a Mac folder with this Cowork session. The VM can read it but never change it."
+            return "Share a Mac folder with this Studio session. The VM can read it but never change it."
         }
         return folderExists
             ? "\(sharedPath) is shared read-only at /work"
@@ -81,7 +81,7 @@ struct CoworkFolderToolbarMenu: View {
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Share"
-        panel.message = "The Cowork VM can read this folder but never change it."
+        panel.message = "The Studio VM can read this folder but never change it."
         if let sharedPath { panel.directoryURL = URL(fileURLWithPath: sharedPath) }
         guard panel.runModal() == .OK, let url = panel.url else { return }
         apply(url)

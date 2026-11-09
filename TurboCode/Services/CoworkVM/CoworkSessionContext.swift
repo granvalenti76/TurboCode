@@ -145,9 +145,9 @@ nonisolated enum CoworkAdmission: Equatable {
     case allowed
     case rejected(String)
 
-    static let codexMessage = "Cowork sessions run in the Cowork VM and cannot use Codex, which executes on this Mac. Choose an on-device, Llama, or DeepSeek profile."
-    static let unavailableMessage = "Cowork is not available. Enable and install it in Settings › Cowork."
-    static let independentTaskMessage = "Independent tasks are not available in Cowork sessions yet."
+    static let codexMessage = "Studio sessions run in the Studio VM and cannot use Codex, which executes on this Mac. Choose an on-device, Llama, or DeepSeek profile."
+    static let unavailableMessage = "Studio is not available. Enable and install it in Settings › Studio."
+    static let independentTaskMessage = "Independent tasks are not available in Studio sessions yet."
 
     /// Pure admission rule shared by every entry point that starts a turn.
     static func evaluate(domain: SessionDomain, backend: ModelBackend, hasContext: Bool) -> Self {

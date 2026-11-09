@@ -51,7 +51,7 @@ struct CoworkArtifactsLibraryView: View {
                         ContentUnavailableView(
                             "No artifacts yet",
                             systemImage: "square.stack.3d.up",
-                            description: Text("Files a Cowork session puts in /out appear here.")
+                            description: Text("Files a Studio session puts in /out appear here.")
                         )
                         .frame(maxWidth: .infinity)
                         .padding(.top, 60)
@@ -74,7 +74,7 @@ struct CoworkArtifactsLibraryView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Artifacts")
                     .font(.system(size: 28, weight: .semibold))
-                Text("Files your Cowork sessions created. Open one to preview it.")
+                Text("Files your Studio sessions created. Open one to preview it.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

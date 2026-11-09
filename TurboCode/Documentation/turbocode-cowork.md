@@ -1,30 +1,36 @@
-# Cowork
+# Studio
 
-Cowork is TurboCode's multi-purpose mode. It works on things beyond Swift
+Studio is TurboCode's multi-purpose mode. It works on things beyond Swift
 development, such as React and other web apps, Python scripts and data
 processing, documents, rendered pages, and screenshots, inside an isolated
-Linux virtual machine. Coding and Cowork are peers: TurboCode without the VM
+Linux virtual machine. Coding and Studio are peers: TurboCode without the VM
 remains a complete local-LLM harness.
 
-## Enable Cowork
+## Enable Studio
 
-Open **Settings › Cowork** and turn on **Enable Cowork**. After you confirm,
+Open **Settings › Studio** and turn on **Enable Studio**. After you confirm,
 TurboCode downloads about 760 MB (a Linux kernel and a Debian 12 image) and
 uses about 2.2 GB of disk space. Installation takes a few minutes and verifies
 the guest with its own self-test, including a headless Chromium render with the
-browser sandbox enabled. Cowork requires a Mac with Apple silicon.
+browser sandbox enabled. Studio requires a Mac with Apple silicon.
 
 The same tab sets processors, memory, and network access for the VM, resets the
-VM, and removes Cowork completely.
+VM, and removes Studio completely.
 
-## Start a Cowork session
+## Start a Studio session
 
-Use the **Coding | Cowork** switch at the top of the sidebar. In Cowork, New
-Chat creates a Cowork session and the list shows only Cowork sessions. Each
+Use the **Coding | Studio** switch at the top of the sidebar. In Studio, New
+Chat creates a Studio session and the list shows only Studio sessions. Each
 session belongs to exactly one mode for its whole life.
 
-Cowork works with the on-device, Llama, and DeepSeek profiles. Codex runs its
-own shell on the Mac, so it is not available in Cowork.
+A new Studio session opens on a home view. Its cards name what Studio is good
+at (web pages and apps, data and scripts, documents, your files) and each one
+starts a draft in the message field for you to finish; nothing is sent until
+you send it. Once earlier sessions have produced files, the latest artifacts
+appear above the cards and open the session that made them.
+
+Studio works with the on-device, Llama, and DeepSeek profiles. Codex runs its
+own shell on the Mac, so it is not available in Studio.
 
 ## What the agent can do
 
@@ -38,7 +44,7 @@ The VM is a Debian 12 system with Node.js 24, Python 3.11, headless Chromium,
   created or downloaded in the VM.
 
 Each session has its own working directory in the VM. The VM itself is shared
-by all Cowork sessions and keeps installed packages until you reset it.
+by all Studio sessions and keeps installed packages until you reset it.
 
 ## Share a folder
 
@@ -49,7 +55,7 @@ nothing of your Mac.
 
 ## Look at the work
 
-**Artifacts** in the sidebar opens a grid of the files your Cowork sessions
+**Artifacts** in the sidebar opens a grid of the files your Studio sessions
 placed in `/out`, grouped by session. Choose a card to preview it at full size;
 **Open Session** returns to the chat that made it. The Artifacts button in the
 toolbar shows the active session's files in the inspector beside the chat, and

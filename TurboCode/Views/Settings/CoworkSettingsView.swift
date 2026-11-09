@@ -20,8 +20,8 @@ struct CoworkSettingsView: View {
         @Bindable var cowork = cowork
         Form {
             Section {
-                Toggle("Enable Cowork", isOn: enabledBinding)
-                Text("Cowork runs builds, scripts, and artifacts in an isolated Linux virtual machine. Your folders are shared read-only, and files reach your Mac only after you approve an export.")
+                Toggle("Enable Studio", isOn: enabledBinding)
+                Text("Studio runs builds, scripts, and artifacts in an isolated Linux virtual machine. Your folders are shared read-only, and files reach your Mac only after you approve an export.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -58,14 +58,14 @@ struct CoworkSettingsView: View {
             Section("Maintenance") {
                 Button("Reset VM…") { confirmingReset = true }
                     .disabled(cowork.phase != .ready)
-                Button("Remove Cowork…", role: .destructive) { confirmingRemoval = true }
+                Button("Remove Studio…", role: .destructive) { confirmingRemoval = true }
                     .disabled((cowork.diskUsageBytes ?? 0) == 0 && cowork.phase != .ready)
             }
         }
         .formStyle(.grouped)
         .onAppear { cowork.refreshStatus() }
         .confirmationDialog(
-            "Download the Cowork virtual machine?",
+            "Download the Studio virtual machine?",
             isPresented: $confirmingDownload
         ) {
             Button("Download") {
@@ -76,20 +76,20 @@ struct CoworkSettingsView: View {
         } message: {
             Text("TurboCode will download \(CoworkStore.approximateDownload) and use \(CoworkStore.approximateDiskUse) of disk space. Installation takes a few minutes.")
         }
-        .confirmationDialog("Reset the Cowork VM?", isPresented: $confirmingReset) {
+        .confirmationDialog("Reset the Studio VM?", isPresented: $confirmingReset) {
             Button("Reset VM", role: .destructive) { runMaintenance { try await cowork.resetVM() } }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Everything installed or created inside the VM is discarded. Your sessions and your files on this Mac are not affected.")
         }
-        .confirmationDialog("Remove Cowork?", isPresented: $confirmingRemoval) {
-            Button("Remove Cowork", role: .destructive) { runMaintenance { try await cowork.removeAll() } }
+        .confirmationDialog("Remove Studio?", isPresented: $confirmingRemoval) {
+            Button("Remove Studio", role: .destructive) { runMaintenance { try await cowork.removeAll() } }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The VM and its downloaded image are deleted. Your sessions and your files on this Mac are kept.")
         }
         .alert(
-            "Cowork",
+            "Studio",
             isPresented: Binding(get: { maintenanceError != nil }, set: { if !$0 { maintenanceError = nil } })
         ) {
             Button("OK", role: .cancel) {}

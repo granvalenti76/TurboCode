@@ -301,7 +301,7 @@ nonisolated enum ModelToolCatalog {
         .init(
             id: .vmExec,
             name: "VM Command",
-            summary: "Run a shell command inside the isolated Cowork VM.",
+            summary: "Run a shell command inside the isolated Studio VM.",
             category: .execution,
             systemImage: "terminal",
             hasNativePresentation: false
@@ -309,7 +309,7 @@ nonisolated enum ModelToolCatalog {
         .init(
             id: .vmFile,
             name: "VM Files",
-            summary: "Read, write, and list files inside the isolated Cowork VM.",
+            summary: "Read, write, and list files inside the isolated Studio VM.",
             category: .execution,
             systemImage: "doc.on.doc",
             hasNativePresentation: false
@@ -325,7 +325,7 @@ nonisolated enum ModelToolCatalog {
         .init(
             id: .vmViewImage,
             name: "VM Image Viewer",
-            summary: "Show the model an image file from the isolated Cowork VM.",
+            summary: "Show the model an image file from the isolated Studio VM.",
             category: .execution,
             systemImage: "photo",
             hasNativePresentation: false

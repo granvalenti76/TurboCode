@@ -700,9 +700,9 @@ struct InputFieldView: View {
     private var sessionContextControls: some View {
         if isCoworkSession {
             HStack(spacing: 14) {
-                Label("Cowork VM", systemImage: "shippingbox")
+                Label("Studio VM", systemImage: "shippingbox")
                     .foregroundStyle(.secondary)
-                    .help("This session works inside the isolated Cowork virtual machine")
+                    .help("This session works inside the isolated Studio virtual machine")
                 // Always-visible entry to the reviewed export; it never copies
                 // anything by itself.
                 if coworkDeliverableCount > 0 {

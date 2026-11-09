@@ -30,7 +30,7 @@ struct SettingsTabView: View {
                 .tag(SettingsSection.agents)
 
             CoworkSettingsView()
-                .tabItem { Label("Cowork", systemImage: "shippingbox") }
+                .tabItem { Label("Studio", systemImage: "shippingbox") }
                 .tag(SettingsSection.cowork)
 
             ShortcutSettingsView()

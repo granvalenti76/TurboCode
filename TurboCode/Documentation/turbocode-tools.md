@@ -225,17 +225,17 @@ on-device orchestrator. It remains implemented for compatibility, but new
 custom profiles that include **Delegate Task** should use the safer, structured
 route.
 
-## Cowork VM tools
+## Studio VM tools
 
-Cowork sessions have a fixed tool surface: the product guide, Markdown skills
+Studio sessions have a fixed tool surface: the product guide, Markdown skills
 when installed, and the three tools below. They act only inside the isolated
-Cowork Linux VM. No Coding profile, default or custom, can include them, and a
-Cowork session never receives workspace, Git, Xcode, SwiftPM, MCP, plugin, or
+Studio Linux VM. No Coding profile, default or custom, can include them, and a
+Studio session never receives workspace, Git, Xcode, SwiftPM, MCP, plugin, or
 delegation tools that could read or change the Mac.
 
 ### `vm_exec`
 
-Runs a bash command inside the Cowork VM as the unprivileged `cowork` user.
+Runs a bash command inside the Studio VM as the unprivileged `cowork` user.
 Commands start in the session's own directory under `/home/cowork/sessions/`.
 The VM boots on first use and output keeps its beginning and end when long.
 There is no per-command approval: the VM is the boundary, any shared Mac folder
@@ -245,7 +245,7 @@ through an approved export.
 ### `vm_file`
 
 Reads numbered line ranges, writes whole files, or lists a directory tree inside
-the Cowork VM. Relative paths start at the session directory. File content is
+the Studio VM. Relative paths start at the session directory. File content is
 delivered on standard input, so it is written exactly as given without shell
 interpretation. Writes are limited to 1 MB; larger artifacts are generated with
 `vm_exec`.
@@ -272,6 +272,6 @@ answer instead of the image.
 A tool can be absent because no workspace is selected, the current model has no
 tool-calling support, its tool tier is intentionally constrained, no matching
 skill is installed, no worker is configured, or the custom profile did not
-include that capability. Cowork VM tools exist only in Cowork sessions, and
-only after Cowork is enabled and installed in Settings. A tool being implemented
+include that capability. Studio VM tools exist only in Studio sessions, and
+only after Studio is enabled and installed in Settings. A tool being implemented
 by TurboCode does not mean it is automatically exposed to every model session.

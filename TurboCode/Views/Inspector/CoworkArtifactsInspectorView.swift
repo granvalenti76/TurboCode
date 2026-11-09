@@ -72,8 +72,8 @@ struct CoworkArtifactsInspectorView: View {
                 strip(listing)
             } else if listing == nil {
                 emptyState(
-                    "No Cowork session",
-                    "Artifacts are the pages and files a Cowork session creates."
+                    "No Studio session",
+                    "Artifacts are the pages and files a Studio session creates."
                 )
             } else {
                 emptyState(
@@ -182,7 +182,7 @@ struct CoworkArtifactsInspectorView: View {
                         CoworkArtifactStripItem(
                             label: ":\(String(live.port))",
                             isSelected: live.id == selectedID,
-                            help: "Live server in the Cowork VM, \(live.host):\(String(live.port))",
+                            help: "Live server in the Studio VM, \(live.host):\(String(live.port))",
                             accessibilityLabel: "\(live.title), live server"
                         ) {
                             ZStack {

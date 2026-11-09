@@ -132,14 +132,14 @@ struct SidebarView: View {
                 set: { domain in Task { await chatStore.setActiveDomain(domain) } }
             )) {
                 Text("Coding").tag(SessionDomain.coding)
-                Text("Cowork").tag(SessionDomain.cowork)
+                Text("Studio").tag(SessionDomain.cowork)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .disabled(chatStore.busy)
             .padding(.horizontal, 16)
             .padding(.bottom, 10)
-            .help("Coding works in your Mac workspace. Cowork works in an isolated Linux VM.")
+            .help("Coding works in your Mac workspace. Studio works in an isolated Linux VM.")
         }
     }
 
