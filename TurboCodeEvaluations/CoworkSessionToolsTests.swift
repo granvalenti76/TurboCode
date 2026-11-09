@@ -10,7 +10,7 @@ import Testing
 struct CoworkSessionToolsTests {
     /// Every capability that can read or change the Mac.
     static let hostCapabilities: Set<ToolCapabilityID> = Set(ToolCapabilityID.allCases)
-        .subtracting([.vmExec, .vmFile, .vmExport, .turboCodeGuide, .loadSkill])
+        .subtracting([.vmExec, .vmFile, .vmExport, .vmViewImage, .turboCodeGuide, .loadSkill])
 
     // MARK: Catalog boundary
 
@@ -51,7 +51,7 @@ struct CoworkSessionToolsTests {
         )
         for tier in [ModelToolTier.onDevice, .standard, .enhanced] {
             let plan = ModelToolCatalog.coworkPlan(tier: tier, context: context)
-            #expect(plan.registeredIDs.isSuperset(of: [.vmExec, .vmFile, .vmExport]))
+            #expect(plan.registeredIDs.isSuperset(of: [.vmExec, .vmFile, .vmExport, .vmViewImage]))
             #expect(plan.registeredIDs.isDisjoint(with: Self.hostCapabilities))
         }
     }
@@ -102,7 +102,7 @@ struct CoworkSessionToolsTests {
             Issue.record("Expected session instructions")
             return
         }
-        #expect(Set(instructions.toolDefinitions.map(\.name)) == ["turbocode_guide", "vm_exec", "vm_file", "vm_export"])
+        #expect(Set(instructions.toolDefinitions.map(\.name)) == ["turbocode_guide", "vm_exec", "vm_file", "vm_export", "vm_view_image"])
     }
 
     // MARK: Admission

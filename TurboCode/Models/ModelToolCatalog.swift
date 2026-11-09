@@ -40,11 +40,14 @@ nonisolated enum ToolCapabilityID: String, CaseIterable, Codable, Sendable, Hash
     case vmExec = "vm_exec"
     case vmFile = "vm_file"
     case vmExport = "vm_export"
+    case vmViewImage = "vm_view_image"
 
     var id: String { rawValue }
 
     /// Whether the capability belongs to the Cowork VM rather than the Mac.
-    var isCoworkVMTool: Bool { self == .vmExec || self == .vmFile || self == .vmExport }
+    var isCoworkVMTool: Bool {
+        self == .vmExec || self == .vmFile || self == .vmExport || self == .vmViewImage
+    }
 
     /// Most capability identifiers equal their model-facing function name.
     /// Search keeps its historical persisted ID while exposing the replacement
@@ -318,6 +321,14 @@ nonisolated enum ModelToolCatalog {
             category: .execution,
             systemImage: "shippingbox",
             hasNativePresentation: false
+        ),
+        .init(
+            id: .vmViewImage,
+            name: "VM Image Viewer",
+            summary: "Show the model an image file from the isolated Cowork VM.",
+            category: .execution,
+            systemImage: "photo",
+            hasNativePresentation: false
         )
     ]
 
@@ -336,7 +347,11 @@ nonisolated enum ModelToolCatalog {
             (.loadSkill, .skills),
             (.vmExec, .coworkVM),
             (.vmFile, .coworkVM),
-            (.vmExport, .coworkVM)
+            (.vmExport, .coworkVM),
+            // Registered for every model because vision is only known from an
+            // asynchronous probe; the tool itself refuses when the model
+            // cannot see.
+            (.vmViewImage, .coworkVM)
         ]
         let assignments = memberships.map { id, requirement in
             assignment(id: id, requirement: requirement, tier: tier, context: context)
@@ -415,7 +430,7 @@ nonisolated enum ModelToolCatalog {
         case .safariMCP: .safariMCP
         case .xcodeMCP: .xcodeMCP
         case .delegateTask, .callPowerfulModel: .delegateModel
-        case .vmExec, .vmFile, .vmExport: .coworkVM
+        case .vmExec, .vmFile, .vmExport, .vmViewImage: .coworkVM
         }
     }
 

@@ -841,6 +841,21 @@ nonisolated enum ModelSessionFactory {
                 return configuration.cowork.map { VMFileTool(context: $0, receiptRegistry: receiptRegistry) }
             case .vmExport:
                 return configuration.cowork.map { VMExportTool(context: $0) }
+            case .vmViewImage:
+                // Same rule as composer images, resolved per call for the
+                // model this session talks to.
+                let backend = configuration.backend
+                let remoteModel = configuration.activeRemoteModel
+                return configuration.cowork.map {
+                    VMViewImageTool(context: $0) {
+                        await ModelVisionSupport.resolve(
+                            backend: backend,
+                            remoteModel: remoteModel,
+                            systemModelSupportsVision: { ModelVisionSupport.systemModelSupportsVision() },
+                            probeServer: { await LlamaServerRuntimeProbe.supportsVision(from: $0) }
+                        )
+                    }
+                }
             }
         }
         // TypeScript plugins run on the Mac through Node, so a Cowork session

@@ -161,6 +161,7 @@
 		B000000000000000000000ab /* TurboCode/Tools/Cowork/VMExportTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000ab /* TurboCode/Tools/Cowork/VMExportTool.swift */; };
 		B000000000000000000000ac /* TurboCode/Services/CoworkVM/CoworkExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000ac /* TurboCode/Services/CoworkVM/CoworkExport.swift */; };
 		B000000000000000000000f0 /* TurboCode/Models/ComposerImageAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f0 /* TurboCode/Models/ComposerImageAttachment.swift */; };
+		B000000000000000000000f1 /* TurboCode/Tools/Cowork/VMViewImageTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f1 /* TurboCode/Tools/Cowork/VMViewImageTool.swift */; };
 		C10000000000000000000000 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 /* End PBXBuildFile section */
 
@@ -342,6 +343,7 @@
 		A000000000000000000000ab /* TurboCode/Tools/Cowork/VMExportTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/Cowork/VMExportTool.swift; sourceTree = "<group>"; };
 		A000000000000000000000ac /* TurboCode/Services/CoworkVM/CoworkExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/CoworkVM/CoworkExport.swift; sourceTree = "<group>"; };
 		A000000000000000000000f0 /* TurboCode/Models/ComposerImageAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/ComposerImageAttachment.swift; sourceTree = "<group>"; };
+		A000000000000000000000f1 /* TurboCode/Tools/Cowork/VMViewImageTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/Cowork/VMViewImageTool.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -414,6 +416,7 @@
 				A00000000000000000000001 /* TurboCode/Diagnostics/AgentDiagnostics.swift */,
 				A00000000000000000000003 /* TurboCode/Models/ACP/ACPProtocol.swift */,
 				A000000000000000000000f0 /* TurboCode/Models/ComposerImageAttachment.swift */,
+				A000000000000000000000f1 /* TurboCode/Tools/Cowork/VMViewImageTool.swift */,
 				A00000000000000000000004 /* TurboCode/Models/AgentActivity.swift */,
 				A00000000000000000000005 /* TurboCode/Models/AgentTaskContract.swift */,
 				A00000000000000000000006 /* TurboCode/Models/AgentTuningConfig.swift */,
@@ -720,6 +723,7 @@
 				B00000000000000000000001 /* TurboCode/Diagnostics/AgentDiagnostics.swift in Sources */,
 				B00000000000000000000003 /* TurboCode/Models/ACP/ACPProtocol.swift in Sources */,
 				B000000000000000000000f0 /* TurboCode/Models/ComposerImageAttachment.swift in Sources */,
+				B000000000000000000000f1 /* TurboCode/Tools/Cowork/VMViewImageTool.swift in Sources */,
 				B00000000000000000000004 /* TurboCode/Models/AgentActivity.swift in Sources */,
 				B00000000000000000000005 /* TurboCode/Models/AgentTaskContract.swift in Sources */,
 				B00000000000000000000006 /* TurboCode/Models/AgentTuningConfig.swift in Sources */,
