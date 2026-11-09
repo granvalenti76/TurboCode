@@ -182,6 +182,24 @@ struct SidebarView: View {
             .listRowInsets(sidebarRowInsets)
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
+
+            // Cowork results live in session outboxes rather than in a Mac
+            // workspace, so their library is a Cowork-only destination.
+            if chatStore.activeDomain == .cowork {
+                Button {
+                    chatStore.setRoute(.artifacts)
+                } label: {
+                    navigationLabel(
+                        icon: "square.stack.3d.up",
+                        title: "Artifacts",
+                        isSelected: chatStore.route == .artifacts
+                    )
+                }
+                .buttonStyle(.plain)
+                .listRowInsets(sidebarRowInsets)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
         }
     }
 

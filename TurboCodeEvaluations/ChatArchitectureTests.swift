@@ -70,10 +70,10 @@ struct ChatArchitectureTests {
     func publicShellContainsOnlyImplementedSurfaces() {
         // These exact lists are the release-boundary tripwire: a new case must
         // arrive with a real consumer and an intentional test update.
-        #expect(AppRoute.allCases.map(\.rawValue) == ["chat", "tools", "skills"])
+        #expect(AppRoute.allCases.map(\.rawValue) == ["chat", "tools", "skills", "artifacts"])
         #expect(
             RightPanelMode.allCases.map(\.rawValue)
-                == ["activity", "changes", "commit", "workspaceListing"]
+                == ["activity", "changes", "commit", "workspaceListing", "artifacts"]
         )
         #expect(
             SettingsSection.allCases.map(\.rawValue)

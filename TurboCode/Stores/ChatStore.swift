@@ -470,6 +470,9 @@ public final class ChatStore {
         conversationStore.activeDomain = domain
         UserDefaults.standard.set(domain.rawValue, forKey: Self.activeDomainKey)
         selectedProject = nil
+        // The artifact library belongs to Cowork; leaving the domain must not
+        // strand the main view on a destination the sidebar no longer offers.
+        if route == .artifacts { setRoute(.chat) }
         if let recent = sortedThreads.first {
             await openThread(recent.id)
         } else {
@@ -518,6 +521,44 @@ public final class ChatStore {
         let outbox = provider.outbox(for: conversation)
         return await Task.detached(priority: .utility) {
             CoworkExportPlanner.deliverables(in: outbox).count
+        }.value
+    }
+
+    /// The active Cowork session's artifacts for the inspector, listed off the
+    /// main actor. `nil` when the active conversation is not a Cowork session,
+    /// so the inspector can tell "nothing yet" from "not applicable".
+    func coworkArtifacts() async -> CoworkArtifactListing? {
+        guard let conversation = activeConversation, conversation.domain == .cowork,
+              let provider = profileSelectionCoordinator.coworkProvider else { return nil }
+        let outbox = provider.outbox(for: conversation)
+        return await Task.detached(priority: .utility) {
+            CoworkArtifactListing(outbox: outbox, artifacts: CoworkArtifactCatalog.artifacts(in: outbox))
+        }.value
+    }
+
+    /// Every Cowork session that has artifacts, most recently used first, for
+    /// the Artifacts library. Archived sessions are left out like in the
+    /// sidebar; outboxes are read off the main actor.
+    func coworkArtifactLibrary() async -> [CoworkArtifactGroup] {
+        guard let provider = profileSelectionCoordinator.coworkProvider else { return [] }
+        let sessions = conversationStore.threads
+            .filter { $0.domain == .cowork && !$0.isArchived }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .map { (id: $0.id, title: $0.title, updatedAt: $0.updatedAt, outbox: provider.outbox(for: $0)) }
+        return await Task.detached(priority: .utility) {
+            sessions.compactMap { session in
+                let artifacts = CoworkArtifactCatalog.displayOrdered(
+                    CoworkArtifactCatalog.artifacts(in: session.outbox)
+                )
+                guard !artifacts.isEmpty else { return nil }
+                return CoworkArtifactGroup(
+                    sessionID: session.id,
+                    sessionTitle: session.title,
+                    updatedAt: session.updatedAt,
+                    outbox: session.outbox,
+                    artifacts: artifacts
+                )
+            }
         }.value
     }
 

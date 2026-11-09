@@ -186,6 +186,27 @@ struct WorkbenchSplitView: View {
                     ? "Start a conversation to inspect its transcript"
                     : "Show transcript")
 
+                // Artifacts exist only for Cowork sessions, whose results live
+                // in the VM outbox rather than in a Mac workspace.
+                if chatStore.activeDomain == .cowork {
+                    Toggle(isOn: Binding(
+                        get: { chatStore.rightPanelMode == .artifacts },
+                        set: { isPresented in
+                            if isPresented != (chatStore.rightPanelMode == .artifacts) {
+                                chatStore.toggleRightPanel(.artifacts)
+                            }
+                        }
+                    )) {
+                        Label("Artifacts", systemImage: "square.stack.3d.up")
+                    }
+                    .toggleStyle(.button)
+                    .labelStyle(.iconOnly)
+                    .disabled(chatStore.route != .chat)
+                    .help(chatStore.rightPanelMode == .artifacts
+                        ? "Hide artifacts"
+                        : "Show the files this session put in /out")
+                }
+
                 Toggle(isOn: Binding(
                     get: { chatStore.rightPanelMode == .changes },
                     set: { isPresented in
