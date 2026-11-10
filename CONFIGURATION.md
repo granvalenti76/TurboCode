@@ -81,13 +81,19 @@ actually loaded. Set the value for OpenAI-compatible servers without that
 endpoint. Apple on-device uses the system model's reported capability. Other
 backends do not accept images.
 
-Coding and Cowork sessions follow the same rule. In Cowork the image reaches
+Coding and Studio sessions follow the same rule. In Studio the image reaches
 only the model: it is not copied into the VM, so `vm_exec` and `vm_file` cannot
 open it unless the file is also in the shared folder.
 
+The opposite direction uses the `vm_view_image` tool: a Studio model with
+vision can look at a PNG, JPEG, GIF, or WebP file of at most 10 MB that exists
+in the VM, for example a screenshot it rendered. The same vision rule decides
+whether the image is returned, and it is asked again on every call.
+
 Images are resized to at most 1568 px on the longest edge and are never written
 to disk. Stored sessions keep only a `[Image: name]` marker in the message text,
-and a rebuilt session replaces earlier images with a text placeholder.
+and a rebuilt session replaces earlier images, including those a tool showed
+the model, with a text placeholder.
 
 ## Repository map model capability
 
@@ -198,19 +204,34 @@ disappears without closing the connection, the turn waits until you press Stop.
 Tool commands keep their own timeouts, including the Xcode verification that
 follows a delegated task.
 
-## Cowork
+## Connectors
 
-Cowork runs multi-purpose work in one managed Linux VM built on Apple
-Containerization. It is configured in **Settings › Cowork**; nothing about it
+Connectors are built in; there is no file to edit and no endpoint to
+configure. Each one talks to a named app over MCP on `127.0.0.1` and is turned
+on per session from **Connectors** in the sidebar. The choice is saved with the
+session (`connectors` in the session file) and is empty by default.
+
+| Connector | App endpoint | Available in |
+| --- | --- | --- |
+| Prassitele | `http://127.0.0.1:48765/mcp` (Agent › Agent Server (MCP) in the app) | Coding, Studio |
+| Safari | `safaridriver --mcp`, the Safari MCP switch in **Settings › Agents** | Coding |
+
+Safari keeps its single switch for all Coding sessions; the Connectors page
+shows the same value.
+
+## Studio
+
+Studio runs multi-purpose work in one managed Linux VM built on Apple
+Containerization. It is configured in **Settings › Studio**; nothing about it
 lives in `config.json` or `models.json`.
 
 | Setting | Stored as (`UserDefaults`) | Default |
 |---|---|---|
-| Enable Cowork | `coworkEnabled` | off |
+| Enable Studio | `coworkEnabled` | off |
 | Processors | `coworkCPUs` | 4 |
 | Memory (GB) | `coworkMemoryGiB` | 4 |
 | Network access | `coworkNetworkEnabled` | on |
-| Sidebar mode (Coding or Cowork) | `activeSessionDomain` | Coding |
+| Sidebar mode (Coding or Studio) | `activeSessionDomain` | Coding |
 
 Resource and network changes apply the next time the VM starts. The VM
 restarts automatically (about 0.4 s) when a session with a different shared
@@ -219,7 +240,7 @@ folder or resource configuration needs it.
 ### Files
 
 Everything lives under `~/.turbocode/cowork/`; deleting the folder (or
-**Remove Cowork…**) uninstalls Cowork. Sessions are kept.
+**Remove Studio…**) uninstalls Studio. Sessions are kept.
 
 | Path | Contents |
 |---|---|

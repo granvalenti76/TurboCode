@@ -273,8 +273,10 @@ extension ChatStore {
         activeBackend != .codex || codexRuntimeStore.canSend
     }
 
+    /// What the composer lists and `/name` can activate in the active
+    /// conversation, including the skills of its enabled connectors.
     var availableSkills: [TurboCodeSkillDefinition] {
-        modelRuntimeStore.resolvedMarkdownSkills
+        activeSkillCatalog
     }
 
     var onDeviceSupportsToolCalling: Bool {

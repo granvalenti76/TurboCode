@@ -52,7 +52,7 @@ nonisolated enum CoworkInstallError: LocalizedError, Equatable {
         case .kernelDownloadFailed(let status): "The kernel download failed (HTTP \(status))."
         case .kernelSizeMismatch: "The downloaded kernel has an unexpected size."
         case .kernelDigestMismatch: "The downloaded kernel does not match its pinned SHA-256."
-        case .verificationFailed(let detail): "The Cowork VM failed its self-test. \(detail)"
+        case .verificationFailed(let detail): "The Studio VM failed its self-test. \(detail)"
         }
     }
 }

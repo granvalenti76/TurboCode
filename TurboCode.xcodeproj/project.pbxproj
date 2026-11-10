@@ -161,6 +161,10 @@
 		B000000000000000000000ab /* TurboCode/Tools/Cowork/VMExportTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000ab /* TurboCode/Tools/Cowork/VMExportTool.swift */; };
 		B000000000000000000000ac /* TurboCode/Services/CoworkVM/CoworkExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000ac /* TurboCode/Services/CoworkVM/CoworkExport.swift */; };
 		B000000000000000000000f0 /* TurboCode/Models/ComposerImageAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f0 /* TurboCode/Models/ComposerImageAttachment.swift */; };
+		B000000000000000000000f1 /* TurboCode/Tools/Cowork/VMViewImageTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f1 /* TurboCode/Tools/Cowork/VMViewImageTool.swift */; };
+		B000000000000000000000f2 /* TurboCode/Models/MCP/MCPConnector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f2 /* TurboCode/Models/MCP/MCPConnector.swift */; };
+		B000000000000000000000f3 /* TurboCode/Services/MCP/MCPLoopbackHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f3 /* TurboCode/Services/MCP/MCPLoopbackHTTPClient.swift */; };
+		B000000000000000000000f4 /* TurboCode/Tools/ConnectorTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f4 /* TurboCode/Tools/ConnectorTool.swift */; };
 		C10000000000000000000000 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 /* End PBXBuildFile section */
 
@@ -342,6 +346,10 @@
 		A000000000000000000000ab /* TurboCode/Tools/Cowork/VMExportTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/Cowork/VMExportTool.swift; sourceTree = "<group>"; };
 		A000000000000000000000ac /* TurboCode/Services/CoworkVM/CoworkExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/CoworkVM/CoworkExport.swift; sourceTree = "<group>"; };
 		A000000000000000000000f0 /* TurboCode/Models/ComposerImageAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/ComposerImageAttachment.swift; sourceTree = "<group>"; };
+		A000000000000000000000f1 /* TurboCode/Tools/Cowork/VMViewImageTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/Cowork/VMViewImageTool.swift; sourceTree = "<group>"; };
+		A000000000000000000000f2 /* TurboCode/Models/MCP/MCPConnector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/MCP/MCPConnector.swift; sourceTree = "<group>"; };
+		A000000000000000000000f3 /* TurboCode/Services/MCP/MCPLoopbackHTTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/MCP/MCPLoopbackHTTPClient.swift; sourceTree = "<group>"; };
+		A000000000000000000000f4 /* TurboCode/Tools/ConnectorTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/ConnectorTool.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -414,6 +422,10 @@
 				A00000000000000000000001 /* TurboCode/Diagnostics/AgentDiagnostics.swift */,
 				A00000000000000000000003 /* TurboCode/Models/ACP/ACPProtocol.swift */,
 				A000000000000000000000f0 /* TurboCode/Models/ComposerImageAttachment.swift */,
+				A000000000000000000000f1 /* TurboCode/Tools/Cowork/VMViewImageTool.swift */,
+				A000000000000000000000f2 /* TurboCode/Models/MCP/MCPConnector.swift */,
+				A000000000000000000000f3 /* TurboCode/Services/MCP/MCPLoopbackHTTPClient.swift */,
+				A000000000000000000000f4 /* TurboCode/Tools/ConnectorTool.swift */,
 				A00000000000000000000004 /* TurboCode/Models/AgentActivity.swift */,
 				A00000000000000000000005 /* TurboCode/Models/AgentTaskContract.swift */,
 				A00000000000000000000006 /* TurboCode/Models/AgentTuningConfig.swift */,
@@ -720,6 +732,10 @@
 				B00000000000000000000001 /* TurboCode/Diagnostics/AgentDiagnostics.swift in Sources */,
 				B00000000000000000000003 /* TurboCode/Models/ACP/ACPProtocol.swift in Sources */,
 				B000000000000000000000f0 /* TurboCode/Models/ComposerImageAttachment.swift in Sources */,
+				B000000000000000000000f1 /* TurboCode/Tools/Cowork/VMViewImageTool.swift in Sources */,
+				B000000000000000000000f2 /* TurboCode/Models/MCP/MCPConnector.swift in Sources */,
+				B000000000000000000000f3 /* TurboCode/Services/MCP/MCPLoopbackHTTPClient.swift in Sources */,
+				B000000000000000000000f4 /* TurboCode/Tools/ConnectorTool.swift in Sources */,
 				B00000000000000000000004 /* TurboCode/Models/AgentActivity.swift in Sources */,
 				B00000000000000000000005 /* TurboCode/Models/AgentTaskContract.swift in Sources */,
 				B00000000000000000000006 /* TurboCode/Models/AgentTuningConfig.swift in Sources */,
@@ -1045,7 +1061,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.63;
+				MARKETING_VERSION = 0.64;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1102,7 +1118,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.63;
+				MARKETING_VERSION = 0.64;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";

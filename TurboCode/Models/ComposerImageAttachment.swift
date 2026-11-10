@@ -66,15 +66,42 @@ nonisolated enum ComposerImageLoader {
         guard (values.fileSize ?? 0) <= maxSourceByteCount else {
             throw .tooLarge
         }
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let modelData = jpegData(from: source, longestEdge: ComposerImagePolicy.maxModelPixelEdge),
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+            throw .unreadable
+        }
+        return try attachment(from: source, fileName: url.lastPathComponent)
+    }
+
+    /// Decodes image bytes that did not come from a file the user chose, such as
+    /// the output of a tool. There is no content type to consult, so the caller
+    /// decides which formats it accepts before handing the bytes over; the result
+    /// is normalized exactly like a dropped file.
+    static func load(
+        data: Data,
+        fileName: String,
+        maxSourceByteCount: Int = ComposerImagePolicy.maxSourceByteCount
+    ) throws(LoadError) -> ComposerImageAttachment {
+        guard data.count <= maxSourceByteCount else {
+            throw .tooLarge
+        }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            throw .unreadable
+        }
+        return try attachment(from: source, fileName: fileName)
+    }
+
+    private static func attachment(
+        from source: CGImageSource,
+        fileName: String
+    ) throws(LoadError) -> ComposerImageAttachment {
+        guard let modelData = jpegData(from: source, longestEdge: ComposerImagePolicy.maxModelPixelEdge),
               let thumbnailData = jpegData(from: source, longestEdge: ComposerImagePolicy.thumbnailPixelEdge)
         else {
             throw .unreadable
         }
         return ComposerImageAttachment(
             id: UUID(),
-            fileName: url.lastPathComponent,
+            fileName: fileName,
             modelJPEGData: modelData,
             thumbnailJPEGData: thumbnailData
         )

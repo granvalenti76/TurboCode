@@ -470,6 +470,15 @@ public final class ChatStore {
         conversationStore.activeDomain = domain
         UserDefaults.standard.set(domain.rawValue, forKey: Self.activeDomainKey)
         selectedProject = nil
+        // The artifact library belongs to Cowork; leaving the domain must not
+        // strand the main view on a destination the sidebar no longer offers.
+        if route == .artifacts { setRoute(.chat) }
+        if domain != .cowork {
+            workbenchStore.setCoworkArtifactsExpanded(false)
+            if workbenchStore.rightPanelMode == .artifacts {
+                workbenchStore.rightPanelMode = nil
+            }
+        }
         if let recent = sortedThreads.first {
             await openThread(recent.id)
         } else {
@@ -498,6 +507,36 @@ public final class ChatStore {
         _ = await profileSelectionCoordinator.rebuildSession()
     }
 
+    /// The facade extension lives in another file and cannot reach the
+    /// private coordinator, so the session's skill catalog is exposed here.
+    var activeSkillCatalog: [TurboCodeSkillDefinition] {
+        profileSelectionCoordinator.activeSkillCatalog()
+    }
+
+    /// Turns a built-in connector on or off for the active session and
+    /// rebuilds the session, because its tool list is fixed when it is built.
+    /// Refused while the agent works: a rebuild would cut the running turn.
+    /// Returns whether the change was applied.
+    ///
+    /// A new chat has no session until its first message. The session is
+    /// created here instead, so a connector can be chosen before writing
+    /// anything rather than after a throwaway first message.
+    @discardableResult
+    func setConnector(_ id: String, enabled: Bool) async -> Bool {
+        guard !busy else { return false }
+        if activeConversation == nil { await ensureActiveThread() }
+        guard let conversation = activeConversation,
+              let connector = MCPConnectorCatalog.connector(id: id),
+              connector.domains.contains(conversation.domain) else { return false }
+        conversationStore.setConnectors(
+            MCPConnectorCatalog.ids(conversation.connectors, setting: id, enabled: enabled),
+            for: conversation.id
+        )
+        await persistConversationMetadata(for: conversation.id)
+        _ = await profileSelectionCoordinator.rebuildSession()
+        return true
+    }
+
     /// Opens the export review for the active Cowork session. The default
     /// destination is the session's shared folder when it still exists.
     func presentCoworkExport() {
@@ -518,6 +557,86 @@ public final class ChatStore {
         let outbox = provider.outbox(for: conversation)
         return await Task.detached(priority: .utility) {
             CoworkExportPlanner.deliverables(in: outbox).count
+        }.value
+    }
+
+    /// The active Cowork session's artifacts for the inspector, listed off the
+    /// main actor. `nil` when the active conversation is not a Cowork session,
+    /// so the inspector can tell "nothing yet" from "not applicable".
+    func coworkArtifacts() async -> CoworkArtifactListing? {
+        guard let conversation = activeConversation, conversation.domain == .cowork,
+              let provider = profileSelectionCoordinator.coworkProvider else { return nil }
+        let outbox = provider.outbox(for: conversation)
+        return await Task.detached(priority: .utility) {
+            CoworkArtifactListing(outbox: outbox, artifacts: CoworkArtifactCatalog.artifacts(in: outbox))
+        }.value
+    }
+
+    /// What the Artifacts inspector shows for the active session: an
+    /// artifact's path or a live preview's ID.
+    var coworkArtifactSelection: String? {
+        get { activeThreadId.flatMap { workbenchStore.coworkArtifactSelection[$0] } }
+        set {
+            guard let id = activeThreadId else { return }
+            workbenchStore.coworkArtifactSelection[id] = newValue
+        }
+    }
+
+    /// Whether the Artifacts preview currently covers the chat.
+    var coworkArtifactsExpanded: Bool { workbenchStore.coworkArtifactsExpanded }
+
+    /// Shows the Artifacts preview over the chat, or returns it to the
+    /// inspector. The session underneath is not touched either way.
+    func setCoworkArtifactsExpanded(_ expanded: Bool) {
+        workbenchStore.setCoworkArtifactsExpanded(expanded)
+    }
+
+    /// Goes from the library to the session that made an artifact, with that
+    /// artifact open beside the chat.
+    func showCoworkArtifact(_ artifactID: String, inSession sessionID: String) async {
+        workbenchStore.coworkArtifactSelection[sessionID] = artifactID
+        await openThread(sessionID)
+        workbenchStore.rightPanelMode = .artifacts
+    }
+
+    /// Servers the agent left listening in the VM that the Mac can open.
+    ///
+    /// Asked only while the VM already runs with this session's configuration:
+    /// running a command boots the VM, or restarts it when another session's
+    /// configuration is active, and looking at the inspector must never do
+    /// either. A stopped VM has no servers anyway.
+    func coworkLivePreviews() async -> [CoworkLivePreview] {
+        guard let conversation = activeConversation, conversation.domain == .cowork,
+              let context = profileSelectionCoordinator.coworkProvider?.sessionContext(for: conversation),
+              await context.runtime.state() == .running(context.configuration),
+              let result = try? await context.run(CoworkLivePreviewProbe.script, timeout: .seconds(10)),
+              result.exitCode == 0 else { return [] }
+        return CoworkLivePreviewProbe.parse(String(decoding: result.stdout, as: UTF8.self))
+    }
+
+    /// Every Cowork session that has artifacts, most recently used first, for
+    /// the Artifacts library. Archived sessions are left out like in the
+    /// sidebar; outboxes are read off the main actor.
+    func coworkArtifactLibrary() async -> [CoworkArtifactGroup] {
+        guard let provider = profileSelectionCoordinator.coworkProvider else { return [] }
+        let sessions = conversationStore.threads
+            .filter { $0.domain == .cowork && !$0.isArchived }
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .map { (id: $0.id, title: $0.title, updatedAt: $0.updatedAt, outbox: provider.outbox(for: $0)) }
+        return await Task.detached(priority: .utility) {
+            sessions.compactMap { session in
+                let artifacts = CoworkArtifactCatalog.displayOrdered(
+                    CoworkArtifactCatalog.artifacts(in: session.outbox)
+                )
+                guard !artifacts.isEmpty else { return nil }
+                return CoworkArtifactGroup(
+                    sessionID: session.id,
+                    sessionTitle: session.title,
+                    updatedAt: session.updatedAt,
+                    outbox: session.outbox,
+                    artifacts: artifacts
+                )
+            }
         }.value
     }
 

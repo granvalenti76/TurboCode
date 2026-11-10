@@ -62,6 +62,37 @@ final class ProfileSelectionCoordinator {
         activeConversation.flatMap { coworkProvider?.sessionContext(for: $0) }
     }
 
+    /// The connectors the active conversation enabled, limited to its domain.
+    func activeConnectors() -> [MCPConnector] {
+        activeConversation.map {
+            MCPConnectorCatalog.enabled(ids: $0.connectors, domain: $0.domain)
+        } ?? []
+    }
+
+    /// Gives a session its enabled connectors and the skills they offer.
+    private func applyConnectors(to configuration: inout ModelSessionConfiguration) {
+        let connectors = activeConnectors()
+        configuration.connectors = connectors
+        configuration.availableSkills = MCPConnectorCatalog.catalog(
+            adding: MCPConnectorCatalog.skills(for: connectors),
+            to: configuration.availableSkills
+        )
+    }
+
+    /// The skills the active conversation can use: the user's catalog plus
+    /// the skills of its enabled connectors. The composer's slash commands
+    /// and suggestions read this, so they list exactly what `load_skill`
+    /// offers the model in the same session. Codex sessions get no connector,
+    /// hence no connector skill either.
+    func activeSkillCatalog() -> [TurboCodeSkillDefinition] {
+        let skills = modelRuntime.resolvedMarkdownSkills
+        guard modelRuntime.activeBackend != .codex else { return skills }
+        return MCPConnectorCatalog.catalog(
+            adding: MCPConnectorCatalog.skills(for: activeConnectors()),
+            to: skills
+        )
+    }
+
     /// Every entry point that starts a turn asks this first. A rejected Cowork
     /// turn never falls back to a Coding session with host tools.
     func coworkAdmission() -> CoworkAdmission {
@@ -401,10 +432,11 @@ final class ProfileSelectionCoordinator {
                 )
             )
         )
-        let configuration = modelRuntime.makeSessionConfiguration(
+        var configuration = modelRuntime.makeSessionConfiguration(
             workspaceRoot: workspace.root,
             cowork: activeCoworkContext()
         )
+        applyConnectors(to: &configuration)
         let rebuilt = await llmRuntime.rebuildFoundationModelsSession(
             configuration: configuration,
             keepingHistory: keepingHistory,
@@ -431,10 +463,11 @@ final class ProfileSelectionCoordinator {
     func restoreInterruptedTurnHistory(
         _ history: [FoundationModelsTranscriptEntry]
     ) async -> Bool {
-        let configuration = modelRuntime.makeSessionConfiguration(
+        var configuration = modelRuntime.makeSessionConfiguration(
             workspaceRoot: workspace.root,
             cowork: activeCoworkContext()
         )
+        applyConnectors(to: &configuration)
         return await llmRuntime.rebuildFoundationModelsSession(
             configuration: configuration,
             restoringHistory: history,

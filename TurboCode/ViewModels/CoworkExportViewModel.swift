@@ -72,7 +72,7 @@ final class CoworkExportViewModel {
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = "Choose"
-        panel.message = "Choose where the Cowork deliverables are copied on this Mac."
+        panel.message = "Choose where the Studio deliverables are copied on this Mac."
         panel.directoryURL = destination
         guard panel.runModal() == .OK, let url = panel.url else { return }
         destination = url

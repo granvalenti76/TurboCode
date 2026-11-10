@@ -107,10 +107,10 @@ nonisolated enum CoworkVMError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .notInstalled(let detail): "Cowork is not installed: \(detail)"
-        case .notRunning: "The Cowork VM is not running."
+        case .notInstalled(let detail): "Studio is not installed: \(detail)"
+        case .notRunning: "The Studio VM is not running."
         case .invalidRequest(let detail): detail
-        case .unsafeInputFolder(let path): "\(path) cannot be shared with the Cowork VM."
+        case .unsafeInputFolder(let path): "\(path) cannot be shared with the Studio VM."
         }
     }
 }

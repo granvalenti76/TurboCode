@@ -132,14 +132,14 @@ struct SidebarView: View {
                 set: { domain in Task { await chatStore.setActiveDomain(domain) } }
             )) {
                 Text("Coding").tag(SessionDomain.coding)
-                Text("Cowork").tag(SessionDomain.cowork)
+                Text("Studio").tag(SessionDomain.cowork)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .disabled(chatStore.busy)
             .padding(.horizontal, 16)
             .padding(.bottom, 10)
-            .help("Coding works in your Mac workspace. Cowork works in an isolated Linux VM.")
+            .help("Coding works in your Mac workspace. Studio works in an isolated Linux VM.")
         }
     }
 
@@ -182,6 +182,24 @@ struct SidebarView: View {
             .listRowInsets(sidebarRowInsets)
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
+
+            // Cowork results live in session outboxes rather than in a Mac
+            // workspace, so their library is a Cowork-only destination.
+            if chatStore.activeDomain == .cowork {
+                Button {
+                    chatStore.setRoute(.artifacts)
+                } label: {
+                    navigationLabel(
+                        icon: "square.stack.3d.up",
+                        title: "Artifacts",
+                        isSelected: chatStore.route == .artifacts
+                    )
+                }
+                .buttonStyle(.plain)
+                .listRowInsets(sidebarRowInsets)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            }
         }
     }
 
@@ -233,11 +251,13 @@ struct SidebarView: View {
 
     private enum UtilityItem: CaseIterable {
         case tools
+        case connectors
         case skills
 
         var label: String {
             switch self {
             case .tools: "Tools"
+            case .connectors: "Connectors"
             case .skills: "Profiles"
             }
         }
@@ -246,12 +266,14 @@ struct SidebarView: View {
             // Tools is a capability catalog and matrix, so a neutral grid is
             // more faithful than a physical construction or settings metaphor.
             case .tools: return "square.grid.2x2"
+            case .connectors: return "powerplug"
             case .skills: return "doc.text"
             }
         }
         var route: AppRoute {
             switch self {
             case .tools: .tools
+            case .connectors: .connectors
             case .skills: .skills
             }
         }

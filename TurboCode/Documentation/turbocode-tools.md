@@ -225,17 +225,33 @@ on-device orchestrator. It remains implemented for compatibility, but new
 custom profiles that include **Delegate Task** should use the safer, structured
 route.
 
-## Cowork VM tools
+### `connector`
 
-Cowork sessions have a fixed tool surface: the product guide, Markdown skills
-when installed, and the three tools below. They act only inside the isolated
-Cowork Linux VM. No Coding profile, default or custom, can include them, and a
-Cowork session never receives workspace, Git, Xcode, SwiftPM, MCP, plugin, or
-delegation tools that could read or change the Mac.
+The gateway to the built-in connectors, such as Prassitele. A connector lets
+the model work with one named app on your Mac through the operations that app
+publishes over MCP on the loopback interface (`127.0.0.1`). It is registered
+only for a session in which you turned a connector on in **Connectors**, and it
+reaches only the connectors enabled for that session. Use `list_tools` first,
+then `call` with an exact advertised tool name and a JSON object.
+
+Turning a connector on is the approval: its calls are not confirmed one by one.
+Images a connector returns, such as a view of a sculpture, are shown to models
+with vision and left out for the others. The gateway is never passed to
+delegated workers and is not available to the Codex backend.
+
+## Studio VM tools
+
+Studio sessions have a fixed tool surface: the product guide, Markdown skills
+when installed, and the tools below. They act only inside the isolated
+Studio Linux VM. No Coding profile, default or custom, can include them, and a
+Studio session never receives workspace, Git, Xcode, SwiftPM, Safari, Xcode
+MCP, plugin, or delegation tools that could read or change the Mac. The one
+exception is `connector`, and only in a session where you enabled a connector:
+it talks to a named app, not to the Mac's shell or files.
 
 ### `vm_exec`
 
-Runs a bash command inside the Cowork VM as the unprivileged `cowork` user.
+Runs a bash command inside the Studio VM as the unprivileged `cowork` user.
 Commands start in the session's own directory under `/home/cowork/sessions/`.
 The VM boots on first use and output keeps its beginning and end when long.
 There is no per-command approval: the VM is the boundary, any shared Mac folder
@@ -245,7 +261,7 @@ through an approved export.
 ### `vm_file`
 
 Reads numbered line ranges, writes whole files, or lists a directory tree inside
-the Cowork VM. Relative paths start at the session directory. File content is
+the Studio VM. Relative paths start at the session directory. File content is
 delivered on standard input, so it is written exactly as given without shell
 interpretation. Writes are limited to 1 MB; larger artifacts are generated with
 `vm_exec`.
@@ -258,11 +274,20 @@ only when the user opens **Review & Export** (from the toolbar folder menu or
 the composer) and approves each file. Build folders such as `node_modules`,
 `.venv`, and `.git` and symbolic links are never offered.
 
+### `vm_view_image`
+
+Shows the model an image file from the VM, such as a Chromium screenshot or a
+downloaded picture, so it can check its own work. It accepts PNG, JPEG, GIF, and
+WebP files up to 10 MB and resizes them like images dropped on the composer.
+The image goes only to the model: nothing is copied to the Mac, and it does not
+replace **Review & Export**. A model without vision receives a short text
+answer instead of the image.
+
 ## Why a tool may be unavailable
 
 A tool can be absent because no workspace is selected, the current model has no
 tool-calling support, its tool tier is intentionally constrained, no matching
 skill is installed, no worker is configured, or the custom profile did not
-include that capability. Cowork VM tools exist only in Cowork sessions, and
-only after Cowork is enabled and installed in Settings. A tool being implemented
+include that capability. Studio VM tools exist only in Studio sessions, and
+only after Studio is enabled and installed in Settings. A tool being implemented
 by TurboCode does not mean it is automatically exposed to every model session.

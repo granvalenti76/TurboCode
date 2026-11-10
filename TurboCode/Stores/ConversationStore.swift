@@ -118,6 +118,12 @@ final class ConversationStore {
         threads[index].updatedAt = .now
     }
 
+    /// Replaces the connectors enabled for one session.
+    func setConnectors(_ ids: [String], for id: String) {
+        guard let index = threads.firstIndex(where: { $0.id == id }) else { return }
+        threads[index].connectors = ids
+    }
+
     func touchThread(id: String) {
         guard let index = threads.firstIndex(where: { $0.id == id }) else { return }
         threads[index].updatedAt = .now

@@ -39,6 +39,9 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
     public let domain: SessionDomain
     /// Added in 0.62 for Cowork sessions; absent for everything else.
     public var coworkFolder: String?
+    /// Connectors enabled for the session. Optional so sessions written
+    /// before connectors existed decode unchanged and enable none.
+    public var connectors: [String]?
     public var modelBackend: String
     public var blocks: [StoredBlock]
     /// Optional so sessions written before transcript persistence remain
@@ -82,7 +85,7 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
 
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, id, title, projectName, workspacePath
-        case createdAt, updatedAt, isPinned, isArchived, mode, domain, coworkFolder
+        case createdAt, updatedAt, isPinned, isArchived, mode, domain, coworkFolder, connectors
         case modelBackend, blocks, transcript, contextProjection
         case steering, statistics
     }
@@ -113,6 +116,7 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
         mode = try values.decodeIfPresent(ConversationMode.self, forKey: .mode) ?? .agent
         domain = try values.decodeIfPresent(SessionDomain.self, forKey: .domain) ?? .coding
         coworkFolder = try values.decodeIfPresent(String.self, forKey: .coworkFolder)
+        connectors = try values.decodeIfPresent([String].self, forKey: .connectors)
         modelBackend = try values.decode(String.self, forKey: .modelBackend)
         blocks = try values.decodeIfPresent([StoredBlock].self, forKey: .blocks) ?? []
         var recovered: [String] = []

@@ -52,10 +52,10 @@
     },
     {
       "id": "cowork",
-      "title": "Cowork",
-      "summary": "How Cowork runs multi-purpose work in an isolated Linux VM: enabling it, sessions, shared folders, and reviewed export of deliverables.",
+      "title": "Studio",
+      "summary": "How Studio runs multi-purpose work in an isolated Linux VM: enabling it, sessions, shared folders, and reviewed export of deliverables.",
       "file": "turbocode-cowork.md",
-      "keywords": ["Cowork", "VM", "virtual machine", "macchina virtuale", "Linux", "React", "Python", "export", "esporta", "deliverables", "out", "shared folder", "cartella condivisa"]
+      "keywords": ["Studio", "Cowork", "VM", "virtual machine", "macchina virtuale", "Linux", "React", "Python", "export", "esporta", "deliverables", "out", "shared folder", "cartella condivisa"]
     }
   ]
 }

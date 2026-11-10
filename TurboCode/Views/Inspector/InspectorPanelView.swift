@@ -17,6 +17,8 @@ struct InspectorPanelView: View {
                 } else {
                     DelegatedActivityEmptyStateView()
                 }
+            } else if chatStore.rightPanelMode == .artifacts {
+                CoworkArtifactsInspectorView()
             } else if chatStore.rightPanelMode == .workspaceListing,
                let listing = chatStore.inspectedWorkspaceListing {
                 WorkspaceListingInspectorView(listing: listing)

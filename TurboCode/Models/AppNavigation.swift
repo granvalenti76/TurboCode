@@ -10,6 +10,11 @@ public enum AppRoute: String, Sendable, Hashable, CaseIterable {
     case chat
     case tools
     case skills
+    /// The library of files Cowork sessions placed in their outboxes. Offered
+    /// only in the Cowork domain; Coding results live in the workspace.
+    case artifacts
+    /// The built-in connectors and their switch for the active session.
+    case connectors
 }
 
 // MARK: - Right Panel Mode
@@ -22,6 +27,9 @@ public enum RightPanelMode: String, Sendable, Hashable, CaseIterable {
     case commit
     /// A persisted directory snapshot selected from the conversation timeline.
     case workspaceListing
+    /// The files a Cowork session placed in its outbox, with a preview. Read
+    /// from the Mac-side outbox folder; it is not an export.
+    case artifacts
 }
 
 // MARK: - Settings Section
