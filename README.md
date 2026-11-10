@@ -24,11 +24,6 @@ To uninstall TurboCode:
 brew uninstall --cask turbocode
 ```
 
-> [!IMPORTANT]
-> The current TurboCode development line requires the latest available macOS
-> 27 beta, Xcode 27 beta, and Swift 6. Earlier macOS versions are not
-> supported.
-
 The distributed application is ad-hoc signed and is not notarized by Apple.
 If macOS blocks the first launch, approve TurboCode in **System Settings →
 Privacy & Security**, or open the application once with **right-click → Open**.
@@ -218,6 +213,8 @@ opens the session that made it.
 - Models with vision can look at images inside the VM, such as a screenshot of
   a page they just built.
 
+![TurboCode Studio session that built a React snake game, with the running dev server open as a live preview in the Artifacts inspector](.github/assets/turbocode-studio-live-preview.png)
+
 <table>
   <tr>
     <td width="50%"><img src=".github/assets/turbocode-studio-artifacts.png" alt="TurboCode Artifacts library showing files from three Studio sessions with thumbnails"></td>
@@ -319,8 +316,8 @@ default and can be enabled from **Settings → Agents → Experimental**.
 
 ## Requirements and Xcode setup
 
-- The latest available macOS 27 beta
-- Xcode 27 beta with the full suite installed
+- macOS 27
+- Xcode 27 with the full suite installed
 - Swift 6
 - Node.js 24 or later for TypeScript plugins
 - A Mac with Apple silicon and about 2.2 GB of free space for Studio
@@ -381,7 +378,7 @@ Scripts/test-deterministic.sh
 ```
 
 Model-backed golden evaluations use a separate, timeout-bounded command. They
-can vary with macOS 27 beta and Foundation Models changes, so they are
+can vary with macOS and Foundation Models changes, so they are
 experimental signals rather than the deterministic release gate. See
 [TESTING.md](TESTING.md) for both paths.
 
@@ -416,8 +413,8 @@ The 0.4.0 line currently includes:
 - workspace `AGENTS.md` instructions;
 - native transcript sharing and compact sidebar session controls.
 
-The release still requires final clean-install validation, documentation
-polish, and confirmation of the supported macOS 27 beta environment. Model
+The release still requires final clean-install validation and documentation
+polish. Model
 behavior varies between backends, and plugin trust and some advanced approval
 flows remain under active development.
 
