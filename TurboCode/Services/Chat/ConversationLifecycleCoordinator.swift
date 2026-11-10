@@ -18,6 +18,11 @@ final class ConversationLifecycleCoordinator {
     private let sessions: ConversationSessionCoordinator
     private let transitionBarrier: RuntimeTransitionBarrier
     private let statistics: ComposerSessionStatisticsStore
+    /// Counts navigation requests in arrival order. Context changes queue
+    /// behind the transition barrier, so several clicks can be waiting at
+    /// once; a queued opening that is no longer the latest request is skipped
+    /// instead of restoring a conversation the user has already left.
+    private var navigationRequest: UInt64 = 0
 
     init(
         conversations: ConversationStore,
@@ -53,28 +58,50 @@ final class ConversationLifecycleCoordinator {
     /// has settled. Presentation owned by the previous conversation is cleared
     /// before the runtime can publish events under the new identity.
     func selectThread(_ id: String) async {
+        let request = beginNavigationRequest()
         await transitionBarrier.performContextChange {
-            if id != conversations.activeThreadID {
-                workbench.dismissWorkspaceListingInspector()
-                workbench.dismissDiffPatchReview()
-                workbench.dismissTranscript()
-                reviewDrafts.discardAll()
-            }
-            conversations.activeThreadID = id
-            statistics.activate(conversationID: id)
-            _ = await runtime.apply(.switchThread(threadID: id))
+            guard request == navigationRequest else { return }
+            await selectSettledThread(id)
         }
+    }
+
+    private func selectSettledThread(_ id: String) async {
+        if id != conversations.activeThreadID {
+            workbench.dismissWorkspaceListingInspector()
+            workbench.dismissDiffPatchReview()
+            workbench.dismissTranscript()
+            reviewDrafts.discardAll()
+        }
+        conversations.activeThreadID = id
+        statistics.activate(conversationID: id)
+        _ = await runtime.apply(.switchThread(threadID: id))
     }
 
     /// Opens one conversation and publishes the final chat route only after
     /// its matching runtime/timeline context is installed.
     func openThread(_ id: String) async {
-        if timeline.blocks.isEmpty || conversations.activeThreadID != id {
-            await restoreSession(id: id)
-        } else {
-            await selectThread(id)
+        let request = beginNavigationRequest()
+        await transitionBarrier.performContextChange {
+            guard request == navigationRequest else { return }
+            // Decide inside the barrier. While this opening was queued, an
+            // earlier one may have installed another conversation; the state
+            // seen at click time would then select this thread's ID on top of
+            // that conversation's timeline.
+            if timeline.blocks.isEmpty || conversations.activeThreadID != id {
+                await restoreSettledSession(id: id)
+            } else {
+                await selectSettledThread(id)
+            }
         }
         workbench.setRoute(.chat)
+    }
+
+    /// Registers one navigation intent. Creation and deletion register too, so
+    /// they supersede queued openings, but they are never skipped themselves:
+    /// both carry an effect the user asked for beyond showing a conversation.
+    private func beginNavigationRequest() -> UInt64 {
+        navigationRequest &+= 1
+        return navigationRequest
     }
 
     /// Creates one empty conversation boundary and installs its runtime
@@ -84,6 +111,7 @@ final class ConversationLifecycleCoordinator {
         title: String = "New Chat",
         mode: ConversationMode = .agent
     ) async {
+        _ = beginNavigationRequest()
         await transitionBarrier.performContextChange {
             workbench.dismissWorkspaceListingInspector()
             workbench.dismissDiffPatchReview()
@@ -106,7 +134,9 @@ final class ConversationLifecycleCoordinator {
     /// Immutable disk state is installed before model history is rebuilt, so
     /// presentation, provider selection, and transcript share one thread ID.
     func restoreSession(id: String) async {
+        let request = beginNavigationRequest()
         await transitionBarrier.performContextChange {
+            guard request == navigationRequest else { return }
             await restoreSettledSession(id: id)
         }
     }
@@ -196,6 +226,7 @@ final class ConversationLifecycleCoordinator {
         if deletesActiveThread {
             // The old operation may still perform its final persistence pass;
             // release it before deleting the file that pass belongs to.
+            _ = beginNavigationRequest()
             await transitionBarrier.performContextChange {
                 await deleteSettledThread(id: id, deletesActiveThread: true)
             }

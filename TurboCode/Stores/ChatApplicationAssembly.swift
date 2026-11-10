@@ -191,6 +191,14 @@ final class ChatApplicationAssembly {
                 await sessionCoordinator.persistActiveSession(id: threadID)
             }
         )
+        // Weak back edge: the barrier checkpoints through the session
+        // coordinator, which in turn must refuse saves during a change.
+        sessionCoordinator.observeContextChanges { [weak transitionBarrier] in
+            ConversationSessionCoordinator.ContextChangeState(
+                isChanging: transitionBarrier?.isChangingContext ?? false,
+                generation: transitionBarrier?.contextGeneration ?? 0
+            )
+        }
         let conversationLifecycleCoordinator = ConversationLifecycleCoordinator(
             conversations: conversations,
             timeline: timeline,

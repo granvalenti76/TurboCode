@@ -26,6 +26,17 @@ final class ConversationSessionCoordinator {
     /// write path refuses these IDs, so no lifecycle fallback can replace a
     /// recoverable file with the empty timeline that is currently visible.
     private var unreadableSessionIDs: Set<String> = []
+    /// Reads the transition barrier's state. Installed after construction
+    /// because the barrier's own checkpoint calls back into this coordinator.
+    private var contextChangeState: @MainActor () -> ContextChangeState = {
+        ContextChangeState(isChanging: false, generation: 0)
+    }
+
+    /// The part of `RuntimeTransitionBarrier` a session save depends on.
+    struct ContextChangeState: Equatable {
+        let isChanging: Bool
+        let generation: UInt64
+    }
 
     init(
         conversations: ConversationStore,
@@ -59,11 +70,25 @@ final class ConversationSessionCoordinator {
         await llmRuntime.foundationModelsContextProjection() ?? .empty
     }
 
+    func observeContextChanges(
+        _ state: @escaping @MainActor () -> ContextChangeState
+    ) {
+        contextChangeState = state
+    }
+
     /// Captures all mutable MainActor values before awaiting disk I/O. The
     /// immutable snapshot therefore belongs to one conversation boundary even
     /// if navigation becomes reentrant while the repository is suspended.
+    ///
+    /// Nothing is saved while a context change is replacing the conversation:
+    /// the active thread ID is installed before its timeline and provider
+    /// session, so a snapshot taken then would store one conversation's file
+    /// with another's blocks or transcript. The barrier's own checkpoint runs
+    /// before the replacement starts and has already saved the outgoing state.
     func persistActiveSession(id: String) async {
         let startedAt = Date()
+        let contextAtCapture = contextChangeState()
+        guard !contextAtCapture.isChanging else { return }
         guard id == conversations.activeThreadID,
               let conversation = conversations.conversation(id: id) else {
             assertionFailure("Only the active conversation can use the visible timeline")
@@ -87,7 +112,10 @@ final class ConversationSessionCoordinator {
         // The awaits above can interleave with a thread switch. Provider state
         // read after it would belong to the next conversation, so skip this
         // checkpoint; the switch's own barrier checkpoint already saved it.
-        guard conversations.activeThreadID == id else { return }
+        // Comparing the whole state also catches a change that started, or
+        // started and finished on this same thread, during those awaits.
+        guard conversations.activeThreadID == id,
+              contextChangeState() == contextAtCapture else { return }
         let snapshot = ConversationSnapshot(
             conversation: conversation,
             modelBackend: modelBackend,
@@ -120,7 +148,9 @@ final class ConversationSessionCoordinator {
     /// Active metadata is persisted with the complete matching timeline;
     /// inactive metadata preserves its previously stored content.
     func persistMetadata(id: String) async {
-        if id == conversations.activeThreadID {
+        // During a context change the visible timeline may not match the
+        // active ID yet; the metadata-only path merges onto the stored file.
+        if id == conversations.activeThreadID, !contextChangeState().isChanging {
             await persistActiveSession(id: id)
             return
         }
