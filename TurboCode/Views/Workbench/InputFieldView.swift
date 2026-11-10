@@ -86,7 +86,7 @@ struct InputFieldView: View {
     private var textField: some View {
         // Keep the invitation workspace-oriented; the active profile and tools
         // provide specialization without narrowing what users think they can ask.
-        // A Studio session has no project (it may not even share a folder), so
+        // A Studio session has no workspace (it may not even share a folder), so
         // it gets an equally open invitation that does not mention one. The
         // same holds for a Coding chat before a workspace is chosen.
         let placeholder: String
@@ -95,7 +95,7 @@ struct InputFieldView: View {
         } else if chatStore.workspaceRoot.isEmpty {
             placeholder = "What would you like to do?"
         } else {
-            placeholder = "What would you like to do in this project?"
+            placeholder = "What would you like to do in this workspace?"
         }
         return VStack(alignment: .leading, spacing: 8) {
             if !composer.imageAttachments.isEmpty {

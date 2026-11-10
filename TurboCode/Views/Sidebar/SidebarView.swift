@@ -27,7 +27,7 @@ struct SidebarView: View {
     @State private var threadIDsBeingRemoved: Set<String> = []
     @State private var exportErrorMessage: String?
     @State private var sharePresenter = ConversationExportService.SharePresenter()
-    @State private var visibleChatLimit = SidebarConversationDisclosure.batchSize
+    @State private var visibleChatLimit = SidebarConversationDisclosure.codingBatchSize
     @State private var expandedWorkspacePath: String?
 
     var body: some View {
@@ -80,8 +80,13 @@ struct SidebarView: View {
         .onChange(of: chatStore.selectedProject) { _, _ in
             // Each collection starts compact. Search can still reveal a result
             // explicitly through openThread(_:), without expanding every list.
-            visibleChatLimit = SidebarConversationDisclosure.batchSize
+            visibleChatLimit = chatBatchSize
             expandedWorkspacePath = selectedWorkspacePath
+        }
+        .onChange(of: chatStore.activeDomain) { _, _ in
+            // The batch differs per domain, so a limit expanded in one must
+            // not carry over and open the other's list wider than its batch.
+            visibleChatLimit = chatBatchSize
         }
     }
 
@@ -166,7 +171,7 @@ struct SidebarView: View {
                 // workspace remains available to tools and to the next new chat.
                 chatStore.selectedProject = nil
                 expandedWorkspacePath = nil
-                visibleChatLimit = SidebarConversationDisclosure.batchSize
+                visibleChatLimit = chatBatchSize
             } label: {
                 navigationLabel(
                     icon: "tray.full",
@@ -331,7 +336,7 @@ struct SidebarView: View {
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
         } header: {
-            sectionHeader("Projects")
+            sectionHeader("Workspaces")
         }
     }
 
@@ -411,7 +416,7 @@ struct SidebarView: View {
         // and inspector state remain consistent with the former toolbar menu.
         Task { await chatStore.switchToWorkspace(path) }
         expandedWorkspacePath = path
-        visibleChatLimit = SidebarConversationDisclosure.batchSize
+        visibleChatLimit = chatBatchSize
     }
 
     /// Swipe removal hides the row immediately, while the lifecycle coordinator
@@ -534,7 +539,8 @@ struct SidebarView: View {
         let sortedThreads = chatStore.sortedThreads
         let visibleThreadIDs = SidebarConversationDisclosure.visibleIDs(
             in: sortedThreads,
-            limit: visibleChatLimit
+            limit: visibleChatLimit,
+            batchSize: chatBatchSize
         )
 
         // Keep ordering and filtering as value snapshots, but resolve each row
@@ -552,7 +558,7 @@ struct SidebarView: View {
             }
         }
 
-        if sortedThreads.count > SidebarConversationDisclosure.batchSize {
+        if sortedThreads.count > chatBatchSize {
             chatDisclosureButton(
                 totalCount: sortedThreads.count,
                 indented: indented
@@ -563,19 +569,27 @@ struct SidebarView: View {
         }
     }
 
+    /// Rows revealed per step in the active domain's chat list.
+    private var chatBatchSize: Int {
+        SidebarConversationDisclosure.batchSize(for: chatStore.activeDomain)
+    }
+
     private func chatDisclosureButton(totalCount: Int, indented: Bool) -> some View {
-        let remaining = max(0, totalCount - visibleChatLimit)
+        // The list never shows fewer than one batch, so count what is hidden
+        // from that effective limit rather than from the raw state.
+        let remaining = max(0, totalCount - max(chatBatchSize, visibleChatLimit))
         let revealsMore = remaining > 0
-        let nextBatchCount = min(SidebarConversationDisclosure.batchSize, remaining)
+        let nextBatchCount = min(chatBatchSize, remaining)
 
         return Button {
             if revealsMore {
                 visibleChatLimit = SidebarConversationDisclosure.nextLimit(
                     current: visibleChatLimit,
-                    total: totalCount
+                    total: totalCount,
+                    batchSize: chatBatchSize
                 )
             } else {
-                visibleChatLimit = SidebarConversationDisclosure.batchSize
+                visibleChatLimit = chatBatchSize
             }
         } label: {
             HStack(spacing: 8) {
@@ -659,7 +673,8 @@ struct SidebarView: View {
         visibleChatLimit = SidebarConversationDisclosure.limitRevealing(
             threadID: thread.id,
             in: chatStore.sortedThreads,
-            current: visibleChatLimit
+            current: visibleChatLimit,
+            batchSize: chatBatchSize
         )
         Task {
             // Chat becomes visible only after its final state is ready, avoiding
@@ -671,23 +686,33 @@ struct SidebarView: View {
 }
 
 /// Pure batching policy for the sidebar's progressive chat disclosure. Keeping
-/// it independent from SwiftUI state makes the five-row contract reviewable and
+/// it independent from SwiftUI state makes the batch contract reviewable and
 /// prevents search results from opening without a visible selected row.
+///
+/// The batch depends on the domain. Coding nests chats under each workspace,
+/// so a short five-row batch keeps several workspaces on screen. Studio has one
+/// flat list and nothing below it to protect, so it shows ten before collapsing.
 nonisolated enum SidebarConversationDisclosure {
-    static let batchSize = 5
+    static let codingBatchSize = 5
+    static let studioBatchSize = 10
 
-    static func visibleIDs(in threads: [Conversation], limit: Int) -> [String] {
+    static func batchSize(for domain: SessionDomain) -> Int {
+        domain == .cowork ? studioBatchSize : codingBatchSize
+    }
+
+    static func visibleIDs(in threads: [Conversation], limit: Int, batchSize: Int) -> [String] {
         Array(threads.prefix(max(batchSize, limit))).map(\.id)
     }
 
-    static func nextLimit(current: Int, total: Int) -> Int {
+    static func nextLimit(current: Int, total: Int, batchSize: Int) -> Int {
         min(total, max(batchSize, current) + batchSize)
     }
 
     static func limitRevealing(
         threadID: String,
         in threads: [Conversation],
-        current: Int
+        current: Int,
+        batchSize: Int
     ) -> Int {
         guard let index = threads.firstIndex(where: { $0.id == threadID }) else {
             return current
