@@ -2,14 +2,18 @@ import AppKit
 import QuickLookThumbnailing
 import SwiftUI
 
-/// A small picture of an artifact: a thumbnail of the file itself where the
-/// system can make one, otherwise the symbol of its kind.
+/// A small picture of an artifact: a thumbnail of the file itself where one
+/// can be made (a rendered page, or what Quick Look provides for other kinds),
+/// otherwise the symbol of its kind.
 ///
 /// Shared by the library's cards and the inspector's strip so the same file
 /// looks the same in both places. The caller decides the size and the frame.
 struct CoworkArtifactThumbnailView: View {
     let artifact: CoworkArtifact
     let fileURL: URL?
+    /// The session's outbox. With it, a web page is rendered for its thumbnail
+    /// instead of asking Quick Look, which cannot run the page's scripts.
+    var outbox: URL? = nil
     /// Changes when the outbox was read again, so a file the agent rewrote in
     /// place gets a fresh thumbnail.
     let revision: Int
@@ -60,6 +64,14 @@ struct CoworkArtifactThumbnailView: View {
     /// which says more about what the file is.
     private func load() async {
         guard let fileURL, artifact.kind != .other else { return }
+        if artifact.kind == .webPage, let outbox {
+            // No Quick Look fallback: its black or white rectangle is worse
+            // than the kind symbol that shows while, or instead of, a render.
+            if let rendered = await CoworkPageThumbnailRenderer.shared.thumbnail(for: fileURL, outbox: outbox) {
+                thumbnail = rendered
+            }
+            return
+        }
         let request = QLThumbnailGenerator.Request(
             fileAt: fileURL,
             size: Self.requestSize,

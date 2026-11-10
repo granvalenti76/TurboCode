@@ -162,6 +162,7 @@ private struct StudioRecentArtifactRow: View {
                 CoworkArtifactThumbnailView(
                     artifact: recent.artifact,
                     fileURL: CoworkArtifactCatalog.fileURL(for: recent.artifact, in: recent.outbox),
+                    outbox: recent.outbox,
                     revision: revision,
                     symbolSize: 16,
                     cornerRadius: 6

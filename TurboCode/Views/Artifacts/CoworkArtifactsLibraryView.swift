@@ -178,6 +178,7 @@ struct CoworkArtifactsLibraryView: View {
                         CoworkArtifactThumbnailView(
                             artifact: artifact,
                             fileURL: CoworkArtifactCatalog.fileURL(for: artifact, in: opened.group.outbox),
+                            outbox: opened.group.outbox,
                             revision: revision,
                             symbolSize: 17,
                             cornerRadius: 6
@@ -266,6 +267,7 @@ private struct CoworkArtifactCard: View {
         CoworkArtifactThumbnailView(
             artifact: primary,
             fileURL: fileURL,
+            outbox: group.outbox,
             revision: revision,
             fillsFrame: true
         )
