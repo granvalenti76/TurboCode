@@ -305,15 +305,6 @@ public enum SidebarBackdropPreference: String, Sendable, Hashable, CaseIterable 
     nonisolated init(storedValue: String?) {
         self = storedValue.flatMap(SidebarBackdropPreference.init(rawValue:)) ?? .translucent
     }
-
-    /// The opaque sidebar surface: the presentation's `#F2F2F2` in light
-    /// appearance and a matching step above the window surface in dark.
-    /// Only meaningful for `solid`.
-    static let solidSurface = Color(nsColor: NSColor(name: "SidebarSolidSurface") { appearance in
-        appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
-            ? NSColor(srgbRed: 0x24 / 255, green: 0x24 / 255, blue: 0x24 / 255, alpha: 1)
-            : NSColor(srgbRed: 0xF2 / 255, green: 0xF2 / 255, blue: 0xF2 / 255, alpha: 1)
-    })
 }
 
 public enum ThemePreference: String, Sendable, Hashable, CaseIterable {

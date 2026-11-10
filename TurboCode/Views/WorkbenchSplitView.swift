@@ -30,7 +30,7 @@ struct WorkbenchSplitView: View {
                     // while preserving the sidebar's native toolbar material.
                     .scrollEdgeEffectStyle(.hard, for: .top)
                     .background {
-                        Color(nsColor: .windowBackgroundColor)
+                        AppSurface.canvas
                             .ignoresSafeArea(edges: .top)
                     }
 
@@ -51,7 +51,7 @@ struct WorkbenchSplitView: View {
             HStack(spacing: 0) {
                 Color.clear
                     .frame(width: chatStore.leftSidebarCollapsed ? 0 : sidebarWidth)
-                Color(nsColor: .windowBackgroundColor)
+                AppSurface.canvas
             }
             .frame(height: 52)
             .ignoresSafeArea(edges: .top)

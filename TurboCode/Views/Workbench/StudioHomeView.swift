@@ -201,16 +201,16 @@ private extension View {
     /// library's cards, so the two artifact surfaces read as one.
     func studioHomeTile(isHovered: Bool) -> some View {
         background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+            RoundedRectangle(cornerRadius: AppSurface.cardCornerRadius, style: .continuous)
+                .fill(AppSurface.card)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: AppSurface.cardCornerRadius, style: .continuous)
                 .strokeBorder(
                     isHovered ? AnyShapeStyle(Color.accentColor.opacity(0.7)) : AnyShapeStyle(.separator),
                     lineWidth: isHovered ? 1.5 : 1
                 )
         }
-        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: AppSurface.cardCornerRadius, style: .continuous))
     }
 }

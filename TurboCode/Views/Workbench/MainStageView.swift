@@ -16,7 +16,7 @@ struct MainStageView: View {
                     ChatContentView()
                     if chatStore.coworkArtifactsExpanded {
                         CoworkArtifactsInspectorView(isExpanded: true)
-                            .background(Color(nsColor: .windowBackgroundColor))
+                            .background(AppSurface.canvas)
                     }
                 }
             case .tools:

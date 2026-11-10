@@ -269,11 +269,12 @@ private struct CoworkArtifactCard: View {
             fileURL: fileURL,
             outbox: group.outbox,
             revision: revision,
+            cornerRadius: AppSurface.cardCornerRadius,
             fillsFrame: true
         )
             .aspectRatio(4 / 3, contentMode: .fit)
             .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: AppSurface.cardCornerRadius, style: .continuous)
                     .strokeBorder(
                         isHovered ? AnyShapeStyle(Color.accentColor.opacity(0.7)) : AnyShapeStyle(.separator),
                         lineWidth: isHovered ? 1.5 : 1

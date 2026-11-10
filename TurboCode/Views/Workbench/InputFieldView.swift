@@ -36,7 +36,7 @@ struct InputFieldView: View {
             }
             composerCard
                 .background(
-                    Color(nsColor: .textBackgroundColor),
+                    AppSurface.card,
                     in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                 )
                 .overlay {
@@ -45,7 +45,7 @@ struct InputFieldView: View {
                 }
                 .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
         }
-        .background(Color(.windowBackgroundColor))
+        .background(AppSurface.canvas)
         .padding(.horizontal, 24)
         .padding(.top, 6)
         .padding(.bottom, compact ? 16 : 12)

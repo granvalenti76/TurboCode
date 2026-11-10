@@ -59,7 +59,7 @@ struct SidebarView: View {
                 case .translucent:
                     SidebarWindowBackdrop()
                 case .solid:
-                    SidebarBackdropPreference.solidSurface
+                    AppSurface.sidebar
                 }
             }
             .ignoresSafeArea()
