@@ -5,7 +5,70 @@ All notable changes to TurboCode are documented in this file.
 The project follows Semantic Versioning while its public API and persisted
 formats continue to evolve before 1.0.
 
-## [0.63] - Unreleased
+## [0.64] - 2026-11-10
+
+TurboCode 0.64 turns Cowork into Studio: a home view that says what the mode is
+for, an Artifacts library with live previews of servers running in the VM,
+image viewing inside the VM, and built-in connectors that let one session work
+with another app on the Mac.
+
+### Features
+
+- Cowork is now called **Studio** in the sidebar switch, Settings, the composer
+  badge, error messages, and the documentation. Existing sessions open
+  unchanged.
+- A new Studio session opens on a home view with four capability cards and up
+  to three recent artifacts. A card writes a starter into the composer without
+  replacing text already typed, and an artifact opens the session that made
+  it. The home view never starts the VM.
+- Studio models with vision can look at images inside the VM with the new
+  `vm_view_image` tool, so they can check a screenshot they rendered or a
+  picture they downloaded. PNG, JPEG, GIF, and WebP files up to 10 MB are
+  accepted.
+- Studio has an Artifacts library. The sidebar item opens a grid of the files
+  each session placed in `/out`, with thumbnails and a full-size preview, and
+  a toolbar button shows the active session's artifacts in the inspector
+  beside the chat. Previews only read the session outbox; copying to the Mac
+  still goes through Review & Export.
+- The Artifacts inspector shows servers the agent left running in the VM as a
+  live page, ahead of files. A server must listen on `0.0.0.0` on a port from
+  1024 up to be reachable from the Mac. Opening the inspector never boots or
+  restarts the VM.
+- The inspector keeps one thin toolbar, a thumbnail strip, and the selected
+  preview per session. It can expand over the chat without disturbing the
+  session, reopens when you return from the library, and the library's detail
+  offers **Show in Session**.
+- Added built-in connectors. A connector lets a session use a named app's own
+  MCP operations on `127.0.0.1`; it is enabled per session from the new
+  **Connectors** page or the Studio home, and is off by default. Studio
+  sessions may use connectors as well.
+- Prassitele is the first connector. Its images reach models with vision, and
+  it offers the `prassitele-sculpting` skill; a user skill of the same name
+  takes precedence.
+
+### Fixes
+
+- The Studio prompt no longer tells the model to stop every server it starts;
+  it points the user to the Artifacts panel and keeps pages worth saving in
+  `/out`.
+
+### Interventions
+
+- Sessions store their enabled connectors in a new optional field. Older
+  session files decode unchanged.
+- Enabling a connector for a session is the consent for its calls; they are
+  not approved one by one. Delegated workers and Codex never receive the
+  `connector` gateway. Safari keeps its global switch and stays Coding-only.
+- Images viewed with `vm_view_image` are dropped from tool output when a
+  session is rebuilt.
+- Source identifiers, the persisted `cowork` session domain, and the `vm_*`
+  tool names keep the Cowork name; renaming them would need a session
+  migration.
+- The `turbocode-acp` target lists the new connector sources explicitly in
+  `project.pbxproj`.
+- Updated the application marketing version to 0.64.
+
+## [0.63] - 2026-11-08
 
 TurboCode 0.63 lets local models see images dropped on the main view, removes
 the time limits that interrupted slow local models, and hardens how sessions are
@@ -22,19 +85,7 @@ saved, restored, and recovered.
   not accept images.
 - Image input also works in Cowork sessions. The image reaches only the model
   and is not copied into the VM.
-- Cowork models with vision can look at images inside the VM with the new
-  `vm_view_image` tool, so they can check a screenshot they rendered or a
-  picture they downloaded. PNG, JPEG, GIF, and WebP files up to 10 MB are
-  accepted.
 - Sent images appear as thumbnails in the conversation.
-- Cowork has an Artifacts library. The sidebar item opens a grid of the files
-  each session placed in `/out`, with thumbnails and a full-size preview, and
-  a toolbar button shows the active session's artifacts in the inspector
-  beside the chat. Previews only read the session outbox; copying to the Mac
-  still goes through Review & Export.
-- The Artifacts inspector also lists servers the agent left running in the VM
-  and opens them as a live page. A server must listen on `0.0.0.0` to be
-  reachable from the Mac.
 
 ### Fixes
 
