@@ -52,7 +52,7 @@ struct ConnectorsView: View {
         HStack(alignment: .top, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Connectors")
-                    .font(.system(size: 28, weight: .semibold))
+                    .font(AppTypography.pageTitle)
                 Text("Let a session work with other apps on your Mac. A connector stays off until you turn it on for a session.")
                     .font(.callout)
                     .foregroundStyle(.secondary)

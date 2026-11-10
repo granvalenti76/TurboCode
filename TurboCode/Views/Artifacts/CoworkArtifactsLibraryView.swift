@@ -89,7 +89,7 @@ struct CoworkArtifactsLibraryView: View {
         HStack(alignment: .top, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Artifacts")
-                    .font(.system(size: 28, weight: .semibold))
+                    .font(AppTypography.pageTitle)
                 Text("What your Studio sessions made. Open one to preview its files.")
                     .font(.callout)
                     .foregroundStyle(.secondary)

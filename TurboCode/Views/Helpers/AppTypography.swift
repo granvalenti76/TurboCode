@@ -3,7 +3,8 @@ import MarkdownUI
 
 // MARK: - TurboCode Design Tokens
 
-/// A semantic type scale based on SF Pro and SF Mono.
+/// A semantic type scale based on SF Pro and SF Mono, with New York reserved
+/// for the few display titles that set the tone of a page.
 enum AppTypography {
     /// Conversation typography follows the native macOS reading scale used by
     /// the reference response: SF Pro, 17 pt, generous Markdown rhythm, and a
@@ -15,7 +16,12 @@ enum AppTypography {
     static let sidebarTitle = Font.system(size: 14)
     static let sidebarMetadata = Font.system(size: 12)
     static let sectionLabel = Font.system(size: 11, weight: .semibold)
-    static let emptyStateTitle = Font.system(size: 24, weight: .semibold)
+    /// Display titles use the system serif (New York) at a medium weight. The
+    /// serif is an editorial accent, not a UI face: keep it to empty states and
+    /// top-level page titles, and leave navigation, controls, metadata, and
+    /// anything showing user or model data in SF Pro.
+    static let emptyStateTitle = Font.system(size: 28, weight: .medium, design: .serif)
+    static let pageTitle = Font.system(size: 28, weight: .medium, design: .serif)
     static let emptyStateSubtitle = Font.system(size: 14)
     static let control = Font.system(size: 13)
     static let controlEmphasized = Font.system(size: 13, weight: .medium)
