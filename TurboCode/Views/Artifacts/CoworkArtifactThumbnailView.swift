@@ -15,6 +15,10 @@ struct CoworkArtifactThumbnailView: View {
     let revision: Int
     var symbolSize: CGFloat = 30
     var cornerRadius: CGFloat = 10
+    /// Lets a page or an image cover the whole frame from its top edge, as a
+    /// library card wants: fitted with a margin, a tall screenshot shrinks to a
+    /// narrow strip. Other kinds stay fitted so a document page is not cropped.
+    var fillsFrame = false
 
     @State private var thumbnail: NSImage?
 
@@ -27,10 +31,20 @@ struct CoworkArtifactThumbnailView: View {
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .fill(.quaternary.opacity(0.5))
             if let thumbnail {
-                Image(nsImage: thumbnail)
-                    .resizable()
-                    .scaledToFit()
-                    .padding(cornerRadius * 0.4)
+                if fillsFrame, artifact.kind == .webPage || artifact.kind == .image {
+                    // The clear color takes the frame's size; the overlay pins
+                    // the oversized image to the top and the clip trims it.
+                    Color.clear.overlay(alignment: .top) {
+                        Image(nsImage: thumbnail)
+                            .resizable()
+                            .scaledToFill()
+                    }
+                } else {
+                    Image(nsImage: thumbnail)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(cornerRadius * 0.4)
+                }
             } else {
                 Image(systemName: artifact.kind.symbolName)
                     .font(.system(size: symbolSize, weight: .light))

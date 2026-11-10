@@ -125,6 +125,20 @@ nonisolated struct CoworkArtifactGroup: Identifiable, Sendable, Equatable {
     let artifacts: [CoworkArtifact]
 
     var id: String { sessionID }
+
+    /// The file that stands for the session in the library: the same entry
+    /// the inspector opens first, so a web deliverable is shown by its page
+    /// and not by its stylesheet, script, or icons.
+    var primary: CoworkArtifact? { CoworkArtifactCatalog.preferred(in: artifacts) }
+
+    /// Every file of the session in the order the library lets the user step
+    /// through them: the primary first, then the inspector's display order.
+    /// The library shows one card per session, so this list is what keeps the
+    /// other files reachable.
+    var browsingOrder: [CoworkArtifact] {
+        guard let primary else { return [] }
+        return [primary] + CoworkArtifactCatalog.displayOrdered(artifacts).filter { $0 != primary }
+    }
 }
 
 /// The artifacts of the active Cowork session together with the folder they

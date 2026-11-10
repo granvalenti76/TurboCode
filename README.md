@@ -203,8 +203,8 @@ A new Studio session opens on a home view with capability cards and the most
 recent artifacts. A card writes a starter prompt into the composer; an artifact
 opens the session that made it.
 
-- **Artifacts** in the sidebar collects the files every session placed in
-  `/out`, grouped by session, with thumbnails and a full-size preview.
+- **Artifacts** in the sidebar collects what every session placed in `/out`,
+  one card per session, with a thumbnail and a full-size preview of its files.
   Previews only read the outbox; copying to the Mac still goes through
   **Review & Export**.
 - The Artifacts inspector beside the chat shows the session's files and opens

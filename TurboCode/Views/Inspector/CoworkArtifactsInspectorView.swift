@@ -258,9 +258,10 @@ struct CoworkArtifactsInspectorView: View {
     }
 }
 
-/// One item of the inspector strip: a small thumbnail with its name, ringed
-/// when it is the one shown above.
-private struct CoworkArtifactStripItem<Thumbnail: View>: View {
+/// One item of a file strip: a small thumbnail with its name, ringed when it
+/// is the one shown above. Shared with the library's detail view so moving
+/// between a session's files looks the same in both places.
+struct CoworkArtifactStripItem<Thumbnail: View>: View {
     let label: String
     let isSelected: Bool
     let help: String

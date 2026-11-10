@@ -71,9 +71,12 @@ nothing of your Mac.
 
 ## Look at the work
 
-**Artifacts** in the sidebar opens a grid of the files your Studio sessions
-placed in `/out`, grouped by session. Choose a card to preview it at full size;
-**Open Session** returns to the chat that made it. The Artifacts button in the
+**Artifacts** in the sidebar opens a grid with one card for each Studio session
+that placed files in `/out`. The card shows the session's main file, usually
+its web page, and says how many files came with it. Choose a card to preview
+that file at full size; the strip under the preview reaches the session's other
+files, and **Show in Session** returns to the chat that made them. The card's
+context menu has **Open Session** as well. The Artifacts button in the
 toolbar shows the active session's files in the inspector beside the chat, and
 follows new files as the agent creates them.
 

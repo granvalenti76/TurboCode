@@ -2,12 +2,16 @@ import SwiftUI
 
 // MARK: - Cowork Artifacts Library
 
-/// The main-view destination behind the sidebar's Artifacts item: every file
-/// Cowork sessions placed in `/out`, as a grid grouped by session.
+/// The main-view destination behind the sidebar's Artifacts item: what Cowork
+/// sessions placed in `/out`, as a grid with one card per session.
 ///
-/// The flow has two steps and one way back. The grid answers "what did my
-/// sessions make"; choosing a card opens that file at full size with a Back
-/// control, and each group leads to the session that made it. Like the
+/// A session's deliverable is usually one thing made of several files (a page
+/// with its assets and screenshots), so the card shows the session's primary
+/// file and counts the rest instead of giving a stylesheet the same weight as
+/// the page. The flow has two steps and one way back. The grid answers "what
+/// did my sessions make"; choosing a card opens the primary file at full size
+/// with a Back control, a strip to reach the session's other files, and a way
+/// to the session that made them. Like the
 /// inspector, the library only reads the outbox folders: copying a file to
 /// the Mac stays with the session's Review & Export.
 struct CoworkArtifactsLibraryView: View {
@@ -24,7 +28,7 @@ struct CoworkArtifactsLibraryView: View {
         let artifact: CoworkArtifact
     }
 
-    private static let columns = [GridItem(.adaptive(minimum: 168, maximum: 220), spacing: 18, alignment: .top)]
+    private static let columns = [GridItem(.adaptive(minimum: 220, maximum: 300), spacing: 20, alignment: .top)]
 
     var body: some View {
         Group {
@@ -56,8 +60,20 @@ struct CoworkArtifactsLibraryView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.top, 60)
                     } else {
-                        ForEach(groups) { group in
-                            section(group)
+                        LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 24) {
+                            ForEach(groups) { group in
+                                // A group without files has nothing to show.
+                                if let primary = group.primary {
+                                    CoworkArtifactCard(
+                                        group: group,
+                                        primary: primary,
+                                        fileURL: CoworkArtifactCatalog.fileURL(for: primary, in: group.outbox),
+                                        revision: revision,
+                                        open: { opened = OpenedArtifact(group: group, artifact: primary) },
+                                        openSession: { Task { await chatStore.openThread(group.sessionID) } }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -74,7 +90,7 @@ struct CoworkArtifactsLibraryView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Artifacts")
                     .font(.system(size: 28, weight: .semibold))
-                Text("Files your Studio sessions created. Open one to preview it.")
+                Text("What your Studio sessions made. Open one to preview its files.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -89,46 +105,6 @@ struct CoworkArtifactsLibraryView: View {
             .controlSize(.regular)
             .help("Read the session outboxes again")
         }
-    }
-
-    private func section(_ group: CoworkArtifactGroup) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(group.sessionTitle)
-                    .font(.system(size: 15, weight: .semibold))
-                    .lineLimit(1)
-                Text(sectionSummary(group))
-                    .font(AppTypography.metadata)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
-                Spacer(minLength: 8)
-
-                Button("Open Session") {
-                    Task { await chatStore.openThread(group.sessionID) }
-                }
-                .buttonStyle(.link)
-                .font(AppTypography.control)
-                .help("Go to the session that created these files")
-            }
-
-            LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 20) {
-                ForEach(group.artifacts) { artifact in
-                    CoworkArtifactCard(
-                        artifact: artifact,
-                        fileURL: CoworkArtifactCatalog.fileURL(for: artifact, in: group.outbox),
-                        revision: revision
-                    ) {
-                        opened = OpenedArtifact(group: group, artifact: artifact)
-                    }
-                }
-            }
-        }
-    }
-
-    private func sectionSummary(_ group: CoworkArtifactGroup) -> String {
-        let count = group.artifacts.count == 1 ? "1 file" : "\(group.artifacts.count) files"
-        return "\(count) · \(group.updatedAt.formatted(date: .abbreviated, time: .shortened))"
     }
 
     // MARK: Detail
@@ -179,7 +155,42 @@ struct CoworkArtifactsLibraryView: View {
                     revision: revision
                 )
             }
+
+            if opened.group.artifacts.count > 1 {
+                Divider()
+                fileStrip(opened)
+            }
         }
+    }
+
+    /// The session's files under the preview, primary first. The grid shows
+    /// one card per session, so this strip is the only way to the other files.
+    private func fileStrip(_ opened: OpenedArtifact) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .top, spacing: 10) {
+                ForEach(opened.group.browsingOrder) { artifact in
+                    CoworkArtifactStripItem(
+                        label: artifact.name,
+                        isSelected: artifact == opened.artifact,
+                        help: artifact.relativePath,
+                        accessibilityLabel: "\(artifact.name), \(artifact.kind.title)"
+                    ) {
+                        CoworkArtifactThumbnailView(
+                            artifact: artifact,
+                            fileURL: CoworkArtifactCatalog.fileURL(for: artifact, in: opened.group.outbox),
+                            revision: revision,
+                            symbolSize: 17,
+                            cornerRadius: 6
+                        )
+                    } select: {
+                        self.opened = OpenedArtifact(group: opened.group, artifact: artifact)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+        }
+        .background(.bar)
     }
 
     private func reload() async {
@@ -187,36 +198,49 @@ struct CoworkArtifactsLibraryView: View {
         groups = updated
         revision += 1
         // A file that no longer exists cannot stay open; return to the grid.
-        if let current = opened,
-           updated.first(where: { $0.id == current.group.id })?.artifacts.contains(current.artifact) != true {
-            opened = nil
+        // Otherwise adopt the refreshed group so the strip lists new files.
+        if let current = opened {
+            if let group = updated.first(where: { $0.id == current.group.id }),
+               group.artifacts.contains(current.artifact) {
+                opened = OpenedArtifact(group: group, artifact: current.artifact)
+            } else {
+                opened = nil
+            }
         }
     }
 }
 
 // MARK: - Card
 
-/// One artifact in the grid: a thumbnail of the file itself where the system
-/// can make one, its name, and a one-line description.
+/// One session in the grid: a thumbnail of its primary file, the session's
+/// title, and a line saying what the file is and how many files came with it.
 private struct CoworkArtifactCard: View {
-    let artifact: CoworkArtifact
+    let group: CoworkArtifactGroup
+    let primary: CoworkArtifact
     let fileURL: URL?
     let revision: Int
     let open: () -> Void
+    let openSession: () -> Void
 
     @State private var isHovered = false
+
+    private var summary: String {
+        let count = group.artifacts.count == 1 ? "1 file" : "\(group.artifacts.count) files"
+        let date = group.updatedAt.formatted(date: .abbreviated, time: .shortened)
+        return "\(primary.kind.title) · \(count) · \(date)"
+    }
 
     var body: some View {
         Button(action: open) {
             VStack(alignment: .leading, spacing: 8) {
                 thumbnailView
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(artifact.name)
+                    Text(group.sessionTitle)
                         .font(AppTypography.controlEmphasized)
                         .foregroundStyle(.primary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Text("\(artifact.kind.title) · \(artifact.size.formatted(.byteCount(style: .file)))")
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Text(summary)
                         .font(AppTypography.metadata)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -227,15 +251,24 @@ private struct CoworkArtifactCard: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .help(artifact.relativePath)
+        .help(primary.relativePath)
+        .contextMenu {
+            Button("Open Session", action: openSession)
+        }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(artifact.name), \(artifact.kind.title)")
-        .accessibilityHint("Opens a preview")
+        .accessibilityLabel("\(group.sessionTitle), \(summary)")
+        .accessibilityHint("Opens a preview of \(primary.name)")
         .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: "Open Session", openSession)
     }
 
     private var thumbnailView: some View {
-        CoworkArtifactThumbnailView(artifact: artifact, fileURL: fileURL, revision: revision)
+        CoworkArtifactThumbnailView(
+            artifact: primary,
+            fileURL: fileURL,
+            revision: revision,
+            fillsFrame: true
+        )
             .aspectRatio(4 / 3, contentMode: .fit)
             .overlay {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
