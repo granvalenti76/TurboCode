@@ -86,13 +86,18 @@ struct InputFieldView: View {
     private var textField: some View {
         // Keep the invitation workspace-oriented; the active profile and tools
         // provide specialization without narrowing what users think they can ask.
+        // A Studio session has no project (it may not even share a folder), so
+        // it gets an equally open invitation that does not mention one.
+        let placeholder = isCoworkSession
+            ? "What would you like to make?"
+            : "What would you like to do in this project?"
         return VStack(alignment: .leading, spacing: 8) {
             if !composer.imageAttachments.isEmpty {
                 imageAttachmentRow
             }
 
             TextField(
-                "What would you like to do in this project?",
+                placeholder,
                 text: Binding(
                     get: { composer.messageText },
                     set: { composer.messageText = $0 }
@@ -714,7 +719,13 @@ struct InputFieldView: View {
                             systemImage: "square.and.arrow.down.on.square"
                         )
                     }
-                    .buttonStyle(.borderless)
+                    // The only tinted control in the footer: waiting deliverables
+                    // are the one thing here that needs the user, so they must
+                    // not read as another passive status label.
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
+                    .tint(.accentColor)
                     .help("Review the session's deliverables and copy approved files to your Mac")
                 }
             }
