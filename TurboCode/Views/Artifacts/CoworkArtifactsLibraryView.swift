@@ -39,9 +39,11 @@ struct CoworkArtifactsLibraryView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Sessions keep working while the library is open; reload when a turn
-        // ends so new files appear without leaving the page.
-        .task(id: chatStore.busy) { await reload() }
+        // The page has no manual reload: it reads the outboxes when it opens,
+        // when a turn ends (sessions keep working while the library is open),
+        // and when the export review closes, which may have cleared an outbox.
+        // Add any new way of changing an outbox to this key.
+        .task(id: refreshKey) { await reload() }
     }
 
     // MARK: Grid
@@ -96,14 +98,6 @@ struct CoworkArtifactsLibraryView: View {
             }
 
             Spacer()
-
-            Button {
-                Task { await reload() }
-            } label: {
-                Label("Reload", systemImage: "arrow.clockwise")
-            }
-            .controlSize(.regular)
-            .help("Read the session outboxes again")
         }
     }
 
@@ -192,6 +186,10 @@ struct CoworkArtifactsLibraryView: View {
             .padding(.vertical, 10)
         }
         .background(.bar)
+    }
+
+    private var refreshKey: String {
+        "\(chatStore.busy)|\(chatStore.coworkExportPresentation == nil)"
     }
 
     private func reload() async {
