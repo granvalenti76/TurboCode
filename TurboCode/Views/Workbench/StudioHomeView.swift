@@ -78,6 +78,8 @@ struct StudioHomeView: View {
                 }
                 Button("All connectors") { chatStore.setRoute(.connectors) }
                     .buttonStyle(.link)
+                    // The link style defaults to system blue; keep links on the app accent.
+                    .tint(.accentColor)
                     .font(AppTypography.metadata)
                 Spacer(minLength: 0)
             }
@@ -93,6 +95,8 @@ struct StudioHomeView: View {
                 Spacer()
                 Button("All artifacts") { chatStore.setRoute(.artifacts) }
                     .buttonStyle(.link)
+                    // The link style defaults to system blue; keep links on the app accent.
+                    .tint(.accentColor)
                     .font(AppTypography.metadata)
             }
             HStack(spacing: 10) {

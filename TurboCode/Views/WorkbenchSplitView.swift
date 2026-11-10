@@ -115,10 +115,9 @@ struct WorkbenchSplitView: View {
             // and outer padding inflate the group inside the unified title bar.
             ToolbarItemGroup(placement: .principal) {
                 // Editorial Desk and the project terminal work in the Mac
-                // workspace; a Cowork session shows its shared folder instead.
-                if chatStore.activeDomain == .cowork {
-                    CoworkFolderToolbarMenu()
-                } else {
+                // workspace, so a Cowork session leaves the centre empty; its
+                // shared folder is chosen in the composer footer instead.
+                if chatStore.activeDomain != .cowork {
                 Button {
                     chatStore.presentEditorialDesk()
                 } label: {

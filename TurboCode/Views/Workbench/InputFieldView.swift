@@ -714,6 +714,9 @@ struct InputFieldView: View {
                 Label("Studio VM", systemImage: "shippingbox")
                     .foregroundStyle(.secondary)
                     .help("This session works inside the isolated Studio virtual machine")
+                // The optional read-only shared folder, next to the VM it is
+                // mounted in.
+                CoworkFolderMenu()
                 // Always-visible entry to the reviewed export; it never copies
                 // anything by itself.
                 if coworkDeliverableCount > 0 {

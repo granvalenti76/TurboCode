@@ -64,7 +64,8 @@ by all Studio sessions and keeps installed packages until you reset it.
 
 ## Share a folder
 
-Use the folder menu in the toolbar to share one Mac folder with the session.
+Use **Share a folder** under the message field to share one Mac folder with
+the session; once shared, the same menu shows the folder name.
 The VM sees it at `/work` and can read it but never change it. Sharing your
 whole disk or home folder is refused. Without a shared folder the VM sees
 nothing of your Mac.
