@@ -87,10 +87,16 @@ struct InputFieldView: View {
         // Keep the invitation workspace-oriented; the active profile and tools
         // provide specialization without narrowing what users think they can ask.
         // A Studio session has no project (it may not even share a folder), so
-        // it gets an equally open invitation that does not mention one.
-        let placeholder = isCoworkSession
-            ? "What would you like to make?"
-            : "What would you like to do in this project?"
+        // it gets an equally open invitation that does not mention one. The
+        // same holds for a Coding chat before a workspace is chosen.
+        let placeholder: String
+        if isCoworkSession {
+            placeholder = "What would you like to make?"
+        } else if chatStore.workspaceRoot.isEmpty {
+            placeholder = "What would you like to do?"
+        } else {
+            placeholder = "What would you like to do in this project?"
+        }
         return VStack(alignment: .leading, spacing: 8) {
             if !composer.imageAttachments.isEmpty {
                 imageAttachmentRow
@@ -735,8 +741,39 @@ struct InputFieldView: View {
                 coworkDeliverableCount = await chatStore.coworkDeliverableCount()
             }
         } else {
-            branchMenu
+            workspaceIndicator
+            // Without a workspace the missing repository is not the fact the
+            // user needs; the indicator already offers to choose a folder.
+            if !chatStore.workspaceRoot.isEmpty {
+                branchMenu
+            }
             dynamicRoutingControl
+        }
+    }
+
+    /// Names the folder the agent will work in, next to where the request is
+    /// written. It is deliberately not a workspace switcher: the sidebar stays
+    /// the single path for changing workspace, because a switch rebuilds the
+    /// model session. Only the empty state acts, by opening the folder picker.
+    @ViewBuilder
+    private var workspaceIndicator: some View {
+        if chatStore.workspaceRoot.isEmpty {
+            Button {
+                chatStore.chooseWorkspace()
+            } label: {
+                Label("Choose workspace…", systemImage: "folder.badge.plus")
+            }
+            .buttonStyle(.borderless)
+            .help("No workspace is selected. Choose the folder this chat should work in")
+        } else {
+            Label(
+                URL(fileURLWithPath: chatStore.workspaceRoot).lastPathComponent,
+                systemImage: "folder"
+            )
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .help(chatStore.workspaceRoot)
         }
     }
 
