@@ -47,7 +47,7 @@ and safety boundaries are implemented with SwiftUI, AppKit, and Apple's
 Foundation Models framework. Optional TypeScript plugins run separately as
 Node.js processes and are not part of the core runtime.
 
-![TurboCode conversation with a Swift composer and a local workspace selected](.github/assets/turbocode-conversation.png)
+![TurboCode Studio home with recent artifacts, capability cards, and the Prassitele connector](.github/assets/turbocode-studio-home.png)
 
 ## Local-first by design
 
@@ -204,7 +204,42 @@ command-line tools.
 - Commands never fall back to the Mac shell, and no credentials or Mac
   environment variables enter the VM. Codex is not available in Studio.
 
-See [CONFIGURATION.md](CONFIGURATION.md#cowork) for settings and files.
+A new Studio session opens on a home view with capability cards and the most
+recent artifacts. A card writes a starter prompt into the composer; an artifact
+opens the session that made it.
+
+- **Artifacts** in the sidebar collects the files every session placed in
+  `/out`, grouped by session, with thumbnails and a full-size preview.
+  Previews only read the outbox; copying to the Mac still goes through
+  **Review & Export**.
+- The Artifacts inspector beside the chat shows the session's files and opens
+  servers the agent left running in the VM as a live page. A server must listen
+  on `0.0.0.0` to be reachable from the Mac.
+- Models with vision can look at images inside the VM, such as a screenshot of
+  a page they just built.
+
+<table>
+  <tr>
+    <td width="50%"><img src=".github/assets/turbocode-studio-artifacts.png" alt="TurboCode Artifacts library showing files from three Studio sessions with thumbnails"></td>
+    <td width="50%"><img src=".github/assets/turbocode-studio-connectors.png" alt="TurboCode Connectors page with Prassitele enabled for the session and Safari limited to Coding"></td>
+  </tr>
+</table>
+
+### Connectors
+
+A connector lets a session work with another app on your Mac through that app's
+own MCP server on `127.0.0.1`. Connectors are off by default and are enabled
+one session at a time from **Connectors** in the sidebar or from the Studio
+home; enabling one is the consent for its calls. Delegated workers and Codex
+never receive them.
+
+- **Prassitele** blocks out and adjusts sculptures in the running Prassitele
+  app. Its rendered views reach models with vision, and it adds the
+  `prassitele-sculpting` skill, loaded only when a request needs it.
+- **Safari** keeps its global switch and is available in Coding sessions only.
+
+See [CONFIGURATION.md](CONFIGURATION.md#studio) for Studio settings and files,
+and [Connectors](CONFIGURATION.md#connectors) for the connector catalog.
 
 ## TypeScript plugins
 
