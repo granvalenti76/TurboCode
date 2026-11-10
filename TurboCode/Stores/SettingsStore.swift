@@ -14,6 +14,12 @@ public final class SettingsStore {
     public var theme: ThemePreference = .system {
         didSet { UserDefaults.standard.set(theme.rawValue, forKey: "theme") }
     }
+    /// How the sidebar column is painted. Persisted on change, like `theme`.
+    public var sidebarBackdrop: SidebarBackdropPreference = .translucent {
+        didSet {
+            UserDefaults.standard.set(sidebarBackdrop.rawValue, forKey: SidebarBackdropPreference.defaultsKey)
+        }
+    }
     public var language: String = "en"
     public var fontSize: Double = 17.0 {
         didSet { UserDefaults.standard.set(fontSize, forKey: "fontSize") }
@@ -90,6 +96,9 @@ public final class SettingsStore {
     public func loadFromUserDefaults() {
         let defaults = UserDefaults.standard
         theme = ThemePreference(rawValue: defaults.string(forKey: "theme") ?? "system") ?? .system
+        sidebarBackdrop = SidebarBackdropPreference(
+            storedValue: defaults.string(forKey: SidebarBackdropPreference.defaultsKey)
+        )
         language = defaults.string(forKey: "language") ?? "en"
         let savedFontSize = defaults.double(forKey: "fontSize")
         let typographyVersion = defaults.integer(forKey: "chatTypographyVersion")
@@ -198,6 +207,7 @@ public final class SettingsStore {
     public func saveToUserDefaults() {
         let defaults = UserDefaults.standard
         defaults.set(theme.rawValue, forKey: "theme")
+        defaults.set(sidebarBackdrop.rawValue, forKey: SidebarBackdropPreference.defaultsKey)
         defaults.set(language, forKey: "language")
         defaults.set(fontSize, forKey: "fontSize")
         defaults.set(maxChatWidth, forKey: "maxChatWidth")
@@ -275,6 +285,35 @@ private enum SettingsStoreError: LocalizedError {
             "The selected remote model is no longer available."
         }
     }
+}
+
+/// The surface behind the sidebar column.
+///
+/// `translucent` samples the desktop through the system sidebar material;
+/// `solid` paints an opaque neutral surface for users who prefer a calm,
+/// wallpaper-independent column. Translucent stays the default so existing
+/// installations keep their appearance until the user chooses otherwise.
+public enum SidebarBackdropPreference: String, Sendable, Hashable, CaseIterable {
+    case translucent
+    case solid
+
+    nonisolated static let defaultsKey = "sidebarBackdrop"
+
+    /// Decodes a persisted raw value. A missing or unknown value (first
+    /// launch, or a preference written by a newer build) falls back to the
+    /// default instead of failing.
+    nonisolated init(storedValue: String?) {
+        self = storedValue.flatMap(SidebarBackdropPreference.init(rawValue:)) ?? .translucent
+    }
+
+    /// The opaque sidebar surface: the presentation's `#F2F2F2` in light
+    /// appearance and a matching step above the window surface in dark.
+    /// Only meaningful for `solid`.
+    static let solidSurface = Color(nsColor: NSColor(name: "SidebarSolidSurface") { appearance in
+        appearance.bestMatch(from: [.darkAqua, .vibrantDark]) != nil
+            ? NSColor(srgbRed: 0x24 / 255, green: 0x24 / 255, blue: 0x24 / 255, alpha: 1)
+            : NSColor(srgbRed: 0xF2 / 255, green: 0xF2 / 255, blue: 0xF2 / 255, alpha: 1)
+    })
 }
 
 public enum ThemePreference: String, Sendable, Hashable, CaseIterable {

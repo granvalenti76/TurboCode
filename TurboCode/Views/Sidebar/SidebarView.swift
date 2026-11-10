@@ -51,11 +51,20 @@ struct SidebarView: View {
         }
         // Explicit desktop blending replaces the automatic sidebar backdrop
         // to favor the colors outside the window, including under the titlebar.
+        // The solid variant covers the same area, so the column never shows a
+        // seam between the titlebar and the list.
         .background {
-            SidebarWindowBackdrop()
-                .ignoresSafeArea()
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+            Group {
+                switch settings.sidebarBackdrop {
+                case .translucent:
+                    SidebarWindowBackdrop()
+                case .solid:
+                    SidebarBackdropPreference.solidSurface
+                }
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         }
         .frame(minWidth: 240)
         .alert("Remove Workspace?", isPresented: workspaceRemovalPresented) {
