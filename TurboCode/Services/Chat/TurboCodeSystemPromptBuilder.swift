@@ -205,9 +205,11 @@ nonisolated enum TurboCodeSystemPromptBuilder {
     /// the VM, grouped under headings because local models follow a few
     /// labelled groups more reliably than one long flat list: where things
     /// live, how work is delivered, what the user can see, and tool recipes.
-    /// The skill named below is `StudioSkillCatalog.webDesignSkillName`. It
-    /// is written out because this file is also compiled into the ACP helper,
+    /// The skills named below are the `StudioSkillCatalog` names. They are
+    /// written out because this file is also compiled into the ACP helper,
     /// which does not include the catalog; a test keeps the two in step.
+    /// All three are named in one rule because a PDF document and a deck are
+    /// also written as HTML, and without it the model loads the web skill.
     private static func coworkSection(
         _ facts: CoworkPromptFacts,
         tools: Set<ToolCapabilityID>
@@ -250,7 +252,8 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             Tools and recipes:
             - Use vm_file to read and write text files and vm_exec for commands.
             - Before writing any web page, HTML report or dashboard, load the \
-            studio-web-design skill and follow it.
+            studio-web-design skill and follow it. For a document meant as a PDF load \
+            studio-documents instead, and for slides load studio-presentations.
             - A background process must redirect its output or the command never returns: \
             python3 -m http.server 3000 > /tmp/server.log 2>&1 &
             - Screenshots: chromium --headless --screenshot=/out/page.png --window-size=1280,720 \

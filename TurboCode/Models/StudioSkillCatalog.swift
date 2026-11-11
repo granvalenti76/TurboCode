@@ -12,7 +12,21 @@ nonisolated enum StudioSkillCatalog {
     /// before writing HTML.
     static let webDesignSkillName = "studio-web-design"
 
-    static let resourceNames = [webDesignSkillName]
+    /// Documents delivered as PDF. Written as print HTML and rendered by the
+    /// Chromium already in the VM image, so the skill needs no extra tooling
+    /// beyond `poppler-utils` for its page check.
+    static let documentsSkillName = "studio-documents"
+
+    /// Slide decks as one HTML file that also prints to PDF. Mostly content
+    /// discipline (outline first, one idea per slide), which is where small
+    /// models fail, rather than a fixed visual template.
+    static let presentationsSkillName = "studio-presentations"
+
+    static let resourceNames = [
+        webDesignSkillName,
+        documentsSkillName,
+        presentationsSkillName
+    ]
 
     /// The bundled skills for `domain`. A missing or malformed resource only
     /// removes that skill; the session itself is unaffected.

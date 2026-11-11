@@ -53,8 +53,16 @@ calls for it.
 Every Studio session offers `studio-web-design`, the house style for web pages,
 HTML reports and dashboards: a ready CSS base, layout rules, patterns for
 tables, key figures and charts, and a screenshot check at desktop and phone
-width. The agent is told to load it before writing HTML. A skill of your own
-with the same name replaces it.
+width. The agent is told to load it before writing HTML.
+
+`studio-documents` covers anything delivered as a PDF, such as a report, a
+letter, a quote or a CV: a print layout, page-break rules, and a check of the
+rendered pages. `studio-presentations` covers slide decks: the story is
+outlined first as slide titles, then built as one HTML file that plays with
+the arrow keys and prints to a PDF with one slide per page. Both tell the
+agent to mark missing facts instead of inventing them.
+
+A skill of your own with the same name replaces the built-in one.
 
 ## What the agent can do
 
