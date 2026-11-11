@@ -34,6 +34,7 @@ final class MessageSendCoordinator {
     /// Captured before runtime ownership is released, then consumed exactly
     /// once by either the release callback or an immediate steering delivery.
     private var interruptedHistoryRestores: [TurnID: InterruptedHistoryRestore] = [:]
+    private var currentDateStamp = CurrentDatePromptStamp()
 
     init(
         runtime: AgentRuntime,
@@ -151,6 +152,12 @@ final class MessageSendCoordinator {
         // Routing is immutable for the accepted turn. A later menu selection
         // cannot redirect this operation after provider execution begins.
         let responseBackend = modelRuntime.activeBackend
+        // Stamped here, after admission, so a rejected send cannot consume
+        // the day's note. Codex gets the date from its own runtime. The
+        // visible message keeps `displayText`; only the model sees the note.
+        let promptText = responseBackend == .codex
+            ? promptText
+            : currentDateStamp.stamped(promptText, conversationID: titleThreadID)
         let steering = self.steering
         await runtime.runOperation(
             turnID: turnID,
