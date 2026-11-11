@@ -96,6 +96,7 @@ public final class ChatStore {
     var conversationStore: ConversationStore { assembly.conversationStore }
     var toolInteractionStore: ToolInteractionStore { assembly.toolInteractionStore }
     var agentActivityStore: AgentActivityStore { assembly.agentActivityStore }
+    var liveToolCallStore: LiveToolCallStore { assembly.liveToolCallStore }
     var agentRuntimeProjectionStore: AgentRuntimeProjectionStore {
         assembly.agentRuntimeProjectionStore
     }

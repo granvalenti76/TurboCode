@@ -10,6 +10,7 @@ final class ChatApplicationAssembly {
     let workspaceStore: WorkspaceStore
     let conversationStore: ConversationStore
     let toolInteractionStore: ToolInteractionStore
+    let liveToolCallStore: LiveToolCallStore
     let agentActivityStore: AgentActivityStore
     let agentRuntimeProjectionStore: AgentRuntimeProjectionStore
     let composerViewModel: ComposerViewModel
@@ -60,9 +61,13 @@ final class ChatApplicationAssembly {
             await timeline.applyRuntimeSnapshot(snapshot)
         }
         timeline.applyRuntimeSnapshot(runtimeProjection.snapshot)
+        let liveToolCalls = LiveToolCallStore()
         let llmSessionFactory = LiveLLMBackendSessionFactory(
             nativeRunner: nativeRunner,
-            codexRuntime: codexRuntime
+            codexRuntime: codexRuntime,
+            toolCallStreamChanged: { [weak liveToolCalls] event in
+                liveToolCalls?.handle(event)
+            }
         )
         let llmRuntime = LLMRuntime(
             sessionFactory: llmSessionFactory,
@@ -272,6 +277,7 @@ final class ChatApplicationAssembly {
         self.workspaceStore = workspace
         self.conversationStore = conversations
         self.toolInteractionStore = toolInteractions
+        self.liveToolCallStore = liveToolCalls
         self.agentActivityStore = agentActivity
         self.agentRuntimeProjectionStore = runtimeProjection
         self.composerViewModel = composer

@@ -310,6 +310,9 @@ public struct ChatCompletionsLanguageModel: Sendable, LanguageModel {
       let responseEntryID = UUID().uuidString
       let reasoningEntryID = UUID().uuidString
       let toolCallsEntryID = UUID().uuidString
+      // TurboCode: identifies this response stream on the tool-call side
+      // channel, because tool-call indexes restart at zero on every round.
+      let toolCallStreamID = UUID()
 
       for try await chunk in chunks {
         if let delta = chunk.choices.first?.delta {
@@ -337,6 +340,16 @@ public struct ChatCompletionsLanguageModel: Sendable, LanguageModel {
               toolCallRouting[toolCallDelta.index] = routing
 
               guard !routing.id.isEmpty, !routing.name.isEmpty else { continue }
+
+              // TurboCode: mirror exactly what the framework receives, so the
+              // live view never shows a call the session will not execute.
+              await reasoningStreamRelay?.publishToolCall(
+                streamID: toolCallStreamID,
+                index: toolCallDelta.index,
+                id: routing.id,
+                name: routing.name,
+                argumentsDelta: toolCallDelta.function?.arguments ?? ""
+              )
 
               await channel.send(
                 .toolCalls(
@@ -382,6 +395,8 @@ public struct ChatCompletionsLanguageModel: Sendable, LanguageModel {
           )
         }
       }
+
+      await reasoningStreamRelay?.finishToolCalls(streamID: toolCallStreamID)
     }
 
     private func topP(_ sampling: GenerationOptions.SamplingMode) throws -> Double {
