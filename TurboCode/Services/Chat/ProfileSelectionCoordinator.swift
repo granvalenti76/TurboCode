@@ -74,7 +74,7 @@ final class ProfileSelectionCoordinator {
         let connectors = activeConnectors()
         configuration.connectors = connectors
         configuration.availableSkills = MCPConnectorCatalog.catalog(
-            adding: MCPConnectorCatalog.skills(for: connectors),
+            adding: bundledSkills(connectors: connectors),
             to: configuration.availableSkills
         )
     }
@@ -88,9 +88,20 @@ final class ProfileSelectionCoordinator {
         let skills = modelRuntime.resolvedMarkdownSkills
         guard modelRuntime.activeBackend != .codex else { return skills }
         return MCPConnectorCatalog.catalog(
-            adding: MCPConnectorCatalog.skills(for: activeConnectors()),
+            adding: bundledSkills(connectors: activeConnectors()),
             to: skills
         )
+    }
+
+    /// Skills that ship with the app for the active conversation: the Studio
+    /// ones for a Studio session, then those of its enabled connectors. One
+    /// function feeds both the session and the composer so the two catalogs
+    /// cannot drift apart.
+    private func bundledSkills(
+        connectors: [MCPConnector]
+    ) -> [TurboCodeSkillDefinition] {
+        StudioSkillCatalog.skills(for: activeConversation?.domain ?? .coding)
+            + MCPConnectorCatalog.skills(for: connectors)
     }
 
     /// Every entry point that starts a turn asks this first. A rejected Cowork

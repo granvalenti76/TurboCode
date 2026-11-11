@@ -194,6 +194,9 @@ nonisolated enum TurboCodeSystemPromptBuilder {
     /// Kept short for small local context windows. It is the agent's map of
     /// the VM: where to work, what is read-only, where deliverables go, and
     /// which tools are already installed.
+    /// The skill named below is `StudioSkillCatalog.webDesignSkillName`. It
+    /// is written out because this file is also compiled into the ACP helper,
+    /// which does not include the catalog; a test keeps the two in step.
     private static func coworkSection(_ facts: CoworkPromptFacts) -> String {
         let input = facts.sharesInputFolder
             ? "- /work: the user's shared folder, read-only. Copy files before changing them."
@@ -213,6 +216,8 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             - Installed: Node 24 with npm, Python 3.11 (use python3 -m venv), headless Chromium \
             (never pass --no-sandbox), rg, fd, jq, git, gcc and make. sudo apt-get works.
             - Use vm_file to read and write text files and vm_exec for commands.
+            - Before writing any web page, HTML report or dashboard, load the \
+            studio-web-design skill and follow it.
             - A background process must redirect its output or the command never returns: \
             python3 -m http.server 3000 > /tmp/server.log 2>&1 &
             - The user looks at your work in the Artifacts panel, which shows the files in /out \

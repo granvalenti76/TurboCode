@@ -48,6 +48,14 @@ Prassitele adds `prassitele-sculpting`, its method for blocking out a head or a
 bust. The skill is only made available; the model loads it when a request
 calls for it.
 
+## Built-in skills
+
+Every Studio session offers `studio-web-design`, the house style for web pages,
+HTML reports and dashboards: a ready CSS base, layout rules, patterns for
+tables, key figures and charts, and a screenshot check at desktop and phone
+width. The agent is told to load it before writing HTML. A skill of your own
+with the same name replaces it.
+
 ## What the agent can do
 
 The VM is a Debian 12 system with Node.js 24, Python 3.11, headless Chromium,
