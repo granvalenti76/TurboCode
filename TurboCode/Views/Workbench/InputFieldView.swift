@@ -26,6 +26,7 @@ struct InputFieldView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            TurnStatusCardView()
             SteeringQueueView()
             if let notice = composer.imageNotice {
                 Label(notice, systemImage: "photo")
@@ -626,8 +627,7 @@ struct InputFieldView: View {
         guard !text.isEmpty else { return }
         let generation = composer.editGeneration
         Task {
-            let result = await chatStore.enqueueSteering(text)
-            guard case .accepted = result,
+            guard await chatStore.submitDuringTurn(text),
                   composer.editGeneration == generation else { return }
             composer.reset()
         }
