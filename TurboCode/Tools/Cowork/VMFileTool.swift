@@ -44,7 +44,7 @@ struct VMFileTool: Tool {
     var name: String { ToolCapabilityID.vmFile.rawValue }
     var description: String {
         """
-        Read, write, or list files in the isolated Cowork VM. Action read returns \
+        Read, write, or list files in the isolated Studio VM. Action read returns \
         numbered lines (startLine, lineCount). Action write replaces a file with \
         content and creates parent folders. Action list shows a directory tree \
         (depth). Relative paths start at the session directory; /work is \
