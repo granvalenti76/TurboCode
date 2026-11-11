@@ -14,6 +14,14 @@ struct SteeringQueueView: View {
             .sorted { $0.sequence < $1.sequence }
     }
 
+    /// Mirrors `SteeringCoordinator.claimAtToolBoundary`: Codex steers through
+    /// its own protocol and the on-device model only at the end of the turn.
+    private var deliversAtToolBoundary: Bool {
+        chatStore.busy
+            && chatStore.activeBackend != .codex
+            && chatStore.activeBackend != .foundationApple
+    }
+
     private var controlFont: Font {
         AppTypography.chatBody(size: max(13, chatFontSize - 3))
     }
@@ -41,6 +49,19 @@ struct SteeringQueueView: View {
                             .controlSize(.regular)
                             .font(controlFont.weight(.medium))
                         }
+                    }
+
+                    if deliversAtToolBoundary,
+                       requests.contains(where: { $0.state == .queued }) {
+                        // States when queued steering will reach the model,
+                        // so the user can tell waiting from Send Now.
+                        Text(
+                            "In consegna dopo il prossimo tool, senza interrompere il turno. "
+                                + "Se non ci sono altri tool, a fine turno."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
 
                     ForEach(requests) { request in

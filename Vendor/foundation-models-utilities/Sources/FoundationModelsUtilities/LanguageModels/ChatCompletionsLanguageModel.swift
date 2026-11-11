@@ -507,7 +507,9 @@ public struct ChatCompletionsLanguageModel: Sendable, LanguageModel {
       }
 
       // Translate each transcript entry into one chat-completion message.
-      for entry in entries {
+      // TurboCode: a prompt appended while a tool was running is moved after
+      // that tool's output, keeping every tool exchange contiguous.
+      for entry in Transcript.deferringPromptsPastToolOutputs(entries) {
         switch entry {
         case .instructions(let instructions):
           // Instructions become system-role messages.

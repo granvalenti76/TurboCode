@@ -151,6 +151,9 @@ final class ChatApplicationAssembly {
                 await sessionCoordinator.persistActiveSession(id: threadID)
             }
         )
+        responseCoordinator.steeringAtToolBoundary = { [weak steeringCoordinator] in
+            await steeringCoordinator?.claimAtToolBoundary()
+        }
         let profileSelectionCoordinator = ProfileSelectionCoordinator(
             modelRuntime: modelRuntime,
             codexRuntime: codexRuntime,

@@ -71,6 +71,10 @@ final class ChatResponseCoordinator {
     private let activityPresentationRequested: @MainActor @Sendable () -> Void
     private var backgroundTaskSubmission: DelegatedTaskBackgroundSubmission?
 
+    /// Installed by the composition root once the steering coordinator
+    /// exists; it is created after this type and holds it weakly.
+    var steeringAtToolBoundary: (@MainActor @Sendable () async -> String?)?
+
     private(set) var isDelegating = false
     private(set) var activeEditGroupID: String?
     private var productGuidePresentation: ProductGuideBlock?
@@ -142,7 +146,10 @@ final class ChatResponseCoordinator {
                     self?.agentActivityChanged(event)
                 }
             },
-            backgroundTaskSubmission: backgroundTaskSubmission
+            backgroundTaskSubmission: backgroundTaskSubmission,
+            steeringAtToolBoundary: { [weak self] in
+                await self?.steeringAtToolBoundary?()
+            }
         )
     }
 

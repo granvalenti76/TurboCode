@@ -141,6 +141,63 @@ final class SteeringCoordinator {
         await persist()
     }
 
+    /// Called by the native session when a coordinator tool has finished and
+    /// the next model request has not been built yet. Returns the text to
+    /// append to the session history, or nil when nothing is queued.
+    ///
+    /// This is the earliest point at which steering can reach a native model
+    /// without cancelling its turn. A paused request is not claimed, a
+    /// request that misses the last boundary is delivered at turn end by
+    /// `deliverAutomatically`, and Send Now remains the explicit interruption.
+    ///
+    /// Codex steers through its own protocol. The on-device model is
+    /// excluded because its requests do not pass through the reordering that
+    /// keeps the injected prompt after the tool output.
+    func claimAtToolBoundary() async -> String? {
+        guard let turnID = await runtime.currentTurnState?.id,
+              let context = await runtime.steeringContext(for: turnID),
+              context.providerSelection.backend != .codex,
+              context.providerSelection.backend != .foundationApple,
+              await runtime.hasActiveOperation,
+              let batch = await runtime.claimSteeringBatch(
+                  for: context,
+                  intent: .toolBoundary
+              ) else { return nil }
+        let requests = await runtime.steeringRequests(for: batch)
+        guard !requests.isEmpty else {
+            _ = await runtime.failSteering(
+                batch,
+                failure: TurnFailure(
+                    code: "steering.missing_request",
+                    message: "The claimed steering request could not be found."
+                )
+            )
+            await persist()
+            return nil
+        }
+        _ = prepareNativeDelivery(
+            turnID,
+            Self.displayText(for: requests),
+            SteeringDeliveryMetadata(
+                requestIDs: batch.requestIDs,
+                deliveryID: batch.id,
+                providerTurnID: nil
+            ),
+            context.providerSelection.modelName ?? ""
+        )
+        // Acknowledged here because the session appends the returned text
+        // synchronously after this call; there is no later provider receipt.
+        _ = await runtime.acknowledgeSteering(
+            batch,
+            receipt: SteeringDeliveryReceipt(
+                deliveryID: batch.id,
+                providerTurnID: nil
+            )
+        )
+        await persist()
+        return Self.prompt(for: requests)
+    }
+
     /// Called at the ownership release boundary, never from a UI `busy`
     /// observation. The same claim path is used by manual delivery.
     func deliverAutomatically(after turnID: TurnID) async {

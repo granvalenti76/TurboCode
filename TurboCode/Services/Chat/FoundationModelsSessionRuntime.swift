@@ -150,10 +150,18 @@ actor FoundationModelsSessionRuntime {
     /// history delta or enter canonical persistence.
     private func synchronizeCanonicalHistory() {
         let current = Array(session.transcript)
-        canonicalHistory.append(contentsOf: FoundationModelsTranscriptDelta.newEntries(
-            previous: materializedSnapshot,
-            current: current
-        ))
+        // Steering injected at a tool boundary sits inside its tool exchange
+        // in the live session (see `SteeringBoundaryModifier`). Durable
+        // history stores it after the output, so the Transcript sheet, context
+        // exclusion and session rebuilds see ordinary, contiguous exchanges.
+        canonicalHistory.append(
+            contentsOf: Transcript.deferringPromptsPastToolOutputs(
+                FoundationModelsTranscriptDelta.newEntries(
+                    previous: materializedSnapshot,
+                    current: current
+                )
+            )
+        )
         materializedSnapshot = current
     }
 }

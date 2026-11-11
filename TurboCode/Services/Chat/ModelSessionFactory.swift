@@ -153,6 +153,9 @@ nonisolated struct ModelSessionEvents: Sendable {
     let backgroundTaskSubmission: DelegatedTaskBackgroundSubmission?
     /// Session-owned external tools, such as ACP-provided MCP gateways.
     let additionalTools: [any Tool]
+    /// Claims steering queued by the user when a coordinator tool finishes.
+    /// The default delivers nothing, which keeps headless hosts unchanged.
+    let steeringAtToolBoundary: @Sendable () async -> String?
 
     init(
         currentTurnID: @escaping @MainActor @Sendable () async -> TurnID? = { nil },
@@ -178,7 +181,8 @@ nonisolated struct ModelSessionEvents: Sendable {
             await ToolApprovalRegistry.shared.request($0)
         },
         backgroundTaskSubmission: DelegatedTaskBackgroundSubmission? = nil,
-        additionalTools: [any Tool] = []
+        additionalTools: [any Tool] = [],
+        steeringAtToolBoundary: @escaping @Sendable () async -> String? = { nil }
     ) {
         self.currentTurnID = currentTurnID
         self.toolReceiptRegistry = toolReceiptRegistry
@@ -189,6 +193,7 @@ nonisolated struct ModelSessionEvents: Sendable {
         self.requestApproval = requestApproval
         self.backgroundTaskSubmission = backgroundTaskSubmission
         self.additionalTools = additionalTools
+        self.steeringAtToolBoundary = steeringAtToolBoundary
     }
 }
 
@@ -485,7 +490,8 @@ nonisolated enum ModelSessionFactory {
                         configuration.backend,
                         .coordinator
                     )
-                }
+                },
+                steeringAtToolBoundary: events.steeringAtToolBoundary
             ),
             history: history
         )
@@ -681,7 +687,8 @@ nonisolated enum ModelSessionFactory {
                 },
                 onToolEnd: { call, output in
                     await events.toolFinished(call, output, configuration.backend, .coordinator)
-                }
+                },
+                steeringAtToolBoundary: events.steeringAtToolBoundary
             ),
             history: history
         )

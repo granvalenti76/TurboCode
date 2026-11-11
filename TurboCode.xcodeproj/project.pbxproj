@@ -125,6 +125,7 @@
 		B00000000000000000000087 /* TurboCode/Tools/RipgrepTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000087 /* TurboCode/Tools/RipgrepTool.swift */; };
 		B00000000000000000000088 /* TurboCode/Tools/SafariMCPTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000088 /* TurboCode/Tools/SafariMCPTool.swift */; };
 		B00000000000000000000089 /* TurboCode/Tools/StandaloneProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000089 /* TurboCode/Tools/StandaloneProfile.swift */; };
+		B000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift */; };
 		B0000000000000000000008a /* TurboCode/Tools/SwiftPackageManagerTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000008a /* TurboCode/Tools/SwiftPackageManagerTool.swift */; };
 		B0000000000000000000008b /* TurboCode/Tools/Xcode/XcodeMCPTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000008b /* TurboCode/Tools/Xcode/XcodeMCPTool.swift */; };
 		B0000000000000000000008c /* TurboCode/Tools/Xcode/XcodeProjectTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000008c /* TurboCode/Tools/Xcode/XcodeProjectTool.swift */; };
@@ -311,6 +312,7 @@
 		A00000000000000000000087 /* TurboCode/Tools/RipgrepTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/RipgrepTool.swift; sourceTree = "<group>"; };
 		A00000000000000000000088 /* TurboCode/Tools/SafariMCPTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/SafariMCPTool.swift; sourceTree = "<group>"; };
 		A00000000000000000000089 /* TurboCode/Tools/StandaloneProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/StandaloneProfile.swift; sourceTree = "<group>"; };
+		A000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/SteeringBoundaryModifier.swift; sourceTree = "<group>"; };
 		A0000000000000000000008a /* TurboCode/Tools/SwiftPackageManagerTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/SwiftPackageManagerTool.swift; sourceTree = "<group>"; };
 		A0000000000000000000008b /* TurboCode/Tools/Xcode/XcodeMCPTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/Xcode/XcodeMCPTool.swift; sourceTree = "<group>"; };
 		A0000000000000000000008c /* TurboCode/Tools/Xcode/XcodeProjectTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/Xcode/XcodeProjectTool.swift; sourceTree = "<group>"; };
@@ -542,6 +544,7 @@
 				A00000000000000000000087 /* TurboCode/Tools/RipgrepTool.swift */,
 				A00000000000000000000088 /* TurboCode/Tools/SafariMCPTool.swift */,
 				A00000000000000000000089 /* TurboCode/Tools/StandaloneProfile.swift */,
+				A000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift */,
 				A0000000000000000000008a /* TurboCode/Tools/SwiftPackageManagerTool.swift */,
 				A0000000000000000000008b /* TurboCode/Tools/Xcode/XcodeMCPTool.swift */,
 				A0000000000000000000008c /* TurboCode/Tools/Xcode/XcodeProjectTool.swift */,
@@ -852,6 +855,7 @@
 				B00000000000000000000087 /* TurboCode/Tools/RipgrepTool.swift in Sources */,
 				B00000000000000000000088 /* TurboCode/Tools/SafariMCPTool.swift in Sources */,
 				B00000000000000000000089 /* TurboCode/Tools/StandaloneProfile.swift in Sources */,
+				B000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift in Sources */,
 				B0000000000000000000008a /* TurboCode/Tools/SwiftPackageManagerTool.swift in Sources */,
 				B0000000000000000000008b /* TurboCode/Tools/Xcode/XcodeMCPTool.swift in Sources */,
 				B0000000000000000000008c /* TurboCode/Tools/Xcode/XcodeProjectTool.swift in Sources */,

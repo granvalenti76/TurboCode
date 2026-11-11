@@ -80,12 +80,16 @@ nonisolated enum SteeringRequestState: String, Codable, Hashable, Sendable {
     case removed
 }
 
-/// Whether a claimed batch was released automatically or by an explicit user
-/// action. Both paths use the same claim operation and therefore cannot
+/// Why a batch was claimed: automatically at the end of the turn, by an
+/// explicit user action, or automatically between two tool rounds of the
+/// running turn. All paths use the same claim operation and therefore cannot
 /// deliver the same request twice.
 nonisolated enum SteeringDeliveryIntent: String, Codable, Hashable, Sendable {
     case automatic
     case sendNow
+    /// Injected after a tool output, before the next model request, without
+    /// interrupting the turn. Native chat-completions sessions only.
+    case toolBoundary
 }
 
 /// Provider-neutral evidence that the input was accepted for delivery.
