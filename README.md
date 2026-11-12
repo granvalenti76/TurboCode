@@ -232,6 +232,12 @@ conversation context:
 
 ![TurboCode project report rendered in the conversation with headings, a file table, and a usage example](.github/assets/turbocode-project-report.png)
 
+In the **Changes** panel, press **+** next to any changed line to leave a review
+comment. Comments stay local until you send them together as one request; the
+model then makes focused, reviewable edits to the lines you marked.
+
+![TurboCode Changes panel with a local review comment on a line of tag.md, asking the agent to modify the file](.github/assets/turbocode-review-comment.png)
+
 ### Native macOS interface
 
 TurboCode uses SwiftUI and AppKit for its window, sidebar, transcript,
