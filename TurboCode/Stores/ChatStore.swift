@@ -197,6 +197,10 @@ public final class ChatStore {
     }()
     // MARK: - Onboarding
 
+    /// Present while `models.json` is missing; the workbench shows it as the
+    /// first-launch sheet and clears it when the user finishes or postpones.
+    var firstLaunchOnboarding: FirstLaunchOnboardingStore?
+
     /// Ensures the current `~/.turbocode/` layout exists and applies additive migrations.
     public func ensureOnboarding() async {
         do {
@@ -204,6 +208,22 @@ public final class ChatStore {
             // first-launch sheet, and only the sheet's confirmation writes it.
             let needsModelSetup = TurboCodeConfig.shared.needsModelSetup
             try TurboCodeConfig.shared.performOnboarding(deferModelCatalog: needsModelSetup)
+            if needsModelSetup, firstLaunchOnboarding == nil {
+                let onboarding = FirstLaunchOnboardingStore(
+                    onComplete: { [weak self] _ in
+                        self?.firstLaunchOnboarding = nil
+                        // Rebind the composer to the chosen endpoint instead
+                        // of the in-memory default used until now.
+                        await self?.reloadRemoteModels()
+                    },
+                    onDismiss: { [weak self] in
+                        self?.firstLaunchOnboarding = nil
+                    }
+                )
+                firstLaunchOnboarding = onboarding
+                // Scan while the welcome page is read.
+                onboarding.scan()
+            }
             if let sdkSource = TypeScriptPluginProjectService.liveSDKSourceURL() {
                 _ = try TypeScriptPluginProjectService.live().bootstrapSDK(
                     from: sdkSource

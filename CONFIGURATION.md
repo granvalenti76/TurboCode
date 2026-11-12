@@ -6,6 +6,26 @@ execution tuning live in `~/.turbocode/config.json`.
 The file is created during onboarding with validated defaults. Common active
 options are also available in **TurboCode > Settings > Agents**.
 
+## First launch
+
+When `~/.turbocode/models.json` is missing, TurboCode creates the rest of the
+layout and opens a setup sheet instead of writing a default model catalog:
+
+1. **Welcome.** **Set Up Later** closes the sheet without writing the catalog,
+   so the sheet returns on the next launch.
+2. **Discovery.** TurboCode sends `GET /v1/models` to `127.0.0.1` on ports
+   8080, 9931, 1234, 11434, 8000 and 1337, and to any address typed in
+   **Another machine**. A server that also answers `GET /props` is listed as
+   llama-server: its context window and vision support are read from it.
+3. **Review.** For llama-server nothing has to be entered. For other
+   OpenAI-compatible servers, choose the context window the model was loaded
+   with. A short request asks the model to call a test tool; the result is
+   shown but does not block setup.
+
+**Create and Start** writes `models.json` with the chosen server as the `llama`
+entry and the built-in DeepSeek entry, which stays unused until a key is added.
+An existing `models.json` is never overwritten by this sheet.
+
 ## Configuration Boundaries
 
 - `config.json` controls agent, orchestrator, execution, skill, and Git policies.

@@ -120,6 +120,70 @@ struct FirstLaunchModelSetupTests {
         #expect(model.supportsVision == false)
     }
 
+    @Test("The sheet prefers llama-server and writes the catalog only on confirmation")
+    func onboardingStorePrefersLlamaAndWritesOnConfirm() async throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCode-OnboardingStore-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let config = TurboCodeConfig(rootURL: home.appendingPathComponent(".turbocode", isDirectory: true))
+        try config.performOnboarding(deferModelCatalog: true)
+
+        // LM Studio answers on a lower-priority port than llama-server on 9931,
+        // so the preselection must come from the kind, not the scan order.
+        let stub = StubHTTPClient(
+            responses: [
+                "http://127.0.0.1:1234/v1/models": (200, #"{"data":[{"id":"qwen3-coder-30b"}]}"#),
+                "http://127.0.0.1:9931/v1/models": (200, modelsListing),
+                "http://127.0.0.1:9931/props": (200, #"{"default_generation_settings":{"n_ctx":65536}}"#),
+            ],
+            postResponse: (200, #"{"choices":[{"message":{"tool_calls":[{"id":"1"}]}}]}"#)
+        )
+        var completed: [RemoteModelConfig]?
+        var dismissed = false
+        let store = FirstLaunchOnboardingStore(
+            discovery: LocalModelServerDiscovery(http: stub),
+            config: config,
+            onComplete: { completed = $0 },
+            onDismiss: { dismissed = true }
+        )
+
+        store.scan()
+        for _ in 0..<1_000 where store.isScanning { await Task.yield() }
+        #expect(!store.isScanning)
+        #expect(store.llamaServers.count == 1)
+        #expect(store.otherServers.count == 1)
+        #expect(store.selectedServer?.baseURL == "http://127.0.0.1:9931/v1")
+        #expect(store.notRunningPorts.count == 4)
+
+        store.showReview()
+        #expect(store.displayName == "Qwen3.6-35B-A3B")
+        #expect(config.needsModelSetup)
+
+        await store.complete()
+        #expect(!config.needsModelSetup)
+        #expect(completed?.first(where: { $0.id == "llama" })?.contextWindowTokens == 65_536)
+        #expect(!dismissed)
+    }
+
+    @Test("Postponing the sheet leaves the catalog missing")
+    func postponingWritesNothing() throws {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TurboCode-OnboardingLater-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let config = TurboCodeConfig(rootURL: home.appendingPathComponent(".turbocode", isDirectory: true))
+        var dismissed = false
+        let store = FirstLaunchOnboardingStore(
+            discovery: LocalModelServerDiscovery(http: StubHTTPClient()),
+            config: config,
+            onComplete: { _ in },
+            onDismiss: { dismissed = true }
+        )
+
+        store.setUpLater()
+        #expect(dismissed)
+        #expect(config.needsModelSetup)
+    }
+
     @Test("First launch defers models.json until setup completes, and never overwrites it")
     func defersAndWritesModelCatalog() throws {
         let home = FileManager.default.temporaryDirectory

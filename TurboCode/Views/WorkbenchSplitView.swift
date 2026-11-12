@@ -59,6 +59,15 @@ struct WorkbenchSplitView: View {
         .sheet(isPresented: customProfilesPresented) {
             CustomProfilesSheet()
         }
+        // First launch: shown only while ~/.turbocode/models.json is missing.
+        .sheet(isPresented: Binding(
+            get: { chatStore.firstLaunchOnboarding != nil },
+            set: { if !$0 { chatStore.firstLaunchOnboarding = nil } }
+        )) {
+            if let onboarding = chatStore.firstLaunchOnboarding {
+                FirstLaunchOnboardingSheet(store: onboarding)
+            }
+        }
         // Keep the editorial feature behind one reversible integration point:
         // removing the module only removes this toolbar action and its sheet.
         .sheet(item: editorialDeskPresentationBinding) { presentation in
