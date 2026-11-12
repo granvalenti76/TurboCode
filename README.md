@@ -58,7 +58,7 @@ and safety boundaries are implemented with SwiftUI, AppKit, and Apple's
 Foundation Models framework. Optional TypeScript plugins run separately as
 Node.js processes and are not part of the core runtime.
 
-![TurboCode Coding session that wrote a Python script, reviewed it, and committed it, with context and cache metrics under the composer](.github/assets/turbocode-coding-session.png)
+![TurboCode Coding home for a workspace, with the composer, branch, and context metrics](.github/assets/turbocode-coding-home.png)
 
 ## Local-first by design
 
@@ -216,7 +216,7 @@ active workspace require explicit approval, and destructive file or Git
 operations have their own confirmation boundaries. Generated changes can be
 reviewed against the real working tree before publication.
 
-![TurboCode Coding home for a workspace, with the composer, branch, and context metrics](.github/assets/turbocode-coding-home.png)
+![TurboCode Coding session that wrote a Python script, reviewed it, and committed it, with context and cache metrics under the composer](.github/assets/turbocode-coding-session.png)
 
 ### Structured conversation output
 
