@@ -28,13 +28,31 @@ The distributed application is ad-hoc signed and is not notarized by Apple.
 If macOS blocks the first launch, approve TurboCode in **System Settings →
 Privacy & Security**, or open the application once with **right-click → Open**.
 
+### First launch
+
+On first launch TurboCode looks for a model server on your Mac and on the
+local network, reads the context window and checks tool calls and vision, then
+writes `~/.turbocode/models.json`. Every value stays editable in Settings.
+
+<table>
+  <tr>
+    <td width="33%"><img src=".github/assets/turbocode-onboarding-welcome.png" alt="TurboCode welcome sheet describing a local model, reviewable changes, and the Coding and Studio modes"></td>
+    <td width="33%"><img src=".github/assets/turbocode-onboarding-server.png" alt="TurboCode first-launch step that found a llama-server model server on the local network"></td>
+    <td width="33%"><img src=".github/assets/turbocode-onboarding-configure.png" alt="TurboCode first-launch step showing the detected context window, live tool calls, and vision support"></td>
+  </tr>
+</table>
+
 ## What is TurboCode?
 
-TurboCode is a native macOS agent harness written entirely in Swift. It
-provides a general execution layer for models, tools, profiles, Skills,
-plugins, context management, and safety boundaries. It brings these
-capabilities together with native integrations for Swift, SwiftUI, Xcode,
-Swift Package Manager, Git, and general workspace automation.
+TurboCode is a compact, fast agent harness for macOS, written in Swift and
+SwiftUI. It is built for people who want to do real agentic work with a local
+model: an agent for your Mac that runs on a model you host, and asks before it
+touches your files.
+
+It has two modes. **Coding** works in a real repository, with native tools for
+Swift, SwiftUI, Xcode, Swift Package Manager, and Git. **Studio** builds web
+pages, scripts, data, and documents inside a sandboxed Linux VM, and nothing
+reaches your Mac until you approve it.
 
 The core agent toolchain has no JavaScript or TypeScript runtime. Model
 interaction, typed tool calls, routing, context management, workspace access,
@@ -42,22 +60,26 @@ and safety boundaries are implemented with SwiftUI, AppKit, and Apple's
 Foundation Models framework. Optional TypeScript plugins run separately as
 Node.js processes and are not part of the core runtime.
 
-![TurboCode Studio home with recent artifacts, capability cards, and the Prassitele connector](.github/assets/turbocode-studio-home.png)
+![TurboCode Coding session that wrote a Python script, reviewed it, and committed it, with context and cache metrics under the composer](.github/assets/turbocode-coding-session.png)
 
 ## Local-first by design
 
-TurboCode is built to make meaningful use of local models, including on
-entry-level Macs such as a MacBook Air M4 with 16 GB of RAM. A capable local
-MoE model, such as Qwen3.6-35B-A3B, is recommended when the available hardware
-can run it comfortably.
+TurboCode is designed around a local model, not as a fallback for one. The
+recommended setup is `llama-server` serving a MoE model such as
+Qwen3.6-35B-A3B, which gives an excellent experience. Use a server on your Mac
+or on your local network whenever you can; the first-launch setup finds it and
+configures it for you.
 
-Local inference keeps everyday work close to the machine and makes the
-workbench useful without sending every request to a remote provider. When a
-task needs more capability, the session can use a frontier model through one
-of the supported adapters.
+Apple's on-device model is an invisible part of the product. It turns your
+first prompt into the session title, and while the main model is still working
+you can ask how it is going: the on-device model answers with a live summary
+of what is happening, without interrupting the run.
+
+When a task needs more capability, a session can use Codex or DeepSeek through
+the supported adapters.
 
 TurboCode is designed to remain lightweight: normal idle memory usage is kept
-below 100 MB so the app can stay open alongside Xcode, simulators, and other
+below 200 MB so the app can stay open alongside Xcode, simulators, and other
 development tools.
 
 ## Supported model backends
@@ -69,7 +91,7 @@ workflow remain inside TurboCode.
 | Backend | Use | Setup |
 | --- | --- | --- |
 | **Apple on-device** | Local model for short answers and small agentic tasks. | No server or API key required. The available context is approximately 8k tokens. |
-| **Local Llama** | Recommended local backend for longer and more capable agentic work. | Run an OpenAI-compatible server such as `llama-server`. |
+| **Local Llama** | Recommended backend for agentic work. | Start `llama-server`, or another OpenAI-compatible server; the first-launch setup detects it and writes the configuration. |
 | **OpenAI Codex** | Frontier model accessed through the official Codex CLI App Server. | Install Codex on the system and complete the first sign-in through the browser. |
 | **DeepSeek API** | Remote provider for tasks that need a frontier model. | Add the API key in **Settings → Providers**. It is stored in the macOS Keychain. |
 
@@ -79,106 +101,6 @@ future without changing the workspace and tool model.
 
 Apple Private Cloud Compute through `fm serve` remains a legacy compatibility
 path. It is not exposed as a selectable default backend.
-
-## How a TurboCode session works
-
-TurboCode keeps the conversation connected to the real development task:
-
-1. You select a workspace and describe an outcome.
-2. The active model reads the context allowed by the current profile.
-3. Structured tools inspect files, repositories, projects, tests, and
-   diagnostics.
-4. Changes remain revision-aware and reviewable before they are applied.
-5. The resulting transcript, tool activity, and session state can be restored
-   later.
-
-The central workflow is **Coordinator → Worker**. A capable model such as
-Codex or DeepSeek can plan a task and delegate implementation or subtasks to a
-smaller local model. TurboCode tracks the operation, keeps the worker inside
-its configured boundaries, and verifies the result before returning it to the
-conversation.
-
-## Profiles, tools, and Skills
-
-Each profile contains a minimal system prompt and only the tool calls that are
-important for its role. This keeps the model-facing context focused and avoids
-turning every profile into an oversized general-purpose agent.
-
-Profiles can be overridden by the user. Examples include:
-
-- a Git-only profile;
-- a read-only profile;
-- a focused code-review profile;
-- a local coordinator profile with an explicitly selected worker.
-
-Profiles can select models, tools, Skills, delegation behavior, and optional
-plugin capabilities. Built-in profiles provide useful defaults, while user
-overrides remain authoritative. Skills can be stored globally or discovered
-from a workspace's `.agents/skills` directory.
-
-<table>
-  <tr>
-    <td width="50%"><img src=".github/assets/turbocode-custom-profiles.png" alt="TurboCode Custom Profiles editor with tool calls and Skills assigned to a local Llama model"></td>
-    <td width="50%"><img src=".github/assets/turbocode-model-picker.png" alt="TurboCode model picker showing built-in and custom profiles"></td>
-  </tr>
-</table>
-
-## Workspaces, tools, and safety
-
-TurboCode includes native integrations for Swift, SwiftUI, Xcode projects,
-Swift Package Manager packages, and general repository workflows. Its
-structured tools cover:
-
-- workspace and file inspection;
-- compact Swift repository maps;
-- revision-aware file editing;
-- Xcode and Swift Package Manager builds and tests;
-- compiler diagnostics and test results;
-- Git status, branches, commits, remotes, and other repository operations.
-
-The interface keeps consequential work visible. File operations outside the
-active workspace require explicit approval, and destructive file or Git
-operations have their own confirmation boundaries. Generated changes can be
-reviewed against the real working tree before publication.
-
-![TurboCode Workspace Files panel showing the contents of a Swift package](.github/assets/turbocode-workspace-files.png)
-
-### Structured conversation output
-
-The transcript is more than a stream of text. TurboCode renders important
-results as native views so they can be inspected without losing the
-conversation context:
-
-- line-by-line change review;
-- grouped Git status;
-- file and workspace listings;
-- build and test diagnostics;
-- tool activity and plugin widgets.
-
-<table>
-  <tr>
-    <td width="50%"><img src=".github/assets/turbocode-review-changes.png" alt="TurboCode Review Changes sheet showing a line-by-line diff"></td>
-    <td width="50%"><img src=".github/assets/turbocode-changes-sidebar.png" alt="TurboCode Changes sidebar showing the diff beside the conversation"></td>
-  </tr>
-</table>
-
-### Native macOS interface
-
-TurboCode uses SwiftUI and AppKit for its window, sidebar, transcript,
-inspector, settings, and workspace interactions. The interface follows native
-macOS conventions and Apple's Human Interface Guidelines, with progressive
-disclosure so tools and past sessions remain available without taking over the
-main conversation.
-
-![TurboCode conversation showing a branch creation and completed Git commit](.github/assets/turbocode-git-commit.png)
-
-### Tools and diagnostics
-
-The **Tools** view makes the active runtime explicit. It shows backend
-availability, context requirements, model capabilities, installed Skills, and
-on-device latency, token, tool-call, and outcome statistics.
-
-![TurboCode Tools view comparing model profiles and their runtime capabilities](.github/assets/turbocode-tools.png)
 
 ## Studio
 
@@ -213,12 +135,12 @@ opens the session that made it.
 - Models with vision can look at images inside the VM, such as a screenshot of
   a page they just built.
 
-![TurboCode Studio session that built a React snake game, with the running dev server open as a live preview in the Artifacts inspector](.github/assets/turbocode-studio-live-preview.png)
+![TurboCode Studio home with capability cards for web pages, data, documents, and files, and the Prassitele connector](.github/assets/turbocode-studio-home.png)
 
 <table>
   <tr>
-    <td width="50%"><img src=".github/assets/turbocode-studio-artifacts.png" alt="TurboCode Artifacts library showing files from three Studio sessions with thumbnails"></td>
-    <td width="50%"><img src=".github/assets/turbocode-studio-connectors.png" alt="TurboCode Connectors page with Prassitele enabled for the session and Safari limited to Coding"></td>
+    <td width="50%"><img src=".github/assets/turbocode-studio-artifacts.png" alt="TurboCode Artifacts library showing a web page built in a Studio session, with its thumbnail"></td>
+    <td width="50%"><img src=".github/assets/turbocode-studio-connectors.png" alt="TurboCode Connectors page with Prassitele off until enabled for the session and Safari limited to Coding"></td>
   </tr>
 </table>
 
@@ -237,6 +159,92 @@ never receive them.
 
 See [CONFIGURATION.md](CONFIGURATION.md#studio) for Studio settings and files,
 and [Connectors](CONFIGURATION.md#connectors) for the connector catalog.
+
+## How a TurboCode session works
+
+TurboCode keeps the conversation connected to the real development task:
+
+1. You select a workspace and describe an outcome.
+2. The active model reads the context allowed by the current profile.
+3. Structured tools inspect files, repositories, projects, tests, and
+   diagnostics.
+4. Changes remain revision-aware and reviewable before they are applied.
+5. The resulting transcript, tool activity, and session state can be restored
+   later.
+
+A session can also delegate a self-contained subtask to a worker model
+(**Coordinator → Worker**). TurboCode tracks the delegated work, keeps the
+worker inside its configured boundaries, and verifies the result before
+returning it to the conversation. Most sessions do not need it: a single
+capable local model handles the work directly.
+
+## Profiles, tools, and Skills
+
+Each profile contains a minimal system prompt and only the tool calls that are
+important for its role. This keeps the model-facing context focused and avoids
+turning every profile into an oversized general-purpose agent.
+
+Profiles can be overridden by the user. Examples include:
+
+- a Git-only profile;
+- a read-only profile;
+- a focused code-review profile;
+- a local coordinator profile with an explicitly selected worker.
+
+Profiles can select models, tools, Skills, delegation behavior, and optional
+plugin capabilities. Built-in profiles provide useful defaults, while user
+overrides remain authoritative. Skills can be stored globally or discovered
+from a workspace's `.agents/skills` directory.
+
+![TurboCode Profiles editor showing the default capabilities of a local Qwen model, with details for the Run Command tool](.github/assets/turbocode-profiles.png)
+
+## Workspaces, tools, and safety
+
+TurboCode includes native integrations for Swift, SwiftUI, Xcode projects,
+Swift Package Manager packages, and general repository workflows. Its
+structured tools cover:
+
+- workspace and file inspection;
+- compact Swift repository maps;
+- revision-aware file editing;
+- Xcode and Swift Package Manager builds and tests;
+- compiler diagnostics and test results;
+- Git status, branches, commits, remotes, and other repository operations.
+
+The interface keeps consequential work visible. File operations outside the
+active workspace require explicit approval, and destructive file or Git
+operations have their own confirmation boundaries. Generated changes can be
+reviewed against the real working tree before publication.
+
+![TurboCode Coding home for a workspace, with the composer, branch, and context metrics](.github/assets/turbocode-coding-home.png)
+
+### Structured conversation output
+
+The transcript is more than a stream of text. TurboCode renders important
+results as native views so they can be inspected without losing the
+conversation context:
+
+- line-by-line change review;
+- grouped Git status;
+- file and workspace listings;
+- build and test diagnostics;
+- tool activity and plugin widgets.
+
+![TurboCode project report rendered in the conversation with headings, a file table, and a usage example](.github/assets/turbocode-project-report.png)
+
+### Native macOS interface
+
+TurboCode uses SwiftUI and AppKit for its window, sidebar, transcript,
+inspector, settings, and workspace interactions. The interface follows native
+macOS conventions and Apple's Human Interface Guidelines, with progressive
+disclosure so tools and past sessions remain available without taking over the
+main conversation.
+
+### Tools and diagnostics
+
+The **Tools** view makes the active runtime explicit. It shows backend
+availability, context requirements, model capabilities, installed Skills, and
+on-device latency, token, tool-call, and outcome statistics.
 
 ## TypeScript plugins
 
@@ -303,11 +311,6 @@ The following capabilities are available but remain experimental:
 The on-device model can act as the entry point, analyze a request, and
 delegate complex work to a configured worker model. The result returns to the
 on-device coordinator for presentation.
-
-### Automatic conversation titles
-
-TurboCode can generate a concise title for a session from its initial context,
-making the sidebar easier to scan.
 
 ### Safari MCP
 
