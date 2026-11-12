@@ -593,10 +593,21 @@ struct InputFieldView: View {
         // and ordinary composer input follow the same lifecycle.
         composer.reset()
         Task {
-            if await commandRouter.execute(text) == false {
-                await chatStore.sendMessage(text)
+            if await commandRouter.execute(text) == false,
+               await chatStore.sendMessage(text) == false {
+                restoreDraftAfterRefusedSend(text)
             }
         }
+    }
+
+    /// The draft is cleared before the send is admitted, and a send can still
+    /// be refused: a failed tool-routing rebuild, the Studio admission check,
+    /// or another operation taking the runtime first. The text was never
+    /// sent, so it goes back unless the user has started typing something
+    /// else. Images are not restored; they were already handed to the send.
+    private func restoreDraftAfterRefusedSend(_ text: String) {
+        guard composer.messageText.isEmpty else { return }
+        composer.messageText = text
     }
 
     /// Rechecks vision before clearing anything: the model may have changed since
@@ -616,8 +627,9 @@ struct InputFieldView: View {
             // Text typed during the probe is not what the user chose to send.
             guard composer.editGeneration == generation else { return }
             composer.reset()
-            if await commandRouter.execute(text) == false {
-                await chatStore.sendMessage(text, images: composer.takeImages())
+            if await commandRouter.execute(text) == false,
+               await chatStore.sendMessage(text, images: composer.takeImages()) == false {
+                restoreDraftAfterRefusedSend(text)
             }
         }
     }

@@ -48,6 +48,21 @@ struct CurrentDatePromptStampTests {
         #expect(other.contains("Thursday, 12 November 2026"))
     }
 
+    @Test("A withdrawn stamp is stated again by the next message")
+    func withdrawnStampIsStatedAgain() {
+        var stamp = CurrentDatePromptStamp()
+        let morning = date(11, hour: 9)
+        _ = stamp.stamped("refused", conversationID: "a", now: morning, calendar: calendar)
+        _ = stamp.stamped("kept", conversationID: "b", now: morning, calendar: calendar)
+
+        stamp.withdraw(conversationID: "a")
+
+        let retry = stamp.stamped("retry", conversationID: "a", now: morning, calendar: calendar)
+        let other = stamp.stamped("next", conversationID: "b", now: morning, calendar: calendar)
+        #expect(retry.contains("Wednesday, 11 November 2026"))
+        #expect(other == "next")
+    }
+
     @Test("A turn without a conversation is left untouched")
     func missingConversationIsNotStamped() {
         var stamp = CurrentDatePromptStamp()

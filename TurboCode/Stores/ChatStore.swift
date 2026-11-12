@@ -789,22 +789,26 @@ public final class ChatStore {
         await workspaceLifecycleCoordinator.clearWorkspace()
     }
 
-    public func sendMessage(_ text: String) async {
+    /// Returns whether the turn was admitted. False means nothing was sent,
+    /// so a caller that already cleared its draft can put the text back.
+    @discardableResult
+    public func sendMessage(_ text: String) async -> Bool {
         presentationViewModel.clearCompactionNotice()
         guard let promptText = await messageSendCoordinator.preparePrompt(
             for: text
-        ) else { return }
-        await sendMessage(text, promptText: promptText, visibleInTimeline: true)
+        ) else { return false }
+        return await sendMessage(text, promptText: promptText, visibleInTimeline: true)
     }
 
     /// Sends a composer turn carrying images. Callers check
     /// `activeModelSupportsImages()` first, so the draft survives a refusal.
-    func sendMessage(_ text: String, images: [ComposerImageAttachment]) async {
+    @discardableResult
+    func sendMessage(_ text: String, images: [ComposerImageAttachment]) async -> Bool {
         presentationViewModel.clearCompactionNotice()
         guard let promptText = await messageSendCoordinator.preparePrompt(
             for: text
-        ) else { return }
-        await sendMessage(
+        ) else { return false }
+        return await sendMessage(
             text,
             promptText: promptText,
             imageAttachments: images,
@@ -1182,13 +1186,14 @@ public final class ChatStore {
         )
     }
 
+    @discardableResult
     private func sendMessage(
         _ text: String,
         promptText: String? = nil,
         imageAttachments: [ComposerImageAttachment] = [],
         visibleInTimeline: Bool
-    ) async {
-        _ = await messageSendCoordinator.send(
+    ) async -> Bool {
+        await messageSendCoordinator.send(
             displayText: text,
             promptText: promptText ?? text,
             imageAttachments: imageAttachments,

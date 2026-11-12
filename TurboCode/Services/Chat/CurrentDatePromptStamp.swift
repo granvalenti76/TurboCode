@@ -16,7 +16,8 @@ nonisolated struct CurrentDatePromptStamp: Sendable {
 
     /// Returns `prompt` with the date note appended when `conversationID`
     /// has not received today's date yet, otherwise `prompt` unchanged.
-    /// Call it only for a turn that is actually sent, since it records the day.
+    /// It records the day, so a caller whose turn is then refused must call
+    /// `withdraw(conversationID:)`.
     mutating func stamped(
         _ prompt: String,
         conversationID: String?,
@@ -29,6 +30,13 @@ nonisolated struct CurrentDatePromptStamp: Sendable {
         guard statedDays[conversationID] != day else { return prompt }
         statedDays[conversationID] = day
         return prompt + "\n\n" + Self.note(for: now, calendar: calendar)
+    }
+
+    /// Forgets that `conversationID` was told the date, so its next message
+    /// states it again. For a turn that was stamped and then never sent.
+    mutating func withdraw(conversationID: String?) {
+        guard let conversationID else { return }
+        statedDays[conversationID] = nil
     }
 
     /// No time of day: it would differ on every message while adding nothing
