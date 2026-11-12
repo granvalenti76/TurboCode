@@ -233,7 +233,7 @@ session (`connectors` in the session file) and is empty by default.
 
 | Connector | App endpoint | Available in |
 | --- | --- | --- |
-| Prassitele | `http://127.0.0.1:48765/mcp` (Agent › Agent Server (MCP) in the app) | Coding, Studio |
+| Prassitele (sculpting tool, not yet available on GitHub) | `http://127.0.0.1:48765/mcp` (Agent › Agent Server (MCP) in the app) | Coding, Studio |
 | Safari | `safaridriver --mcp`, the Safari MCP switch in **Settings › Agents** | Coding |
 
 Safari keeps its single switch for all Coding sessions; the Connectors page
