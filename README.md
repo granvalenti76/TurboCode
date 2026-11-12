@@ -427,4 +427,9 @@ overview and the latest project notes, visit
 
 ## License
 
-TurboCode is available under the [MIT License](LICENSE).
+Copyright (C) 2026 Luca Travaglini.
+
+TurboCode is free software, available under the
+[GNU General Public License v3.0](LICENSE) (GPL-3.0-only). Third-party
+components keep their own licenses; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
