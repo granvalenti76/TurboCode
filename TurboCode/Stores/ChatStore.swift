@@ -200,7 +200,10 @@ public final class ChatStore {
     /// Ensures the current `~/.turbocode/` layout exists and applies additive migrations.
     public func ensureOnboarding() async {
         do {
-            try TurboCodeConfig.shared.performOnboarding()
+            // Read before onboarding: a missing catalog is the signal for the
+            // first-launch sheet, and only the sheet's confirmation writes it.
+            let needsModelSetup = TurboCodeConfig.shared.needsModelSetup
+            try TurboCodeConfig.shared.performOnboarding(deferModelCatalog: needsModelSetup)
             if let sdkSource = TypeScriptPluginProjectService.liveSDKSourceURL() {
                 _ = try TypeScriptPluginProjectService.live().bootstrapSDK(
                     from: sdkSource

@@ -72,7 +72,21 @@ public final class TurboCodeConfig {
             && FileManager.default.fileExists(atPath: userDocumentationDirectoryURL.path)
     }
 
-    public func performOnboarding() throws {
+    /// True until a model catalog exists. The first-launch sheet uses this to
+    /// decide whether to ask for a local model; it must be read before
+    /// `performOnboarding` because a non-deferred run writes the catalog.
+    public var needsModelSetup: Bool {
+        !FileManager.default.fileExists(atPath: modelsURL.path)
+    }
+
+    /// Creates the `~/.turbocode/` layout and applies additive migrations.
+    ///
+    /// - Parameter deferModelCatalog: When true, `models.json` is not written.
+    ///   First launch passes it so the catalog is created only by the
+    ///   onboarding sheet's confirmation; quitting midway leaves the catalog
+    ///   absent and the sheet appears again on the next launch. Until then the
+    ///   runtime falls back to `RemoteModelConfig.defaults` in memory.
+    public func performOnboarding(deferModelCatalog: Bool = false) throws {
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: skillsDirectoryURL, withIntermediateDirectories: true)
@@ -100,7 +114,9 @@ public final class TurboCodeConfig {
             at: userDocumentationDirectoryURL,
             withIntermediateDirectories: true
         )
-        try migrateRemoteModels()
+        if !deferModelCatalog {
+            try migrateRemoteModels()
+        }
         try migrateAgentTuning()
         try DynamicProfileStore(fileURL: dynamicProfilesURL).migrate()
         if !FileManager.default.fileExists(atPath: dynamicProfilesURL.path) {
@@ -567,6 +583,25 @@ public final class TurboCodeConfig {
             return model
         }
         try encoder.encode(validated).write(to: modelsURL, options: .atomic)
+    }
+
+    /// Writes the first model catalog from the onboarding sheet: the built-in
+    /// defaults with the `llama` entry replaced by the server the user chose.
+    /// An existing catalog is never overwritten, so a second window or a file
+    /// created externally while the sheet was open keeps its endpoints.
+    @discardableResult
+    public func completeModelSetup(localModel: RemoteModelConfig) throws -> [RemoteModelConfig] {
+        if !needsModelSetup {
+            return try loadRemoteModels()
+        }
+        var models = RemoteModelConfig.defaults
+        if let index = models.firstIndex(where: { $0.id == localModel.id }) {
+            models[index] = localModel
+        } else {
+            models.insert(localModel, at: 0)
+        }
+        try saveRemoteModels(models)
+        return models
     }
 
     /// Reload immediately before writing so a display-name edit cannot replace
