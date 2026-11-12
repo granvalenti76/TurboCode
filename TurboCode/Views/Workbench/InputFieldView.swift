@@ -14,6 +14,10 @@ struct InputFieldView: View {
     @State private var showsDynamicRouting = false
     @State private var coworkDeliverableCount = 0
     @State private var isSubmittingImages = false
+    /// True while a steering submission waits for the progress-question
+    /// classifier. The draft stays visible during that wait, so without this
+    /// a second Return would queue the same instruction twice.
+    @State private var isSubmittingSteering = false
 
     let compact: Bool
 
@@ -636,9 +640,11 @@ struct InputFieldView: View {
 
     private func enqueueComposerSteering() {
         let text = composer.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty, !isSubmittingSteering else { return }
+        isSubmittingSteering = true
         let generation = composer.editGeneration
         Task {
+            defer { isSubmittingSteering = false }
             guard await chatStore.submitDuringTurn(text),
                   composer.editGeneration == generation else { return }
             composer.reset()
