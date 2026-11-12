@@ -69,11 +69,24 @@ nonisolated enum AgentTaskRoutingError: LocalizedError, Sendable {
         }
     }
 
-    func result(for envelope: AgentTaskEnvelope) -> AgentTaskResult {
-        (try? AgentTaskResult(
+    /// Converts a refused destination into a result the coordinator can read.
+    ///
+    /// Pass the catalog when the model chose the destination itself: worker
+    /// IDs are long opaque strings that local models miscopy, and naming the
+    /// valid ones lets the coordinator correct the call in the same turn.
+    func result(
+        for envelope: AgentTaskEnvelope,
+        catalog: [AgentTaskWorkerDescriptor] = []
+    ) -> AgentTaskResult {
+        var detail = errorDescription ?? "Worker routing failed."
+        if case .unknownWorker = self, !catalog.isEmpty {
+            detail += " Valid worker_id values: "
+                + catalog.map(\.id).joined(separator: ", ") + "."
+        }
+        return (try? AgentTaskResult(
             taskID: envelope.taskID, attemptID: envelope.attemptID,
-            outcome: .failed, technicalSummary: errorDescription ?? "Worker routing failed.",
-            failureReason: .workerFailed, failureDetail: errorDescription,
+            outcome: .failed, technicalSummary: detail,
+            failureReason: .workerFailed, failureDetail: detail,
             workerID: envelope.workerID
         )) ?? .invalidContractResult(taskID: envelope.taskID, attemptID: envelope.attemptID)
     }
@@ -540,7 +553,17 @@ struct DelegateTaskTool: Tool {
 
     func call(arguments: DelegateTaskArguments) async throws -> String {
         let envelope = try arguments.envelope()
-        try invoker.validateDestination(envelope.workerID)
+        // A refused destination is returned, not thrown. A throw leaves the
+        // tool as a FoundationModels ToolCallError, which ends the whole turn
+        // before the coordinator can read the reason and choose a valid ID.
+        // Nothing is substituted: the task simply does not start.
+        do {
+            try invoker.validateDestination(envelope.workerID)
+        } catch let error as AgentTaskRoutingError {
+            return try Self.encode(
+                error.result(for: envelope, catalog: invoker.workerCatalog)
+            )
+        }
         let parentTurnID = await currentTurnID()
         if let backgroundSubmission {
             let receipt = try await backgroundSubmission(

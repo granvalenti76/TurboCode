@@ -253,7 +253,7 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
         } catch {
             outcome = .failed
             recordedError = error
-            disposition = .failed(error.localizedDescription)
+            disposition = .failed(ToolFailureMessage.describe(error))
         }
 
         // A cancelled or failed stream may not yield a final Foundation Models
@@ -364,6 +364,27 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
         await events.liveToolCallsChanged(.finished)
         await events.diagnosticsChanged(nil)
         return result
+    }
+}
+
+/// Builds the text shown or reported when a model turn ends with an error.
+///
+/// FoundationModels wraps an error thrown by a tool in `ToolCallError`, whose
+/// own description interpolates the complete tool value. For a tool that holds
+/// its session context, such as `DelegateTaskTool`, that prints the system
+/// prompt, every skill body, and the provider configuration into the chat and
+/// into worker results. Only the tool name and the underlying reason are
+/// useful to the user or to a coordinating model.
+///
+/// It lives in this file, not its own, because the ACP helper target lists its
+/// sources by hand and already compiles this file together with the task runner.
+nonisolated enum ToolFailureMessage {
+    static func describe(_ error: any Error) -> String {
+        guard let toolError = error as? LanguageModelSession.ToolCallError else {
+            return error.localizedDescription
+        }
+        return "The \(toolError.tool.name) tool failed: "
+            + toolError.underlyingError.localizedDescription
     }
 }
 

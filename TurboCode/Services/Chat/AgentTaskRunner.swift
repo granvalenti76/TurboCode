@@ -310,7 +310,9 @@ nonisolated struct BoundedAgentTaskRunner: AgentTaskRunning {
             return failureResult(
                 envelope: envelope,
                 reason: .workerFailed,
-                detail: error.localizedDescription
+                // A worker's failed tool must not copy the tool value into
+                // the result the coordinator keeps in its context.
+                detail: ToolFailureMessage.describe(error)
             )
         }
     }
