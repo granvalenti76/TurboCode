@@ -165,6 +165,7 @@
 		B000000000000000000000f2 /* TurboCode/Models/MCP/MCPConnector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f2 /* TurboCode/Models/MCP/MCPConnector.swift */; };
 		B000000000000000000000f3 /* TurboCode/Services/MCP/MCPLoopbackHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f3 /* TurboCode/Services/MCP/MCPLoopbackHTTPClient.swift */; };
 		B000000000000000000000f4 /* TurboCode/Tools/ConnectorTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f4 /* TurboCode/Tools/ConnectorTool.swift */; };
+		B000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift */; };
 		C10000000000000000000000 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 /* End PBXBuildFile section */
 
@@ -350,6 +351,7 @@
 		A000000000000000000000f2 /* TurboCode/Models/MCP/MCPConnector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Models/MCP/MCPConnector.swift; sourceTree = "<group>"; };
 		A000000000000000000000f3 /* TurboCode/Services/MCP/MCPLoopbackHTTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/MCP/MCPLoopbackHTTPClient.swift; sourceTree = "<group>"; };
 		A000000000000000000000f4 /* TurboCode/Tools/ConnectorTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/ConnectorTool.swift; sourceTree = "<group>"; };
+		A000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/SteeringBoundaryModifier.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -542,6 +544,7 @@
 				A00000000000000000000087 /* TurboCode/Tools/RipgrepTool.swift */,
 				A00000000000000000000088 /* TurboCode/Tools/SafariMCPTool.swift */,
 				A00000000000000000000089 /* TurboCode/Tools/StandaloneProfile.swift */,
+				A000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift */,
 				A0000000000000000000008a /* TurboCode/Tools/SwiftPackageManagerTool.swift */,
 				A0000000000000000000008b /* TurboCode/Tools/Xcode/XcodeMCPTool.swift */,
 				A0000000000000000000008c /* TurboCode/Tools/Xcode/XcodeProjectTool.swift */,
@@ -852,6 +855,7 @@
 				B00000000000000000000087 /* TurboCode/Tools/RipgrepTool.swift in Sources */,
 				B00000000000000000000088 /* TurboCode/Tools/SafariMCPTool.swift in Sources */,
 				B00000000000000000000089 /* TurboCode/Tools/StandaloneProfile.swift in Sources */,
+				B000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift in Sources */,
 				B0000000000000000000008a /* TurboCode/Tools/SwiftPackageManagerTool.swift in Sources */,
 				B0000000000000000000008b /* TurboCode/Tools/Xcode/XcodeMCPTool.swift in Sources */,
 				B0000000000000000000008c /* TurboCode/Tools/Xcode/XcodeProjectTool.swift in Sources */,
@@ -1031,6 +1035,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = TurboCode/TurboCode.entitlements;
@@ -1061,7 +1066,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.64;
+				MARKETING_VERSION = 0.65;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1088,6 +1093,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = TurboCode/TurboCode.entitlements;
@@ -1118,7 +1124,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 0.64;
+				MARKETING_VERSION = 0.65;
 				PRODUCT_BUNDLE_IDENTIFIER = "devplaceholder.$(PROJECT_UNIQUE_VALUE:identifier).$(PRODUCT_NAME:identifier)";
 				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = art.granvalenti.turbocode;
 				PRODUCT_NAME = "$(TARGET_NAME)";

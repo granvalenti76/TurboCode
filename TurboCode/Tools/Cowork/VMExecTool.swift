@@ -27,10 +27,9 @@ struct VMExecTool: Tool {
     var name: String { ToolCapabilityID.vmExec.rawValue }
     var description: String {
         """
-        Run a bash command in the isolated Cowork Linux VM (Debian 12, Node 24, \
-        Python 3.11, Chromium, rg, fd, jq, git). Commands start in this session's \
-        directory. /work is the user's shared folder (read-only); put deliverables \
-        in /out. Use for builds, scripts, package installs, and headless rendering.
+        Run a bash command in the isolated Studio Linux VM. Commands start in \
+        this session's directory. Use for builds, scripts, package installs, and \
+        headless rendering.
         """
     }
     var includesSchemaInInstructions: Bool { true }

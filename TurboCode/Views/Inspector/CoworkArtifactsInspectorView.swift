@@ -207,6 +207,7 @@ struct CoworkArtifactsInspectorView: View {
                             CoworkArtifactThumbnailView(
                                 artifact: artifact,
                                 fileURL: CoworkArtifactCatalog.fileURL(for: artifact, in: listing.outbox),
+                                outbox: listing.outbox,
                                 revision: revision,
                                 symbolSize: 17,
                                 cornerRadius: 6
@@ -258,9 +259,10 @@ struct CoworkArtifactsInspectorView: View {
     }
 }
 
-/// One item of the inspector strip: a small thumbnail with its name, ringed
-/// when it is the one shown above.
-private struct CoworkArtifactStripItem<Thumbnail: View>: View {
+/// One item of a file strip: a small thumbnail with its name, ringed when it
+/// is the one shown above. Shared with the library's detail view so moving
+/// between a session's files looks the same in both places.
+struct CoworkArtifactStripItem<Thumbnail: View>: View {
     let label: String
     let isSelected: Bool
     let help: String
@@ -493,24 +495,16 @@ private struct CoworkLiveWebView: NSViewRepresentable {
     }
 }
 
-/// Renders an HTML artifact from the outbox.
-///
-/// The page was written by a model, so it gets a plain web view: no script
-/// bridge into the app, no persistent website data, and file access limited
-/// to the session's outbox so sibling scripts, styles, and images still load.
-/// Network access is left on, because generated pages commonly load libraries
-/// and fonts from a CDN and the page can reach nothing on the Mac but this
-/// folder.
+/// Renders an HTML artifact from the outbox. The web view's configuration and
+/// its file access are defined once in `CoworkArtifactWebPage`, shared with the
+/// thumbnail renderer.
 private struct CoworkArtifactWebView: NSViewRepresentable {
     let fileURL: URL
     let outbox: URL
     let revision: Int
 
     func makeNSView(context: Context) -> WKWebView {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let webView = WKWebView(frame: .zero, configuration: CoworkArtifactWebPage.configuration())
         load(in: webView, coordinator: context.coordinator)
         return webView
     }
@@ -525,7 +519,7 @@ private struct CoworkArtifactWebView: NSViewRepresentable {
     private func load(in webView: WKWebView, coordinator: Coordinator) {
         coordinator.loadedURL = fileURL
         coordinator.revision = revision
-        webView.loadFileURL(fileURL, allowingReadAccessTo: outbox)
+        CoworkArtifactWebPage.load(fileURL, outbox: outbox, in: webView)
     }
 
     final class Coordinator {

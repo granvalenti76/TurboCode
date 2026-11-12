@@ -121,7 +121,7 @@ struct CoworkSessionToolsTests {
 
     // MARK: Prompt
 
-    @Test("Only Cowork prompts describe the VM, and they omit the host workspace")
+    @Test("Only Studio prompts describe the VM and use the Studio principles, and they omit the host workspace")
     func coworkPromptSection() {
         func prompt(_ cowork: CoworkPromptFacts?, workspace: String) -> String {
             TurboCodeSystemPromptBuilder.build(TurboCodeSystemPromptContext(
@@ -137,7 +137,17 @@ struct CoworkSessionToolsTests {
             ))
         }
         let cowork = prompt(.init(sessionDirectory: "/home/cowork/sessions/abc", sharesInputFolder: false), workspace: "")
-        #expect(cowork.contains("Cowork VM:"))
+        #expect(cowork.contains("Studio VM:"))
+        // The model repeats the prompt's words, so it must say the name the
+        // user sees and none of the coding-only rules.
+        #expect(!cowork.contains("Cowork"))
+        #expect(!cowork.contains("active workspace"))
+        #expect(!cowork.contains("revision checks"))
+        #expect(!cowork.contains("After changing source code"))
+        #expect(!cowork.contains("Rules for getting work done"))
+        #expect(cowork.contains("A question gets an answer in the chat"))
+        #expect(cowork.contains("look at it yourself"))
+        #expect(cowork.contains("Use emoji sparingly"))
         #expect(cowork.contains("/home/cowork/sessions/abc"))
         #expect(cowork.contains("No user folder is shared"))
         #expect(!cowork.contains("Workspace:\n"))
@@ -146,7 +156,12 @@ struct CoworkSessionToolsTests {
         let shared = prompt(.init(sessionDirectory: "/home/cowork/sessions/abc", sharesInputFolder: true), workspace: "")
         #expect(shared.contains("/work: the user's shared folder, read-only"))
 
-        #expect(!prompt(nil, workspace: "/tmp/project").contains("Cowork VM:"))
+        // Coding sessions keep their own wording and gain nothing from Studio.
+        let coding = prompt(nil, workspace: "/tmp/project")
+        #expect(!coding.contains("Studio VM:"))
+        #expect(coding.contains("Work from evidence in the active workspace"))
+        #expect(coding.contains("After changing source code"))
+        #expect(!coding.contains("emoji"))
     }
 
     // MARK: Tools against a fake runtime

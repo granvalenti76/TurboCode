@@ -42,8 +42,13 @@ struct ThreadRowView: View {
                     } else {
                         Text(thread.title)
                             .font(isSelected ? AppTypography.sidebarTitle.weight(.medium) : AppTypography.sidebarTitle)
-                            .lineLimit(1)
+                            // Generated titles are often longer than one
+                            // sidebar line; two lines keep them readable and
+                            // the tooltip covers the rest.
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
                             .foregroundStyle(.primary)
+                            .help(thread.title)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

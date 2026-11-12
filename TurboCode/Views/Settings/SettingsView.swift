@@ -364,6 +364,11 @@ struct GeneralSettingsView: View {
                     Text("Dark").tag(ThemePreference.dark)
                 }
 
+                Picker("Sidebar", selection: s.sidebarBackdrop) {
+                    Text("Translucent").tag(SidebarBackdropPreference.translucent)
+                    Text("Solid").tag(SidebarBackdropPreference.solid)
+                }
+
                 HStack {
                     Text("Chat text size")
                     Slider(value: s.fontSize, in: 13...20, step: 1)

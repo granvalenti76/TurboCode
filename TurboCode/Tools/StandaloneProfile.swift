@@ -26,6 +26,9 @@ nonisolated struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     let safariSkillActivations: SkillActivations?
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
+    /// Supplies steering to inject between tool rounds. Nil for sessions
+    /// that are not the user's conversation, such as benchmarks.
+    var steeringAtToolBoundary: (@Sendable () async -> String?)? = nil
 
     var body: some LanguageModelSession.DynamicProfile {
         if dropsCompletedToolCalls {
@@ -127,5 +130,6 @@ nonisolated struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                 await action(call, output)
             }
         }
+        .modifier(SteeringBoundaryModifier(claim: steeringAtToolBoundary))
     }
 }

@@ -78,6 +78,8 @@ struct StudioHomeView: View {
                 }
                 Button("All connectors") { chatStore.setRoute(.connectors) }
                     .buttonStyle(.link)
+                    // The link style defaults to system blue; keep links on the app accent.
+                    .tint(.accentColor)
                     .font(AppTypography.metadata)
                 Spacer(minLength: 0)
             }
@@ -93,6 +95,8 @@ struct StudioHomeView: View {
                 Spacer()
                 Button("All artifacts") { chatStore.setRoute(.artifacts) }
                     .buttonStyle(.link)
+                    // The link style defaults to system blue; keep links on the app accent.
+                    .tint(.accentColor)
                     .font(AppTypography.metadata)
             }
             HStack(spacing: 10) {
@@ -162,6 +166,7 @@ private struct StudioRecentArtifactRow: View {
                 CoworkArtifactThumbnailView(
                     artifact: recent.artifact,
                     fileURL: CoworkArtifactCatalog.fileURL(for: recent.artifact, in: recent.outbox),
+                    outbox: recent.outbox,
                     revision: revision,
                     symbolSize: 16,
                     cornerRadius: 6
@@ -200,16 +205,16 @@ private extension View {
     /// library's cards, so the two artifact surfaces read as one.
     func studioHomeTile(isHovered: Bool) -> some View {
         background {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+            RoundedRectangle(cornerRadius: AppSurface.cardCornerRadius, style: .continuous)
+                .fill(AppSurface.card)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: AppSurface.cardCornerRadius, style: .continuous)
                 .strokeBorder(
                     isHovered ? AnyShapeStyle(Color.accentColor.opacity(0.7)) : AnyShapeStyle(.separator),
                     lineWidth: isHovered ? 1.5 : 1
                 )
         }
-        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: AppSurface.cardCornerRadius, style: .continuous))
     }
 }

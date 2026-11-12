@@ -48,6 +48,22 @@ Prassitele adds `prassitele-sculpting`, its method for blocking out a head or a
 bust. The skill is only made available; the model loads it when a request
 calls for it.
 
+## Built-in skills
+
+Every Studio session offers `studio-web-design`, the house style for web pages,
+HTML reports and dashboards: a ready CSS base, layout rules, patterns for
+tables, key figures and charts, and a screenshot check at desktop and phone
+width. The agent is told to load it before writing HTML.
+
+`studio-documents` covers anything delivered as a PDF, such as a report, a
+letter, a quote or a CV: a print layout, page-break rules, and a check of the
+rendered pages. `studio-presentations` covers slide decks: the story is
+outlined first as slide titles, then built as one HTML file that plays with
+the arrow keys and prints to a PDF with one slide per page. Both tell the
+agent to mark missing facts instead of inventing them.
+
+A skill of your own with the same name replaces the built-in one.
+
 ## What the agent can do
 
 The VM is a Debian 12 system with Node.js 24, Python 3.11, headless Chromium,
@@ -64,16 +80,20 @@ by all Studio sessions and keeps installed packages until you reset it.
 
 ## Share a folder
 
-Use the folder menu in the toolbar to share one Mac folder with the session.
+Use **Share a folder** under the message field to share one Mac folder with
+the session; once shared, the same menu shows the folder name.
 The VM sees it at `/work` and can read it but never change it. Sharing your
 whole disk or home folder is refused. Without a shared folder the VM sees
 nothing of your Mac.
 
 ## Look at the work
 
-**Artifacts** in the sidebar opens a grid of the files your Studio sessions
-placed in `/out`, grouped by session. Choose a card to preview it at full size;
-**Open Session** returns to the chat that made it. The Artifacts button in the
+**Artifacts** in the sidebar opens a grid with one card for each Studio session
+that placed files in `/out`. The card shows the session's main file, usually
+its web page, and says how many files came with it. Choose a card to preview
+that file at full size; the strip under the preview reaches the session's other
+files, and **Show in Session** returns to the chat that made them. The card's
+context menu has **Open Session** as well. The Artifacts button in the
 toolbar shows the active session's files in the inspector beside the chat, and
 follows new files as the agent creates them.
 

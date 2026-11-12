@@ -96,6 +96,27 @@ public final class ChatStore {
     var conversationStore: ConversationStore { assembly.conversationStore }
     var toolInteractionStore: ToolInteractionStore { assembly.toolInteractionStore }
     var agentActivityStore: AgentActivityStore { assembly.agentActivityStore }
+    var liveToolCallStore: LiveToolCallStore { assembly.liveToolCallStore }
+
+    /// Side answers to progress questions asked during a turn. Built here
+    /// because its input is the facade's own live projection of the turn.
+    @ObservationIgnored
+    private(set) lazy var turnStatusStore = TurnStatusStore(
+        assistant: FoundationModelsTurnStatusAssistant(),
+        context: { [weak self] in self?.turnStatusContext() }
+    )
+
+    /// Nil when a side answer makes no sense: nothing is running, or the
+    /// on-device model is the one working and cannot also be the observer.
+    private func turnStatusContext() -> TurnStatusContext? {
+        guard busy, activeBackend != .foundationApple else { return nil }
+        return TurnStatusContext(
+            lastUserMessage: blocks.last { $0.kind == .user }?.text ?? "",
+            reasoning: liveReasoning,
+            assistantText: liveAssistant,
+            toolCalls: liveToolCallStore.calls
+        )
+    }
     var agentRuntimeProjectionStore: AgentRuntimeProjectionStore {
         assembly.agentRuntimeProjectionStore
     }
@@ -176,10 +197,33 @@ public final class ChatStore {
     }()
     // MARK: - Onboarding
 
+    /// Present while `models.json` is missing; the workbench shows it as the
+    /// first-launch sheet and clears it when the user finishes or postpones.
+    var firstLaunchOnboarding: FirstLaunchOnboardingStore?
+
     /// Ensures the current `~/.turbocode/` layout exists and applies additive migrations.
     public func ensureOnboarding() async {
         do {
-            try TurboCodeConfig.shared.performOnboarding()
+            // Read before onboarding: a missing catalog is the signal for the
+            // first-launch sheet, and only the sheet's confirmation writes it.
+            let needsModelSetup = TurboCodeConfig.shared.needsModelSetup
+            try TurboCodeConfig.shared.performOnboarding(deferModelCatalog: needsModelSetup)
+            if needsModelSetup, firstLaunchOnboarding == nil {
+                let onboarding = FirstLaunchOnboardingStore(
+                    onComplete: { [weak self] _ in
+                        self?.firstLaunchOnboarding = nil
+                        // Rebind the composer to the chosen endpoint instead
+                        // of the in-memory default used until now.
+                        await self?.reloadRemoteModels()
+                    },
+                    onDismiss: { [weak self] in
+                        self?.firstLaunchOnboarding = nil
+                    }
+                )
+                firstLaunchOnboarding = onboarding
+                // Scan while the welcome page is read.
+                onboarding.scan()
+            }
             if let sdkSource = TypeScriptPluginProjectService.liveSDKSourceURL() {
                 _ = try TypeScriptPluginProjectService.live().bootstrapSDK(
                     from: sdkSource
@@ -768,22 +812,26 @@ public final class ChatStore {
         await workspaceLifecycleCoordinator.clearWorkspace()
     }
 
-    public func sendMessage(_ text: String) async {
+    /// Returns whether the turn was admitted. False means nothing was sent,
+    /// so a caller that already cleared its draft can put the text back.
+    @discardableResult
+    public func sendMessage(_ text: String) async -> Bool {
         presentationViewModel.clearCompactionNotice()
         guard let promptText = await messageSendCoordinator.preparePrompt(
             for: text
-        ) else { return }
-        await sendMessage(text, promptText: promptText, visibleInTimeline: true)
+        ) else { return false }
+        return await sendMessage(text, promptText: promptText, visibleInTimeline: true)
     }
 
     /// Sends a composer turn carrying images. Callers check
     /// `activeModelSupportsImages()` first, so the draft survives a refusal.
-    func sendMessage(_ text: String, images: [ComposerImageAttachment]) async {
+    @discardableResult
+    func sendMessage(_ text: String, images: [ComposerImageAttachment]) async -> Bool {
         presentationViewModel.clearCompactionNotice()
         guard let promptText = await messageSendCoordinator.preparePrompt(
             for: text
-        ) else { return }
-        await sendMessage(
+        ) else { return false }
+        return await sendMessage(
             text,
             promptText: promptText,
             imageAttachments: images,
@@ -819,6 +867,27 @@ public final class ChatStore {
             }
         }
         return result
+    }
+
+    /// Entry point for text sent from the composer while a turn runs.
+    /// A pure progress question is answered on the side by the on-device
+    /// model; everything else is queued as steering. Returns true when the
+    /// text was taken either way and the composer may be cleared.
+    func submitDuringTurn(_ text: String) async -> Bool {
+        if await turnStatusStore.intercept(text) { return true }
+        if case .accepted = await enqueueSteering(text) { return true }
+        return false
+    }
+
+    /// Delivers a question that was answered on the side to the working
+    /// model after all, or as a normal message if the turn has ended.
+    func sendTurnStatusQuestionToModel() async {
+        guard let question = turnStatusStore.takeQuestion() else { return }
+        if busy {
+            _ = await enqueueSteering(question)
+        } else {
+            await sendMessage(question)
+        }
     }
 
     func showSteeringUnavailableMessage() {
@@ -1140,13 +1209,14 @@ public final class ChatStore {
         )
     }
 
+    @discardableResult
     private func sendMessage(
         _ text: String,
         promptText: String? = nil,
         imageAttachments: [ComposerImageAttachment] = [],
         visibleInTimeline: Bool
-    ) async {
-        _ = await messageSendCoordinator.send(
+    ) async -> Bool {
+        await messageSendCoordinator.send(
             displayText: text,
             promptText: promptText ?? text,
             imageAttachments: imageAttachments,

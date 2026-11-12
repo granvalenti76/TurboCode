@@ -10,6 +10,7 @@ final class ChatApplicationAssembly {
     let workspaceStore: WorkspaceStore
     let conversationStore: ConversationStore
     let toolInteractionStore: ToolInteractionStore
+    let liveToolCallStore: LiveToolCallStore
     let agentActivityStore: AgentActivityStore
     let agentRuntimeProjectionStore: AgentRuntimeProjectionStore
     let composerViewModel: ComposerViewModel
@@ -60,9 +61,13 @@ final class ChatApplicationAssembly {
             await timeline.applyRuntimeSnapshot(snapshot)
         }
         timeline.applyRuntimeSnapshot(runtimeProjection.snapshot)
+        let liveToolCalls = LiveToolCallStore()
         let llmSessionFactory = LiveLLMBackendSessionFactory(
             nativeRunner: nativeRunner,
-            codexRuntime: codexRuntime
+            codexRuntime: codexRuntime,
+            toolCallStreamChanged: { [weak liveToolCalls] event in
+                liveToolCalls?.handle(event)
+            }
         )
         let llmRuntime = LLMRuntime(
             sessionFactory: llmSessionFactory,
@@ -146,6 +151,9 @@ final class ChatApplicationAssembly {
                 await sessionCoordinator.persistActiveSession(id: threadID)
             }
         )
+        responseCoordinator.steeringAtToolBoundary = { [weak steeringCoordinator] in
+            await steeringCoordinator?.claimAtToolBoundary()
+        }
         let profileSelectionCoordinator = ProfileSelectionCoordinator(
             modelRuntime: modelRuntime,
             codexRuntime: codexRuntime,
@@ -191,6 +199,14 @@ final class ChatApplicationAssembly {
                 await sessionCoordinator.persistActiveSession(id: threadID)
             }
         )
+        // Weak back edge: the barrier checkpoints through the session
+        // coordinator, which in turn must refuse saves during a change.
+        sessionCoordinator.observeContextChanges { [weak transitionBarrier] in
+            ConversationSessionCoordinator.ContextChangeState(
+                isChanging: transitionBarrier?.isChangingContext ?? false,
+                generation: transitionBarrier?.contextGeneration ?? 0
+            )
+        }
         let conversationLifecycleCoordinator = ConversationLifecycleCoordinator(
             conversations: conversations,
             timeline: timeline,
@@ -264,6 +280,7 @@ final class ChatApplicationAssembly {
         self.workspaceStore = workspace
         self.conversationStore = conversations
         self.toolInteractionStore = toolInteractions
+        self.liveToolCallStore = liveToolCalls
         self.agentActivityStore = agentActivity
         self.agentRuntimeProjectionStore = runtimeProjection
         self.composerViewModel = composer

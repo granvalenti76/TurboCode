@@ -7,6 +7,8 @@ struct TranscriptSheet: View {
     private enum DisplayMode: String, CaseIterable, Identifiable {
         case conversation = "Conversation"
         case entries = "Entries"
+        /// Tool calls of the running turn, as the model writes them.
+        case live = "Live"
 
         var id: Self { self }
     }
@@ -38,7 +40,19 @@ struct TranscriptSheet: View {
                 dismiss()
                 return
             }
+            // Opening the sheet during a turn is almost always a request
+            // to watch what the model is doing right now.
+            if chatStore.liveToolCallStore.isActive,
+               !chatStore.liveToolCallStore.calls.isEmpty {
+                displayMode = .live
+            }
             await reload()
+        }
+        .onChange(of: chatStore.liveToolCallStore.isActive) { _, isActive in
+            // The canonical transcript gains the turn's entries only when the
+            // turn ends, so that is the moment the lists become stale.
+            guard !isActive else { return }
+            Task { await reload(preservingEdits: true) }
         }
     }
 
@@ -72,7 +86,7 @@ struct TranscriptSheet: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 220)
+            .frame(width: 300)
         }
         .padding(.horizontal, 22)
         .padding(.vertical, 18)
@@ -83,7 +97,7 @@ struct TranscriptSheet: View {
         if let presentation {
             if presentation.hasTranscript {
                 HSplitView {
-                    transcriptList(presentation)
+                    leadingColumn(presentation)
                         .frame(minWidth: 480, maxWidth: .infinity)
                         .layoutPriority(1)
                     inspector(presentation)
@@ -104,6 +118,58 @@ struct TranscriptSheet: View {
                 .controlSize(.large)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    @ViewBuilder
+    private func leadingColumn(
+        _ presentation: TranscriptContextPresentation
+    ) -> some View {
+        let liveStore = chatStore.liveToolCallStore
+        if displayMode == .live {
+            TranscriptLiveToolCallsView(
+                store: liveStore,
+                canStop: chatStore.busy,
+                onStop: { Task { await chatStore.interrupt() } }
+            )
+        } else {
+            VStack(spacing: 0) {
+                if liveStore.isActive, let call = liveStore.calls.last {
+                    liveShortcut(call, hasRepetition: liveStore.repetition != nil)
+                    Divider()
+                }
+                transcriptList(presentation)
+            }
+        }
+    }
+
+    /// Keeps the running tool call one click away while the user reads the
+    /// history, and surfaces a suspected loop without switching view.
+    private func liveShortcut(
+        _ call: LiveToolCall,
+        hasRepetition: Bool
+    ) -> some View {
+        HStack(spacing: 8) {
+            if hasRepetition {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text("Possible loop on \(call.name)")
+                    .font(.callout.weight(.medium))
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+                Text(call.phase == .writing ? "Writing \(call.name)…" : "Running \(call.name)…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Button("Show Live") {
+                displayMode = .live
+            }
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(hasRepetition ? Color.orange.opacity(0.12) : Color.clear)
     }
 
     private func transcriptList(
@@ -246,13 +312,29 @@ struct TranscriptSheet: View {
         return "Apply Context Changes"
     }
 
-    private func reload() async {
+    /// - Parameter preservingEdits: Set for a refresh the user did not ask
+    ///   for. It keeps the exclusions toggled but not yet applied, and the
+    ///   selected entry, instead of resetting the sheet under the reader.
+    private func reload(preservingEdits: Bool = false) async {
         let value = await chatStore.transcriptContextPresentation()
         guard !Task.isCancelled, chatStore.activeThreadId == threadID else { return }
+        let added = excludedGroupIDs.subtracting(initialExcludedGroupIDs)
+        let removed = initialExcludedGroupIDs.subtracting(excludedGroupIDs)
         presentation = value
         initialExcludedGroupIDs = value.excludedGroupIDs
-        excludedGroupIDs = value.excludedGroupIDs
-        selectedItemID = value.conversationItems.first?.id
+        if preservingEdits {
+            let knownGroupIDs = Set(value.groups.map(\.id))
+            excludedGroupIDs = value.excludedGroupIDs
+                .union(added.intersection(knownGroupIDs))
+                .subtracting(removed)
+            let allItems = value.conversationItems + value.entryItems
+            if !allItems.contains(where: { $0.id == selectedItemID }) {
+                selectedItemID = value.conversationItems.first?.id
+            }
+        } else {
+            excludedGroupIDs = value.excludedGroupIDs
+            selectedItemID = value.conversationItems.first?.id
+        }
         localError = nil
     }
 

@@ -34,6 +34,7 @@ final class MessageSendCoordinator {
     /// Captured before runtime ownership is released, then consumed exactly
     /// once by either the release callback or an immediate steering delivery.
     private var interruptedHistoryRestores: [TurnID: InterruptedHistoryRestore] = [:]
+    private var currentDateStamp = CurrentDatePromptStamp()
 
     init(
         runtime: AgentRuntime,
@@ -151,8 +152,16 @@ final class MessageSendCoordinator {
         // Routing is immutable for the accepted turn. A later menu selection
         // cannot redirect this operation after provider execution begins.
         let responseBackend = modelRuntime.activeBackend
+        // Stamped after the checks above but before the runtime's own
+        // admission, which can still refuse the turn; the note is withdrawn
+        // below in that case. Codex gets the date from its own runtime. The
+        // visible message keeps `displayText`; only the model sees the note.
+        let unstampedPromptText = promptText
+        let promptText = responseBackend == .codex
+            ? promptText
+            : currentDateStamp.stamped(promptText, conversationID: titleThreadID)
         let steering = self.steering
-        await runtime.runOperation(
+        let admitted = await runtime.runOperation(
             turnID: turnID,
             operation: { [weak self] in
                 guard let self else { return }
@@ -185,7 +194,15 @@ final class MessageSendCoordinator {
                 await sessions.persistGeneratedTitle(id: titleThreadID)
             }
         )
-        return true
+        // The guard at the top of this method only reads a projection, and
+        // the awaits since then let another operation or a context change
+        // take the runtime first. The runtime is the authority: a refused
+        // turn never ran, so report it and let the next message carry the
+        // date this one would have stated.
+        if !admitted, promptText != unstampedPromptText {
+            currentDateStamp.withdraw(conversationID: titleThreadID)
+        }
+        return admitted
     }
 
     /// Runs one native continuation for a claimed steering batch. The batch is

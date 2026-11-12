@@ -4,19 +4,38 @@ import Testing
 @MainActor
 @Suite("Sidebar conversation disclosure")
 struct SidebarConversationDisclosureTests {
-    @Test("The initial sidebar collection contains at most five chats")
+    @Test("The initial Coding collection contains at most five chats")
     func initialCollectionIsLimitedToFive() {
         let threads = makeThreads(count: 8)
+        let batch = SidebarConversationDisclosure.batchSize(for: .coding)
 
-        let visible = SidebarConversationDisclosure.visibleIDs(in: threads, limit: 5)
+        let visible = SidebarConversationDisclosure.visibleIDs(
+            in: threads, limit: batch, batchSize: batch
+        )
 
+        #expect(batch == 5)
         #expect(visible == threads.prefix(5).map(\.id))
+    }
+
+    @Test("Studio shows ten chats before collapsing, even from a smaller limit")
+    func studioCollectionIsLimitedToTen() {
+        let threads = makeThreads(count: 13)
+        let batch = SidebarConversationDisclosure.batchSize(for: .cowork)
+
+        // A limit left over from Coding must not shrink the Studio list.
+        let visible = SidebarConversationDisclosure.visibleIDs(
+            in: threads, limit: 5, batchSize: batch
+        )
+
+        #expect(batch == 10)
+        #expect(visible == threads.prefix(10).map(\.id))
+        #expect(SidebarConversationDisclosure.nextLimit(current: 10, total: 13, batchSize: batch) == 13)
     }
 
     @Test("Progressive disclosure reveals chats in five-row batches")
     func disclosureAdvancesByOneBatch() {
-        #expect(SidebarConversationDisclosure.nextLimit(current: 5, total: 13) == 10)
-        #expect(SidebarConversationDisclosure.nextLimit(current: 10, total: 13) == 13)
+        #expect(SidebarConversationDisclosure.nextLimit(current: 5, total: 13, batchSize: 5) == 10)
+        #expect(SidebarConversationDisclosure.nextLimit(current: 10, total: 13, batchSize: 5) == 13)
     }
 
     @Test("Opening a hidden search result reveals its containing batch")
@@ -26,7 +45,8 @@ struct SidebarConversationDisclosureTests {
         let limit = SidebarConversationDisclosure.limitRevealing(
             threadID: "thread-7",
             in: threads,
-            current: 5
+            current: 5,
+            batchSize: 5
         )
 
         #expect(limit == 10)

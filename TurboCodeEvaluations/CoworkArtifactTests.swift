@@ -55,6 +55,32 @@ struct CoworkArtifactTests {
         #expect(CoworkArtifactCatalog.preferred(in: []) == nil)
     }
 
+    @Test("A library group is shown by its entry page and keeps every other file reachable")
+    func groupExposesPrimaryAndBrowsingOrder() {
+        func group(_ paths: String...) -> CoworkArtifactGroup {
+            CoworkArtifactGroup(
+                sessionID: "s",
+                sessionTitle: "Session",
+                updatedAt: Date(timeIntervalSince1970: 0),
+                outbox: URL(fileURLWithPath: "/tmp/out"),
+                artifacts: paths.map { CoworkArtifact(relativePath: $0, size: 1) }
+            )
+        }
+
+        let web = group("assets/index-abc.css", "assets/index-abc.js", "favicon.svg", "index.html", "shot.png")
+        #expect(web.primary?.relativePath == "index.html")
+        #expect(web.browsingOrder.map(\.relativePath) == [
+            "index.html", "favicon.svg", "shot.png", "assets/index-abc.css", "assets/index-abc.js"
+        ])
+        // Nothing is dropped or repeated: the card hides files, the strip must not.
+        #expect(Set(web.browsingOrder) == Set(web.artifacts))
+        #expect(web.browsingOrder.count == web.artifacts.count)
+
+        #expect(group("a.zip", "page.png").primary?.relativePath == "page.png")
+        #expect(group().primary == nil)
+        #expect(group().browsingOrder.isEmpty)
+    }
+
     @Test("The list shows pages first, then images, PDFs, text, and other files, each by path")
     func displayOrderGroupsByWhatCanBePreviewed() {
         let ordered = CoworkArtifactCatalog.displayOrdered(

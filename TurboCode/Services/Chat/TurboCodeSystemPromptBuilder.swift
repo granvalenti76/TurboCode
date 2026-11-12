@@ -22,8 +22,9 @@ nonisolated struct TurboCodeSystemPromptContext: Sendable {
     /// contract provides the product-level reasoning control.
     let reasoningEffort: ReasoningEffort?
     let workers: [AgentTaskWorkerDescriptor]
-    /// Present only for Cowork sessions. Replaces the coding identity and adds
-    /// the VM contract; Cowork sessions have no host workspace section.
+    /// Present only for Cowork (Studio) sessions. Replaces the coding identity,
+    /// working principles, and tool rules with their Studio forms and adds the
+    /// VM contract; Cowork sessions have no host workspace section.
     let cowork: CoworkPromptFacts?
 
     init(
@@ -91,7 +92,10 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             runsDelegatedTasksInBackground: context.agentTuning.orchestrator
                 .runsDelegatedTasksInBackground
         )
-        if !toolGuidance.isEmpty {
+        // Studio has no host-tool rules; the one line that survives there
+        // (turbocode_guide) is folded into the VM section instead of standing
+        // alone under a heading written for the coding tools.
+        if !toolGuidance.isEmpty, context.cowork == nil {
             sections.append(
                 "Rules for getting work done:\n"
                     + toolGuidance.joined(separator: "\n")
@@ -124,7 +128,7 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         }
 
         if let cowork = context.cowork {
-            sections.append(coworkSection(cowork))
+            sections.append(coworkSection(cowork, tools: tools))
         }
 
         if context.role == .orchestrator {
@@ -184,57 +188,101 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         their requested outcome is handled.
         """
 
+    /// Says "Studio", the name the user sees, even though the code calls the
+    /// domain Cowork: the model repeats the prompt's words back to the user.
+    /// The role is a stance rather than a list of deliverable types, because
+    /// small local models treat such a list as a menu and force every request
+    /// into one of its entries.
     private static let coworkIdentitySection = """
         Role:
-        You are TurboCode in a Cowork session: a multi-purpose agent that builds
-        artifacts, runs scripts, and produces documents inside an isolated Linux
-        VM. Work with the user until their requested outcome is handled.
+        You are TurboCode in a Studio session. The user hands you an outcome, and
+        you have a Linux VM of your own in which to produce it. Choose the form
+        that fits the request, from a direct answer to a finished deliverable,
+        and work with the user until the outcome is handled.
         """
 
     /// Kept short for small local context windows. It is the agent's map of
-    /// the VM: where to work, what is read-only, where deliverables go, and
-    /// which tools are already installed.
-    private static func coworkSection(_ facts: CoworkPromptFacts) -> String {
+    /// the VM, grouped under headings because local models follow a few
+    /// labelled groups more reliably than one long flat list: where things
+    /// live, how work is delivered, what the user can see, and tool recipes.
+    /// The skills named below are the `StudioSkillCatalog` names. They are
+    /// written out because this file is also compiled into the ACP helper,
+    /// which does not include the catalog; a test keeps the two in step.
+    /// All three are named in one rule because a PDF document and a deck are
+    /// also written as HTML, and without it the model loads the web skill.
+    private static func coworkSection(
+        _ facts: CoworkPromptFacts,
+        tools: Set<ToolCapabilityID>
+    ) -> String {
         let input = facts.sharesInputFolder
             ? "- /work: the user's shared folder, read-only. Copy files before changing them."
             : "- No user folder is shared in this session; /work is absent."
+        let guide = tools.contains(.turboCodeGuide)
+            ? "\n- Use turbocode_guide only for explicit questions about TurboCode itself, and answer from its official documentation."
+            : ""
         return """
-            Cowork VM:
-            The Debian 12 VM belongs entirely to you; nothing you run there can change the user's Mac.
-            - \(facts.sessionDirectory): this session's directory and default working directory.
+            Studio VM:
+            The Debian 12 VM belongs entirely to you; nothing you run there can change the user's \
+            Mac. You cannot reach the Mac, so do not ask the user to run commands for you.
+
+            Where things live:
+            - \(facts.sessionDirectory): this session's directory and default working directory. \
+            Build here.
             \(input)
-            - /out: put finished deliverables here and leave them there; the user reviews them \
-            before they reach the Mac. Never move or delete files out of /out. If the user cannot \
-            see them yet, say they are in /out instead of moving them.
-            - Build in the session directory; copy only finished deliverables into /out (sources, \
-            dist, zips, screenshots), never node_modules or virtualenvs.
-            - When the deliverables are complete, call vm_export and tell the user to choose \
-            Review & Export to copy them to the Mac.
+            - /out: finished deliverables only (sources, dist, zips, screenshots), never \
+            node_modules or virtualenvs.
             - Installed: Node 24 with npm, Python 3.11 (use python3 -m venv), headless Chromium \
             (never pass --no-sandbox), rg, fd, jq, git, gcc and make. sudo apt-get works.
-            - Use vm_file to read and write text files and vm_exec for commands.
-            - A background process must redirect its output or the command never returns: \
-            python3 -m http.server 3000 > /tmp/server.log 2>&1 &
+
+            Delivering:
+            - Leave deliverables in /out; the user reviews them before they reach the Mac. Never \
+            move or delete files out of /out. If the user cannot see them yet, say they are in \
+            /out instead of moving them.
+            - When the deliverables are complete, call vm_export and tell the user to choose \
+            Review & Export, the button below the message field, to copy them to the Mac.
+
+            What the user sees:
             - The user looks at your work in the Artifacts panel, which shows the files in /out \
             and the servers you leave running. Review & Export only copies files to the Mac; do \
             not send the user there to look at a result.
             - A server is visible there when it listens on 0.0.0.0 (vite and similar: \
             --host 0.0.0.0). Leave running the one the user should see; stop the others (pkill -f).
             - Put a page the user should keep in /out as well, with the files it needs.
+
+            Tools and recipes:
+            - Use vm_file to read and write text files and vm_exec for commands.
+            - Before writing any web page, HTML report or dashboard, load the \
+            studio-web-design skill and follow it. For a document meant as a PDF load \
+            studio-documents instead, and for slides load studio-presentations.
+            - A background process must redirect its output or the command never returns: \
+            python3 -m http.server 3000 > /tmp/server.log 2>&1 &
             - Screenshots: chromium --headless --screenshot=/out/page.png --window-size=1280,720 \
             http://127.0.0.1:3000/
             - If you can see images, check a screenshot or picture with vm_view_image before \
-            describing it.
-            - You cannot reach the Mac. Do not ask the user to run commands for you.
+            describing it.\(guide)
             """
     }
 
     private static func behaviorSection(
         for context: TurboCodeSystemPromptContext
     ) -> String {
-        var workingPrinciples = [
-            "Treat a clear request for action as authorization to perform the work within the available capabilities and safety boundaries. Make reasonable assumptions when they do not change the intended outcome; ask only when a missing choice would materially change the result or an action requires approval.",
-            "Continue through the necessary inspection, implementation, and verification. Do not stop after proposing work when the request already authorizes it.",
+        let authorization = "Treat a clear request for action as authorization to perform the work within the available capabilities and safety boundaries. Make reasonable assumptions when they do not change the intended outcome; ask only when a missing choice would materially change the result or an action requires approval."
+        let persistence = "Continue through the necessary inspection, implementation, and verification. Do not stop after proposing work when the request already authorizes it."
+        // Studio has no host workspace, revisions, or approval gates, so the
+        // coding principles that name them are restated for the VM. Studio also
+        // gets the rules that keep an open-ended agent in proportion: answer
+        // in the chat when that is enough, and look at the result before
+        // calling it finished. Coding sessions keep their original wording.
+        var workingPrinciples = context.cowork != nil ? [
+            authorization,
+            persistence,
+            "Work from evidence: the user's files, command output, and what you actually see. Use the tools when inspection or execution is required; never claim to have read, run, built, or checked something unless the operation succeeded.",
+            "Match the form to the request. A question gets an answer in the chat; build a file, page, or program only when the outcome needs one, and keep it as simple as the request allows.",
+            "Before calling a deliverable finished, look at it yourself: run it, open it, or take a screenshot. Then say what you made and name anything you did not verify.",
+            "Use only the tools, skills, and integrations exposed in this session."
+        ] : [
+            authorization,
+            persistence,
             "Work from evidence in the active workspace. Use the available tools when inspection or execution is required; never claim to have read, changed, built, or tested something unless the operation succeeded.",
             "Keep changes focused and reviewable. Respect TurboCode workspace boundaries, revision checks, approval gates, and tool restrictions.",
             "Use only the tools, skills, workers, and integrations exposed by the active profile."
@@ -255,7 +303,14 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         case .detailed:
             communication.append("Explain decisions and verification in detail without repeating tool output.")
         }
-        if context.agentTuning.agent.verifiesChanges {
+        if context.cowork != nil {
+            // Applies to chat replies and to deliverables alike. It names the
+            // marks to avoid because local models reach for them by default.
+            communication.append("Use emoji sparingly, in replies and in what you build. When one helps, choose something quiet that suits the content; avoid the stock status marks such as the green check, the red cross, and colored dots.")
+        }
+        // The source-code rule is a coding rule; Studio verifies through the
+        // look-at-it principle above, whatever the deliverable is.
+        if context.agentTuning.agent.verifiesChanges, context.cowork == nil {
             workingPrinciples.append("After changing source code, run the smallest meaningful build or test that verifies the behavior. Broaden verification only when failures or remaining risks justify it.")
         }
         if context.backend == .foundationApple {

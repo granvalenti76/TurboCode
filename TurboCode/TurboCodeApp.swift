@@ -72,8 +72,12 @@ struct TurboCodeApp: App {
                     .keyboardShortcut("o", modifiers: [.command, .shift])
             }
 
-            // View menu
-            CommandMenu("View") {
+            // View menu. macOS already provides a View menu for the window
+            // toolbar and full screen, so these items join it through its
+            // sidebar group; a CommandMenu("View") adds a second menu with the
+            // same title. Replacing the group also keeps a single sidebar
+            // toggle, the one that drives the app's own sidebar state.
+            CommandGroup(replacing: .sidebar) {
                 Button("Toggle Sidebar") {
                     chatStore.toggleLeftSidebar()
                 }

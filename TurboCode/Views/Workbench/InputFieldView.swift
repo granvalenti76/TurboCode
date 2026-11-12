@@ -14,6 +14,10 @@ struct InputFieldView: View {
     @State private var showsDynamicRouting = false
     @State private var coworkDeliverableCount = 0
     @State private var isSubmittingImages = false
+    /// True while a steering submission waits for the progress-question
+    /// classifier. The draft stays visible during that wait, so without this
+    /// a second Return would queue the same instruction twice.
+    @State private var isSubmittingSteering = false
 
     let compact: Bool
 
@@ -26,6 +30,7 @@ struct InputFieldView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            TurnStatusCardView()
             SteeringQueueView()
             if let notice = composer.imageNotice {
                 Label(notice, systemImage: "photo")
@@ -36,7 +41,7 @@ struct InputFieldView: View {
             }
             composerCard
                 .background(
-                    Color(nsColor: .textBackgroundColor),
+                    AppSurface.card,
                     in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                 )
                 .overlay {
@@ -45,7 +50,7 @@ struct InputFieldView: View {
                 }
                 .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
         }
-        .background(Color(.windowBackgroundColor))
+        .background(AppSurface.canvas)
         .padding(.horizontal, 24)
         .padding(.top, 6)
         .padding(.bottom, compact ? 16 : 12)
@@ -86,13 +91,24 @@ struct InputFieldView: View {
     private var textField: some View {
         // Keep the invitation workspace-oriented; the active profile and tools
         // provide specialization without narrowing what users think they can ask.
+        // A Studio session has no workspace (it may not even share a folder), so
+        // it gets an equally open invitation that does not mention one. The
+        // same holds for a Coding chat before a workspace is chosen.
+        let placeholder: String
+        if isCoworkSession {
+            placeholder = "What would you like to make?"
+        } else if chatStore.workspaceRoot.isEmpty {
+            placeholder = "What would you like to do?"
+        } else {
+            placeholder = "What would you like to do in this workspace?"
+        }
         return VStack(alignment: .leading, spacing: 8) {
             if !composer.imageAttachments.isEmpty {
                 imageAttachmentRow
             }
 
             TextField(
-                "What would you like to do in this project?",
+                placeholder,
                 text: Binding(
                     get: { composer.messageText },
                     set: { composer.messageText = $0 }
@@ -581,10 +597,21 @@ struct InputFieldView: View {
         // and ordinary composer input follow the same lifecycle.
         composer.reset()
         Task {
-            if await commandRouter.execute(text) == false {
-                await chatStore.sendMessage(text)
+            if await commandRouter.execute(text) == false,
+               await chatStore.sendMessage(text) == false {
+                restoreDraftAfterRefusedSend(text)
             }
         }
+    }
+
+    /// The draft is cleared before the send is admitted, and a send can still
+    /// be refused: a failed tool-routing rebuild, the Studio admission check,
+    /// or another operation taking the runtime first. The text was never
+    /// sent, so it goes back unless the user has started typing something
+    /// else. Images are not restored; they were already handed to the send.
+    private func restoreDraftAfterRefusedSend(_ text: String) {
+        guard composer.messageText.isEmpty else { return }
+        composer.messageText = text
     }
 
     /// Rechecks vision before clearing anything: the model may have changed since
@@ -604,19 +631,21 @@ struct InputFieldView: View {
             // Text typed during the probe is not what the user chose to send.
             guard composer.editGeneration == generation else { return }
             composer.reset()
-            if await commandRouter.execute(text) == false {
-                await chatStore.sendMessage(text, images: composer.takeImages())
+            if await commandRouter.execute(text) == false,
+               await chatStore.sendMessage(text, images: composer.takeImages()) == false {
+                restoreDraftAfterRefusedSend(text)
             }
         }
     }
 
     private func enqueueComposerSteering() {
         let text = composer.messageText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty, !isSubmittingSteering else { return }
+        isSubmittingSteering = true
         let generation = composer.editGeneration
         Task {
-            let result = await chatStore.enqueueSteering(text)
-            guard case .accepted = result,
+            defer { isSubmittingSteering = false }
+            guard await chatStore.submitDuringTurn(text),
                   composer.editGeneration == generation else { return }
             composer.reset()
         }
@@ -703,6 +732,9 @@ struct InputFieldView: View {
                 Label("Studio VM", systemImage: "shippingbox")
                     .foregroundStyle(.secondary)
                     .help("This session works inside the isolated Studio virtual machine")
+                // The optional read-only shared folder, next to the VM it is
+                // mounted in.
+                CoworkFolderMenu()
                 // Always-visible entry to the reviewed export; it never copies
                 // anything by itself.
                 if coworkDeliverableCount > 0 {
@@ -714,7 +746,13 @@ struct InputFieldView: View {
                             systemImage: "square.and.arrow.down.on.square"
                         )
                     }
-                    .buttonStyle(.borderless)
+                    // The only tinted control in the footer: waiting deliverables
+                    // are the one thing here that needs the user, so they must
+                    // not read as another passive status label.
+                    .buttonStyle(.bordered)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
+                    .tint(.accentColor)
                     .help("Review the session's deliverables and copy approved files to your Mac")
                 }
             }
@@ -724,8 +762,39 @@ struct InputFieldView: View {
                 coworkDeliverableCount = await chatStore.coworkDeliverableCount()
             }
         } else {
-            branchMenu
+            workspaceIndicator
+            // Without a workspace the missing repository is not the fact the
+            // user needs; the indicator already offers to choose a folder.
+            if !chatStore.workspaceRoot.isEmpty {
+                branchMenu
+            }
             dynamicRoutingControl
+        }
+    }
+
+    /// Names the folder the agent will work in, next to where the request is
+    /// written. It is deliberately not a workspace switcher: the sidebar stays
+    /// the single path for changing workspace, because a switch rebuilds the
+    /// model session. Only the empty state acts, by opening the folder picker.
+    @ViewBuilder
+    private var workspaceIndicator: some View {
+        if chatStore.workspaceRoot.isEmpty {
+            Button {
+                chatStore.chooseWorkspace()
+            } label: {
+                Label("Choose workspace…", systemImage: "folder.badge.plus")
+            }
+            .buttonStyle(.borderless)
+            .help("No workspace is selected. Choose the folder this chat should work in")
+        } else {
+            Label(
+                URL(fileURLWithPath: chatStore.workspaceRoot).lastPathComponent,
+                systemImage: "folder"
+            )
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .help(chatStore.workspaceRoot)
         }
     }
 

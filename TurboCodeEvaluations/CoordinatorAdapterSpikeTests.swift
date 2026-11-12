@@ -71,9 +71,36 @@ struct CoordinatorAdapterSpikeTests {
         _ = try await CodexTurboCodeToolBridge.execute(call, workspaceRoot: "/workspace", workspaceName: nil,
             agentTuning: .default, delegationInvoker: invoker)
         #expect(invoker.lastEnvelope?.workerID == "qa")
-        await #expect(throws: AgentTaskRoutingError.self) {
-            _ = try await tool.call(arguments: DelegateTaskArguments(goal: "Review", worker_id: "missing"))
-        }
+    }
+
+    @Test("An unknown destination returns a readable failure naming the valid IDs")
+    func unknownDestinationIsRecoverable() async throws {
+        let invoker = RecordingTaskInvoker()
+        let tool = DelegateTaskTool(invoker: invoker)
+        // A thrown error would end the coordinator's turn; the model must get
+        // a result it can read and correct instead.
+        let json = try await tool.call(
+            arguments: DelegateTaskArguments(goal: "Review", worker_id: "qa-qa")
+        )
+        let result = try JSONDecoder().decode(AgentTaskResult.self, from: Data(json.utf8))
+        #expect(result.outcome == .failed)
+        #expect(result.failureDetail?.contains("Unknown worker_id 'qa-qa'") == true)
+        #expect(result.failureDetail?.contains("Valid worker_id values: qa.") == true)
+        #expect(invoker.lastEnvelope == nil)
+    }
+
+    @Test("A failed tool is reported by name and reason, without the tool value")
+    func toolFailureMessageOmitsToolValue() {
+        let tool = DelegateTaskTool(invoker: RecordingTaskInvoker())
+        let error = LanguageModelSession.ToolCallError(
+            tool: tool,
+            underlyingError: AgentTaskRoutingError.unknownWorker("missing")
+        )
+        let message = ToolFailureMessage.describe(error)
+        #expect(message == "The delegate_task tool failed: "
+            + "Unknown worker_id 'missing'. Choose an ID from the worker catalog.")
+        #expect(ToolFailureMessage.describe(DelegateTaskAdapterError.unknownMode("x"))
+            == "Unknown delegated worker mode 'x'.")
     }
 
     @Test("DeepSeek custom profiles expose only explicitly selected delegation")

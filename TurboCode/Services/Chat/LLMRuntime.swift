@@ -160,13 +160,23 @@ protocol LLMBackendSessionBuilding: AnyObject, Sendable {
 final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
     private let nativeRunner: any NativeResponseRunning
     private let codexRuntime: CodexRuntimeStore
+    /// Output port for tool calls still being written by a native model.
+    /// It lives on the factory rather than on the per-turn configuration
+    /// because it is one fixed presentation sink, not a per-request choice.
+    private let toolCallStreamChanged: @MainActor @Sendable (
+        NativeToolCallStreamEvent
+    ) async -> Void
 
     init(
         nativeRunner: any NativeResponseRunning,
-        codexRuntime: CodexRuntimeStore
+        codexRuntime: CodexRuntimeStore,
+        toolCallStreamChanged: @escaping @MainActor @Sendable (
+            NativeToolCallStreamEvent
+        ) async -> Void = { _ in }
     ) {
         self.nativeRunner = nativeRunner
         self.codexRuntime = codexRuntime
+        self.toolCallStreamChanged = toolCallStreamChanged
     }
 
     func makeNativeSession(
@@ -187,6 +197,7 @@ final class LiveLLMBackendSessionFactory: LLMBackendSessionBuilding {
             diagnosticsChanged: configuration.diagnosticsChanged,
             contextChanged: configuration.contextChanged,
             usageChanged: configuration.usageChanged,
+            toolCallStreamChanged: toolCallStreamChanged,
             approvalRequested: configuration.approvalRequested
         )
     }

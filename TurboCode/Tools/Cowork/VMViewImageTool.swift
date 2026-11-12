@@ -68,7 +68,7 @@ struct VMViewImageTool: Tool {
     var name: String { ToolCapabilityID.vmViewImage.rawValue }
     var description: String {
         """
-        Look at an image file in the isolated Cowork VM (PNG, JPEG, GIF, WebP), \
+        Look at an image file in the isolated Studio VM (PNG, JPEG, GIF, WebP), \
         for example a Chromium screenshot or a downloaded picture. Create or \
         download the file with vm_exec first, then pass its path. Each viewed \
         image stays in the conversation, so view only what you need.

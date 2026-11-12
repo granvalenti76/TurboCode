@@ -36,7 +36,7 @@ struct ToolsView: View {
         HStack(alignment: .top, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Tools")
-                    .font(.system(size: 28, weight: .semibold))
+                    .font(AppTypography.pageTitle)
                 Text("See which capabilities each model profile receives at runtime.")
                     .font(.callout)
                     .foregroundStyle(.secondary)

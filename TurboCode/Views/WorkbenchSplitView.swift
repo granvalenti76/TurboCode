@@ -30,7 +30,7 @@ struct WorkbenchSplitView: View {
                     // while preserving the sidebar's native toolbar material.
                     .scrollEdgeEffectStyle(.hard, for: .top)
                     .background {
-                        Color(nsColor: .windowBackgroundColor)
+                        AppSurface.canvas
                             .ignoresSafeArea(edges: .top)
                     }
 
@@ -51,13 +51,22 @@ struct WorkbenchSplitView: View {
             HStack(spacing: 0) {
                 Color.clear
                     .frame(width: chatStore.leftSidebarCollapsed ? 0 : sidebarWidth)
-                Color(nsColor: .windowBackgroundColor)
+                AppSurface.canvas
             }
             .frame(height: 52)
             .ignoresSafeArea(edges: .top)
         }
         .sheet(isPresented: customProfilesPresented) {
             CustomProfilesSheet()
+        }
+        // First launch: shown only while ~/.turbocode/models.json is missing.
+        .sheet(isPresented: Binding(
+            get: { chatStore.firstLaunchOnboarding != nil },
+            set: { if !$0 { chatStore.firstLaunchOnboarding = nil } }
+        )) {
+            if let onboarding = chatStore.firstLaunchOnboarding {
+                FirstLaunchOnboardingSheet(store: onboarding)
+            }
         }
         // Keep the editorial feature behind one reversible integration point:
         // removing the module only removes this toolbar action and its sheet.
@@ -115,10 +124,9 @@ struct WorkbenchSplitView: View {
             // and outer padding inflate the group inside the unified title bar.
             ToolbarItemGroup(placement: .principal) {
                 // Editorial Desk and the project terminal work in the Mac
-                // workspace; a Cowork session shows its shared folder instead.
-                if chatStore.activeDomain == .cowork {
-                    CoworkFolderToolbarMenu()
-                } else {
+                // workspace, so a Cowork session leaves the centre empty; its
+                // shared folder is chosen in the composer footer instead.
+                if chatStore.activeDomain != .cowork {
                 Button {
                     chatStore.presentEditorialDesk()
                 } label: {

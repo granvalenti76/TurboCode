@@ -62,6 +62,11 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
         ) async -> Void
         let liveContentChanged: @MainActor @Sendable (String) async -> Void
         let liveReasoningChanged: @MainActor @Sendable (String) async -> Void
+        /// Tool calls as the model writes them, before the session exposes
+        /// the completed call. Presentation only.
+        let liveToolCallsChanged: @MainActor @Sendable (
+            NativeToolCallStreamEvent
+        ) async -> Void
         let approvalRequested: @MainActor @Sendable (
             ApprovalRequest
         ) async -> Void
@@ -82,6 +87,9 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
             liveReasoningChanged: @escaping @MainActor @Sendable (
                 String
             ) async -> Void,
+            liveToolCallsChanged: @escaping @MainActor @Sendable (
+                NativeToolCallStreamEvent
+            ) async -> Void = { _ in },
             approvalRequested: @escaping @MainActor @Sendable (
                 ApprovalRequest
             ) async -> Void
@@ -91,6 +99,7 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
             self.usageChanged = usageChanged
             self.liveContentChanged = liveContentChanged
             self.liveReasoningChanged = liveReasoningChanged
+            self.liveToolCallsChanged = liveToolCallsChanged
             self.approvalRequested = approvalRequested
         }
     }
@@ -148,6 +157,16 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
         } else {
             reasoningRelayID = nil
         }
+
+        // Tool calls use the relay on every chat-completions backend, not
+        // only llama-server: unlike reasoning there is no snapshot fallback,
+        // because the session exposes a tool call only once it is complete.
+        // The on-device model has no relay and reports nothing here.
+        await events.liveToolCallsChanged(.started)
+        let toolCallRelayID = await request.reasoningStreamRelay?
+            .installToolCallSink { updates in
+                await events.liveToolCallsChanged(.updated(updates))
+            }
 
         do {
             let stream = request.imageAttachments.isEmpty
@@ -234,7 +253,7 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
         } catch {
             outcome = .failed
             recordedError = error
-            disposition = .failed(error.localizedDescription)
+            disposition = .failed(ToolFailureMessage.describe(error))
         }
 
         // A cancelled or failed stream may not yield a final Foundation Models
@@ -339,9 +358,43 @@ nonisolated final class NativeResponseRunner: NativeResponseRunning, Sendable {
         if let reasoningRelayID, let relay = request.reasoningStreamRelay {
             await relay.remove(reasoningRelayID)
         }
+        if let toolCallRelayID, let relay = request.reasoningStreamRelay {
+            await relay.removeToolCallSink(toolCallRelayID)
+        }
+        await events.liveToolCallsChanged(.finished)
         await events.diagnosticsChanged(nil)
         return result
     }
+}
+
+/// Builds the text shown or reported when a model turn ends with an error.
+///
+/// FoundationModels wraps an error thrown by a tool in `ToolCallError`, whose
+/// own description interpolates the complete tool value. For a tool that holds
+/// its session context, such as `DelegateTaskTool`, that prints the system
+/// prompt, every skill body, and the provider configuration into the chat and
+/// into worker results. Only the tool name and the underlying reason are
+/// useful to the user or to a coordinating model.
+///
+/// It lives in this file, not its own, because the ACP helper target lists its
+/// sources by hand and already compiles this file together with the task runner.
+nonisolated enum ToolFailureMessage {
+    static func describe(_ error: any Error) -> String {
+        guard let toolError = error as? LanguageModelSession.ToolCallError else {
+            return error.localizedDescription
+        }
+        return "The \(toolError.tool.name) tool failed: "
+            + toolError.underlyingError.localizedDescription
+    }
+}
+
+/// Lifecycle of the streamed tool calls of one native model request.
+nonisolated enum NativeToolCallStreamEvent: Sendable {
+    /// A request started; calls from the previous request are obsolete.
+    case started
+    case updated([ReasoningStreamRelay.ToolCallUpdate])
+    /// The request ended, normally or not.
+    case finished
 }
 
 /// Reconstructs the cumulative live reasoning value from request-scoped
@@ -441,6 +494,9 @@ actor NativeBackendSession: BackendSession {
     private let usageChanged: @MainActor @Sendable (
         Usage?, ContextUsage?
     ) async -> Void
+    private let toolCallStreamChanged: @MainActor @Sendable (
+        NativeToolCallStreamEvent
+    ) async -> Void
     private let approvalRequested: @MainActor @Sendable (
         ApprovalRequest
     ) async -> Void
@@ -464,6 +520,9 @@ actor NativeBackendSession: BackendSession {
         usageChanged: @escaping @MainActor @Sendable (
             Usage?, ContextUsage?
         ) async -> Void = { _, _ in },
+        toolCallStreamChanged: @escaping @MainActor @Sendable (
+            NativeToolCallStreamEvent
+        ) async -> Void = { _ in },
         approvalRequested: @escaping @MainActor @Sendable (
             ApprovalRequest
         ) async -> Void = { _ in }
@@ -479,6 +538,7 @@ actor NativeBackendSession: BackendSession {
         self.diagnosticsChanged = diagnosticsChanged
         self.contextChanged = contextChanged
         self.usageChanged = usageChanged
+        self.toolCallStreamChanged = toolCallStreamChanged
         self.approvalRequested = approvalRequested
     }
 
@@ -497,6 +557,7 @@ actor NativeBackendSession: BackendSession {
         let diagnosticsChanged = self.diagnosticsChanged
         let contextChanged = self.contextChanged
         let usageChanged = self.usageChanged
+        let toolCallStreamChanged = self.toolCallStreamChanged
         let approvalRequested = self.approvalRequested
 
         // The child inherits this actor only long enough to capture immutable
@@ -542,6 +603,7 @@ actor NativeBackendSession: BackendSession {
                             )
                         )
                     },
+                    liveToolCallsChanged: toolCallStreamChanged,
                     approvalRequested: approvalRequested
                 )
             )

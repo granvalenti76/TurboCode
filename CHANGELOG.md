@@ -5,6 +5,101 @@ All notable changes to TurboCode are documented in this file.
 The project follows Semantic Versioning while its public API and persisted
 formats continue to evolve before 1.0.
 
+## [0.65] - 2026-11-12
+
+TurboCode 0.65 sets itself up on first launch, lets you follow and steer a
+working model without interrupting it, gives Studio bundled skills for pages,
+documents, and decks, and introduces a calmer visual language.
+
+### Features
+
+- Added a first-launch setup. It looks for a model server on the Mac
+  (llama-server, LM Studio, Ollama, vLLM, Jan) or at an address you type for
+  another machine, reads the context window and vision support from
+  llama-server, checks tool calls in the background, and writes
+  `~/.turbocode/models.json` only when you choose **Create and Start**.
+  Servers other than llama-server ask for a context window.
+- Asking how the work is going while a model is busy no longer reaches that
+  model. The on-device model recognises a short progress question and
+  answers it in a card above the composer from the live reasoning, text, and
+  tool calls. Anything uncertain is queued as steering, and the card offers
+  **Send to Model**.
+- Steering sent during a turn now reaches native models between tool rounds
+  instead of waiting for the turn to end. **Send Now** still interrupts.
+  Codex and the on-device model keep end-of-turn delivery.
+- The Transcript sheet has a **Live** view that shows tool calls while they
+  stream, with their arguments split into fields, a warning after three
+  identical calls in a row, and a **Stop Turn** button. It covers every
+  chat-completions backend.
+- The model is told the current date in the first message of a conversation
+  and again when the day changes. Codex already receives it from its runtime.
+- Studio sessions offer three bundled skills, loaded only when needed:
+  `studio-web-design` for pages and HTML reports, `studio-documents` for
+  printable documents, and `studio-presentations` for slide decks. Documents
+  and decks are written as HTML and printed to PDF with the VM's Chromium. A
+  user skill with the same name replaces the bundled one.
+- Studio sessions have their own prompt principles: work from what was
+  observed, answer in the chat when that is enough, and look at a deliverable
+  before calling it finished.
+- The Artifacts library shows one card per session, with the session's main
+  file as thumbnail and every other file in the detail view. HTML artifacts
+  are rendered for their thumbnails, so dark pages and single-page apps no
+  longer appear as blank rectangles.
+- The Coding composer names the active workspace beside the branch, or offers
+  **Choose workspace…** when none is selected. In Studio the shared-folder
+  menu moved from the toolbar into the composer as **Share a folder**, and
+  **Review & Export** appears as a tinted button only while files are
+  waiting.
+- New visual language: a terracotta accent colour, serif display titles for
+  empty states and page headers, shared surface tokens for the canvas,
+  composer, and cards, and a choice between a translucent and a solid sidebar
+  under **Settings → General → Appearance**.
+- Sidebar chat titles wrap to two lines and show the full title as a tooltip.
+  Studio lists ten chats before **Show More**, and the Coding section is
+  called **Workspaces**.
+- The steering queue is part of the composer, with compact rows and a header
+  that says when queued messages will be delivered.
+
+### Fixes
+
+- Switching conversations quickly could save one conversation with another's
+  blocks or rebuild the sessions out of order. Context changes now run one
+  at a time.
+- A send refused by the runtime vanished together with the draft. It is now
+  reported and the text returns to the composer.
+- Pressing Return twice while steering was being submitted queued the same
+  message twice.
+- A delegation to an unknown worker ended the turn and could print the
+  coordinator's system prompt and skills into the chat. It now returns a
+  readable refusal that lists the valid workers, and tool failures report
+  only the tool name and reason.
+- The app showed two **View** menus; its commands now join the system one.
+- The Artifacts library drops its **Reload** button and refreshes after an
+  export review as well as after each turn.
+
+### Interventions
+
+- On first launch `models.json` is no longer written with a default llama
+  entry. Until setup completes the app uses the same in-memory defaults as
+  before, and an existing catalog is never overwritten.
+- The date note is added only to the model-facing text of a user message, so
+  the system prompt and its cached prefix are unchanged and visible messages
+  are not rewritten.
+- The persisted steering delivery intent gains a `toolBoundary` case.
+- HTML thumbnails are rendered in a web view that is never shown, one page at
+  a time, with the same outbox-limited file access as the preview. Results
+  are cached in memory only.
+- Studio prompt changes apply only to Studio sessions; Coding prompts are
+  unchanged. The **Verify source changes** setting now governs Coding
+  sessions only.
+- The sidebar backdrop is a new persisted preference; translucent stays the
+  default. An accent colour chosen in System Settings still takes precedence.
+- The README has new screenshots and describes the first-launch setup, the
+  on-device model's role, and the current release.
+- New sources used by the `turbocode-acp` target are listed explicitly in
+  `project.pbxproj`.
+- Updated the application marketing version to 0.65.
+
 ## [0.64] - 2026-11-10
 
 TurboCode 0.64 turns Cowork into Studio: a home view that says what the mode is

@@ -3,10 +3,14 @@ import SwiftUI
 
 // MARK: - Cowork shared folder
 
-/// Toolbar control for the Mac folder a Cowork session shares read-only with
-/// the VM at `/work`. It replaces the Mac-workspace controls while a Cowork
-/// session is open, because Cowork never works in the Mac workspace.
-struct CoworkFolderToolbarMenu: View {
+/// Composer control for the Mac folder a Cowork session shares read-only with
+/// the VM at `/work`. It sits in the composer footer, where Coding names its
+/// workspace, so both domains state "where this request works" in one place.
+///
+/// Sharing is optional, so the empty state is a quiet invitation rather than
+/// a status: a session without a folder is normal and must not look like a
+/// warning. Only a folder that disappeared is called out.
+struct CoworkFolderMenu: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var errorMessage: String?
 
@@ -30,6 +34,11 @@ struct CoworkFolderToolbarMenu: View {
             Label(title, systemImage: symbol)
                 .labelStyle(.titleAndIcon)
         }
+        // Borderless and hugging its label, like the neighbouring footer
+        // controls; a bordered menu would compete with the export button.
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .foregroundStyle(.secondary)
         .disabled(chatStore.busy)
         .help(help)
         .alert(
@@ -54,14 +63,14 @@ struct CoworkFolderToolbarMenu: View {
     }
 
     private var title: String {
-        guard let sharedPath else { return "No Shared Folder" }
+        guard let sharedPath else { return "Share a folder" }
         let name = URL(fileURLWithPath: sharedPath).lastPathComponent
         return folderExists ? name : "\(name) (missing)"
     }
 
     private var symbol: String {
         guard sharedPath != nil else { return "folder.badge.plus" }
-        return folderExists ? "folder.fill" : "exclamationmark.triangle"
+        return folderExists ? "folder" : "exclamationmark.triangle"
     }
 
     private var help: String {
