@@ -34,13 +34,11 @@ On first launch TurboCode looks for a model server on your Mac and on the
 local network, reads the context window and checks tool calls and vision, then
 writes `~/.turbocode/models.json`. Every value stays editable in Settings.
 
-<table>
-  <tr>
-    <td width="33%"><img src=".github/assets/turbocode-onboarding-welcome.png" alt="TurboCode welcome sheet describing a local model, reviewable changes, and the Coding and Studio modes"></td>
-    <td width="33%"><img src=".github/assets/turbocode-onboarding-server.png" alt="TurboCode first-launch step that found a llama-server model server on the local network"></td>
-    <td width="33%"><img src=".github/assets/turbocode-onboarding-configure.png" alt="TurboCode first-launch step showing the detected context window, live tool calls, and vision support"></td>
-  </tr>
-</table>
+![TurboCode welcome sheet describing a local model, reviewable changes, and the Coding and Studio modes](.github/assets/turbocode-onboarding-welcome.png)
+
+![TurboCode first-launch step that found a llama-server model server on the local network](.github/assets/turbocode-onboarding-server.png)
+
+![TurboCode first-launch step showing the detected context window, live tool calls, and vision support](.github/assets/turbocode-onboarding-configure.png)
 
 ## What is TurboCode?
 
@@ -155,7 +153,9 @@ never receive them.
 - **Prassitele** blocks out and adjusts sculptures in the running Prassitele
   app. Its rendered views reach models with vision, and it adds the
   `prassitele-sculpting` skill, loaded only when a request needs it.
-- **Safari** keeps its global switch and is available in Coding sessions only.
+- **Safari** opens pages, reads them, clicks, and types through `safaridriver`.
+  It is available in Coding sessions only and has a single switch for all of
+  them, shown on the Connectors page and in **Settings → Agents**.
 
 See [CONFIGURATION.md](CONFIGURATION.md#studio) for Studio settings and files,
 and [Connectors](CONFIGURATION.md#connectors) for the connector catalog.
@@ -304,18 +304,13 @@ schema.
 
 ## Experimental capabilities
 
-The following capabilities are available but remain experimental:
+The following capability is available but remains experimental:
 
 ### On-device orchestration
 
 The on-device model can act as the entry point, analyze a request, and
 delegate complex work to a configured worker model. The result returns to the
 on-device coordinator for presentation.
-
-### Safari MCP
-
-Safari MCP is an optional coordinator-only integration. It is disabled by
-default and can be enabled from **Settings → Agents → Experimental**.
 
 ## Requirements and Xcode setup
 
@@ -403,27 +398,26 @@ publishing them.
 
 ## Project status
 
-The 0.4.0 line currently includes:
+TurboCode 0.65 includes:
 
-- workspace and session persistence;
-- built-in and custom model profiles;
-- local and Codex runtime lifecycle management;
-- reviewable, revision-bound edits;
-- repository maps and structured Git tools;
-- Xcode and Swift Package Manager inspection, builds, and tests;
-- Codex App Server integration and model handoff;
-- TypeScript plugin SDK, validation, installation, reload, tools, and widgets;
-- workspace `AGENTS.md` instructions;
-- native transcript sharing and compact sidebar session controls.
+- Coding sessions with reviewable, revision-bound edits, repository maps,
+  structured Git tools, and Xcode and Swift Package Manager builds and tests;
+- Studio sessions in a managed Linux VM, with live previews, vision, an
+  Artifacts library, and approval-gated export;
+- a first-launch setup that finds a local model server and writes the
+  configuration;
+- built-in and custom profiles, Skills, workspace `AGENTS.md` instructions,
+  and TypeScript plugins;
+- connectors for Prassitele and Safari;
+- session titles and live progress answers from the on-device model;
+- Codex and DeepSeek adapters for tasks that need a frontier model.
 
-The release still requires final clean-install validation and documentation
-polish. Model
-behavior varies between backends, and plugin trust and some advanced approval
-flows remain under active development.
+Model behavior varies between backends and model sizes, and plugin trust and
+some advanced approval flows are still evolving.
 
-See [CHANGELOG.md](CHANGELOG.md) for the release history and
-[PRODUCT.md](PRODUCT.md) for the product contract. For a visual overview and
-the latest project notes, visit [granvalenti.art/turbocode](https://granvalenti.art/turbocode/).
+See [CHANGELOG.md](CHANGELOG.md) for the release history. For a visual
+overview and the latest project notes, visit
+[granvalenti.art/turbocode](https://granvalenti.art/turbocode/).
 
 ## License
 
