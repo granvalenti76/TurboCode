@@ -26,6 +26,17 @@ nonisolated struct TurboCodeSystemPromptContext: Sendable {
     /// working principles, and tool rules with their Studio forms and adds the
     /// VM contract; Cowork sessions have no host workspace section.
     let cowork: CoworkPromptFacts?
+    /// The marketing version stated in the product section. Read from the
+    /// bundle so the prompt never names a stale release. Nil when the running
+    /// bundle has no version (the ACP helper), which omits the number.
+    let productVersion: String?
+
+    /// The version of the running bundle, or nil when it declares none.
+    static var bundleProductVersion: String? {
+        let value = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
 
     init(
         role: TurboCodeSystemPromptRole,
@@ -38,8 +49,10 @@ nonisolated struct TurboCodeSystemPromptContext: Sendable {
         workspaceInstructions: WorkspaceInstructions?,
         reasoningEffort: ReasoningEffort? = nil,
         workers: [AgentTaskWorkerDescriptor] = [],
-        cowork: CoworkPromptFacts? = nil
+        cowork: CoworkPromptFacts? = nil,
+        productVersion: String? = TurboCodeSystemPromptContext.bundleProductVersion
     ) {
+        self.productVersion = productVersion
         self.role = role
         self.backend = backend
         self.workspaceRoot = workspaceRoot
@@ -73,8 +86,14 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         var sections = [
             context.cowork == nil ? identitySection : coworkIdentitySection,
             TurboCodePersonality.default.prompt,
-            behaviorSection(for: context)
+            productSection(version: context.productVersion)
         ]
+        // A delegate only ever talks to the coordinator, so it never needs
+        // the casual-conversation register.
+        if context.role != .delegate {
+            sections.append(conversationSection)
+        }
+        sections.append(behaviorSection(for: context))
 
         if let reasoningGuidance = reasoningGuidance(for: context) {
             sections.append(reasoningGuidance)
@@ -188,6 +207,33 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         their requested outcome is handled.
         """
 
+    /// Facts the model may need when the user asks about TurboCode itself.
+    /// The version changes only between builds, so the section stays inside
+    /// the deterministic prefix that DeepSeek caches. No model is named: the
+    /// recommendation would age with every release. llama-server is named
+    /// because TurboCode reads its GET /props endpoint (context window, vision,
+    /// reasoning effort levels); that endpoint needs no extra server flag.
+    private static func productSection(version: String?) -> String {
+        let name = version.map { "TurboCode \($0)" } ?? "TurboCode"
+        return """
+            About TurboCode:
+            Share these facts only when the user asks about TurboCode. \(name) is the most \
+            compact native macOS harness, optimized for agentic work with local models. It \
+            works best with a recent llama-server: TurboCode reads the server's /props \
+            endpoint and adjusts the context window and the reasoning effort levels \
+            automatically.
+            """
+    }
+
+    /// Lets small models drop the agentic register when the user is only
+    /// talking; without it they answer small talk with headings and plans.
+    private static let conversationSection = """
+        Conversation:
+        Not every message is a task. When the user is just chatting, answer naturally \
+        in prose with minimal Markdown; a casual reply can be two lines. You may be \
+        more reflective or playful in casual conversation.
+        """
+
     /// Says "Studio", the name the user sees, even though the code calls the
     /// domain Cowork: the model repeats the prompt's words back to the user.
     /// The role is a stance rather than a list of deliverable types, because
@@ -210,6 +256,9 @@ nonisolated enum TurboCodeSystemPromptBuilder {
     /// which does not include the catalog; a test keeps the two in step.
     /// All three are named in one rule because a PDF document and a deck are
     /// also written as HTML, and without it the model loads the web skill.
+    /// The research recipe writes the page to a file because a raw DOM in the
+    /// tool output floods a small context window; `timeout` keeps a stalled
+    /// page from holding the vm_exec call open.
     private static func coworkSection(
         _ facts: CoworkPromptFacts,
         tools: Set<ToolCapabilityID>
@@ -260,6 +309,13 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             http://127.0.0.1:3000/
             - If you can see images, check a screenshot or picture with vm_view_image before \
             describing it.\(guide)
+
+            Research:
+            - Read web pages with headless Chromium, saving the page to a file first: \
+            timeout 60 chromium --headless --dump-dom URL > /tmp/page.html \
+            Then read only the parts you need (rg, or a short python3 script).
+            - When your answer relies on web pages, end it with a short "Sources:" list of \
+            the URLs you used, so the user knows where to look.
             """
     }
 
@@ -279,6 +335,10 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             "Work from evidence: the user's files, command output, and what you actually see. Use the tools when inspection or execution is required; never claim to have read, run, built, or checked something unless the operation succeeded.",
             "Match the form to the request. A question gets an answer in the chat; build a file, page, or program only when the outcome needs one, and keep it as simple as the request allows.",
             "Before calling a deliverable finished, look at it yourself: run it, open it, or take a screenshot. Then say what you made and name anything you did not verify.",
+            // Studio work often runs unattended (research, analysis, plans);
+            // a progress narration in the reply is noise to someone who
+            // comes back for the result.
+            "The user may not be watching while you work and usually expects the finished result, not a commentary on the process. Carry research, analysis, and planning through to a complete outcome before replying.",
             "Use only the tools, skills, and integrations exposed in this session."
         ] : [
             authorization,

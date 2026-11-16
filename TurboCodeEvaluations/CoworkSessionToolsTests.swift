@@ -148,6 +148,10 @@ struct CoworkSessionToolsTests {
         #expect(cowork.contains("A question gets an answer in the chat"))
         #expect(cowork.contains("look at it yourself"))
         #expect(cowork.contains("Use emoji sparingly"))
+        #expect(cowork.contains("may not be watching"))
+        #expect(cowork.contains("Research:"))
+        #expect(cowork.contains("chromium --headless --dump-dom URL > /tmp/page.html"))
+        #expect(cowork.contains("\"Sources:\""))
         #expect(cowork.contains("/home/cowork/sessions/abc"))
         #expect(cowork.contains("No user folder is shared"))
         #expect(!cowork.contains("Workspace:\n"))
@@ -162,6 +166,39 @@ struct CoworkSessionToolsTests {
         #expect(coding.contains("Work from evidence in the active workspace"))
         #expect(coding.contains("After changing source code"))
         #expect(!coding.contains("emoji"))
+        #expect(!coding.contains("Research:"))
+        #expect(!coding.contains("may not be watching"))
+    }
+
+    @Test("Prompts state the given product version, and only delegates skip the conversation register")
+    func productAndConversationSections() {
+        func prompt(_ role: TurboCodeSystemPromptRole, version: String?) -> String {
+            TurboCodeSystemPromptBuilder.build(TurboCodeSystemPromptContext(
+                role: role,
+                backend: .llamaServer,
+                workspaceRoot: "/tmp/project",
+                agentTuning: .default,
+                toolIDs: [],
+                toolNames: [],
+                availableSkills: [],
+                workspaceInstructions: nil,
+                productVersion: version
+            ))
+        }
+        let standalone = prompt(.standalone, version: "9.99")
+        #expect(standalone.contains("About TurboCode:"))
+        #expect(standalone.contains("TurboCode 9.99 is the most compact native macOS harness"))
+        #expect(standalone.contains("/props"))
+        #expect(standalone.contains("Conversation:"))
+
+        // A bundle without a version (the ACP helper) omits the number
+        // instead of printing a placeholder.
+        let unversioned = prompt(.standalone, version: nil)
+        #expect(unversioned.contains("TurboCode is the most compact native macOS harness"))
+
+        let delegate = prompt(.delegate, version: "9.99")
+        #expect(delegate.contains("About TurboCode:"))
+        #expect(!delegate.contains("Conversation:"))
     }
 
     // MARK: Tools against a fake runtime
