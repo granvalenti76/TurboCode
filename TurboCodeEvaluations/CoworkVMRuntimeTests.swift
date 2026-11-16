@@ -76,6 +76,52 @@ struct CoworkVMRuntimeTests {
         #expect(CoworkVMLifecycle.action(current: .running(base), requested: network) == .restart)
     }
 
+    @Test("Lifecycle operations launched together never overlap")
+    func lifecycleQueueSerializesConcurrentOperations() async throws {
+        let queue = CoworkLifecycleQueue()
+        let log = LifecycleLog()
+
+        // Each operation suspends in the middle, which is exactly where an
+        // unqueued actor would let the next boot or reset in.
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for name in ["boot", "reset", "boot again"] {
+                group.addTask {
+                    try await queue.run {
+                        await log.append("\(name) begins")
+                        try await Task.sleep(for: .milliseconds(20))
+                        await log.append("\(name) ends")
+                    }
+                }
+            }
+            try await group.waitForAll()
+        }
+
+        let entries = await log.entries
+        #expect(entries.count == 6)
+        for pair in stride(from: 0, to: entries.count, by: 2) {
+            let name = entries[pair].replacingOccurrences(of: " begins", with: "")
+            #expect(entries[pair + 1] == "\(name) ends")
+        }
+    }
+
+    @Test("A failed lifecycle operation does not block the next one")
+    func lifecycleQueueContinuesAfterFailure() async throws {
+        let queue = CoworkLifecycleQueue()
+
+        await #expect(throws: CoworkVMError.notRunning) {
+            try await queue.run { throw CoworkVMError.notRunning }
+        }
+        let value = try await queue.run { 42 }
+        #expect(value == 42)
+    }
+
+    @Test("A stopped VM is not reported to the model as a slow command")
+    func interruptionIsDistinctFromTimeout() {
+        let message = CoworkVMError.interrupted.localizedDescription
+        #expect(message.contains("stopped"))
+        #expect(!message.localizedCaseInsensitiveContains("timed out"))
+    }
+
     // MARK: Mounts
 
     @Test("Only the outbox is shared when no input folder is selected")
@@ -165,5 +211,14 @@ struct CoworkVMRuntimeTests {
 
     private func isHex(_ value: String) -> Bool {
         value.allSatisfy { $0.isHexDigit && !$0.isUppercase }
+    }
+}
+
+/// Order in which queued lifecycle operations began and ended.
+private actor LifecycleLog {
+    private(set) var entries: [String] = []
+
+    func append(_ entry: String) {
+        entries.append(entry)
     }
 }

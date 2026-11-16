@@ -14,7 +14,9 @@ nonisolated protocol CoworkVMRuntime: Sendable {
     /// from the running one. The writable layer persists across restarts.
     func start(_ configuration: CoworkVMConfiguration) async throws
     /// Runs one command in the guest. The stream yields output as it arrives
-    /// and always ends with exactly one `.exited` or `.timedOut` event.
+    /// and ends with exactly one `.exited` or `.timedOut` event, unless the VM
+    /// is stopped or reset meanwhile: then it throws
+    /// `CoworkVMError.interrupted`. Cancelling the consumer kills the process.
     func exec(_ request: CoworkExecRequest) async throws -> AsyncThrowingStream<CoworkExecEvent, any Error>
     func stop() async throws
     /// Stops the VM and discards the writable layer. The base image stays
@@ -102,6 +104,9 @@ nonisolated enum CoworkExecEvent: Sendable, Equatable {
 nonisolated enum CoworkVMError: LocalizedError, Equatable {
     case notInstalled(String)
     case notRunning
+    /// The VM was stopped or reset while the command ran. Kept apart from a
+    /// timeout so the model is not told its command was too slow.
+    case interrupted
     case invalidRequest(String)
     case unsafeInputFolder(String)
 
@@ -109,6 +114,7 @@ nonisolated enum CoworkVMError: LocalizedError, Equatable {
         switch self {
         case .notInstalled(let detail): "Studio is not installed: \(detail)"
         case .notRunning: "The Studio VM is not running."
+        case .interrupted: "The Studio VM was stopped while the command ran."
         case .invalidRequest(let detail): detail
         case .unsafeInputFolder(let path): "\(path) cannot be shared with the Studio VM."
         }
@@ -135,6 +141,31 @@ nonisolated enum CoworkVMLifecycle {
             // needs a restart (≈0.4 s); the writable layer is preserved.
             running == requested ? .none : .restart
         }
+    }
+}
+
+/// Runs VM lifecycle operations one at a time, in arrival order.
+///
+/// The runtime is an actor, but actors are reentrant: while a boot awaits the
+/// hypervisor, a second `start` or a `reset` can enter and act on half-built
+/// state (a double boot of the one container ID, or the writable layer deleted
+/// while it is being mounted). Every operation that reads or changes the
+/// container goes through this queue instead.
+///
+/// Each operation runs in its own unstructured task, so a caller that is
+/// cancelled does not abandon a boot or a stop halfway; it still waits for
+/// its own result. A failed operation never blocks the ones queued after it.
+actor CoworkLifecycleQueue {
+    private var tail: Task<Void, Never>?
+
+    func run<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        let previous = tail
+        let task = Task<T, any Error> {
+            await previous?.value
+            return try await operation()
+        }
+        tail = Task { _ = await task.result }
+        return try await task.value
     }
 }
 
