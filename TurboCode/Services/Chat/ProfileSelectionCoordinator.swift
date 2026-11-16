@@ -275,6 +275,14 @@ final class ProfileSelectionCoordinator {
         await rebuildSession(discardingCapabilityContext: true)
     }
 
+    /// Selects a model with declared server levels and turns thinking off.
+    /// The flag is set before selection so a Codex handoff keeps it too.
+    func selectBuiltInProfileWithReasoningOff(_ id: ProfileBaseModelID) async {
+        guard !isBusy, id != .codex else { return }
+        modelRuntime.selectServerReasoningOff(for: id)
+        await selectBuiltInProfile(id)
+    }
+
     func selectDynamicProfile(_ id: UUID) async {
         guard !isBusy else { return }
         if let profile = modelRuntime.dynamicProfiles.first(where: { $0.id == id }),

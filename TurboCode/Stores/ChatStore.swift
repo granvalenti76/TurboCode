@@ -344,6 +344,10 @@ public final class ChatStore {
         )
     }
 
+    func selectBuiltInProfileWithReasoningOff(_ id: ProfileBaseModelID) async {
+        await profileSelectionCoordinator.selectBuiltInProfileWithReasoningOff(id)
+    }
+
     /// Reflect a persisted label edit without rebuilding the provider session.
     func updateRemoteModelDisplayName(id: String, name: String) {
         modelRuntimeStore.updateRemoteModelDisplayName(id: id, name: name)

@@ -235,6 +235,13 @@ extension ChatStore {
         modelRuntimeStore.activeModelOffersReasoningControl
     }
 
+    /// True when "Off" is the active choice for a model with server levels.
+    var activeServerReasoningOff: Bool {
+        modelRuntimeStore.serverReasoningOff
+            && !(modelRuntimeStore.activeRemoteModel?.reasoningConfiguration
+                .supportedEfforts.isEmpty ?? true)
+    }
+
     var codexConnectionState: CodexConnectionState {
         codexRuntimeStore.connectionState
     }

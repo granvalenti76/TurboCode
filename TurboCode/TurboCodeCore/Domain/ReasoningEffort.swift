@@ -8,3 +8,16 @@ nonisolated enum ReasoningEffort: String, CaseIterable, Codable, Sendable {
     case high = "High"
     case xhigh = "X-High"
 }
+
+nonisolated extension ReasoningEffort {
+    /// Spelling used by chat templates that accept `reasoning_effort`. Kept
+    /// separate from `rawValue`, which is a persisted UI preference.
+    var serverLevelName: String {
+        switch self {
+        case .low: "low"
+        case .medium: "medium"
+        case .high: "high"
+        case .xhigh: "xhigh"
+        }
+    }
+}

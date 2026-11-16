@@ -34,6 +34,11 @@ final class ModelRuntimeStore {
 
     var composerModel: String
     var activeBackend: ModelBackend
+    /// "Off" for models whose levels come from the server's `/props`. Kept
+    /// apart from the shared `reasoningEffort` preference so turning thinking
+    /// off on llama-server never changes the level other backends use; any
+    /// explicit level selection clears it.
+    private(set) var serverReasoningOff: Bool
     var orchestratorMode: OrchestratorMode
     private var skillsWorkspaceRoot: String?
 
@@ -108,6 +113,7 @@ final class ModelRuntimeStore {
         }
         return model.reasoningTransport == .deepseekThinking
             || model.reasoningConfiguration.mode == .requestTokenBudget
+            || !model.reasoningConfiguration.supportedEfforts.isEmpty
     }
 
     var reasoningEffort: ReasoningEffort? {
@@ -139,6 +145,7 @@ final class ModelRuntimeStore {
         dynamicRoutingAssetsPrepared: Bool? = nil
     ) {
         self.preferences = preferences
+        self.serverReasoningOff = preferences.bool(forKey: "serverReasoningOff")
         self.dynamicRouter = AnchorSignalClassifier()
         let assetsPrepared = dynamicRoutingAssetsPrepared
             ?? AnchorSignalAssetDescriptor.current.isPrepared()
@@ -552,6 +559,20 @@ final class ModelRuntimeStore {
 
     func setReasoningEffort(_ effort: ReasoningEffort) {
         preferences.set(effort.rawValue, forKey: "reasoningEffort")
+        setServerReasoningOff(false)
+    }
+
+    /// Records "Off" only for a model that declared server effort levels;
+    /// other models have no way to honour it, so the request is ignored.
+    func selectServerReasoningOff(for id: ProfileBaseModelID) {
+        guard let model = remoteModels.first(where: { $0.id == id.remoteModelID }),
+              !model.reasoningConfiguration.supportedEfforts.isEmpty else { return }
+        setServerReasoningOff(true)
+    }
+
+    private func setServerReasoningOff(_ value: Bool) {
+        serverReasoningOff = value
+        preferences.set(value, forKey: "serverReasoningOff")
     }
 
     func isConfigured(_ model: RemoteModelConfig) -> Bool {
@@ -740,7 +761,14 @@ final class ModelRuntimeStore {
         for model: RemoteModelConfig?
     ) -> ReasoningEffort? {
         guard let model, model.supportsReasoning else { return nil }
-        return persistedReasoningEffort
+        // Nil becomes `enable_thinking: false` on the wire for this mode.
+        if serverReasoningOff,
+           !model.reasoningConfiguration.supportedEfforts.isEmpty {
+            return nil
+        }
+        // Server-declared levels may exclude the shared preference; resolve it
+        // here so the session snapshot names the level actually sent.
+        return model.reasoningConfiguration.resolvedEffort(persistedReasoningEffort)
     }
 
     /// One chooser is shared by the eligible local and on-device sessions so

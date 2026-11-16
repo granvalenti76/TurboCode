@@ -69,8 +69,11 @@ nonisolated enum ComposerProfileMenu {
     ) -> [ReasoningEffort] {
         if id == .onDevice { return ReasoningEffort.allCases }
         guard let model = models.first(where: { $0.id == id.remoteModelID }),
-              model.supportsReasoning,
-              model.reasoningTransport == .deepseekThinking
+              model.supportsReasoning else { return [] }
+        // Levels read from the server's `/props` are authoritative.
+        let serverLevels = model.reasoningConfiguration.supportedEfforts
+        if !serverLevels.isEmpty { return serverLevels }
+        guard model.reasoningTransport == .deepseekThinking
                 || model.reasoningConfiguration.mode == .requestTokenBudget else { return [] }
         return id == .llama ? ReasoningEffort.allCases : [.low, .medium, .high]
     }

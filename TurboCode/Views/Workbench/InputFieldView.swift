@@ -488,13 +488,30 @@ struct InputFieldView: View {
                     reasoningOptionLabel("Automatic", selected: isSelected)
                 }
             } else {
+                // Only templates that declared levels in `/props` accept
+                // `enable_thinking: false` as an explicit choice.
+                let offersOff = id.remoteModelID.flatMap { remoteID in
+                    chatStore.remoteModels.first { $0.id == remoteID }
+                }.map { !$0.reasoningConfiguration.supportedEfforts.isEmpty } ?? false
+                if offersOff {
+                    Button {
+                        Task { await chatStore.selectBuiltInProfileWithReasoningOff(id) }
+                    } label: {
+                        reasoningOptionLabel(
+                            "Off",
+                            selected: isSelected && chatStore.activeServerReasoningOff
+                        )
+                    }
+                }
                 ForEach(options, id: \.self) { effort in
                     Button {
                         Task { await chatStore.selectBuiltInProfile(id, reasoning: effort) }
                     } label: {
                         reasoningOptionLabel(
                             effort.rawValue,
-                            selected: isSelected && effectiveReasoningEffort == effort
+                            selected: isSelected
+                                && !chatStore.activeServerReasoningOff
+                                && effectiveReasoningEffort == effort
                         )
                     }
                 }
@@ -522,12 +539,19 @@ struct InputFieldView: View {
         if chatStore.activeBackend == .codex {
             return chatStore.codexReasoningEffort.displayName
         }
+        if chatStore.activeServerReasoningOff { return "Off" }
         return effectiveReasoningEffort.rawValue
     }
 
     /// Preserve the local X-High preference while presenting the equivalent
     /// native High selection when the user temporarily switches providers.
     private var effectiveReasoningEffort: ReasoningEffort {
+        // A server that declared its own levels shows the level actually sent.
+        if chatStore.activeBackend == .llamaServer,
+           let configuration = chatStore.activeRemoteModel?.reasoningConfiguration,
+           !configuration.supportedEfforts.isEmpty {
+            return configuration.resolvedEffort(reasoningEffort)
+        }
         guard reasoningEffort == .xhigh else { return reasoningEffort }
         switch chatStore.activeBackend {
         case .llamaServer, .foundationApple:

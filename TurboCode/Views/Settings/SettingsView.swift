@@ -401,6 +401,7 @@ struct ReasoningSettingsView: View {
     @State private var selectedModelID = ""
     @State private var reasoningDraft: RemoteReasoningConfiguration = .serverManaged
     @State private var reasoningSaveError: String?
+    @State private var isDetectingEffortLevels = false
 
     var body: some View {
         Form {
@@ -420,6 +421,26 @@ struct ReasoningSettingsView: View {
                             .tag(RemoteReasoningControlMode.serverManaged)
                         Text("Per-request token budget")
                             .tag(RemoteReasoningControlMode.requestTokenBudget)
+                        Text("Server effort levels (/props)")
+                            .tag(RemoteReasoningControlMode.requestEffortLevel)
+                    }
+
+                    if reasoningDraft.mode == .requestEffortLevel {
+                        LabeledContent("Levels") {
+                            if isDetectingEffortLevels {
+                                ProgressView().controlSize(.small)
+                            } else if let levels = reasoningDraft.serverEffortLevels {
+                                Text(levels.joined(separator: ", "))
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Not detected").foregroundStyle(.secondary)
+                            }
+                        }
+                        HStack {
+                            Spacer()
+                            Button("Detect Again") { detectEffortLevels() }
+                                .disabled(isDetectingEffortLevels)
+                        }
                     }
 
                     if reasoningDraft.mode == .requestTokenBudget {
@@ -468,6 +489,11 @@ struct ReasoningSettingsView: View {
         .onChange(of: selectedModelID) {
             loadReasoningDraft()
         }
+        .onChange(of: reasoningDraft.mode) { _, mode in
+            // Detect on every explicit selection so a model swapped on the
+            // server is picked up without editing `models.json`.
+            if mode == .requestEffortLevel { detectEffortLevels() }
+        }
     }
 
     private var configurableModels: [RemoteModelConfig] {
@@ -491,6 +517,8 @@ struct ReasoningSettingsView: View {
             "TurboCode adds no reasoning fields. The endpoint uses its launch and template configuration."
         case .requestTokenBudget:
             "TurboCode sends a thinking switch and the selected token budget with each request."
+        case .requestEffortLevel:
+            "TurboCode reads the levels the chat template accepts from the server's /props and sends the selected one as reasoning_effort with each request."
         }
     }
 
@@ -531,6 +559,25 @@ struct ReasoningSettingsView: View {
         guard let selectedReasoningModel else { return }
         reasoningDraft = selectedReasoningModel.reasoningConfiguration
         reasoningSaveError = nil
+    }
+
+    /// Read-only probe of the selected endpoint. Levels are stored only in the
+    /// draft; nothing is persisted until the user presses Apply.
+    private func detectEffortLevels() {
+        guard let url = selectedReasoningModel?.url else { return }
+        let modelID = selectedModelID
+        isDetectingEffortLevels = true
+        reasoningSaveError = nil
+        Task {
+            let levels = await LlamaServerRuntimeProbe.reasoningEffortLevels(from: url)
+            isDetectingEffortLevels = false
+            guard selectedModelID == modelID,
+                  reasoningDraft.mode == .requestEffortLevel else { return }
+            reasoningDraft.serverEffortLevels = levels
+            if levels == nil {
+                reasoningSaveError = "The server does not report reasoning effort levels in /props."
+            }
+        }
     }
 
     private func applyReasoningConfiguration() {

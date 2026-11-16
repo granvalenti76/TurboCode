@@ -666,6 +666,10 @@ nonisolated public enum RemoteReasoningTransport: String, Codable, Hashable, Sen
 nonisolated public enum RemoteReasoningControlMode: String, Codable, Hashable, Sendable {
     case serverManaged
     case requestTokenBudget
+    /// The chat template declares named effort levels (llama-server `/props`
+    /// `chat_template_caps.reasoning_effort_levels`); each request sends the
+    /// selected level as `chat_template_kwargs.reasoning_effort`.
+    case requestEffortLevel
 }
 
 /// Per-model request budgets used only when request-level control is enabled.
@@ -676,19 +680,25 @@ nonisolated public struct RemoteReasoningConfiguration: Codable, Hashable, Senda
     public var mediumTokenBudget: Int
     public var highTokenBudget: Int
     public var maximumTokenBudget: Int?
+    /// Levels detected from the server when `mode == .requestEffortLevel`,
+    /// in the server's spelling. Persisted so a turn never waits on `/props`;
+    /// Settings refreshes them when the user re-selects the mode.
+    public var serverEffortLevels: [String]?
 
     public init(
         mode: RemoteReasoningControlMode = .serverManaged,
         lowTokenBudget: Int = 512,
         mediumTokenBudget: Int = 2_048,
         highTokenBudget: Int = 8_192,
-        maximumTokenBudget: Int? = nil
+        maximumTokenBudget: Int? = nil,
+        serverEffortLevels: [String]? = nil
     ) {
         self.mode = mode
         self.lowTokenBudget = lowTokenBudget
         self.mediumTokenBudget = mediumTokenBudget
         self.highTokenBudget = highTokenBudget
         self.maximumTokenBudget = maximumTokenBudget
+        self.serverEffortLevels = serverEffortLevels
     }
 
     public static let serverManaged = RemoteReasoningConfiguration()
@@ -698,7 +708,7 @@ nonisolated public struct RemoteReasoningConfiguration: Codable, Hashable, Senda
 
     private enum CodingKeys: String, CodingKey {
         case mode, lowTokenBudget, mediumTokenBudget, highTokenBudget
-        case maximumTokenBudget
+        case maximumTokenBudget, serverEffortLevels
     }
 
     public init(from decoder: Decoder) throws {
@@ -711,9 +721,36 @@ nonisolated public struct RemoteReasoningConfiguration: Codable, Hashable, Senda
         highTokenBudget = try values.decodeIfPresent(Int.self, forKey: .highTokenBudget)
             ?? 8_192
         maximumTokenBudget = try values.decodeIfPresent(Int.self, forKey: .maximumTokenBudget)
+        serverEffortLevels = try values.decodeIfPresent([String].self, forKey: .serverEffortLevels)
+    }
+
+    /// Product levels the server can honour, in product order. Server levels
+    /// without a product counterpart (`minimal`, `max`) are not offered.
+    var supportedEfforts: [ReasoningEffort] {
+        guard mode == .requestEffortLevel, let serverEffortLevels else { return [] }
+        return ReasoningEffort.allCases.filter {
+            serverEffortLevels.contains($0.serverLevelName)
+        }
+    }
+
+    /// Maps a stored preference onto a level this server accepts. The
+    /// preference is shared with other models, so it may name a level this
+    /// template rejects (here `high`); the nearest lower level wins, then the
+    /// nearest higher one. Other modes return the preference unchanged.
+    func resolvedEffort(_ effort: ReasoningEffort) -> ReasoningEffort {
+        let supported = supportedEfforts
+        guard mode == .requestEffortLevel, !supported.isEmpty,
+              !supported.contains(effort) else { return effort }
+        let order = ReasoningEffort.allCases
+        let index = order.firstIndex(of: effort) ?? 0
+        return supported.last { order.firstIndex(of: $0)! < index }
+            ?? supported.first!
     }
 
     func validated() throws -> Self {
+        if mode == .requestEffortLevel, supportedEfforts.isEmpty {
+            throw RemoteReasoningConfigurationError.noEffortLevels
+        }
         let namedBudgets = [
             ("lowTokenBudget", lowTokenBudget),
             ("mediumTokenBudget", mediumTokenBudget),
@@ -732,11 +769,14 @@ nonisolated public struct RemoteReasoningConfiguration: Codable, Hashable, Senda
 
 nonisolated private enum RemoteReasoningConfigurationError: LocalizedError {
     case invalidBudget(String)
+    case noEffortLevels
 
     var errorDescription: String? {
         switch self {
         case .invalidBudget(let field):
             "\(field) must be between 1 and 1,048,576 tokens."
+        case .noEffortLevels:
+            "The server does not report reasoning effort levels in /props."
         }
     }
 }
