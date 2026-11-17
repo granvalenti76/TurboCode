@@ -347,6 +347,18 @@ struct GeneralSettingsView: View {
                     Text("Adds a button that opens a shell in the current workspace.")
                 }
             }
+
+            Section("Notifications") {
+                Toggle(isOn: s.replyNotificationsEnabled) {
+                    Text("Notify when a reply is ready")
+                    Text("Only while TurboCode is in the background.")
+                }
+                Toggle(isOn: s.replyNotificationExcerptEnabled) {
+                    Text("Show a preview of the reply")
+                    Text("Notifications can appear on the lock screen.")
+                }
+                .disabled(!settings.replyNotificationsEnabled)
+            }
         }
         .formStyle(.grouped)
     }

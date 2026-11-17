@@ -671,7 +671,8 @@ struct SidebarView: View {
             thread: thread,
             // Only the currently visible destination receives source-list
             // selection; an open chat stays available while browsing utilities.
-            isSelected: chatStore.route == .chat && thread.id == chatStore.activeThreadId,
+            isSelected: chatStore.route == .chat && thread.id == chatStore.displayedThreadID,
+            activity: chatStore.sidebarActivity(for: thread.id),
             onSelect: {
                 openThread(thread)
             },

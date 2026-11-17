@@ -35,6 +35,21 @@ public final class SettingsStore {
         didSet { UserDefaults.standard.set(projectTerminalEnabled, forKey: Self.projectTerminalKey) }
     }
     nonisolated static let projectTerminalKey = "projectTerminalEnabled"
+    /// Posts a system notification when a reply finishes while TurboCode is
+    /// in the background or another chat is on screen. On by default: it is
+    /// the only signal that a background reply is done.
+    public var replyNotificationsEnabled = true {
+        didSet { UserDefaults.standard.set(replyNotificationsEnabled, forKey: Self.replyNotificationsKey) }
+    }
+    nonisolated static let replyNotificationsKey = "replyNotificationsEnabled"
+    /// Includes a short excerpt of the reply. Notifications can appear on the
+    /// lock screen and in Notification Center, so the excerpt can be hidden.
+    public var replyNotificationExcerptEnabled = true {
+        didSet {
+            UserDefaults.standard.set(replyNotificationExcerptEnabled, forKey: Self.replyNotificationExcerptKey)
+        }
+    }
+    nonisolated static let replyNotificationExcerptKey = "replyNotificationExcerptEnabled"
     public var workspacePaths: [String] = []
     /// The newsroom taxonomy used by Editorial Desk metadata menus and
     /// persisted independently from provider and agent configuration.
@@ -138,6 +153,10 @@ public final class SettingsStore {
         }
         // Absent means off: existing users also start without the button.
         projectTerminalEnabled = defaults.bool(forKey: Self.projectTerminalKey)
+        // Absent means on, for existing users too.
+        replyNotificationsEnabled = defaults.object(forKey: Self.replyNotificationsKey) as? Bool ?? true
+        replyNotificationExcerptEnabled =
+            defaults.object(forKey: Self.replyNotificationExcerptKey) as? Bool ?? true
         reloadAgentTuning()
         reloadRemoteModels()
         loadEditorialDeskCatalog()
@@ -222,6 +241,8 @@ public final class SettingsStore {
         defaults.set(fontSize, forKey: "fontSize")
         defaults.set(maxChatWidth, forKey: "maxChatWidth")
         defaults.set(projectTerminalEnabled, forKey: Self.projectTerminalKey)
+        defaults.set(replyNotificationsEnabled, forKey: Self.replyNotificationsKey)
+        defaults.set(replyNotificationExcerptEnabled, forKey: Self.replyNotificationExcerptKey)
     }
 
     private func loadEditorialDeskCatalog() {

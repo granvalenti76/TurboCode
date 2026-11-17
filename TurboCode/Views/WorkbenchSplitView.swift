@@ -60,6 +60,22 @@ struct WorkbenchSplitView: View {
         .sheet(isPresented: customProfilesPresented) {
             CustomProfilesSheet()
         }
+        // TurboCode runs one chat at a time: a new chat stops the running
+        // reply, so it is never done silently.
+        .alert(
+            "Stop the running reply?",
+            isPresented: Binding(
+                get: { chatStore.pendingNewChatInterruption != nil },
+                set: { if !$0 { chatStore.pendingNewChatInterruption = nil } }
+            )
+        ) {
+            Button("Stop and Start New Chat", role: .destructive) {
+                Task { await chatStore.confirmNewChatInterruption() }
+            }
+            Button("Keep Working", role: .cancel) {}
+        } message: {
+            Text("TurboCode is still answering in another chat. Starting a new chat stops that reply.")
+        }
         // First launch: shown only while ~/.turbocode/models.json is missing.
         .sheet(isPresented: Binding(
             get: { chatStore.firstLaunchOnboarding != nil },

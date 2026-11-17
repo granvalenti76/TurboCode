@@ -21,6 +21,12 @@ struct TurboCodeApp: App {
         WindowGroup(id: "main") {
             WorkbenchSplitView()
                 .navigationTitle("")
+                // An external event, such as a click on a reply notification,
+                // would otherwise make the WindowGroup open a second main
+                // window on the same shared ChatStore. The open window claims
+                // every such event; the notification delegate then shows the
+                // chat in it.
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
                 .environment(chatStore)
                 .environment(settingsStore)
                 .environment(approvalStore)
@@ -38,6 +44,7 @@ struct TurboCodeApp: App {
                     // TurboCodeCore can remain independent of global UI stores.
                     await chatStore.applyAgentTuning(settingsStore.agentTuning)
                     chatStore.attachCowork(settingsStore.cowork)
+                    chatStore.attachReplyNotifications(settings: settingsStore)
                     appDelegate.cowork = settingsStore.cowork
                     chatStore.restoreActiveDomain(allowsCowork: settingsStore.cowork.isAvailable)
                     await chatStore.reloadRemoteModels()

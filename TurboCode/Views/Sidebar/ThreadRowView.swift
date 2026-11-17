@@ -5,6 +5,8 @@ import SwiftUI
 struct ThreadRowView: View {
     let thread: Conversation
     let isSelected: Bool
+    /// Running turn or unseen reply; drawn as a small dot before the title.
+    var activity: ThreadRowActivity = .idle
     let onSelect: () -> Void
     let onRename: (String) -> Void
     let onPin: () -> Void
@@ -26,6 +28,10 @@ struct ThreadRowView: View {
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                         .rotationEffect(.degrees(45))
+                }
+
+                if activity != .idle {
+                    ThreadActivityDot(activity: activity)
                 }
 
                 Group {
@@ -154,5 +160,41 @@ struct ThreadRowView: View {
             }
             Button("Delete", role: .destructive) { onDelete() }
         }
+    }
+}
+
+/// What a sidebar row reports about its chat's agent.
+enum ThreadRowActivity: Equatable {
+    case idle
+    /// The agent is working in this chat right now.
+    case running
+    /// A reply finished while the user was elsewhere.
+    case unread
+}
+
+/// A discreet status dot: it breathes while the agent works and stays still
+/// for an unseen reply. Reduce Motion keeps it still in both states.
+private struct ThreadActivityDot: View {
+    let activity: ThreadRowActivity
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Group {
+            if activity == .running && !reduceMotion {
+                dot.phaseAnimator([1.0, 0.35]) { content, opacity in
+                    content.opacity(opacity)
+                } animation: { _ in .easeInOut(duration: 0.9) }
+            } else {
+                dot
+            }
+        }
+        .help(activity == .running ? "TurboCode is working in this chat" : "New reply")
+        .accessibilityLabel(activity == .running ? "Working" : "New reply")
+    }
+
+    private var dot: some View {
+        Circle()
+            .fill(Color.accentColor)
+            .frame(width: 7, height: 7)
     }
 }
