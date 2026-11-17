@@ -136,8 +136,27 @@ struct ChatArchitectureTests {
         )
         #expect(
             SettingsSection.allCases.map(\.rawValue)
-                == ["general", "editorialDesk", "providers", "reasoning", "agents", "cowork", "shortcuts"]
+                == [
+                    "general", "shortcuts", "providers", "reasoning", "routing",
+                    "behavior", "execution", "cowork", "editorialDesk", "permissions",
+                ]
         )
+    }
+
+    @Test("Settings panes form five purpose groups in sidebar order")
+    func settingsPanesFormOrderedPurposeGroups() {
+        #expect(
+            SettingsGroup.allCases.map(\.rawValue)
+                == ["turboCode", "intelligence", "agents", "workspaces", "trust"]
+        )
+        // Flattening the groups must reproduce the case order exactly: every
+        // pane appears once, and no group interleaves with another.
+        #expect(SettingsGroup.allCases.flatMap(\.sections) == SettingsSection.allCases)
+        #expect(SettingsGroup.allCases.allSatisfy { !$0.sections.isEmpty })
+        #expect(SettingsSection.permissions.group == .trust)
+        // The Studio pane keeps its `cowork` source name but never shows it.
+        #expect(SettingsSection.cowork.title == "Studio")
+        #expect(SettingsSection.allCases.allSatisfy { !$0.summary.isEmpty })
     }
 
     @Test("Runtime rejects an incomplete skill command before inference")

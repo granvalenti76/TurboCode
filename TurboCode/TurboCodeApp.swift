@@ -176,7 +176,7 @@ struct TurboCodeApp: App {
 
         // Native macOS Settings window
         Settings {
-            SettingsTabView()
+            SettingsRootView()
                 .environment(chatStore)
                 .environment(settingsStore)
         }

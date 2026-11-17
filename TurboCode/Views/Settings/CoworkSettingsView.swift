@@ -19,6 +19,8 @@ struct CoworkSettingsView: View {
     var body: some View {
         @Bindable var cowork = cowork
         Form {
+            SettingsPaneHeader(section: .cowork)
+
             Section {
                 Toggle("Enable Studio", isOn: enabledBinding)
                 Text("Studio runs builds, scripts, and artifacts in an isolated Linux virtual machine. Your folders are shared read-only, and files reach your Mac only after you approve an export.")
