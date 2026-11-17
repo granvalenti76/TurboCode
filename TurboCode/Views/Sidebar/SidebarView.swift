@@ -28,7 +28,7 @@ struct SidebarView: View {
     @State private var threadIDsBeingRemoved: Set<String> = []
     @State private var exportErrorMessage: String?
     @State private var sharePresenter = ConversationExportService.SharePresenter()
-    @State private var visibleChatLimit = SidebarConversationDisclosure.codingBatchSize
+    @State private var visibleChatLimit = SidebarConversationDisclosure.batchSize
     @State private var expandedWorkspacePath: String?
 
     var body: some View {
@@ -584,9 +584,9 @@ struct SidebarView: View {
         }
     }
 
-    /// Rows revealed per step in the active domain's chat list.
+    /// Rows revealed per step; the same in Coding and Studio.
     private var chatBatchSize: Int {
-        SidebarConversationDisclosure.batchSize(for: chatStore.activeDomain)
+        SidebarConversationDisclosure.batchSize
     }
 
     private func chatDisclosureButton(totalCount: Int, indented: Bool) -> some View {
@@ -704,16 +704,11 @@ struct SidebarView: View {
 /// it independent from SwiftUI state makes the batch contract reviewable and
 /// prevents search results from opening without a visible selected row.
 ///
-/// The batch depends on the domain. Coding nests chats under each workspace,
-/// so a short five-row batch keeps several workspaces on screen. Studio has one
-/// flat list and nothing below it to protect, so it shows ten before collapsing.
+/// Both domains show five chats, then reveal five more per step. Studio used
+/// to show ten because its list is flat, but a long list pushed Configuration
+/// out of view and read as noise; one batch size keeps the sidebar uniform.
 nonisolated enum SidebarConversationDisclosure {
-    static let codingBatchSize = 5
-    static let studioBatchSize = 10
-
-    static func batchSize(for domain: SessionDomain) -> Int {
-        domain == .cowork ? studioBatchSize : codingBatchSize
-    }
+    static let batchSize = 5
 
     static func visibleIDs(in threads: [Conversation], limit: Int, batchSize: Int) -> [String] {
         Array(threads.prefix(max(batchSize, limit))).map(\.id)
