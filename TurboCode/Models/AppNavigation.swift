@@ -108,6 +108,48 @@ public enum SettingsSection: String, Sendable, Hashable, CaseIterable {
         case .permissions: "What agents can reach outside your workspace. Each item stays off until you turn it on."
         }
     }
+
+    /// Words a user may type to find this pane: its control labels plus
+    /// common synonyms. Keep them in step with the pane's controls, so a
+    /// search for a setting lands on the pane that now owns it.
+    public var searchKeywords: [String] {
+        switch self {
+        case .general:
+            ["appearance", "theme", "dark", "light", "sidebar", "translucent", "chat text size", "font", "content width", "reading width"]
+        case .shortcuts:
+            ["keyboard", "shortcut", "hotkey", "navigation", "actions", "views"]
+        case .providers:
+            ["DeepSeek", "API key", "credential", "Keychain", "models.json", "endpoint"]
+        case .reasoning:
+            ["thinking", "effort", "levels", "low", "medium", "high", "token budget", "props", "remote model"]
+        case .routing:
+            ["tools", "on-device", "classifier", "download", "KV cache", "model"]
+        case .behavior:
+            ["responses", "detail", "concise", "balanced", "detailed", "verify source changes", "delegated worker", "delegation", "background", "skills", "discover user skills"]
+        case .execution:
+            ["command timeout", "maximum tool output", "limits", "reload configuration", "bash", "shell"]
+        case .cowork:
+            ["VM", "virtual machine", "Linux", "processors", "CPU", "memory", "disk usage", "network access", "reset", "remove", "install"]
+        case .editorialDesk:
+            ["sections", "article types", "editorial", "writing", "symbol", "color"]
+        case .permissions:
+            ["network", "internet", "Xcode MCP", "Safari MCP", "plugins", "third-party", "Node.js", "security", "access", "privacy"]
+        }
+    }
+
+    /// Whether this pane matches a sidebar search.
+    ///
+    /// Every whitespace-separated term must appear in the title, summary, or a
+    /// keyword, ignoring case and diacritics, so "xcode mcp" narrows while a
+    /// single word stays broad. An empty query matches every pane.
+    public func matches(searchQuery query: String) -> Bool {
+        let terms = query.split(whereSeparator: \.isWhitespace)
+        guard !terms.isEmpty else { return true }
+        let haystack = ([title, summary] + searchKeywords).joined(separator: " ")
+        return terms.allSatisfy {
+            haystack.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        }
+    }
 }
 
 /// Purpose groups shown as sidebar sections in Settings, in display order.

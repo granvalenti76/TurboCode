@@ -14,20 +14,34 @@ struct SettingsRootView: View {
     @Environment(ChatStore.self) private var chatStore
     @State private var selection: SettingsSection? = .general
     @State private var agentTuningPublish: Task<Void, Never>?
+    @State private var searchQuery = ""
 
     var body: some View {
         let current = selection ?? .general
+        let results = SettingsGroup.allCases.compactMap { group -> (SettingsGroup, [SettingsSection])? in
+            let sections = group.sections.filter { $0.matches(searchQuery: searchQuery) }
+            return sections.isEmpty ? nil : (group, sections)
+        }
         NavigationSplitView {
             List(selection: $selection) {
-                ForEach(SettingsGroup.allCases, id: \.self) { group in
+                // Groups without a match disappear, so the sidebar shows only
+                // where the searched setting lives. The detail keeps the
+                // current pane; searching never changes the selection.
+                ForEach(results, id: \.0) { group, sections in
                     Section(group.title) {
-                        ForEach(group.sections, id: \.self) { section in
+                        ForEach(sections, id: \.self) { section in
                             Label(section.title, systemImage: section.systemImage)
                                 .tag(section)
                         }
                     }
                 }
             }
+            .overlay {
+                if results.isEmpty {
+                    ContentUnavailableView.search(text: searchQuery)
+                }
+            }
+            .searchable(text: $searchQuery, placement: .sidebar, prompt: "Search")
             .navigationSplitViewColumnWidth(220)
             .toolbar(removing: .sidebarToggle)
         } detail: {

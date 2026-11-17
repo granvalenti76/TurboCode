@@ -159,6 +159,23 @@ struct ChatArchitectureTests {
         #expect(SettingsSection.allCases.allSatisfy { !$0.summary.isEmpty })
     }
 
+    @Test("Settings search finds the pane that owns a moved setting")
+    func settingsSearchFindsOwningPane() {
+        func panes(_ query: String) -> [SettingsSection] {
+            SettingsSection.allCases.filter { $0.matches(searchQuery: query) }
+        }
+        #expect(panes("") == SettingsSection.allCases)
+        #expect(panes("   ") == SettingsSection.allCases)
+        // Every term must match, case-insensitively.
+        #expect(panes("xcode MCP") == [.permissions])
+        #expect(panes("command timeout") == [.execution])
+        #expect(panes("api key") == [.providers])
+        // Studio is found by its user-visible name, not its source name.
+        #expect(panes("virtual machine") == [.cowork])
+        #expect(panes("cowork").isEmpty)
+        #expect(panes("zzz-no-such-setting").isEmpty)
+    }
+
     @Test("Runtime rejects an incomplete skill command before inference")
     func runtimeRejectsIncompleteSkillCommand() {
         let runtime = ModelRuntimeStore()
