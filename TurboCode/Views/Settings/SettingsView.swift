@@ -340,6 +340,13 @@ struct GeneralSettingsView: View {
                         .frame(width: 40)
                 }
             }
+
+            Section("Workbench") {
+                Toggle(isOn: s.projectTerminalEnabled) {
+                    Text("Show project terminal")
+                    Text("Adds a button that opens a shell in the current workspace.")
+                }
+            }
         }
         .formStyle(.grouped)
     }

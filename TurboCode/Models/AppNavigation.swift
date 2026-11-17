@@ -114,7 +114,7 @@ public enum SettingsSection: String, Sendable, Hashable, CaseIterable {
     public var searchKeywords: [String] {
         switch self {
         case .general:
-            ["appearance", "theme", "dark", "light", "sidebar", "translucent", "chat text size", "font", "content width", "reading width"]
+            ["appearance", "theme", "dark", "light", "sidebar", "translucent", "chat text size", "font", "content width", "reading width", "workbench", "terminal", "shell", "console"]
         case .shortcuts:
             ["keyboard", "shortcut", "hotkey", "navigation", "actions", "views"]
         case .providers:

@@ -4,6 +4,7 @@ import SwiftUI
 
 struct WorkbenchSplitView: View {
     @Environment(ChatStore.self) private var chatStore
+    @Environment(SettingsStore.self) private var settings
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     private let sidebarWidth: Double = 268
@@ -106,6 +107,11 @@ struct WorkbenchSplitView: View {
         .onChange(of: columnVisibility) { _, visibility in
             chatStore.leftSidebarCollapsed = visibility == .detailOnly
         }
+        .onChange(of: settings.projectTerminalEnabled) { _, enabled in
+            // Turning the terminal off in Settings closes an open panel, which
+            // dismantles the view and terminates its shell.
+            if !enabled { chatStore.terminalPresented = false }
+        }
         .onChange(of: chatStore.workspaceRoot) { previousRoot, workspaceRoot in
             // A pseudo-terminal belongs to exactly one workspace. Closing the
             // project also tears down its utility area and child shell.
@@ -157,26 +163,28 @@ struct WorkbenchSplitView: View {
                     ? "Hide delegated task activity"
                     : "Show delegated task activity")
 
-                Toggle(isOn: Binding(
-                    get: { chatStore.terminalPresented },
-                    set: { isPresented in
-                        if isPresented != chatStore.terminalPresented {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                chatStore.toggleTerminal()
+                if settings.projectTerminalEnabled {
+                    Toggle(isOn: Binding(
+                        get: { chatStore.terminalPresented },
+                        set: { isPresented in
+                            if isPresented != chatStore.terminalPresented {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    chatStore.toggleTerminal()
+                                }
                             }
                         }
+                    )) {
+                        Label("Project terminal", systemImage: "terminal")
                     }
-                )) {
-                    Label("Project terminal", systemImage: "terminal")
+                    .toggleStyle(.button)
+                    .labelStyle(.iconOnly)
+                    .disabled(chatStore.workspaceRoot.isEmpty || chatStore.route != .chat)
+                    .help(chatStore.workspaceRoot.isEmpty
+                        ? "Choose a workspace to open its terminal"
+                        : chatStore.terminalPresented
+                            ? "Close project terminal"
+                            : "Open project terminal")
                 }
-                .toggleStyle(.button)
-                .labelStyle(.iconOnly)
-                .disabled(chatStore.workspaceRoot.isEmpty || chatStore.route != .chat)
-                .help(chatStore.workspaceRoot.isEmpty
-                    ? "Choose a workspace to open its terminal"
-                    : chatStore.terminalPresented
-                        ? "Close project terminal"
-                        : "Open project terminal")
                 }
             }
 
@@ -250,6 +258,7 @@ struct WorkbenchSplitView: View {
     private var workbenchCanvas: some View {
         if chatStore.terminalPresented,
            let configuration = EmbeddedTerminalLaunchConfiguration.resolve(
+               isEnabled: settings.projectTerminalEnabled,
                workspacePath: chatStore.workspaceRoot
            ) {
             VSplitView {

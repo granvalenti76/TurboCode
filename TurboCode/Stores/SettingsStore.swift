@@ -27,6 +27,14 @@ public final class SettingsStore {
     public var maxChatWidth: Double = 1440.0 {
         didSet { UserDefaults.standard.set(maxChatWidth, forKey: "maxChatWidth") }
     }
+    /// Shows the project terminal button in Coding sessions. Off by default:
+    /// few users need a shell inside TurboCode, and the button was noise.
+    /// The shell itself starts only when the panel opens, so this setting
+    /// affects the toolbar, not idle memory.
+    public var projectTerminalEnabled = false {
+        didSet { UserDefaults.standard.set(projectTerminalEnabled, forKey: Self.projectTerminalKey) }
+    }
+    nonisolated static let projectTerminalKey = "projectTerminalEnabled"
     public var workspacePaths: [String] = []
     /// The newsroom taxonomy used by Editorial Desk metadata menus and
     /// persisted independently from provider and agent configuration.
@@ -128,6 +136,8 @@ public final class SettingsStore {
         } else {
             maxChatWidth = savedMaxWidth == 0 ? 1440.0 : savedMaxWidth
         }
+        // Absent means off: existing users also start without the button.
+        projectTerminalEnabled = defaults.bool(forKey: Self.projectTerminalKey)
         reloadAgentTuning()
         reloadRemoteModels()
         loadEditorialDeskCatalog()
@@ -211,6 +221,7 @@ public final class SettingsStore {
         defaults.set(language, forKey: "language")
         defaults.set(fontSize, forKey: "fontSize")
         defaults.set(maxChatWidth, forKey: "maxChatWidth")
+        defaults.set(projectTerminalEnabled, forKey: Self.projectTerminalKey)
     }
 
     private func loadEditorialDeskCatalog() {
