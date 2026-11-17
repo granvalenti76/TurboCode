@@ -3,6 +3,7 @@ import ContainerizationEXT4
 import ContainerizationExtras
 import ContainerizationOCI
 import Foundation
+import os
 import Synchronization
 import SystemPackage
 
@@ -19,6 +20,7 @@ import SystemPackage
 /// this runtime only boots what is already installed.
 actor ContainerizationCoworkRuntime: CoworkVMRuntime {
     nonisolated static let containerID = "cowork"
+    nonisolated static let log = Logger(subsystem: "art.granvalenti.turbocode", category: "StudioVM")
     nonisolated static let hostname = "cowork"
     /// Sparse capacity of the writable layer; actual disk use grows on demand.
     nonisolated static let writableLayerBytes: UInt64 = 16 * 1_024 * 1_024 * 1_024
@@ -48,7 +50,9 @@ actor ContainerizationCoworkRuntime: CoworkVMRuntime {
     }
 
     func start(_ configuration: CoworkVMConfiguration) async throws {
-        try await lifecycle.run { try await self.performStart(configuration) }
+        try await reporting(.booting) {
+            try await self.lifecycle.run { try await self.performStart(configuration) }
+        }
     }
 
     /// Only the launch is queued, so a command never starts in a VM that is
@@ -56,15 +60,42 @@ actor ContainerizationCoworkRuntime: CoworkVMRuntime {
     /// queue: a stop must not wait for long-running commands, it ends them.
     func exec(_ request: CoworkExecRequest) async throws -> AsyncThrowingStream<CoworkExecEvent, any Error> {
         let request = try request.validated()
-        return try await lifecycle.run { try await self.launch(request) }
+        return try await reporting(.startingCommand) {
+            try await self.lifecycle.run { try await self.launch(request) }
+        }
     }
 
     func stop() async throws {
-        try await lifecycle.run { try await self.performStop() }
+        try await reporting(.stopping) {
+            try await self.lifecycle.run { try await self.performStop() }
+        }
     }
 
     func reset() async throws {
-        try await lifecycle.run { try await self.performReset() }
+        try await reporting(.resetting) {
+            try await self.lifecycle.run { try await self.performReset() }
+        }
+    }
+
+    /// Every public entry point goes through here. Containerization and its
+    /// guest agent throw gRPC errors whose bridged description is only "error
+    /// 1", which hid the cause of a failing `vm_exec`. The full description is
+    /// logged (`log show --predicate 'category == "StudioVM"'`) and returned
+    /// as `CoworkVMError.failed`, so no Containerization type leaves this
+    /// adapter. The script itself is never logged.
+    private func reporting<T: Sendable>(
+        _ stage: CoworkVMStage,
+        _ operation: () async throws -> T
+    ) async throws -> T {
+        do {
+            return try await operation()
+        } catch {
+            let normalized = CoworkVMError.normalizing(error, during: stage)
+            if case CoworkVMError.failed(_, let detail) = normalized {
+                Self.log.error("Studio VM failed while \(stage.description, privacy: .public): \(detail, privacy: .public)")
+            }
+            throw normalized
+        }
     }
 
     // MARK: - Queued operations

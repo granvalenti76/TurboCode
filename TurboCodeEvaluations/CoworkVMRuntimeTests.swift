@@ -122,6 +122,36 @@ struct CoworkVMRuntimeTests {
         #expect(!message.localizedCaseInsensitiveContains("timed out"))
     }
 
+    /// Stands in for GRPCCore.RPCError: a struct error whose bridged
+    /// `localizedDescription` says only "error 1".
+    private struct GuestAgentError: Error, CustomStringConvertible {
+        var description: String { "unavailable: \"guest agent closed the connection\"" }
+    }
+
+    @Test("A guest agent failure reaches the model with its real code and message")
+    func guestFailureKeepsItsDescription() {
+        #expect(GuestAgentError().localizedDescription.contains("error 1"))
+
+        let normalized = CoworkVMError.normalizing(GuestAgentError(), during: .startingCommand)
+        #expect(normalized as? CoworkVMError == .failed(
+            stage: .startingCommand,
+            detail: "unavailable: \"guest agent closed the connection\""
+        ))
+        let message = normalized.localizedDescription
+        #expect(message.contains("starting the command"))
+        #expect(message.contains("guest agent closed the connection"))
+        #expect(!message.contains("error 1"))
+    }
+
+    @Test("Normalization keeps cancellation and known VM errors unchanged")
+    func normalizationPassesThroughKnownErrors() {
+        #expect(CoworkVMError.normalizing(CancellationError(), during: .booting) is CancellationError)
+        #expect(
+            CoworkVMError.normalizing(CoworkVMError.notRunning, during: .booting) as? CoworkVMError
+                == .notRunning
+        )
+    }
+
     // MARK: Mounts
 
     @Test("Only the outbox is shared when no input folder is selected")

@@ -109,6 +109,11 @@ nonisolated enum CoworkVMError: LocalizedError, Equatable {
     case interrupted
     case invalidRequest(String)
     case unsafeInputFolder(String)
+    /// The VM or its guest agent failed during `stage`. `detail` is the
+    /// underlying error's full description (for a gRPC error, its code and
+    /// message), which a bridged `localizedDescription` would reduce to
+    /// "error 1".
+    case failed(stage: CoworkVMStage, detail: String)
 
     var errorDescription: String? {
         switch self {
@@ -117,6 +122,32 @@ nonisolated enum CoworkVMError: LocalizedError, Equatable {
         case .interrupted: "The Studio VM was stopped while the command ran."
         case .invalidRequest(let detail): detail
         case .unsafeInputFolder(let path): "\(path) cannot be shared with the Studio VM."
+        case .failed(let stage, let detail): "The Studio VM failed while \(stage.description): \(detail)"
+        }
+    }
+
+    /// Normalizes any runtime failure into a `CoworkVMError`, so tools report
+    /// it to the model as text and the turn continues. Cancellation passes
+    /// through unchanged: Stop must still end the turn.
+    static func normalizing(_ error: any Error, during stage: CoworkVMStage) -> any Error {
+        if error is CoworkVMError || error is CancellationError { return error }
+        return CoworkVMError.failed(stage: stage, detail: String(describing: error))
+    }
+}
+
+/// The runtime operation a `CoworkVMError.failed` happened in.
+nonisolated enum CoworkVMStage: String, Sendable, Equatable, CustomStringConvertible {
+    case booting
+    case startingCommand
+    case stopping
+    case resetting
+
+    var description: String {
+        switch self {
+        case .booting: "starting the VM"
+        case .startingCommand: "starting the command"
+        case .stopping: "stopping the VM"
+        case .resetting: "resetting the VM"
         }
     }
 }
