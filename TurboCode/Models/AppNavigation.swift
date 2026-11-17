@@ -8,7 +8,6 @@ import Foundation
 /// case makes it possible for shell navigation to expose that destination.
 public enum AppRoute: String, Sendable, Hashable, CaseIterable {
     case chat
-    case tools
     case skills
     /// The library of files Cowork sessions placed in their outboxes. Offered
     /// only in the Cowork domain; Coding results live in the workspace.

@@ -23,7 +23,6 @@ final class ChatApplicationAssembly {
     let modelRuntimeStore: ModelRuntimeStore
     let agentRuntime: AgentRuntime
     let llmRuntime: LLMRuntime
-    let onDeviceToolCallingSupported: Bool
     let responseCoordinator: ChatResponseCoordinator
     let sessionCoordinator: ConversationSessionCoordinator
     let conversationPersistence: ConversationPersistenceService
@@ -293,8 +292,6 @@ final class ChatApplicationAssembly {
         self.modelRuntimeStore = modelRuntime
         self.agentRuntime = agentRuntime
         self.llmRuntime = llmRuntime
-        self.onDeviceToolCallingSupported =
-            FoundationModelsCapabilities.onDeviceSupportsToolCalling
         self.responseCoordinator = responseCoordinator
         self.sessionCoordinator = sessionCoordinator
         self.conversationPersistence = conversationPersistence

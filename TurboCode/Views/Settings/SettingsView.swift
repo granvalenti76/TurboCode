@@ -832,7 +832,6 @@ struct ShortcutSettingsView: View {
                 ShortcutRow(label: "Settings", shortcut: "⌘,")
                 ShortcutRow(label: "Chat", shortcut: "⌘1")
                 ShortcutRow(label: "Custom Profiles", shortcut: "⌘2")
-                ShortcutRow(label: "Tools", shortcut: "⌘3")
             }
         }
         .formStyle(.grouped)

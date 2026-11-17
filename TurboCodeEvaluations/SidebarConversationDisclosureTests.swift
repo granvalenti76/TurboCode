@@ -71,7 +71,7 @@ struct SidebarConversationDisclosureTests {
         store.timelineStore.restore([
             ChatBlock(kind: .assistant, text: "Stale timeline")
         ])
-        store.workbenchStore.route = .tools
+        store.workbenchStore.route = .connectors
 
         await store.openThread(conversation.id)
 

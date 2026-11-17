@@ -4,14 +4,14 @@ import Testing
 @MainActor
 @Suite("Custom Profiles presentation")
 struct CustomProfilesPresentationTests {
-    @Test("Opening Custom Profiles preserves Tools underneath the sheet")
-    func toolsRemainTheUnderlyingDestination() {
+    @Test("Opening Custom Profiles preserves Connectors underneath the sheet")
+    func connectorsRemainTheUnderlyingDestination() {
         let store = ChatStore(conversationRepository: CustomProfilesConversationRepository())
-        store.setRoute(.tools)
+        store.setRoute(.connectors)
 
         store.setRoute(.skills)
 
-        #expect(store.route == .tools)
+        #expect(store.route == .connectors)
         #expect(store.isCustomProfilesPresented)
     }
 
@@ -32,9 +32,9 @@ struct CustomProfilesPresentationTests {
         let store = ChatStore(conversationRepository: CustomProfilesConversationRepository())
         store.setRoute(.skills)
 
-        store.setRoute(.tools)
+        store.setRoute(.connectors)
 
-        #expect(store.route == .tools)
+        #expect(store.route == .connectors)
         #expect(!store.isCustomProfilesPresented)
     }
 }

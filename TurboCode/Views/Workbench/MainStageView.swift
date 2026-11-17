@@ -19,8 +19,6 @@ struct MainStageView: View {
                             .background(AppSurface.canvas)
                     }
                 }
-            case .tools:
-                ToolsView()
             case .artifacts:
                 CoworkArtifactsLibraryView()
             case .connectors:

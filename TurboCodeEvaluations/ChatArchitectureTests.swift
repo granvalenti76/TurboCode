@@ -43,15 +43,15 @@ struct ChatArchitectureTests {
     @Test("Workbench profile presentation preserves the underlying route")
     func workbenchProfilePresentationIsModal() {
         let workbench = WorkbenchStore()
-        workbench.route = .tools
+        workbench.route = .connectors
         workbench.setRoute(.skills)
 
-        #expect(workbench.route == .tools)
+        #expect(workbench.route == .connectors)
         #expect(workbench.isCustomProfilesPresented)
 
         workbench.rightPanelMode = .changes
-        workbench.setRoute(.tools)
-        #expect(workbench.route == .tools)
+        workbench.setRoute(.connectors)
+        #expect(workbench.route == .connectors)
         #expect(workbench.rightPanelMode == nil)
     }
 
@@ -78,7 +78,7 @@ struct ChatArchitectureTests {
         #expect(workbench.rightPanelMode == .artifacts)
 
         // Another destination closes the inspector for good, as before.
-        workbench.setRoute(.tools)
+        workbench.setRoute(.connectors)
         workbench.setRoute(.chat)
         #expect(workbench.rightPanelMode == nil)
 
@@ -119,7 +119,7 @@ struct ChatArchitectureTests {
         #expect(workbench.rightPanelMode == .artifacts)
 
         workbench.setCoworkArtifactsExpanded(true)
-        workbench.setRoute(.tools)
+        workbench.setRoute(.connectors)
         workbench.setRoute(.chat)
         #expect(!workbench.coworkArtifactsExpanded)
         #expect(workbench.rightPanelMode == nil)
@@ -129,7 +129,7 @@ struct ChatArchitectureTests {
     func publicShellContainsOnlyImplementedSurfaces() {
         // These exact lists are the release-boundary tripwire: a new case must
         // arrive with a real consumer and an intentional test update.
-        #expect(AppRoute.allCases.map(\.rawValue) == ["chat", "tools", "skills", "artifacts"])
+        #expect(AppRoute.allCases.map(\.rawValue) == ["chat", "skills", "artifacts", "connectors"])
         #expect(
             RightPanelMode.allCases.map(\.rawValue)
                 == ["activity", "changes", "commit", "workspaceListing", "artifacts"]

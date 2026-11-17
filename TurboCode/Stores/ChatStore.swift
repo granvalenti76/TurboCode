@@ -134,9 +134,6 @@ public final class ChatStore {
     var modelRuntimeStore: ModelRuntimeStore { assembly.modelRuntimeStore }
     var agentRuntime: AgentRuntime { assembly.agentRuntime }
     private var llmRuntime: LLMRuntime { assembly.llmRuntime }
-    var onDeviceToolCallingSupported: Bool {
-        assembly.onDeviceToolCallingSupported
-    }
     var responseCoordinator: ChatResponseCoordinator {
         assembly.responseCoordinator
     }

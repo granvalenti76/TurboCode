@@ -40,7 +40,7 @@ struct EmbeddedTerminalTests {
         workbench.toggleTerminal()
         #expect(workbench.terminalPresented)
 
-        workbench.setRoute(.tools)
+        workbench.setRoute(.connectors)
         #expect(!workbench.terminalPresented)
     }
 }

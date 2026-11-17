@@ -99,9 +99,6 @@ struct TurboCodeApp: App {
 
                 Button("Custom Profiles") { chatStore.setRoute(.skills) }
                     .keyboardShortcut("2", modifiers: [.command])
-
-                Button("Tools") { chatStore.setRoute(.tools) }
-                    .keyboardShortcut("3", modifiers: [.command])
             }
 
 #if DEBUG

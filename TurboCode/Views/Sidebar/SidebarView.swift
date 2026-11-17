@@ -21,6 +21,7 @@ private struct SidebarWindowBackdrop: NSViewRepresentable {
 struct SidebarView: View {
     @Environment(ChatStore.self) private var chatStore
     @Environment(SettingsStore.self) private var settings
+    @Environment(\.openSettings) private var openSettings
     @State private var isSessionSearchPresented = false
     @State private var workspacePendingRemoval: String?
     @State private var workspacePathsBeingRemoved: Set<String> = []
@@ -245,12 +246,16 @@ struct SidebarView: View {
         Section {
             ForEach(UtilityItem.allCases, id: \.self) { item in
                 Button {
-                    chatStore.setRoute(item.route)
+                    if let route = item.route {
+                        chatStore.setRoute(route)
+                    } else {
+                        openSettings()
+                    }
                 } label: {
                     navigationLabel(
                         icon: item.icon,
                         title: item.label,
-                        isSelected: chatStore.route == item.route
+                        isSelected: item.route.map { chatStore.route == $0 } ?? false
                     )
                 }
                 .buttonStyle(.plain)
@@ -264,31 +269,32 @@ struct SidebarView: View {
     }
 
     private enum UtilityItem: CaseIterable {
-        case tools
         case connectors
         case skills
+        case settings
 
         var label: String {
             switch self {
-            case .tools: "Tools"
             case .connectors: "Connectors"
             case .skills: "Profiles"
+            case .settings: "Settings"
             }
         }
         var icon: String {
             switch self {
-            // Tools is a capability catalog and matrix, so a neutral grid is
-            // more faithful than a physical construction or settings metaphor.
-            case .tools: return "square.grid.2x2"
             case .connectors: return "powerplug"
             case .skills: return "doc.text"
+            case .settings: return "gearshape"
             }
         }
-        var route: AppRoute {
+        /// The main-window destination, or nil for Settings, which opens its
+        /// own window and so is never shown as the selected row. It replaces
+        /// the former Tools catalog so Settings is reachable without the menu.
+        var route: AppRoute? {
             switch self {
-            case .tools: .tools
             case .connectors: .connectors
             case .skills: .skills
+            case .settings: nil
             }
         }
     }

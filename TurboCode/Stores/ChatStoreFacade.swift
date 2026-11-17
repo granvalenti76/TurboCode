@@ -213,8 +213,6 @@ extension ChatStore {
         modelRuntimeStore.dynamicRoutingPresentationRevision
     }
 
-    var dynamicRoutingToolNames: [String] { modelRuntimeStore.dynamicRoutingToolNames }
-
     var dynamicRoutingPresentedToolNames: [String] {
         modelRuntimeStore.dynamicRoutingPresentedToolNames
     }
@@ -284,10 +282,6 @@ extension ChatStore {
     /// conversation, including the skills of its enabled connectors.
     var availableSkills: [TurboCodeSkillDefinition] {
         activeSkillCatalog
-    }
-
-    var onDeviceSupportsToolCalling: Bool {
-        onDeviceToolCallingSupported
     }
 
     public var isDelegating: Bool {
