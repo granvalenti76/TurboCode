@@ -30,8 +30,12 @@ struct SettingsRootView: View {
                 ForEach(results, id: \.0) { group, sections in
                     Section(group.title) {
                         ForEach(sections, id: \.self) { section in
-                            Label(section.title, systemImage: section.systemImage)
-                                .tag(section)
+                            Label {
+                                Text(section.title)
+                            } icon: {
+                                SettingsIconTile(section: section)
+                            }
+                            .tag(section)
                         }
                     }
                 }
@@ -42,16 +46,28 @@ struct SettingsRootView: View {
                 }
             }
             .searchable(text: $searchQuery, placement: .sidebar, prompt: "Search")
-            .navigationSplitViewColumnWidth(220)
+            .listStyle(.sidebar)
+            // The Settings window ignored navigationSplitViewColumnWidth alone
+            // (fixed, then min/ideal/max) and kept the sidebar so narrow that
+            // "Keyboard Shortcuts" truncated. A minimum frame on the sidebar
+            // content raises the split view's own minimum, which it honors.
+            .frame(minWidth: 240)
+            .navigationSplitViewColumnWidth(min: 240, ideal: 240, max: 280)
             .toolbar(removing: .sidebarToggle)
         } detail: {
             pane(for: current)
+                // The title still names the window for the Window menu and
+                // accessibility, but the toolbar does not draw it: the pane
+                // header already shows it, and drawing both repeated it.
                 .navigationTitle(current.title)
+                .toolbar(removing: .title)
                 // Panes link to each other (Permissions → Studio) through
                 // this action instead of owning the selection.
                 .environment(\.openSettingsSection, OpenSettingsSectionAction { selection = $0 })
         }
-        .frame(minWidth: 760, minHeight: 560)
+        // The Settings scene opens at the ideal size; the minimum keeps the
+        // fixed sidebar plus a readable pane.
+        .frame(minWidth: 820, idealWidth: 940, minHeight: 560, idealHeight: 700)
         .onChange(of: settings.agentTuning) { _, tuning in
             // Behavior, Execution and Permissions all edit `agentTuning`, so
             // the runtime publish lives here rather than in one pane. It runs
@@ -85,6 +101,39 @@ struct SettingsRootView: View {
     }
 }
 
+// MARK: - Icon tiles
+
+extension SettingsGroup {
+    /// Tile color shared by every pane of the group, so the sidebar reads as
+    /// five colored bands. Kept in the view layer: the model stays free of
+    /// SwiftUI.
+    var tileColor: Color {
+        switch self {
+        case .turboCode: .gray
+        case .intelligence: .blue
+        case .agents: .purple
+        case .workspaces: .green
+        case .trust: .orange
+        }
+    }
+}
+
+/// A white symbol on a rounded tile in its group's color, as in System
+/// Settings. The tile is decorative; the row's title carries the meaning.
+struct SettingsIconTile: View {
+    let section: SettingsSection
+    var size: CGFloat = 20
+
+    var body: some View {
+        Image(systemName: section.systemImage)
+            .font(.system(size: size * 0.55, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(section.group.tileColor.gradient, in: .rect(cornerRadius: size * 0.225))
+            .accessibilityHidden(true)
+    }
+}
+
 // MARK: - Pane header
 
 /// The first section of every pane's `Form`: symbol, title, and the one
@@ -95,12 +144,7 @@ struct SettingsPaneHeader: View {
     var body: some View {
         Section {
             HStack(spacing: 12) {
-                Image(systemName: section.systemImage)
-                    .font(.title2)
-                    .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
-                    .background(.tint, in: .rect(cornerRadius: 9))
-                    .accessibilityHidden(true)
+                SettingsIconTile(section: section, size: 40)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(section.title)

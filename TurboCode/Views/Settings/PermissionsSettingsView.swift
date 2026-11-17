@@ -29,6 +29,7 @@ struct PermissionsSettingsView: View {
 
                 LabeledContent {
                     Button("Studio Settings…") { openSettingsSection(.cowork) }
+                        .buttonStyle(.link)
                 } label: {
                     Text("Studio virtual machine")
                     Text("Set separately, because the VM is isolated from this Mac.")
@@ -38,7 +39,17 @@ struct PermissionsSettingsView: View {
             Section("Apple Integrations") {
                 Toggle(isOn: s.agentTuning.experimental.xcodeMCPEnabled) {
                     Text("Xcode MCP")
-                    Text("The active model can discover and call Xcode's MCP tools through xcrun mcpbridge. Enable external agents in Xcode Intelligence settings first.")
+                    Text("The active model can discover and call Xcode's MCP tools through xcrun mcpbridge.")
+                }
+                if settings.agentTuning.experimental.xcodeMCPEnabled {
+                    // TurboCode cannot read Xcode's setting, so the
+                    // prerequisite is stated whenever the switch is on.
+                    Label(
+                        "Turn on external agents in Xcode › Settings › Intelligence first.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.orange)
                 }
 
                 Toggle(isOn: s.agentTuning.experimental.safariMCPEnabled) {
