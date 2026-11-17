@@ -163,6 +163,20 @@ final class CoworkStore: CoworkSessionProviding {
         refreshDiskUsage()
     }
 
+    /// Stops the VM before the app quits so the guest unmounts its writable
+    /// layer cleanly. Waits at most `timeout`: quitting must never hang on a
+    /// guest that does not answer, and the layer's journal covers the rest.
+    /// Does nothing quickly when no VM is running.
+    func stopForTermination(timeout: Duration = .seconds(5)) async {
+        let runtime = runtime
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { try? await runtime.stop() }
+            group.addTask { try? await Task.sleep(for: timeout) }
+            await group.next()
+            group.cancelAll()
+        }
+    }
+
     /// Stops the VM and deletes every Cowork file. Sessions are kept.
     func removeAll() async throws {
         installTask?.cancel()

@@ -5,6 +5,7 @@ import AppKit
 
 @main
 struct TurboCodeApp: App {
+    @NSApplicationDelegateAdaptor(TurboCodeAppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
     @State private var chatStore: ChatStore
     @State private var settingsStore = SettingsStore()
@@ -37,6 +38,7 @@ struct TurboCodeApp: App {
                     // TurboCodeCore can remain independent of global UI stores.
                     await chatStore.applyAgentTuning(settingsStore.agentTuning)
                     chatStore.attachCowork(settingsStore.cowork)
+                    appDelegate.cowork = settingsStore.cowork
                     chatStore.restoreActiveDomain(allowsCowork: settingsStore.cowork.isAvailable)
                     await chatStore.reloadRemoteModels()
                 }
@@ -177,5 +179,29 @@ struct TurboCodeApp: App {
                 .environment(chatStore)
                 .environment(settingsStore)
         }
+    }
+}
+
+// MARK: - Termination
+
+/// Stops the Studio VM before the app exits.
+///
+/// Without this the process exited with the guest still running, so its
+/// writable layer was never unmounted; repeated unclean exits corrupted that
+/// layer and made every later boot fail. Quitting waits for the stop, bounded
+/// by `CoworkStore.stopForTermination`. A forced kill (Xcode's Stop) skips
+/// this path; the layer's journal covers that case.
+@MainActor
+final class TurboCodeAppDelegate: NSObject, NSApplicationDelegate {
+    /// Set once the Studio store is attached; nil means nothing to stop.
+    var cowork: CoworkStore?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let cowork else { return .terminateNow }
+        Task { @MainActor in
+            await cowork.stopForTermination()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 }

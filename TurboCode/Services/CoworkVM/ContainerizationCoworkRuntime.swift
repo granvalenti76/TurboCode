@@ -231,6 +231,34 @@ actor ContainerizationCoworkRuntime: CoworkVMRuntime {
         try? await process.kill(.kill)
     }
 
+    // MARK: - Writable layer
+
+    /// Creates the guest's writable layer with an ordered JBD2 journal.
+    ///
+    /// The layer used to be formatted without a journal. The guest is often
+    /// killed without a clean unmount (Xcode's Stop, a crash, a forced quit),
+    /// and an unjournalled ext4 left that way corrupted its block bitmap; the
+    /// guest then mounted the overlay read-only and every boot failed at
+    /// `configureDns`. The journal lets the guest kernel replay or discard
+    /// unfinished writes on the next mount. Existing layers keep their format
+    /// until a Reset recreates them.
+    nonisolated static func formatWritableLayer(at url: URL, minimumBytes: UInt64) throws {
+        let formatter = try EXT4.Formatter(
+            FilePath(url.path),
+            minDiskSize: minimumBytes,
+            journal: EXT4.JournalConfig(defaultMode: .ordered)
+        )
+        try formatter.close()
+    }
+
+    /// Whether the ext4 image at `url` carries a journal. Lets tests check the
+    /// format without importing Containerization outside this adapter.
+    nonisolated static func writableLayerHasJournal(at url: URL) throws -> Bool {
+        let reader = try EXT4.EXT4Reader(blockDevice: FilePath(url.path))
+        let hasJournal: UInt32 = 0x4  // EXT4_FEATURE_COMPAT_HAS_JOURNAL
+        return reader.superBlock.featureCompat & hasJournal != 0
+    }
+
     // MARK: - Boot
 
     private func boot(_ configuration: CoworkVMConfiguration) async throws {
@@ -251,11 +279,7 @@ actor ContainerizationCoworkRuntime: CoworkVMRuntime {
             withIntermediateDirectories: true
         )
         if !fileManager.fileExists(atPath: layout.writableLayer.path) {
-            let formatter = try EXT4.Formatter(
-                FilePath(layout.writableLayer.path),
-                minDiskSize: Self.writableLayerBytes
-            )
-            try formatter.close()
+            try Self.formatWritableLayer(at: layout.writableLayer, minimumBytes: Self.writableLayerBytes)
         }
 
         var manager = try await ContainerManager(

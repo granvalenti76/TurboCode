@@ -143,6 +143,33 @@ struct CoworkVMRuntimeTests {
         #expect(!message.contains("error 1"))
     }
 
+    @Test("A new writable layer is formatted with a journal")
+    func writableLayerHasJournal() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cowork-journal-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layer = root.appendingPathComponent("writable.ext4")
+
+        try ContainerizationCoworkRuntime.formatWritableLayer(at: layer, minimumBytes: 64 * 1_048_576)
+
+        #expect(try ContainerizationCoworkRuntime.writableLayerHasJournal(at: layer))
+    }
+
+    @Test("Quitting with no Studio VM running returns without waiting for the timeout")
+    @MainActor
+    func terminationStopIsImmediateWithoutVM() async {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cowork-quit-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let defaults = UserDefaults(suiteName: "cowork-quit-\(UUID().uuidString)")!
+        let store = CoworkStore(layout: CoworkSandboxLayout(root: root), defaults: defaults)
+
+        let started = ContinuousClock.now
+        await store.stopForTermination(timeout: .seconds(30))
+        #expect(ContinuousClock.now - started < .seconds(5))
+    }
+
     @Test("Normalization keeps cancellation and known VM errors unchanged")
     func normalizationPassesThroughKnownErrors() {
         #expect(CoworkVMError.normalizing(CancellationError(), during: .booting) is CancellationError)
