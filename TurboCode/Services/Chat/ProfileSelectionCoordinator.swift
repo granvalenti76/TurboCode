@@ -73,9 +73,9 @@ final class ProfileSelectionCoordinator {
     private func applyConnectors(to configuration: inout ModelSessionConfiguration) {
         let connectors = activeConnectors()
         configuration.connectors = connectors
-        configuration.availableSkills = MCPConnectorCatalog.catalog(
-            adding: bundledSkills(connectors: connectors),
-            to: configuration.availableSkills
+        configuration.availableSkills = sessionSkillCatalog(
+            codingSkills: configuration.availableSkills,
+            connectors: connectors
         )
     }
 
@@ -87,21 +87,30 @@ final class ProfileSelectionCoordinator {
     func activeSkillCatalog() -> [TurboCodeSkillDefinition] {
         let skills = modelRuntime.resolvedMarkdownSkills
         guard modelRuntime.activeBackend != .codex else { return skills }
-        return MCPConnectorCatalog.catalog(
-            adding: bundledSkills(connectors: activeConnectors()),
-            to: skills
-        )
+        return sessionSkillCatalog(codingSkills: skills, connectors: activeConnectors())
     }
 
-    /// Skills that ship with the app for the active conversation: the Studio
-    /// ones for a Studio session, then those of its enabled connectors. One
-    /// function feeds both the session and the composer so the two catalogs
-    /// cannot drift apart.
-    private func bundledSkills(
+    /// The skill catalog of the active conversation. A Studio session takes
+    /// the profile's Studio selection (user and bundled Studio skills); a
+    /// Coding session keeps `codingSkills`. Connector skills are added last
+    /// because they follow the connector, not the profile. One function
+    /// feeds both the session and the composer so the two cannot drift apart.
+    private func sessionSkillCatalog(
+        codingSkills: [TurboCodeSkillDefinition],
         connectors: [MCPConnector]
     ) -> [TurboCodeSkillDefinition] {
-        StudioSkillCatalog.skills(for: activeConversation?.domain ?? .coding)
-            + MCPConnectorCatalog.skills(for: connectors)
+        let domain = activeConversation?.domain ?? .coding
+        let base = domain == .cowork
+            ? DynamicProfileRuntimeSelection.studioSkills(
+                from: modelRuntime.availableSkills,
+                bundled: StudioSkillCatalog.skills(for: domain),
+                profile: modelRuntime.activeDynamicProfile
+            )
+            : codingSkills
+        return MCPConnectorCatalog.catalog(
+            adding: MCPConnectorCatalog.skills(for: connectors),
+            to: base
+        )
     }
 
     /// Every entry point that starts a turn asks this first. A rejected Cowork
@@ -464,13 +473,17 @@ final class ProfileSelectionCoordinator {
             restoringProjection: restoringProjection,
             events: responseCoordinator.modelSessionEvents
         )
-        if rebuilt, modelRuntime.dynamicRoutingEnabled,
-           let transcript = await llmRuntime.foundationModelsTranscript() {
-            let names = transcript.flatMap { entry -> [String] in
+        if rebuilt, let transcript = await llmRuntime.foundationModelsTranscript() {
+            let definitions = transcript.flatMap { entry -> [Transcript.ToolDefinition] in
                 guard case .instructions(let instructions) = entry else { return [] }
-                return instructions.toolDefinitions.map(\.name)
+                return instructions.toolDefinitions
             }
-            modelRuntime.recordDynamicRoutingTools(names)
+            // Feeds the context estimate in Profiles with the definitions the
+            // model really received, instead of guessing from catalog text.
+            ToolDefinitionSizeStore.shared.record(definitions)
+            if modelRuntime.dynamicRoutingEnabled {
+                modelRuntime.recordDynamicRoutingTools(definitions.map(\.name))
+            }
         }
         return rebuilt
     }

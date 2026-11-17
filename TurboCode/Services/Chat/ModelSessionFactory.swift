@@ -646,7 +646,9 @@ nonisolated enum ModelSessionFactory {
             ? nil
             : ModelToolCatalog.coworkPlan(
                 tier: activeCapabilities.toolAccess,
-                context: toolContext(for: configuration, repositoryMap: nil)
+                context: toolContext(for: configuration, repositoryMap: nil),
+                // Only narrows the Studio surface; nil keeps the full default.
+                selectedIDs: configuration.activeDynamicProfile?.resolvedStudioToolIDs
             )
         let instructions = coworkSystemPrompt(for: configuration, cowork: cowork, plan: plan)
         guard let plan else {
