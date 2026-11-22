@@ -199,6 +199,28 @@ public final class SettingsStore {
         remoteModels = try TurboCodeConfig.shared.updateRemoteModelDisplayName(name, for: id)
     }
 
+    /// Points the local model at a server chosen in Settings → Providers.
+    /// Reloading immediately before the atomic write preserves hand edits
+    /// made to `models.json` while Settings was open; only the connection
+    /// fields of the local entry change (see `applyingLocalServer`).
+    func updateLocalServer(
+        baseURL: String,
+        kind: LocalModelServerKind,
+        modelID: String,
+        contextWindow: Int
+    ) throws {
+        let persistedModels = try TurboCodeConfig.shared.loadRemoteModels()
+        let updatedModels = OnboardingModelConfiguration.applyingLocalServer(
+            baseURL: baseURL,
+            kind: kind,
+            modelID: modelID,
+            contextWindow: contextWindow,
+            to: persistedModels.isEmpty ? remoteModels : persistedModels
+        )
+        try TurboCodeConfig.shared.saveRemoteModels(updatedModels)
+        remoteModels = updatedModels
+    }
+
     /// Replaces only the reasoning request contract for one configured model.
     /// Reloading immediately before the atomic write preserves endpoint edits
     /// made directly in `models.json` while Settings was open.

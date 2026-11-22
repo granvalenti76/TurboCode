@@ -120,6 +120,148 @@ struct FirstLaunchModelSetupTests {
         #expect(model.supportsVision == false)
     }
 
+    // MARK: MLX VLM
+
+    /// A trimmed copy of what mlx_vlm.server's `/health` returned on
+    /// 2026-11-18, including its 524K model-maximum context.
+    private let mlxHealth = #"""
+    {"status":"healthy","loaded_model":"nativ-community/SenseNova-Loop-9B-nvfp4","model_ready":true,
+     "loaded_context_size":524288,"effective_context_limit":524288,"apc_enabled":true}
+    """#
+
+    @Test("A server whose /health names a loaded model is recognized as MLX VLM with images")
+    func recognizesMLXVLM() async {
+        let stub = StubHTTPClient(responses: [
+            "http://127.0.0.1:8080/v1/models": (200, #"{"data":[{"id":"other/cached-model"},{"id":"nativ-community/SenseNova-Loop-9B-nvfp4"}]}"#),
+            "http://127.0.0.1:8080/props": (404, #"{"detail":"Not Found"}"#),
+            "http://127.0.0.1:8080/health": (200, mlxHealth),
+        ])
+        let server = await LocalModelServerDiscovery(http: stub)
+            .probe(baseURL: "127.0.0.1:8080", productHint: "llama-server")
+
+        #expect(server?.kind == .mlxVLM)
+        #expect(server?.product == "MLX VLM")
+        #expect(server?.primaryModelID == "nativ-community/SenseNova-Loop-9B-nvfp4")
+        #expect(server?.modelIDs.count == 2)
+        #expect(server?.supportsVision == true)
+        // The reported 524K is the model's maximum, not what fits in memory.
+        #expect(server?.contextWindowTokens == nil)
+    }
+
+    @Test("A plain health check is not mistaken for MLX VLM")
+    func plainHealthIsGeneric() async {
+        let stub = StubHTTPClient(responses: [
+            "http://127.0.0.1:1234/v1/models": (200, #"{"data":[{"id":"qwen3-coder-30b"}]}"#),
+            "http://127.0.0.1:1234/health": (200, #"{"status":"ok"}"#),
+        ])
+        let server = await LocalModelServerDiscovery(http: stub)
+            .probe(baseURL: "http://127.0.0.1:1234/v1", productHint: "LM Studio")
+
+        #expect(server?.kind == .openAICompatible)
+    }
+
+    @Test("MLX VLM entries store the chosen context and images on")
+    func buildsMLXEntry() {
+        let server = DiscoveredModelServer(
+            baseURL: "http://127.0.0.1:8080/v1", kind: .mlxVLM, product: "MLX VLM",
+            modelIDs: ["nativ-community/SenseNova-Loop-9B-nvfp4"], contextWindowTokens: nil, supportsVision: true
+        )
+        let model = OnboardingModelConfiguration.localModel(
+            server: server, modelID: server.primaryModelID, displayName: "", chosenContextWindow: nil
+        )
+
+        #expect(model.name == "SenseNova-Loop-9B-nvfp4")
+        #expect(model.contextWindowTokens == 32_768)
+        #expect(model.supportsVision == true)
+    }
+
+    // MARK: Settings → Local Server
+
+    @Test("Applying a server from Settings changes only the connection fields")
+    func applyingLocalServerKeepsTunedFields() {
+        var local = RemoteModelConfig(
+            id: "llama", name: "sensenova-9b", url: "http://localhost:8080/v1",
+            modelName: "nativ-community/SenseNova-Loop-9B-nvfp4", temperature: 0.3,
+            reasoningConfiguration: .requestTokenBudget, contextWindowTokens: 65_536
+        )
+        local.enabled = false
+        let premium = RemoteModelConfig(
+            id: "deepseek", name: "DeepSeek", url: "https://api.deepseek.com",
+            modelName: "deepseek-v4-flash", temperature: 0.6, provider: .deepseek, role: .premium
+        )
+
+        let updated = OnboardingModelConfiguration.applyingLocalServer(
+            baseURL: "http://127.0.0.1:8080/v1", kind: .mlxVLM,
+            modelID: "nativ-community/SenseNova-Loop-9B-nvfp4", contextWindow: 32_768,
+            to: [local, premium]
+        )
+
+        #expect(updated.count == 2)
+        #expect(updated[1] == premium)
+        let entry = updated[0]
+        #expect(entry.name == "sensenova-9b")
+        #expect(entry.temperature == 0.3)
+        #expect(entry.reasoningConfiguration == .requestTokenBudget)
+        #expect(entry.url == "http://127.0.0.1:8080/v1")
+        #expect(entry.contextWindowTokens == 32_768)
+        #expect(entry.supportsVision == true)
+        #expect(entry.enabled)
+    }
+
+    @Test("A different model renames the entry, and llama-server leaves vision to /props")
+    func applyingLocalServerFollowsModelChange() {
+        let local = RemoteModelConfig(
+            id: "llama", name: "sensenova-9b", url: "http://127.0.0.1:8080/v1",
+            modelName: "nativ-community/SenseNova-Loop-9B-nvfp4", temperature: 0.6,
+            supportsVision: true
+        )
+
+        let updated = OnboardingModelConfiguration.applyingLocalServer(
+            baseURL: "http://127.0.0.1:8080/v1", kind: .llamaServer,
+            modelID: "/models/Qwen3.6-35B-A3B.gguf", contextWindow: 65_536, to: [local]
+        )
+
+        #expect(updated[0].name == "Qwen3.6-35B-A3B")
+        #expect(updated[0].modelName == "/models/Qwen3.6-35B-A3B.gguf")
+        #expect(updated[0].supportsVision == nil)
+    }
+
+    @Test("Effort levels detected on llama-server are dropped for MLX VLM")
+    func applyingMLXServerResetsDetectedEffortLevels() {
+        let local = RemoteModelConfig(
+            id: "llama", name: "sensenova-9b", url: "http://127.0.0.1:8080/v1",
+            modelName: "nativ-community/SenseNova-Loop-9B-nvfp4", temperature: 0.6,
+            reasoningConfiguration: RemoteReasoningConfiguration(
+                mode: .requestEffortLevel, serverEffortLevels: ["low", "medium", "xhigh"]
+            )
+        )
+
+        let mlx = OnboardingModelConfiguration.applyingLocalServer(
+            baseURL: "http://127.0.0.1:8080/v1", kind: .mlxVLM,
+            modelID: "nativ-community/SenseNova-Loop-9B-nvfp4", contextWindow: 32_768, to: [local]
+        )
+        let llama = OnboardingModelConfiguration.applyingLocalServer(
+            baseURL: "http://127.0.0.1:8080/v1", kind: .llamaServer,
+            modelID: "nativ-community/SenseNova-Loop-9B-nvfp4", contextWindow: 32_768, to: [local]
+        )
+
+        #expect(mlx[0].reasoningConfiguration.mode == .serverManaged)
+        #expect(mlx[0].reasoningConfiguration.serverEffortLevels == nil)
+        #expect(llama[0].reasoningConfiguration == local.reasoningConfiguration)
+    }
+
+    @Test("Without a local entry, applying a server appends one")
+    func applyingLocalServerAppendsEntry() {
+        let updated = OnboardingModelConfiguration.applyingLocalServer(
+            baseURL: "http://127.0.0.1:1234/v1", kind: .openAICompatible,
+            modelID: "qwen3-coder-30b", contextWindow: 16_384, to: []
+        )
+
+        #expect(updated.map(\.id) == ["llama"])
+        #expect(updated[0].supportsVision == false)
+        #expect(updated[0].contextWindowTokens == 16_384)
+    }
+
     @Test("The sheet prefers llama-server and writes the catalog only on confirmation")
     func onboardingStorePrefersLlamaAndWritesOnConfirm() async throws {
         let home = FileManager.default.temporaryDirectory

@@ -16,7 +16,11 @@ layout and opens a setup sheet instead of writing a default model catalog:
 2. **Discovery.** TurboCode sends `GET /v1/models` to `127.0.0.1` on ports
    8080, 9931, 1234, 11434, 8000 and 1337, and to any address typed in
    **Another machine**. A server that also answers `GET /props` is listed as
-   llama-server: its context window and vision support are read from it.
+   llama-server: its context window and vision support are read from it. A
+   server whose `GET /health` names a `loaded_model` with `model_ready` and
+   `apc_enabled` is listed as MLX VLM (`mlx_vlm.server`): its loaded model is
+   preselected and images are on, but its reported context limit is the
+   model's maximum rather than what fits in memory, so the context is chosen.
 3. **Review.** For llama-server nothing has to be entered. For other
    OpenAI-compatible servers, choose the context window the model was loaded
    with. A short request asks the model to call a test tool; the result is
@@ -25,6 +29,22 @@ layout and opens a setup sheet instead of writing a default model catalog:
 **Create and Start** writes `models.json` with the chosen server as the `llama`
 entry and the built-in DeepSeek entry, which stays unused until a key is added.
 An existing `models.json` is never overwritten by this sheet.
+
+## Local server in Settings
+
+**Settings → Providers → Local Server** points the `llama` entry at a running
+server without editing `models.json`. Choose the kind of server (llama-server,
+MLX VLM, or another OpenAI-compatible server) and its address; the same
+detection as the setup sheet fills in the loaded model and image support, and
+preselects the kind it recognizes. The context window starts at 32K and is
+read from the server only for llama-server.
+
+**Apply** rewrites only the entry's address, model, context window and
+`supportsVision` (unset for llama-server, `true` for MLX VLM, `false`
+otherwise). Its display name, temperature, reasoning control and every other
+model are kept; the display name follows the model only when the model
+changes. The file is re-read just before the write, so hand edits made while
+Settings was open are preserved.
 
 ## Configuration Boundaries
 

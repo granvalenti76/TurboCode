@@ -573,6 +573,7 @@ struct ProviderSettingsView: View {
         let s = Bindable(settings)
         return Form {
             SettingsPaneHeader(section: .providers)
+            LocalServerSettingsSection()
             Section("DeepSeek") {
                 SecureField("API Key", text: s.deepseekAPIKey)
                     .textFieldStyle(.roundedBorder)
