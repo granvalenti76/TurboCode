@@ -14,6 +14,10 @@ public enum AppRoute: String, Sendable, Hashable, CaseIterable {
     case artifacts
     /// The built-in connectors and their switch for the active session.
     case connectors
+    /// The library and editor of user-built system prompts. A main-window
+    /// page rather than a Settings pane: building a prompt is product work
+    /// the user returns to, not a preference set once.
+    case systemPrompts
 }
 
 // MARK: - Right Panel Mode
