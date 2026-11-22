@@ -18,4 +18,11 @@ nonisolated enum FileDigest {
         }
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
+
+    /// Lowercase hexadecimal SHA-256 of bytes already in memory, matching
+    /// `sha256sum` output so a digest computed in the Studio VM compares
+    /// equal to one computed here.
+    static func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
 }

@@ -319,6 +319,104 @@ struct CoworkSessionToolsTests {
         #expect(await runtime.startCount == 0)
     }
 
+    // MARK: vm_file partial edits and unchanged writes
+
+    static func fingerprint(_ text: String) -> String {
+        String(FileDigest.sha256(Data(text.utf8)).prefix(VMFileTool.fingerprintLength))
+    }
+
+    @Test("replace_lines rewrites only the chosen lines and reports the new fingerprint")
+    func vmFileReplaceLinesSplicesTheFile() async throws {
+        let original = "one\ntwo\nthree\nfour\n"
+        let runtime = RecordingRuntime(stdout: original)
+        let tool = VMFileTool(context: Self.context(runtime: runtime))
+
+        let output = try await tool.call(arguments: VMFileArguments(
+            action: "replace_lines", path: "game.js", content: "TWO\nTWO-B\n",
+            startLine: 2, lineCount: nil, depth: nil,
+            endLine: 3, fingerprint: Self.fingerprint(original)
+        ))
+
+        let edited = "one\nTWO\nTWO-B\nfour\n"
+        let write = try #require(await runtime.requests.first { $0.stdin != nil })
+        #expect(write.stdin == Data(edited.utf8))
+        #expect(output.contains("fingerprint \(Self.fingerprint(edited))"))
+        #expect(output.contains("     3  TWO-B"))
+    }
+
+    @Test("replace_lines refuses a stale or missing fingerprint without writing")
+    func vmFileReplaceLinesNeedsCurrentFingerprint() async throws {
+        let runtime = RecordingRuntime(stdout: "one\ntwo\n")
+        let tool = VMFileTool(context: Self.context(runtime: runtime))
+
+        let stale = try await tool.call(arguments: VMFileArguments(
+            action: "edit", path: "game.js", content: "x",
+            startLine: 1, lineCount: nil, depth: nil,
+            endLine: 1, fingerprint: Self.fingerprint("one\nold\n")
+        ))
+        let missing = try await tool.call(arguments: VMFileArguments(
+            action: "replace_lines", path: "game.js", content: "x",
+            startLine: 1, lineCount: nil, depth: nil, endLine: 1
+        ))
+
+        #expect(stale.contains("Read the file again"))
+        #expect(missing.contains("fingerprint"))
+        #expect(await runtime.requests.allSatisfy { $0.stdin == nil })
+    }
+
+    @Test("Line splices insert, delete, keep the final newline, and reject lines outside the file")
+    func lineSpliceEdgeCases() throws {
+        let file = "a\nb\nc\n"
+        let insert = try LineSplice.apply(to: file, startLine: 2, endLine: 1, content: "new").get()
+        #expect(insert.text == "a\nnew\nb\nc\n")
+        let delete = try LineSplice.apply(to: file, startLine: 2, endLine: 3, content: "").get()
+        #expect(delete.text == "a\n")
+        let append = try LineSplice.apply(to: "a\nb", startLine: 3, endLine: 2, content: "c").get()
+        #expect(append.text == "a\nb\nc")
+        #expect(throws: LineSplice.Failure.self) {
+            try LineSplice.apply(to: file, startLine: 5, endLine: 5, content: "x").get()
+        }
+        #expect(throws: LineSplice.Failure.self) {
+            try LineSplice.apply(to: file, startLine: 2, endLine: 9, content: "x").get()
+        }
+    }
+
+    @Test("Writing content a file already has writes nothing, and repeating it ends the turn")
+    func vmFileUnchangedWritesStopTheLoop() async throws {
+        let content = "same\n"
+        let runtime = RecordingRuntime(stdout: content)
+        let tool = VMFileTool(context: Self.context(runtime: runtime))
+        let arguments = VMFileArguments(
+            action: "write", path: "/tmp/map.txt", content: content,
+            startLine: nil, lineCount: nil, depth: nil
+        )
+
+        for _ in 1..<VMFileTool.maximumUnchangedWrites {
+            let output = try await tool.call(arguments: arguments)
+            #expect(output.contains("nothing was written"))
+        }
+        await #expect(throws: VMFileToolError.self) {
+            _ = try await tool.call(arguments: arguments)
+        }
+        #expect(await runtime.requests.allSatisfy { $0.stdin == nil })
+    }
+
+    @Test("read reports the file fingerprint computed in the VM")
+    func vmFileReadReportsFingerprint() async throws {
+        let runtime = RecordingRuntime(stdout: "     1  hello\n__TOTAL_LINES__ 1\n__SHA256__ 0123456789ab\n")
+        let tool = VMFileTool(context: Self.context(runtime: runtime))
+
+        let output = try await tool.call(arguments: VMFileArguments(
+            action: "read", path: "a.txt", content: nil,
+            startLine: nil, lineCount: nil, depth: nil
+        ))
+
+        #expect(output.contains("lines 1–1 of 1. fingerprint 0123456789ab"))
+        #expect(!output.contains("__SHA256__"))
+        let request = try #require(await runtime.requests.first)
+        #expect(request.script.contains("sha256sum"))
+    }
+
     @Test("Guest paths resolve from the session directory and IDs are sanitized")
     func guestPathResolution() {
         let context = Self.context(runtime: RecordingRuntime())

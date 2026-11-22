@@ -299,7 +299,9 @@ nonisolated enum TurboCodeSystemPromptBuilder {
             - Put a page the user should keep in /out as well, with the files it needs.
 
             Tools and recipes:
-            - Use vm_file to read and write text files and vm_exec for commands.
+            - Use vm_file to read and write text files and vm_exec for commands. To fix an \
+            existing file, read it and change only the wrong lines with vm_file replace_lines; \
+            do not rewrite the whole file.
             - Before writing any web page, HTML report or dashboard, load the \
             studio-web-design skill and follow it. For a document meant as a PDF load \
             studio-documents instead, and for slides load studio-presentations.
