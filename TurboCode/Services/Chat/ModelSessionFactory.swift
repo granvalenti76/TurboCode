@@ -73,6 +73,11 @@ nonisolated struct ModelSessionConfiguration: Sendable {
     /// the session's domain. Set by the caller that knows the conversation;
     /// background and delegated sessions keep the empty default.
     var connectors: [MCPConnector] = []
+    /// The user's system prompt for each profile, resolved by
+    /// `ModelRuntimeStore`. A configuration built elsewhere keeps the built-in
+    /// prompt. The Coding and Studio choices apply wherever the store builds
+    /// sessions, ACP included.
+    var systemPrompts: ResolvedSystemPrompts = .builtIn
 
     init(
         backend: ModelBackend,
@@ -718,7 +723,8 @@ nonisolated enum ModelSessionFactory {
                 cowork: CoworkPromptFacts(
                     sessionDirectory: cowork.sessionDirectory,
                     sharesInputFolder: cowork.configuration.inputFolder != nil
-                )
+                ),
+                promptDocument: configuration.systemPrompts.studio
             )
         )
     }
@@ -1172,7 +1178,8 @@ nonisolated enum ModelSessionFactory {
                     for: configuration,
                     backend: backend
                 ),
-                workers: workers
+                workers: workers,
+                promptDocument: configuration.systemPrompts.document(forCodingRole: role)
             )
         )
     }

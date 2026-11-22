@@ -166,6 +166,8 @@
 		B000000000000000000000f3 /* TurboCode/Services/MCP/MCPLoopbackHTTPClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f3 /* TurboCode/Services/MCP/MCPLoopbackHTTPClient.swift */; };
 		B000000000000000000000f4 /* TurboCode/Tools/ConnectorTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f4 /* TurboCode/Tools/ConnectorTool.swift */; };
 		B000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift */; };
+		B000000000000000000000f6 /* TurboCode/Services/Chat/SystemPromptDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f6 /* TurboCode/Services/Chat/SystemPromptDocument.swift */; };
+		B000000000000000000000f7 /* TurboCode/Services/Chat/SystemPromptLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f7 /* TurboCode/Services/Chat/SystemPromptLibrary.swift */; };
 		C10000000000000000000000 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 /* End PBXBuildFile section */
 
@@ -352,6 +354,8 @@
 		A000000000000000000000f3 /* TurboCode/Services/MCP/MCPLoopbackHTTPClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/MCP/MCPLoopbackHTTPClient.swift; sourceTree = "<group>"; };
 		A000000000000000000000f4 /* TurboCode/Tools/ConnectorTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/ConnectorTool.swift; sourceTree = "<group>"; };
 		A000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/SteeringBoundaryModifier.swift; sourceTree = "<group>"; };
+		A000000000000000000000f6 /* TurboCode/Services/Chat/SystemPromptDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/SystemPromptDocument.swift; sourceTree = "<group>"; };
+		A000000000000000000000f7 /* TurboCode/Services/Chat/SystemPromptLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/SystemPromptLibrary.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -486,6 +490,8 @@
 				A00000000000000000000038 /* TurboCode/Services/Chat/OnDeviceStreamingGuard.swift */,
 				A0000000000000000000003b /* TurboCode/Services/Chat/SessionRebuildHistory.swift */,
 				A0000000000000000000003d /* TurboCode/Services/Chat/TurboCodePersonality.swift */,
+				A000000000000000000000f6 /* TurboCode/Services/Chat/SystemPromptDocument.swift */,
+				A000000000000000000000f7 /* TurboCode/Services/Chat/SystemPromptLibrary.swift */,
 				A0000000000000000000003e /* TurboCode/Services/Chat/TurboCodeSystemPromptBuilder.swift */,
 				A00000000000000000000041 /* TurboCode/Services/Codex/CodexAppServerClient.swift */,
 				A00000000000000000000042 /* TurboCode/Services/Codex/CodexBackendSession.swift */,
@@ -797,6 +803,8 @@
 				B00000000000000000000038 /* TurboCode/Services/Chat/OnDeviceStreamingGuard.swift in Sources */,
 				B0000000000000000000003b /* TurboCode/Services/Chat/SessionRebuildHistory.swift in Sources */,
 				B0000000000000000000003d /* TurboCode/Services/Chat/TurboCodePersonality.swift in Sources */,
+				B000000000000000000000f6 /* TurboCode/Services/Chat/SystemPromptDocument.swift in Sources */,
+				B000000000000000000000f7 /* TurboCode/Services/Chat/SystemPromptLibrary.swift in Sources */,
 				B0000000000000000000003e /* TurboCode/Services/Chat/TurboCodeSystemPromptBuilder.swift in Sources */,
 				B00000000000000000000041 /* TurboCode/Services/Codex/CodexAppServerClient.swift in Sources */,
 				B00000000000000000000042 /* TurboCode/Services/Codex/CodexBackendSession.swift in Sources */,

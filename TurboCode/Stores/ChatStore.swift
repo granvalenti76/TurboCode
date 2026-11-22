@@ -1286,6 +1286,14 @@ public final class ChatStore {
         )
     }
 
+    /// Re-reads the saved system prompts after a Settings change and rebuilds
+    /// the session once if a profile's prompt changed. The rebuild discards
+    /// the provider's prompt cache, which the next reply recomputes.
+    func reloadSystemPrompts() async {
+        guard modelRuntimeStore.applySystemPrompts(SystemPromptLibrary.live.resolved()) else { return }
+        await profileSelectionCoordinator.rebuildSession(discardingCapabilityContext: false)
+    }
+
     /// Loads every valid installed plugin when the global setting permits it.
     /// Discovery failures and individual handshake failures are logged per
     /// plugin so one bad extension never blocks the rest of startup.
