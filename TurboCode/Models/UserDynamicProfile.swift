@@ -77,6 +77,24 @@ nonisolated enum ComposerProfileMenu {
                 || model.reasoningConfiguration.mode == .requestTokenBudget else { return [] }
         return id == .llama ? ReasoningEffort.allCases : [.low, .medium, .high]
     }
+
+    /// Levels the model's chat template declared in `/props`, in the
+    /// server's order and spelling; empty for every other kind of model.
+    static func serverLevels(
+        for id: ProfileBaseModelID,
+        models: [RemoteModelConfig]
+    ) -> [String] {
+        guard id != .onDevice, id != .codex,
+              let model = models.first(where: { $0.id == id.remoteModelID }),
+              model.supportsReasoning else { return [] }
+        return model.reasoningConfiguration.declaredServerLevels
+    }
+
+    /// A server level as the composer shows it: the server's own word with a
+    /// capital first letter ("max" → "Max").
+    static func displayName(forServerLevel level: String) -> String {
+        level.prefix(1).uppercased() + level.dropFirst()
+    }
 }
 
 /// One executable worker slot owned by a custom profile.

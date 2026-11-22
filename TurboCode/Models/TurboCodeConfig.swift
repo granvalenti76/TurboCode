@@ -684,6 +684,11 @@ nonisolated public struct RemoteReasoningConfiguration: Codable, Hashable, Senda
     /// in the server's spelling. Persisted so a turn never waits on `/props`;
     /// Settings refreshes them when the user re-selects the mode.
     public var serverEffortLevels: [String]?
+    /// The server level chosen in the composer, in the server's spelling.
+    /// Runtime only: `ModelRuntimeStore` sets it on the copy handed to a
+    /// session, and it is never encoded, because `models.json` holds the
+    /// endpoint's contract, not the user's current choice.
+    var selectedServerLevel: String? = nil
 
     public init(
         mode: RemoteReasoningControlMode = .serverManaged,
@@ -724,8 +729,35 @@ nonisolated public struct RemoteReasoningConfiguration: Codable, Hashable, Senda
         serverEffortLevels = try values.decodeIfPresent([String].self, forKey: .serverEffortLevels)
     }
 
+    /// The server's own levels when this mode uses them, in its order.
+    var declaredServerLevels: [String] {
+        guard mode == .requestEffortLevel else { return [] }
+        return serverEffortLevels ?? []
+    }
+
+    /// The level that turns thinking off, when the template declares one.
+    static let serverLevelOff = "none"
+
+    /// The product level closest to a server level, used for the shared
+    /// preference and for other models when this server's level is chosen.
+    /// Names the product shares map directly; a level above every shared one
+    /// (`max`) is X-High, any other unshared level (`minimal`) is Low.
+    func productEffort(forServerLevel level: String) -> ReasoningEffort? {
+        guard level != Self.serverLevelOff,
+              let position = declaredServerLevels.firstIndex(of: level) else { return nil }
+        if let exact = ReasoningEffort.allCases.first(where: { $0.serverLevelName == level }) {
+            return exact
+        }
+        let sharedPositions = declaredServerLevels.indices.filter { index in
+            ReasoningEffort.allCases.contains { $0.serverLevelName == declaredServerLevels[index] }
+        }
+        if let lastShared = sharedPositions.last, position > lastShared { return .xhigh }
+        return .low
+    }
+
     /// Product levels the server can honour, in product order. Server levels
-    /// without a product counterpart (`minimal`, `max`) are not offered.
+    /// without a product counterpart (`minimal`, `max`) are not offered here;
+    /// the composer lists `declaredServerLevels` and sends them verbatim.
     var supportedEfforts: [ReasoningEffort] {
         guard mode == .requestEffortLevel, let serverEffortLevels else { return [] }
         return ReasoningEffort.allCases.filter {

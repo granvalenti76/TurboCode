@@ -292,6 +292,14 @@ final class ProfileSelectionCoordinator {
         await selectBuiltInProfile(id)
     }
 
+    /// Selects a model with declared server levels at one of those levels,
+    /// named as the server spells it (`minimal`, `max`, `none`).
+    func selectBuiltInProfile(_ id: ProfileBaseModelID, serverReasoningLevel level: String) async {
+        guard !isBusy, id != .codex else { return }
+        modelRuntime.selectServerReasoningLevel(level, for: id)
+        await selectBuiltInProfile(id)
+    }
+
     func selectDynamicProfile(_ id: UUID) async {
         guard !isBusy else { return }
         if let profile = modelRuntime.dynamicProfiles.first(where: { $0.id == id }),

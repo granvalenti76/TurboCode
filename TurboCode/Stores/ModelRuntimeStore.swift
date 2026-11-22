@@ -39,6 +39,11 @@ final class ModelRuntimeStore {
     /// off on llama-server never changes the level other backends use; any
     /// explicit level selection clears it.
     private(set) var serverReasoningOff: Bool
+    /// A level picked by its server name for a model that declares levels
+    /// (llama-server `/props`), such as `minimal` or `max`. Kept apart from
+    /// the shared product preference for the same reason as Off; selecting a
+    /// product level elsewhere clears it.
+    private(set) var serverReasoningLevel: String?
     var orchestratorMode: OrchestratorMode
     private var skillsWorkspaceRoot: String?
 
@@ -84,7 +89,7 @@ final class ModelRuntimeStore {
         FoundationModelsBootstrapConfiguration(
             backend: activeBackend,
             usesSystemModel: activeBackend == .foundationApple,
-            remoteModel: activeRemoteModel ?? RemoteModelConfig.fallbackLlama,
+            remoteModel: sessionModel(activeRemoteModel) ?? RemoteModelConfig.fallbackLlama,
             reasoningEffort: reasoningEffort
         )
     }
@@ -146,6 +151,7 @@ final class ModelRuntimeStore {
     ) {
         self.preferences = preferences
         self.serverReasoningOff = preferences.bool(forKey: "serverReasoningOff")
+        self.serverReasoningLevel = preferences.string(forKey: "serverReasoningLevel")
         self.dynamicRouter = AnchorSignalClassifier()
         let assetsPrepared = dynamicRoutingAssetsPrepared
             ?? AnchorSignalAssetDescriptor.current.isPrepared()
@@ -560,6 +566,60 @@ final class ModelRuntimeStore {
     func setReasoningEffort(_ effort: ReasoningEffort) {
         preferences.set(effort.rawValue, forKey: "reasoningEffort")
         setServerReasoningOff(false)
+        setServerReasoningLevel(nil)
+    }
+
+    /// Records a level the model's server declared, by its server name. The
+    /// shared product preference moves to the nearest product level so other
+    /// models follow the intent; "none" is the same choice as Off.
+    func selectServerReasoningLevel(_ level: String, for id: ProfileBaseModelID) {
+        guard let model = remoteModels.first(where: { $0.id == id.remoteModelID }),
+              model.reasoningConfiguration.declaredServerLevels.contains(level) else { return }
+        if level == RemoteReasoningConfiguration.serverLevelOff {
+            setServerReasoningLevel(nil)
+            setServerReasoningOff(true)
+            return
+        }
+        if let effort = model.reasoningConfiguration.productEffort(forServerLevel: level) {
+            setReasoningEffort(effort)
+        }
+        setServerReasoningOff(false)
+        setServerReasoningLevel(level)
+    }
+
+    /// The server level a request to `model` sends, or nil when the model
+    /// does not declare levels. Shown in the composer as the active choice.
+    func serverLevel(for model: RemoteModelConfig?) -> String? {
+        guard let model, model.supportsReasoning else { return nil }
+        let configuration = model.reasoningConfiguration
+        let levels = configuration.declaredServerLevels
+        guard !levels.isEmpty else { return nil }
+        if serverReasoningOff {
+            return levels.contains(RemoteReasoningConfiguration.serverLevelOff)
+                ? RemoteReasoningConfiguration.serverLevelOff : nil
+        }
+        if let serverReasoningLevel, levels.contains(serverReasoningLevel) {
+            return serverReasoningLevel
+        }
+        guard !configuration.supportedEfforts.isEmpty else { return nil }
+        return configuration.resolvedEffort(persistedReasoningEffort).serverLevelName
+    }
+
+    /// The copy of `model` a session receives: it carries the server level
+    /// chosen in the composer, which `requestDirective` sends verbatim.
+    private func sessionModel(_ model: RemoteModelConfig?) -> RemoteModelConfig? {
+        model.map(sessionModel)
+    }
+
+    private func sessionModel(_ model: RemoteModelConfig) -> RemoteModelConfig {
+        var model = model
+        model.reasoningConfiguration.selectedServerLevel = serverLevel(for: model)
+        return model
+    }
+
+    private func setServerReasoningLevel(_ value: String?) {
+        serverReasoningLevel = value
+        preferences.set(value, forKey: "serverReasoningLevel")
     }
 
     /// Records "Off" only for a model that declared server effort levels;
@@ -613,8 +673,8 @@ final class ModelRuntimeStore {
             && dynamicRoutingDecision?.source != .fallback
         return ModelSessionConfiguration(
             backend: activeBackend,
-            activeRemoteModel: activeRemoteModel,
-            delegateRemoteModel: delegateModel,
+            activeRemoteModel: sessionModel(activeRemoteModel),
+            delegateRemoteModel: sessionModel(delegateModel),
             orchestratorMode: orchestratorMode,
             workspaceRoot: workspaceRoot,
             agentTuning: agentTuning,
@@ -827,7 +887,7 @@ final class ModelRuntimeStore {
                 id: worker.id,
                 name: worker.name,
                 modelID: worker.modelID,
-                remoteModel: remote,
+                remoteModel: sessionModel(remote),
                 toolIDs: worker.resolvedToolIDs,
                 reasoningEffort: worker.modelID == .onDevice
                     ? persistedReasoningEffort

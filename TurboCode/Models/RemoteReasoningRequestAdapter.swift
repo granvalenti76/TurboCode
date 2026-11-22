@@ -15,6 +15,13 @@ nonisolated extension RemoteReasoningConfiguration {
         for effort: ReasoningEffort?
     ) -> RemoteReasoningRequestDirective? {
         if mode == .requestEffortLevel {
+            // A level chosen by its server name is sent verbatim, so levels
+            // with no product counterpart (`minimal`, `max`) reach the
+            // template too. A choice the template does not declare (another
+            // model's level) falls through to the product mapping below.
+            if let level = selectedServerLevel, declaredServerLevels.contains(level) {
+                return .effortLevel(level)
+            }
             // Without detected levels nothing is sent: the template would
             // otherwise raise on an unknown level and fail the turn.
             guard let effort else { return .disabled }
@@ -56,7 +63,9 @@ nonisolated enum RemoteReasoningRequestBody {
             templateArguments["enable_thinking"] = true
             object["thinking_budget_tokens"] = tokens
         case .effortLevel(let level):
-            templateArguments["enable_thinking"] = true
+            // "none" also clears the switch, so thinking stays off for a
+            // template that reads only `enable_thinking`.
+            templateArguments["enable_thinking"] = level != RemoteReasoningConfiguration.serverLevelOff
             templateArguments["reasoning_effort"] = level
             object.removeValue(forKey: "thinking_budget_tokens")
         }

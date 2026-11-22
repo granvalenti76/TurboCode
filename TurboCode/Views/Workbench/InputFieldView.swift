@@ -455,6 +455,7 @@ struct InputFieldView: View {
             && chatStore.activeBaseModelID == id
             && chatStore.orchestratorMode == .standalone
         let options = ComposerProfileMenu.reasoningOptions(for: id, models: chatStore.remoteModels)
+        let serverLevels = ComposerProfileMenu.serverLevels(for: id, models: chatStore.remoteModels)
         let available = id.remoteModelID.map { remoteID in
             chatStore.remoteModels.contains { $0.id == remoteID && $0.enabled }
         } ?? true
@@ -479,6 +480,30 @@ struct InputFieldView: View {
                                 selected: isSelected && chatStore.codexReasoningEffort == option.reasoningEffort
                             )
                         }
+                    }
+                }
+            } else if !serverLevels.isEmpty {
+                // The template's own levels, spelled as it declares them and
+                // sent verbatim, so the menu matches the server ("Minimal",
+                // "Max"); "None" takes the place of Off.
+                if !serverLevels.contains(RemoteReasoningConfiguration.serverLevelOff) {
+                    Button {
+                        Task { await chatStore.selectBuiltInProfileWithReasoningOff(id) }
+                    } label: {
+                        reasoningOptionLabel(
+                            "Off",
+                            selected: isSelected && chatStore.activeServerReasoningOff
+                        )
+                    }
+                }
+                ForEach(serverLevels, id: \.self) { level in
+                    Button {
+                        Task { await chatStore.selectBuiltInProfile(id, serverReasoningLevel: level) }
+                    } label: {
+                        reasoningOptionLabel(
+                            ComposerProfileMenu.displayName(forServerLevel: level),
+                            selected: isSelected && chatStore.activeServerReasoningLevel == level
+                        )
                     }
                 }
             } else if options.isEmpty {
@@ -538,6 +563,9 @@ struct InputFieldView: View {
     private var activeReasoningLabel: String {
         if chatStore.activeBackend == .codex {
             return chatStore.codexReasoningEffort.displayName
+        }
+        if let level = chatStore.activeServerReasoningLevel {
+            return ComposerProfileMenu.displayName(forServerLevel: level)
         }
         if chatStore.activeServerReasoningOff { return "Off" }
         return effectiveReasoningEffort.rawValue

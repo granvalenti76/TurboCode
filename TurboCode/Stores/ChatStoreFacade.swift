@@ -240,6 +240,12 @@ extension ChatStore {
                 .supportedEfforts.isEmpty ?? true)
     }
 
+    /// The server level the active model's requests send, in the server's
+    /// spelling; nil when the model does not declare levels.
+    var activeServerReasoningLevel: String? {
+        modelRuntimeStore.serverLevel(for: modelRuntimeStore.activeRemoteModel)
+    }
+
     var codexConnectionState: CodexConnectionState {
         codexRuntimeStore.connectionState
     }
