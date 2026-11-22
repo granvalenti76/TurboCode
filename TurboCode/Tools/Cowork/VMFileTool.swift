@@ -88,8 +88,16 @@ struct VMFileTool: Tool {
 
     private func perform(_ arguments: VMFileArguments) async throws -> ToolCommandOutput {
         let path = context.guestPath(arguments.path)
+        let action = arguments.action.lowercased().trimmingCharacters(in: .whitespaces)
+        // An omitted path resolves to the session directory, which is right
+        // for list but never names a file. A small model once sent
+        // replace_lines without path and, told the "file" was missing, gave
+        // up on the tool; naming the omission lets it retry correctly.
+        if action != "list", Self.isMissing(arguments.path) {
+            return .plain("\(action) needs path: the file to \(action == "read" ? "read" : "change"), for example the path you read.")
+        }
         do {
-            switch arguments.action.lowercased().trimmingCharacters(in: .whitespaces) {
+            switch action {
             case "read":
                 return .plain(try await read(path: path, arguments: arguments))
             case "write":
@@ -139,6 +147,9 @@ struct VMFileTool: Tool {
             return .plain("Content is \(data.count) bytes; the limit is \(Self.maximumWriteBytes). Write smaller files or generate them with vm_exec.")
         }
         let previous = try await previousContent(at: path)
+        if case .directory = previous {
+            return .plain("\(path) is a directory. Give the path of the file to write inside it.")
+        }
         if case .reviewable(let original?, _) = previous, original == content {
             return .plain(try await unchanged(path: path))
         }
@@ -161,8 +172,18 @@ struct VMFileTool: Tool {
               !expected.isEmpty else {
             return .plain("replace_lines needs the fingerprint shown by the latest read of \(path). Read the file again.")
         }
-        guard case .reviewable(let current?, let digest) = try await previousContent(at: path) else {
-            return .plain("\(path) is missing, binary, or larger than \(UnifiedTextDiff.maximumBytes) bytes. Use write for a new file, or vm_exec for large ones.")
+        let current: String
+        let digest: String
+        switch try await previousContent(at: path) {
+        case .reviewable(let text?, let fileDigest):
+            current = text
+            digest = fileDigest
+        case .reviewable(nil, _):
+            return .plain("\(path) does not exist. Check the path you read, or use write for a new file.")
+        case .directory:
+            return .plain("\(path) is a directory. Give the path of the file you read.")
+        case .unreviewable:
+            return .plain("\(path) is binary or larger than \(UnifiedTextDiff.maximumBytes) bytes. Edit it with vm_exec instead.")
         }
         guard digest.hasPrefix(expected), expected.count >= 6 else {
             return .plain("\(path) changed since that fingerprint, so the line numbers may be wrong. Read the file again and use its new fingerprint.")
@@ -229,16 +250,19 @@ struct VMFileTool: Tool {
         case reviewable(String?, digest: String)
         /// Binary or oversized: the write proceeds without a diff.
         case unreviewable
+        /// The path names a directory, so neither write nor edit applies.
+        case directory
     }
 
     /// Reads at most one byte over the review limit so oversized files are
     /// detected without transferring them.
     private func previousContent(at path: String) async throws -> PreviousContent {
         let result = try await context.run("""
-            if [ -f \(CoworkShell.quote(path)) ]; then head -c \(UnifiedTextDiff.maximumBytes + 1) -- \(CoworkShell.quote(path)); else exit 3; fi
+            if [ -d \(CoworkShell.quote(path)) ]; then exit 4; elif [ -f \(CoworkShell.quote(path)) ]; then head -c \(UnifiedTextDiff.maximumBytes + 1) -- \(CoworkShell.quote(path)); else exit 3; fi
             """)
         switch result.exitCode {
         case 3: return .reviewable(nil, digest: "")
+        case 4: return .directory
         case 0:
             return UnifiedTextDiff.reviewableText(result.stdout)
                 .map { .reviewable($0, digest: FileDigest.sha256(result.stdout)) } ?? .unreviewable
@@ -251,6 +275,11 @@ struct VMFileTool: Tool {
     private func displayPath(_ path: String) -> String {
         let prefix = context.sessionDirectory + "/"
         return path.hasPrefix(prefix) ? String(path.dropFirst(prefix.count)) : path
+    }
+
+    private static func isMissing(_ path: String?) -> Bool {
+        let trimmed = path?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty || trimmed == "."
     }
 
     private func list(path: String, depth: Int?) async throws -> String {

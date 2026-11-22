@@ -364,6 +364,27 @@ struct CoworkSessionToolsTests {
         #expect(await runtime.requests.allSatisfy { $0.stdin == nil })
     }
 
+    @Test("File actions without a path name the omission instead of using the session folder")
+    func vmFileActionsNeedPath() async throws {
+        let runtime = RecordingRuntime(stdout: "one\n")
+        let tool = VMFileTool(context: Self.context(runtime: runtime))
+
+        // The exact call a small model sent: everything right except path.
+        let edit = try await tool.call(arguments: VMFileArguments(
+            action: "replace_lines", path: nil, content: "\n*co-edit*\n",
+            startLine: 23, lineCount: nil, depth: nil,
+            endLine: 22, fingerprint: "a11706300829"
+        ))
+        let write = try await tool.call(arguments: VMFileArguments(
+            action: "write", path: " ", content: "x",
+            startLine: nil, lineCount: nil, depth: nil
+        ))
+
+        #expect(edit.contains("replace_lines needs path"))
+        #expect(write.contains("write needs path"))
+        #expect(await runtime.requests.isEmpty)
+    }
+
     @Test("Line splices insert, delete, keep the final newline, and reject lines outside the file")
     func lineSpliceEdgeCases() throws {
         let file = "a\nb\nc\n"
