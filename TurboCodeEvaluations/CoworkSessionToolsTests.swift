@@ -401,6 +401,52 @@ struct CoworkSessionToolsTests {
         #expect(await runtime.requests.allSatisfy { $0.stdin == nil })
     }
 
+    @Test("VM tool calls of one session never overlap and run in arrival order")
+    func toolCallGateSerializesCalls() async throws {
+        let context = Self.context(runtime: RecordingRuntime())
+        let log = Mutex<[String]>([])
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for index in 0..<4 {
+                group.addTask {
+                    try await context.serialized {
+                        log.withLock { $0.append("start \(index)") }
+                        try await Task.sleep(for: .milliseconds(20))
+                        log.withLock { $0.append("end \(index)") }
+                    }
+                }
+                // Lets each call reach the gate before the next one starts.
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            try await group.waitForAll()
+        }
+
+        let events = log.withLock { $0 }
+        #expect(events == (0..<4).flatMap { ["start \($0)", "end \($0)"] })
+    }
+
+    @Test("A queued VM tool call that is cancelled leaves the queue without running")
+    func toolCallGateDropsCancelledWaiters() async throws {
+        let context = Self.context(runtime: RecordingRuntime())
+        let ran = Mutex(false)
+
+        let holder = Task {
+            try await context.serialized { try await Task.sleep(for: .milliseconds(100)) }
+        }
+        try await Task.sleep(for: .milliseconds(10))
+        let queued = Task {
+            try await context.serialized { ran.withLock { $0 = true } }
+        }
+        try await Task.sleep(for: .milliseconds(10))
+        queued.cancel()
+
+        await #expect(throws: CancellationError.self) { try await queued.value }
+        try await holder.value
+        #expect(ran.withLock { $0 } == false)
+        // The gate is free again after the holder and the cancelled waiter.
+        try await context.serialized { }
+    }
+
     @Test("read reports the file fingerprint computed in the VM")
     func vmFileReadReportsFingerprint() async throws {
         let runtime = RecordingRuntime(stdout: "     1  hello\n__TOTAL_LINES__ 1\n__SHA256__ 0123456789ab\n")

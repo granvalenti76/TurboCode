@@ -81,6 +81,12 @@ struct VMFileTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: VMFileArguments) async throws -> ToolCommandOutput {
+        // One gate around the whole call: a write is a read for the receipt
+        // plus the write itself, and no vm_exec may run between them.
+        try await context.serialized { try await perform(arguments) }
+    }
+
+    private func perform(_ arguments: VMFileArguments) async throws -> ToolCommandOutput {
         let path = context.guestPath(arguments.path)
         do {
             switch arguments.action.lowercased().trimmingCharacters(in: .whitespaces) {

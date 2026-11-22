@@ -12,6 +12,30 @@ nonisolated struct CoworkSessionContext: Sendable {
     let runtime: any CoworkVMRuntime
     let configuration: CoworkVMConfiguration
     let sessionID: String
+    /// Shared by every copy of this value, so all VM tools of one model
+    /// session queue behind the same gate.
+    let toolCallGate = CoworkToolCallGate()
+
+    /// Runs one VM tool call at a time, in arrival order.
+    ///
+    /// FoundationModels runs the tool calls of one model reply concurrently.
+    /// A small model once sent a vm_file write and a vm_exec that ran the
+    /// written file in the same reply; the command started before the write
+    /// had finished and failed with "No such file", which began a rewrite
+    /// loop. The gate prevents that overlap. It cannot restore the order the
+    /// model emitted the calls in, which the framework does not expose, so
+    /// vm_exec's description also asks for dependent calls in later replies.
+    func serialized<T>(_ body: () async throws -> T) async throws -> T {
+        try await toolCallGate.acquire()
+        do {
+            let value = try await body()
+            await toolCallGate.release()
+            return value
+        } catch {
+            await toolCallGate.release()
+            throw error
+        }
+    }
 
     /// The session's private working directory inside the guest. The ID is
     /// reduced to a safe path component because it becomes a guest path.
@@ -77,6 +101,53 @@ nonisolated struct CoworkSessionContext: Sendable {
         }
         result.duration = ContinuousClock.now - started
         return result
+    }
+}
+
+/// A first-in, first-out mutex for VM tool calls. A queued call that is
+/// cancelled (the user pressed Stop) leaves the queue with
+/// `CancellationError` instead of running after the turn ended.
+actor CoworkToolCallGate {
+    private var isBusy = false
+    private var waiters: [(id: UUID, continuation: CheckedContinuation<Void, any Error>)] = []
+
+    func acquire() async throws {
+        guard isBusy else {
+            isBusy = true
+            return
+        }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await enqueue(id)
+        } onCancel: {
+            Task { await self.cancelWaiter(id) }
+        }
+    }
+
+    private func enqueue(_ id: UUID) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            // Runs on the actor, so a cancellation that arrived earlier is
+            // seen here and one that arrives later finds the waiter.
+            if Task.isCancelled {
+                continuation.resume(throwing: CancellationError())
+            } else {
+                waiters.append((id, continuation))
+            }
+        }
+    }
+
+    /// Hands the gate to the next waiter, or frees it when none is queued.
+    func release() {
+        guard !waiters.isEmpty else {
+            isBusy = false
+            return
+        }
+        waiters.removeFirst().continuation.resume()
+    }
+
+    private func cancelWaiter(_ id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).continuation.resume(throwing: CancellationError())
     }
 }
 
