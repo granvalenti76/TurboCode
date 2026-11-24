@@ -66,7 +66,8 @@ TurboCode is designed around a local model, not as a fallback for one. The
 recommended setup is `llama-server` serving a MoE model such as
 Qwen3.6-35B-A3B, which gives an excellent experience. Use a server on your Mac
 or on your local network whenever you can; the first-launch setup finds it and
-configures it for you.
+configures it for you. [LLAMA_SERVER.md](LLAMA_SERVER.md) lists the
+recommended model, flags and a ready-to-use start script.
 
 Apple's on-device model is an invisible part of the product. It turns your
 first prompt into the session title, and while the main model is still working

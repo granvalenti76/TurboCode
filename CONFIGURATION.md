@@ -30,6 +30,9 @@ layout and opens a setup sheet instead of writing a default model catalog:
 entry and the built-in DeepSeek entry, which stays unused until a key is added.
 An existing `models.json` is never overwritten by this sheet.
 
+To start a llama-server with the recommended model and flags, see
+[LLAMA_SERVER.md](LLAMA_SERVER.md).
+
 ## Local server in Settings
 
 **Settings → Providers → Local Server** points the `llama` entry at a running
