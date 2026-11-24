@@ -19,6 +19,10 @@ to be configured by hand:
   changes them live, per request, without restarting the server.
 - **Image input.** `modalities.vision` says whether a vision projector is
   loaded, so images are offered only when the model can see them.
+- **Automatic compaction.** Because the context window is known, TurboCode
+  compacts the conversation before the next message once it passes a
+  threshold (80% by default, **Settings → Agents → Context**), with the same
+  summary as `/compact`.
 
 ## Recommended models
 

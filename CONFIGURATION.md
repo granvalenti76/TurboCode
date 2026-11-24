@@ -319,7 +319,8 @@ folder shared read-only at `/work`). Older TurboCode versions ignore both.
 {
   "agent": {
     "responseStyle": "balanced",
-    "verifiesChanges": true
+    "verifiesChanges": true,
+    "autoCompactThresholdPercent": 80
   },
   "execution": {
     "allowNetworkAccess": true,
@@ -379,6 +380,16 @@ adapts the response to the request and its actual complexity. `concise` and
 
 `verifiesChanges` tells the agent to run the most focused available build or test
 after changing source code. It does not bypass execution permissions.
+
+`autoCompactThresholdPercent` compacts a local llama-server conversation before
+the next message once the previous turn filled at least that share of the
+context window. It accepts `0` (off) or a value from `50` to `95`; the default
+is `80`, and files without the key get it. The compaction is the same as
+`/compact`: the first request and the newest exchanges are kept whole, completed
+tool calls become one-line receipts, and raw tool output is dropped. It runs only
+between turns, never inside a running tool loop, and only with llama-server,
+because the context fill is measured against the `n_ctx` it reports in `/props`.
+The same option is under **TurboCode > Settings > Agents > Context**.
 
 ## Orchestrator
 
