@@ -691,6 +691,29 @@ public final class ChatStore {
         return true
     }
 
+    /// Turns the built-in System Prompt Builder skill on or off for the
+    /// active session. Same rules as `setConnector` (no change mid-turn, the
+    /// session is rebuilt), but Coding only: its save tool writes to the
+    /// prompt library on the Mac, which a Studio session must never do.
+    @discardableResult
+    func setSystemPromptBuilder(enabled: Bool) async -> Bool {
+        guard !busy else { return false }
+        if activeConversation == nil { await ensureActiveThread() }
+        guard let conversation = activeConversation,
+              conversation.domain == .coding else { return false }
+        conversationStore.setConnectors(
+            MCPConnectorCatalog.ids(
+                conversation.connectors,
+                setting: SystemPromptBuilderFeature.id,
+                enabled: enabled
+            ),
+            for: conversation.id
+        )
+        await persistConversationMetadata(for: conversation.id)
+        _ = await profileSelectionCoordinator.rebuildSession()
+        return true
+    }
+
     /// Opens the export review for the active Cowork session. The default
     /// destination is the session's shared folder when it still exists.
     func presentCoworkExport() {

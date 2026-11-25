@@ -73,6 +73,9 @@ final class ProfileSelectionCoordinator {
     private func applyConnectors(to configuration: inout ModelSessionConfiguration) {
         let connectors = activeConnectors()
         configuration.connectors = connectors
+        configuration.systemPromptBuilderEnabled = activeConversation.map {
+            SystemPromptBuilderFeature.isEnabled(ids: $0.connectors, domain: $0.domain)
+        } ?? false
         configuration.availableSkills = sessionSkillCatalog(
             codingSkills: configuration.availableSkills,
             connectors: connectors

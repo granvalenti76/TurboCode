@@ -38,6 +38,7 @@ struct ConnectorsView: View {
                     }
                     safariCard
                 }
+                skillsSection
             }
             .frame(maxWidth: 760, alignment: .leading)
             .padding(.horizontal, 32)
@@ -119,6 +120,39 @@ struct ConnectorsView: View {
             } catch {
                 availability[connector.id] = .failed(error.localizedDescription)
             }
+        }
+    }
+
+    // MARK: Built-in skills
+
+    /// Skills TurboCode ships that add a tool only while the model has them
+    /// loaded. They sit here, not in Skills, because like a connector they
+    /// are switched on per session before it starts, and they bring a tool.
+    private var skillsSection: some View {
+        let isStudio = chatStore.activeDomain == .cowork
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Skills")
+                .font(.headline)
+            ConnectorCard(
+                systemImage: "text.badge.star",
+                name: SystemPromptBuilderFeature.displayName,
+                summary: SystemPromptBuilderFeature.summary,
+                status: isStudio
+                    ? .init(text: Self.unavailableText(in: .cowork), tone: .neutral)
+                    : .init(text: "Loaded by the model when you ask for a system prompt", tone: .neutral),
+                scope: "This session",
+                isOn: Binding(
+                    get: {
+                        !isStudio && chatStore.activeConversation?.connectors
+                            .contains(SystemPromptBuilderFeature.id) == true
+                    },
+                    set: { enabled in
+                        Task { await chatStore.setSystemPromptBuilder(enabled: enabled) }
+                    }
+                ),
+                // Same rule as connectors: a rebuild would cut a running turn.
+                isEnabled: !isStudio && !chatStore.busy
+            )
         }
     }
 

@@ -168,6 +168,8 @@
 		B000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift */; };
 		B000000000000000000000f6 /* TurboCode/Services/Chat/SystemPromptDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f6 /* TurboCode/Services/Chat/SystemPromptDocument.swift */; };
 		B000000000000000000000f7 /* TurboCode/Services/Chat/SystemPromptLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f7 /* TurboCode/Services/Chat/SystemPromptLibrary.swift */; };
+		B000000000000000000000f8 /* TurboCode/Tools/SaveSystemPromptTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f8 /* TurboCode/Tools/SaveSystemPromptTool.swift */; };
+		B000000000000000000000f9 /* TurboCode/Services/Chat/SystemPromptBuilderFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = A000000000000000000000f9 /* TurboCode/Services/Chat/SystemPromptBuilderFeature.swift */; };
 		C10000000000000000000000 /* FoundationModelsUtilities in Frameworks */ = {isa = PBXBuildFile; productRef = 5E5203CC30053A3A00C554D4 /* FoundationModelsUtilities */; };
 /* End PBXBuildFile section */
 
@@ -356,6 +358,8 @@
 		A000000000000000000000f5 /* TurboCode/Tools/SteeringBoundaryModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/SteeringBoundaryModifier.swift; sourceTree = "<group>"; };
 		A000000000000000000000f6 /* TurboCode/Services/Chat/SystemPromptDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/SystemPromptDocument.swift; sourceTree = "<group>"; };
 		A000000000000000000000f7 /* TurboCode/Services/Chat/SystemPromptLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/SystemPromptLibrary.swift; sourceTree = "<group>"; };
+		A000000000000000000000f8 /* TurboCode/Tools/SaveSystemPromptTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Tools/SaveSystemPromptTool.swift; sourceTree = "<group>"; };
+		A000000000000000000000f9 /* TurboCode/Services/Chat/SystemPromptBuilderFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurboCode/Services/Chat/SystemPromptBuilderFeature.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -492,6 +496,8 @@
 				A0000000000000000000003d /* TurboCode/Services/Chat/TurboCodePersonality.swift */,
 				A000000000000000000000f6 /* TurboCode/Services/Chat/SystemPromptDocument.swift */,
 				A000000000000000000000f7 /* TurboCode/Services/Chat/SystemPromptLibrary.swift */,
+				A000000000000000000000f8 /* TurboCode/Tools/SaveSystemPromptTool.swift */,
+				A000000000000000000000f9 /* TurboCode/Services/Chat/SystemPromptBuilderFeature.swift */,
 				A0000000000000000000003e /* TurboCode/Services/Chat/TurboCodeSystemPromptBuilder.swift */,
 				A00000000000000000000041 /* TurboCode/Services/Codex/CodexAppServerClient.swift */,
 				A00000000000000000000042 /* TurboCode/Services/Codex/CodexBackendSession.swift */,
@@ -805,6 +811,8 @@
 				B0000000000000000000003d /* TurboCode/Services/Chat/TurboCodePersonality.swift in Sources */,
 				B000000000000000000000f6 /* TurboCode/Services/Chat/SystemPromptDocument.swift in Sources */,
 				B000000000000000000000f7 /* TurboCode/Services/Chat/SystemPromptLibrary.swift in Sources */,
+				B000000000000000000000f8 /* TurboCode/Tools/SaveSystemPromptTool.swift in Sources */,
+				B000000000000000000000f9 /* TurboCode/Services/Chat/SystemPromptBuilderFeature.swift in Sources */,
 				B0000000000000000000003e /* TurboCode/Services/Chat/TurboCodeSystemPromptBuilder.swift in Sources */,
 				B00000000000000000000041 /* TurboCode/Services/Codex/CodexAppServerClient.swift in Sources */,
 				B00000000000000000000042 /* TurboCode/Services/Codex/CodexBackendSession.swift in Sources */,
