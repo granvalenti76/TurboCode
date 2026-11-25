@@ -33,6 +33,9 @@ nonisolated struct TurboCodeSystemPromptContext: Sendable {
     /// The user-authored editable areas. The built-in default keeps every
     /// area's TurboCode text, so existing sessions are unaffected.
     let promptDocument: SystemPromptDocument
+    /// The name the agent answers to in the default Identity text. A
+    /// customized Identity area uses the user's own words instead.
+    let agentName: String
 
     /// The version of the running bundle, or nil when it declares none.
     static var bundleProductVersion: String? {
@@ -54,8 +57,10 @@ nonisolated struct TurboCodeSystemPromptContext: Sendable {
         workers: [AgentTaskWorkerDescriptor] = [],
         cowork: CoworkPromptFacts? = nil,
         productVersion: String? = TurboCodeSystemPromptContext.bundleProductVersion,
-        promptDocument: SystemPromptDocument = .turboCodeDefault
+        promptDocument: SystemPromptDocument = .turboCodeDefault,
+        agentName: String = AgentIdentity.defaultName
     ) {
+        self.agentName = agentName
         self.productVersion = productVersion
         self.promptDocument = promptDocument
         self.role = role
@@ -242,7 +247,9 @@ nonisolated enum TurboCodeSystemPromptBuilder {
     ) -> [String] {
         switch area {
         case .identity:
-            return [context.cowork == nil ? identitySection : coworkIdentitySection]
+            return [context.cowork == nil
+                ? identitySection(name: context.agentName)
+                : coworkIdentitySection(name: context.agentName)]
         case .personality:
             return [TurboCodePersonality.default.prompt]
         case .communication:
@@ -267,11 +274,20 @@ nonisolated enum TurboCodeSystemPromptBuilder {
         tool safety rules, approval gates, and workspace boundaries that follow.
         """
 
-    private static let identitySection = """
-        Role:
-        You are TurboCode, a native macOS coding agent. Work with the user until
-        their requested outcome is handled.
-        """
+    /// With the default name the text is byte-identical to the one sessions
+    /// used before names existed, so their cached prefix stays valid. A
+    /// custom name still says it runs inside TurboCode, so questions about
+    /// the app keep a clear answer.
+    private static func identitySection(name: String) -> String {
+        let who = name == AgentIdentity.defaultName
+            ? "TurboCode, a native macOS coding agent"
+            : "\(name), a native macOS coding agent running inside TurboCode"
+        return """
+            Role:
+            You are \(who). Work with the user until
+            their requested outcome is handled.
+            """
+    }
 
     /// Facts the model may need when the user asks about TurboCode itself.
     /// The version changes only between builds, so the section stays inside
@@ -305,13 +321,16 @@ nonisolated enum TurboCodeSystemPromptBuilder {
     /// The role is a stance rather than a list of deliverable types, because
     /// small local models treat such a list as a menu and force every request
     /// into one of its entries.
-    private static let coworkIdentitySection = """
+    private static func coworkIdentitySection(name: String) -> String {
+        let who = name == AgentIdentity.defaultName ? "TurboCode" : "\(name), running inside TurboCode,"
+        return """
         Role:
-        You are TurboCode in a Studio session. The user hands you an outcome, and
+        You are \(who) in a Studio session. The user hands you an outcome, and
         you have a Linux VM of your own in which to produce it. Choose the form
         that fits the request, from a direct answer to a finished deliverable,
         and work with the user until the outcome is handled.
         """
+    }
 
     /// Kept short for small local context windows. It is the agent's map of
     /// the VM, grouped under headings because local models follow a few

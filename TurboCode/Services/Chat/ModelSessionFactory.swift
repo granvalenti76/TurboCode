@@ -735,7 +735,8 @@ nonisolated enum ModelSessionFactory {
                     sessionDirectory: cowork.sessionDirectory,
                     sharesInputFolder: cowork.configuration.inputFolder != nil
                 ),
-                promptDocument: configuration.systemPrompts.studio
+                promptDocument: configuration.systemPrompts.studio,
+                agentName: configuration.systemPrompts.agentName
             )
         )
     }
@@ -1190,7 +1191,8 @@ nonisolated enum ModelSessionFactory {
                     backend: backend
                 ),
                 workers: workers,
-                promptDocument: configuration.systemPrompts.document(forCodingRole: role)
+                promptDocument: configuration.systemPrompts.document(forCodingRole: role),
+                agentName: configuration.systemPrompts.agentName
             )
         )
     }

@@ -51,6 +51,15 @@ public final class SettingsStore {
     }
     nonisolated static let replyNotificationExcerptKey = "replyNotificationExcerptEnabled"
     public var workspacePaths: [String] = []
+    /// The agent's name and sidebar icon. Saved with the system prompts
+    /// (`identity.json`) because the name is part of what the model reads;
+    /// the caller reloads the prompts after a change, once per commit.
+    var agentIdentity: AgentIdentity = SystemPromptLibrary.live.agentIdentity() {
+        didSet {
+            guard agentIdentity != oldValue else { return }
+            try? SystemPromptLibrary.live.saveAgentIdentity(agentIdentity)
+        }
+    }
     /// The newsroom taxonomy used by Editorial Desk metadata menus and
     /// persisted independently from provider and agent configuration.
     public var editorialDeskCatalog: EditorialDeskCatalog = .default {

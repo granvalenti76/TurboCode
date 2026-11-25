@@ -104,8 +104,7 @@ struct SidebarView: View {
 
     private var headerView: some View {
         HStack {
-            Text("TurboCode")
-                .font(AppTypography.sidebarHeader)
+            AgentIdentityLabel(identity: settings.agentIdentity)
 
             Spacer()
 

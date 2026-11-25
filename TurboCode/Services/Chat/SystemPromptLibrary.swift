@@ -111,12 +111,62 @@ nonisolated struct SystemPromptAssignments: Codable, Sendable, Hashable {
     var promptIDs: [SystemPromptProfile: UUID] = [:]
 }
 
+/// The agent's own name and sidebar icon, chosen in Settings › General.
+///
+/// The name reaches the model through the Identity area ("You are Ada…")
+/// while the product keeps its name: About TurboCode, the window, and
+/// notifications still say TurboCode, because they describe the app.
+/// Stored with the prompts because, like them, it changes what the model
+/// reads and must trigger the same single session rebuild.
+nonisolated struct AgentIdentity: Codable, Sendable, Hashable {
+    static let defaultName = "TurboCode"
+    static let maximumNameLength = 32
+
+    /// A small set of system colors keeps every choice legible on the
+    /// sidebar in both appearances.
+    enum Tint: String, Codable, Sendable, CaseIterable {
+        case accent, blue, purple, pink, red, orange, green, teal, graphite
+    }
+
+    var name: String
+    /// SF Symbol shown on a tile beside the name; nil shows the name alone,
+    /// which is how the sidebar looked before the setting existed.
+    var symbol: String?
+    var tint: Tint
+
+    init(name: String = AgentIdentity.defaultName, symbol: String? = nil, tint: Tint = .accent) {
+        self.name = name
+        self.symbol = symbol
+        self.tint = tint
+    }
+
+    static let `default` = AgentIdentity()
+
+    /// The name as used: one trimmed line, at most `maximumNameLength`
+    /// characters, and the default when empty.
+    var displayName: String {
+        let line = name.components(separatedBy: .newlines).first ?? ""
+        let trimmed = String(line.trimmingCharacters(in: .whitespaces).prefix(Self.maximumNameLength))
+            .trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? Self.defaultName : trimmed
+    }
+
+    /// Curated symbols that read well at sidebar size.
+    static let symbolChoices = [
+        "sparkles", "bolt.fill", "brain.head.profile", "cpu", "terminal.fill",
+        "hammer.fill", "wand.and.stars", "leaf.fill", "flame.fill", "star.fill",
+        "moon.stars.fill", "globe", "atom", "paintbrush.pointed.fill", "pawprint.fill"
+    ]
+}
+
 /// The documents a session configuration carries, already resolved from the
 /// library so session assembly never touches the disk.
 nonisolated struct ResolvedSystemPrompts: Sendable, Hashable {
     var coding: SystemPromptDocument = .turboCodeDefault
     var studio: SystemPromptDocument = .turboCodeDefault
     var delegate: SystemPromptDocument = .turboCodeDefault
+    /// The agent's name for the Identity area; see `AgentIdentity`.
+    var agentName: String = AgentIdentity.defaultName
 
     static let builtIn = ResolvedSystemPrompts()
 
@@ -173,6 +223,10 @@ nonisolated struct SystemPromptLibrary: Sendable {
 
     /// Kept apart from the prompt files so rating never rewrites a prompt
     /// and the record format stays unchanged.
+    private var identityURL: URL {
+        directoryURL.appendingPathComponent("identity.json")
+    }
+
     private var ratingsURL: URL {
         directoryURL.appendingPathComponent("ratings.json")
     }
@@ -188,7 +242,7 @@ nonisolated struct SystemPromptLibrary: Sendable {
         )) ?? []
         let decoder = Self.decoder
         return files
-            .filter { $0.pathExtension == "json" && $0 != assignmentsURL && $0 != ratingsURL }
+            .filter { $0.pathExtension == "json" && $0 != assignmentsURL && $0 != ratingsURL && $0 != identityURL }
             .compactMap { url in
                 guard let data = try? Data(contentsOf: url),
                       let record = try? decoder.decode(SystemPromptRecord.self, from: data),
@@ -237,6 +291,19 @@ nonisolated struct SystemPromptLibrary: Sendable {
         return records().first { $0.id == id }
     }
 
+    /// The saved identity, or the default when none was saved or the file
+    /// is unreadable.
+    func agentIdentity() -> AgentIdentity {
+        guard let data = try? Data(contentsOf: identityURL),
+              let value = try? Self.decoder.decode(AgentIdentity.self, from: data)
+        else { return .default }
+        return value
+    }
+
+    func saveAgentIdentity(_ value: AgentIdentity) throws {
+        try write(value, to: identityURL)
+    }
+
     /// Every rating, oldest first. An unreadable file reads as none, so a
     /// damaged ratings file never hides the prompts themselves.
     func ratings() -> [SystemPromptRating] {
@@ -279,7 +346,8 @@ nonisolated struct SystemPromptLibrary: Sendable {
         return ResolvedSystemPrompts(
             coding: document(.coding),
             studio: document(.studio),
-            delegate: document(.delegate)
+            delegate: document(.delegate),
+            agentName: agentIdentity().displayName
         )
     }
 
