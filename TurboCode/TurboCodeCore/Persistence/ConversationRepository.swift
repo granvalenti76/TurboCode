@@ -355,7 +355,8 @@ private extension Conversation {
             mode: mode,
             domain: domain,
             coworkFolder: coworkFolder,
-            connectors: connectors
+            connectors: connectors,
+            promptTrial: promptTrial
         )
     }
 }
@@ -378,7 +379,8 @@ private extension ConversationSnapshot {
             mode: stored.mode,
             domain: stored.domain,
             coworkFolder: stored.coworkFolder,
-            connectors: stored.connectors ?? []
+            connectors: stored.connectors ?? [],
+            promptTrial: stored.promptTrial
         )
         modelBackend = stored.modelBackend
         blocks = stored.blocks.map(ChatBlock.init)
@@ -413,6 +415,7 @@ private extension ConversationSnapshot {
         // Written only when used, so sessions without connectors keep the
         // exact file shape they had before the field existed.
         storedSession.connectors = conversation.connectors.isEmpty ? nil : conversation.connectors
+        storedSession.promptTrial = conversation.promptTrial
         return storedSession
     }
 }

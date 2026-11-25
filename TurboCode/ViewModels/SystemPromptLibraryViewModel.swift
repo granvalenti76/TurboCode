@@ -28,6 +28,9 @@ final class SystemPromptLibraryViewModel {
 
     private(set) var records: [SystemPromptRecord] = []
     private(set) var assignments = SystemPromptAssignments()
+    /// Loaded with the records; ratings are added from trial chats, which
+    /// reload this page when it next appears.
+    private(set) var ratings: [SystemPromptRating] = []
     var sortOrder: SortOrder = .name
     /// The last failed write, shown once by the view.
     var errorMessage: String?
@@ -50,6 +53,12 @@ final class SystemPromptLibraryViewModel {
     func load() {
         records = library.records()
         assignments = library.assignments()
+        ratings = library.ratings()
+    }
+
+    /// The rating of a prompt's current version, or nil when unrated.
+    func ratingSummary(for record: SystemPromptRecord) -> SystemPromptRatingSummary? {
+        SystemPromptLibrary.summary(of: ratings, promptID: record.id, version: record.version)
     }
 
     func record(_ id: UUID) -> SystemPromptRecord? {

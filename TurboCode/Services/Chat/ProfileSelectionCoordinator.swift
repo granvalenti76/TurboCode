@@ -76,6 +76,15 @@ final class ProfileSelectionCoordinator {
         configuration.systemPromptBuilderEnabled = activeConversation.map {
             SystemPromptBuilderFeature.isEnabled(ids: $0.connectors, domain: $0.domain)
         } ?? false
+        // A "Try" chat runs the prompt under trial in place of its profile's,
+        // always at its current version. Applied here because, like the
+        // connectors, it belongs to the conversation, not to the profile.
+        if let conversation = activeConversation,
+           let trial = conversation.promptTrial,
+           let record = SystemPromptLibrary.live.record(for: trial) {
+            configuration.systemPrompts = configuration.systemPrompts
+                .applyingTrial(record.document, domain: conversation.domain)
+        }
         configuration.availableSkills = sessionSkillCatalog(
             codingSkills: configuration.availableSkills,
             connectors: connectors

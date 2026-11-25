@@ -51,6 +51,60 @@ nonisolated struct SystemPromptRecord: Codable, Sendable, Hashable, Identifiable
     }
 }
 
+/// One judgement of a saved prompt, given in a "Try" chat.
+///
+/// Ratings belong to a version, not to the prompt: an edit makes a new
+/// prompt as far as the model is concerned, so old stars must not vouch for
+/// it. The gallery shows the average of the current version only.
+nonisolated struct SystemPromptRating: Codable, Sendable, Hashable, Identifiable {
+    let id: UUID
+    let promptID: UUID
+    let version: Int
+    /// 1 to 5.
+    let stars: Int
+    let tags: [String]
+    let note: String
+    let date: Date
+    /// The trial chat it came from, so the user can find the evidence.
+    let conversationID: String?
+
+    init(
+        id: UUID = UUID(),
+        promptID: UUID,
+        version: Int,
+        stars: Int,
+        tags: [String] = [],
+        note: String = "",
+        date: Date = .now,
+        conversationID: String? = nil
+    ) {
+        self.id = id
+        self.promptID = promptID
+        self.version = version
+        self.stars = min(5, max(1, stars))
+        self.tags = tags
+        self.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.date = date
+        self.conversationID = conversationID
+    }
+
+    /// Quick reasons offered next to the stars. Fixed so they can be
+    /// compared across prompts; the note covers everything else.
+    static let suggestedTags = [
+        "Follows the routine",
+        "Right tone",
+        "Too long",
+        "Ignored a rule",
+        "Used the wrong tools"
+    ]
+}
+
+/// The average stars of one prompt version.
+nonisolated struct SystemPromptRatingSummary: Sendable, Hashable {
+    let average: Double
+    let count: Int
+}
+
 /// Which saved prompt each profile uses. A missing entry means the built-in
 /// TurboCode default.
 nonisolated struct SystemPromptAssignments: Codable, Sendable, Hashable {
@@ -65,6 +119,19 @@ nonisolated struct ResolvedSystemPrompts: Sendable, Hashable {
     var delegate: SystemPromptDocument = .turboCodeDefault
 
     static let builtIn = ResolvedSystemPrompts()
+
+    /// The prompts of a "Try" chat: the trial document replaces the prompt
+    /// of the chat's own kind of session (Coding or Studio) and nothing else.
+    /// Delegates keep their profile's prompt, because the trial judges how
+    /// the agent talks to the user, not how workers report back.
+    func applyingTrial(_ document: SystemPromptDocument, domain: SessionDomain) -> Self {
+        var copy = self
+        switch domain {
+        case .coding: copy.coding = document
+        case .cowork: copy.studio = document
+        }
+        return copy
+    }
 
     func document(for profile: SystemPromptProfile) -> SystemPromptDocument {
         switch profile {
@@ -104,6 +171,12 @@ nonisolated struct SystemPromptLibrary: Sendable {
         directoryURL.appendingPathComponent("assignments.json")
     }
 
+    /// Kept apart from the prompt files so rating never rewrites a prompt
+    /// and the record format stays unchanged.
+    private var ratingsURL: URL {
+        directoryURL.appendingPathComponent("ratings.json")
+    }
+
     private func recordURL(_ id: UUID) -> URL {
         directoryURL.appendingPathComponent("\(id.uuidString).json")
     }
@@ -115,7 +188,7 @@ nonisolated struct SystemPromptLibrary: Sendable {
         )) ?? []
         let decoder = Self.decoder
         return files
-            .filter { $0.pathExtension == "json" && $0 != assignmentsURL }
+            .filter { $0.pathExtension == "json" && $0 != assignmentsURL && $0 != ratingsURL }
             .compactMap { url in
                 guard let data = try? Data(contentsOf: url),
                       let record = try? decoder.decode(SystemPromptRecord.self, from: data),
@@ -138,6 +211,8 @@ nonisolated struct SystemPromptLibrary: Sendable {
         let before = current
         current.promptIDs = current.promptIDs.filter { $0.value != id }
         if current != before { try saveAssignments(current) }
+        let kept = ratings().filter { $0.promptID != id }
+        if kept.count != ratings().count { try write(kept, to: ratingsURL) }
         let url = recordURL(id)
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
@@ -153,6 +228,45 @@ nonisolated struct SystemPromptLibrary: Sendable {
 
     func saveAssignments(_ value: SystemPromptAssignments) throws {
         try write(value, to: assignmentsURL)
+    }
+
+    /// The saved prompt a trial chat runs, or nil when it was deleted; the
+    /// chat then falls back to its profile's prompt.
+    func record(for trial: PromptTrial) -> SystemPromptRecord? {
+        guard let id = UUID(uuidString: trial.promptID) else { return nil }
+        return records().first { $0.id == id }
+    }
+
+    /// Every rating, oldest first. An unreadable file reads as none, so a
+    /// damaged ratings file never hides the prompts themselves.
+    func ratings() -> [SystemPromptRating] {
+        guard let data = try? Data(contentsOf: ratingsURL),
+              let value = try? Self.decoder.decode([SystemPromptRating].self, from: data)
+        else { return [] }
+        return value
+    }
+
+    func addRating(_ rating: SystemPromptRating) throws {
+        try write(ratings() + [rating], to: ratingsURL)
+    }
+
+    /// Average of the ratings given to exactly this version, or nil.
+    func ratingSummary(for promptID: UUID, version: Int) -> SystemPromptRatingSummary? {
+        Self.summary(of: ratings(), promptID: promptID, version: version)
+    }
+
+    static func summary(
+        of ratings: [SystemPromptRating],
+        promptID: UUID,
+        version: Int
+    ) -> SystemPromptRatingSummary? {
+        let matching = ratings.filter { $0.promptID == promptID && $0.version == version }
+        guard !matching.isEmpty else { return nil }
+        let total = matching.reduce(0) { $0 + $1.stars }
+        return SystemPromptRatingSummary(
+            average: Double(total) / Double(matching.count),
+            count: matching.count
+        )
     }
 
     /// The document each profile uses right now.

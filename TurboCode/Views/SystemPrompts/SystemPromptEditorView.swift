@@ -187,6 +187,19 @@ struct SystemPromptEditorView: View {
                 }
                 .help("Make an editable copy of the default prompt")
             } else {
+                Button {
+                    if let record { Task { await chatStore.startPromptTrial(record) } }
+                } label: {
+                    Label("Try", systemImage: "flask")
+                }
+                .disabled(hasChanges || chatStore.busy)
+                .help(hasChanges
+                      ? "Save first, so the chat tries what you see."
+                      : "Open a new chat that uses this prompt; the profile keeps its own")
+            }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            if !isReadOnly {
                 // A split button: Save is the click, Revert to Saved is in
                 // its menu, so no control sits disabled most of the time.
                 Menu {

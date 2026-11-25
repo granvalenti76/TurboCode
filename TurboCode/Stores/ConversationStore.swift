@@ -124,6 +124,12 @@ final class ConversationStore {
         threads[index].connectors = ids
     }
 
+    /// Marks one session as a trial of a saved system prompt, or clears it.
+    func setPromptTrial(_ trial: PromptTrial?, for id: String) {
+        guard let index = threads.firstIndex(where: { $0.id == id }) else { return }
+        threads[index].promptTrial = trial
+    }
+
     func touchThread(id: String) {
         guard let index = threads.firstIndex(where: { $0.id == id }) else { return }
         threads[index].updatedAt = .now

@@ -89,12 +89,15 @@ struct SystemPromptsView: View {
                         isBuiltIn: false,
                         areaTokens: SystemPromptTemplates.editableTokenEstimates(record.document, tuning: settings.agentTuning),
                         totalTokens: total,
+                        rating: Self.ratingText(model.ratingSummary(for: record)),
                         inUseFor: model.assignments.promptIDs[scope] == record.id ? scope : nil,
                         onUse: { model.assign(scope, to: record.id) },
                         onEdit: { editing = .record(record.id) }
                     )
                     .contextMenu {
                         Button("Edit") { editing = .record(record.id) }
+                        Button("Try in a New Chat") { Task { await chatStore.startPromptTrial(record) } }
+                            .disabled(chatStore.busy)
                         Button("Rename…") {
                             renameText = record.name
                             renaming = record
@@ -269,6 +272,13 @@ struct SystemPromptsView: View {
         SystemPromptTemplates.totalTokenEstimate(.turboCodeDefault, tuning: settings.agentTuning)
     }
 
+    /// "★ 4.3 · 3 ratings" for the current version, or an invitation.
+    static func ratingText(_ summary: SystemPromptRatingSummary?) -> String {
+        guard let summary else { return "Not rated · try it to rate" }
+        let average = summary.average.formatted(.number.precision(.fractionLength(1)))
+        return "\u{2605} \(average) \u{00B7} \(summary.count) rating\(summary.count == 1 ? "" : "s")"
+    }
+
     private func tokenText(_ tokens: Int) -> String {
         "\(tokens.formatted()) tok"
     }
@@ -304,6 +314,8 @@ private struct SystemPromptCard: View {
     let isBuiltIn: Bool
     let areaTokens: [(area: SystemPromptArea, tokens: Int)]
     let totalTokens: Int
+    /// Nil for the built-in default, which is not rated.
+    var rating: String? = nil
     /// The profile this card is in use for, or nil.
     let inUseFor: SystemPromptProfile?
     let onUse: () -> Void
@@ -328,6 +340,11 @@ private struct SystemPromptCard: View {
                 Text(meta)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
+                if let rating {
+                    Text(rating)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer(minLength: 0)
                 if let inUseFor {
                     Label("In use for \(inUseFor.title)", systemImage: "checkmark")

@@ -42,6 +42,9 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
     /// Connectors enabled for the session. Optional so sessions written
     /// before connectors existed decode unchanged and enable none.
     public var connectors: [String]?
+    /// The saved system prompt a "Try" chat runs. Absent for every other
+    /// session, so their files keep their shape.
+    public var promptTrial: PromptTrial?
     public var modelBackend: String
     public var blocks: [StoredBlock]
     /// Optional so sessions written before transcript persistence remain
@@ -86,6 +89,7 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, id, title, projectName, workspacePath
         case createdAt, updatedAt, isPinned, isArchived, mode, domain, coworkFolder, connectors
+        case promptTrial
         case modelBackend, blocks, transcript, contextProjection
         case steering, statistics
     }
@@ -117,6 +121,8 @@ nonisolated public struct StoredSession: Codable, Hashable, Sendable, Identifiab
         domain = try values.decodeIfPresent(SessionDomain.self, forKey: .domain) ?? .coding
         coworkFolder = try values.decodeIfPresent(String.self, forKey: .coworkFolder)
         connectors = try values.decodeIfPresent([String].self, forKey: .connectors)
+        // A malformed trial only loses the trial; the chat itself opens.
+        promptTrial = try? values.decodeIfPresent(PromptTrial.self, forKey: .promptTrial)
         modelBackend = try values.decode(String.self, forKey: .modelBackend)
         blocks = try values.decodeIfPresent([StoredBlock].self, forKey: .blocks) ?? []
         var recovered: [String] = []
