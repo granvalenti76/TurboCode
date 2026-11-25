@@ -5,6 +5,106 @@ All notable changes to TurboCode are documented in this file.
 The project follows Semantic Versioning while its public API and persisted
 formats continue to evolve before 1.0.
 
+## [0.66] - 2026-11-25
+
+TurboCode 0.66 lets you write your own system prompt, with the model's help
+if you like, try it in a chat and rate it, and give the agent its own name.
+Long local conversations compact themselves, replies keep running while you
+browse other chats, and Settings is reorganised around what each pane
+decides. TurboCode is now licensed under the GPL-3.0.
+
+### Features
+
+- Added **System Prompts**, a page under Configuration. A prompt is built
+  from blocks in fixed areas (identity, personality, communication, working
+  method, user context, rules, examples); the tool rules, approvals, and
+  session details stay in a locked part that TurboCode manages. The editor
+  shows how much of the model's context each part takes.
+- The library is a gallery: choose Coding, Studio, or Delegate, and click a
+  prompt to use it for that kind of session. The prompt in use has a ring,
+  the TurboCode default is always there to go back to, and **New Prompt**
+  can start from the default, from a blank prompt, or from a Markdown file
+  in which each `##` heading becomes a block.
+- **Try** opens a new chat that runs a saved prompt while the profile keeps
+  its own. A banner above the chat offers **Rate…** (five stars, quick
+  reasons, a note) and **Use This Prompt**. Ratings belong to the version
+  they were given to, and each card shows the current version's average.
+- **System Prompt Builder**, a skill turned on per Coding session under
+  **Connectors → Skills**, lets the model interview you about the prompt's
+  purpose, show a draft area by area, and save it to the library once you
+  approve. It never overwrites a prompt or puts one in use by itself.
+- Name the agent and give it a sidebar icon under **Settings → General →
+  Agent**. The model introduces itself by that name; the app is still
+  TurboCode.
+- Long llama-server conversations compact automatically before a send once
+  the previous turn filled more than a set share of the context (80% by
+  default, adjustable or off under **Settings → Agents → Context**).
+  Compaction, automatic or `/compact`, keeps the first request whole, the
+  newest exchanges, and a one-line receipt for each completed tool call.
+- A reply keeps running while you open other chats: they open read-only
+  until it finishes. A dot in the sidebar shows the chat that is working or
+  has an unread reply, and a notification arrives when a reply finishes
+  while TurboCode is in the background. **New Chat** during a reply asks
+  before stopping it.
+- Settings is a sidebar of ten panes in five groups (TurboCode,
+  Intelligence, Agents, Workspaces, Trust), each opening with what it
+  decides, and it can be searched.
+- Reasoning levels declared by llama-server's `/props` are offered by their
+  own names, such as **Minimal** or **Max**, and the composer shows the
+  level actually sent.
+- **Settings → Providers → Local Server** points the local model at
+  another running server without editing `models.json`. `mlx_vlm.server`
+  is recognised with its loaded model and image support, and the streamed
+  thinking of `mlx_lm.server` is now shown.
+- Studio's `vm_file` can replace a range of lines (`replace_lines`) instead
+  of rewriting a whole file, and refuses an edit made against a stale read.
+- Profiles show Studio's tools and skills next to Coding's, and a profile
+  override can turn off Studio's optional tools.
+- The model can answer questions about TurboCode itself, keeps casual
+  conversation casual, and in Studio follows guidance for unattended
+  research and citing web sources.
+- Added `LLAMA_SERVER.md`, which explains what TurboCode reads from
+  llama-server and which flags it expects, and
+  `Scripts/turbocode-llama-server.sh`, a configurable launcher.
+
+### Fixes
+
+- Studio VMs no longer fail to start after the app quits with the VM
+  running; the writable layer is formatted with a journal.
+- Studio VM errors name the failing step instead of showing an opaque gRPC
+  error, and a stopped command is no longer reported as a timeout.
+- Studio VM start, stop, reset, and commands run one at a time, and a
+  cancelled command is killed in the VM instead of running to its timeout.
+- Tool calls of one Studio reply no longer overlap, so a command can't start
+  before the file it runs has been written.
+- A `vm_file` call without a path asks for one instead of acting on the
+  session folder, and the tool no longer lets a model rewrite the same file
+  over and over in one turn.
+- A local model that sent a connector's tool name as the operation now
+  reaches the tool.
+
+### Interventions
+
+- TurboCode is licensed under the GNU General Public License v3.0
+  (GPL-3.0-only) instead of MIT. Third-party components keep their own
+  licenses, listed in `THIRD_PARTY_NOTICES.md`.
+- With the default prompt and the default name, the system prompt is
+  unchanged, so cached prefixes stay valid. A custom prompt or name changes
+  the prompt and rebuilds the session once.
+- Saved prompts, profile assignments, ratings, and the agent's identity are
+  stored in `~/.turbocode/prompts/`. A chat opened with **Try** stores the
+  prompt it is trying; other sessions keep their exact file format.
+- The Tools page was removed; what it showed is covered by Profiles and
+  Settings, and ⌘3 is free.
+- The project terminal is an opt-in setting under **Settings → General →
+  Workbench**, off by default.
+- Both sidebar domains show five chats per step before **Show More**.
+- Agent tuning gains an optional automatic compaction threshold; older
+  configuration files read as the default.
+- New sources used by the `turbocode-acp` target are listed explicitly in
+  `project.pbxproj`.
+- Updated the application marketing version to 0.66.
+
 ## [0.65] - 2026-11-12
 
 TurboCode 0.65 sets itself up on first launch, lets you follow and steer a
