@@ -120,6 +120,7 @@ final class MessageSendCoordinator {
         }
 
         await compactOnDeviceContextIfNeeded()
+        await compactLocalContextIfNeeded()
         await lifecycle.ensureActiveThread()
         if case .rejected(let message) = profiles.coworkAdmission() {
             presentation.errorMessage = message
@@ -410,6 +411,66 @@ final class MessageSendCoordinator {
 
     func refreshSkillsIfNeeded(forceRebuild: Bool = false) async {
         await profiles.refreshSkillsIfNeeded(forceRebuild: forceRebuild)
+    }
+
+    enum LocalCompactionOutcome: Equatable {
+        case noTranscript
+        case nothingToCompact
+        case compacted
+    }
+
+    /// Replaces the active local Llama conversation with its deterministic
+    /// handoff summary. Shared by `/compact` and the automatic threshold, so
+    /// both produce the same summary, notice and diagnostics. Callers check
+    /// the backend and that no turn is running.
+    func compactLocalContext() async -> LocalCompactionOutcome {
+        guard let transcript = await llmRuntime.foundationModelsTranscript() else {
+            return .noTranscript
+        }
+        let turnCount = SessionRebuildHistory.userTurnCount(in: transcript)
+        let maximumCharacters = SessionRebuildHistory.localCompactionCharacterLimit(
+            contextWindowTokens: modelRuntime.activeRemoteModel?.contextWindowTokens
+        )
+        guard let compaction = SessionRebuildHistory.localCompaction(
+            from: timeline.blocks,
+            toolEntries: Array(transcript),
+            maximumCharacters: maximumCharacters
+        ) else {
+            return .nothingToCompact
+        }
+
+        await lifecycle.ensureActiveThread()
+        timeline.presentCompaction(compaction.summary)
+        presentation.presentCompactionNotice(
+            LocalCompactionNotice(
+                sourceCharacters: compaction.sourceCharacters,
+                retainedCharacters: compaction.retainedCharacters
+            )
+        )
+        await profiles.rebuildSession(
+            restoringHistory: compaction.history,
+            restoringProjection: .empty
+        )
+
+        await AgentDiagnosticsRecorder.shared.recordLocalCompaction(
+            backend: modelRuntime.activeBackend,
+            turnCount: turnCount,
+            sourceCharacters: compaction.sourceCharacters,
+            retainedCharacters: compaction.retainedCharacters
+        )
+        return .compacted
+    }
+
+    /// Compacts before the next message once the previous turn filled the
+    /// llama-server context past the threshold set in Settings. The rebuild
+    /// clears the reported usage, so the following send cannot compact again.
+    private func compactLocalContextIfNeeded() async {
+        guard SessionRebuildHistory.shouldAutoCompact(
+            backend: modelRuntime.activeBackend,
+            usage: presentation.llamaContextUsage,
+            thresholdPercent: modelRuntime.agentTuning.agent.autoCompactThresholdPercent
+        ) else { return }
+        _ = await compactLocalContext()
     }
 
     private func compactOnDeviceContextIfNeeded() async {

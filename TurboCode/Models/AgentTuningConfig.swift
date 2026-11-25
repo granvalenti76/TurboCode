@@ -70,6 +70,13 @@ nonisolated public struct AgentTuningConfig: Codable, Hashable, Sendable {
                 "execution.maximumToolOutputCharacters must be between 1000 and 30000"
             )
         }
+        let threshold = agent.autoCompactThresholdPercent
+        guard threshold == 0 || AgentPolicy.autoCompactThresholdRange.contains(threshold) else {
+            throw AgentTuningError.invalidValue(
+                field: "agent.autoCompactThresholdPercent",
+                "agent.autoCompactThresholdPercent must be 0 (off) or between 50 and 95"
+            )
+        }
         guard !orchestrator.delegateModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw AgentTuningError.invalidValue(
                 field: "orchestrator.delegateModelID",
@@ -179,22 +186,40 @@ nonisolated public struct OrchestratorPolicy: Codable, Hashable, Sendable {
 nonisolated public struct AgentPolicy: Codable, Hashable, Sendable {
     public var responseStyle: AgentResponseStyle
     public var verifiesChanges: Bool
+    /// Context fill, in percent, at which a local llama-server conversation
+    /// is compacted before the next message is sent; 0 turns it off. Only
+    /// llama-server reports the loaded context through `/props`, so other
+    /// servers never reach the threshold.
+    public var autoCompactThresholdPercent: Int
+
+    public static let autoCompactThresholdRange = 50...95
+    public static let defaultAutoCompactThresholdPercent = 80
 
     public init(
         responseStyle: AgentResponseStyle = .balanced,
-        verifiesChanges: Bool = true
+        verifiesChanges: Bool = true,
+        autoCompactThresholdPercent: Int = AgentPolicy.defaultAutoCompactThresholdPercent
     ) {
         self.responseStyle = responseStyle
         self.verifiesChanges = verifiesChanges
+        self.autoCompactThresholdPercent = autoCompactThresholdPercent
     }
 
-    private enum CodingKeys: String, CodingKey { case responseStyle, verifiesChanges }
+    private enum CodingKeys: String, CodingKey {
+        case responseStyle, verifiesChanges, autoCompactThresholdPercent
+    }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         responseStyle = try values.decodeIfPresent(AgentResponseStyle.self, forKey: .responseStyle)
             ?? .balanced
         verifiesChanges = try values.decodeIfPresent(Bool.self, forKey: .verifiesChanges) ?? true
+        // Files written before this option existed get the default, so
+        // automatic compaction is on after an update.
+        autoCompactThresholdPercent = try values.decodeIfPresent(
+            Int.self,
+            forKey: .autoCompactThresholdPercent
+        ) ?? AgentPolicy.defaultAutoCompactThresholdPercent
     }
 }
 

@@ -622,6 +622,19 @@ struct ProviderSettingsView: View {
 struct AgentBehaviorSettingsView: View {
     @Environment(SettingsStore.self) private var settings
 
+    /// The threshold doubles as the switch: 0 is off, and turning it back on
+    /// restores the default rather than an arbitrary remembered value.
+    private var autoCompactEnabled: Binding<Bool> {
+        Binding(
+            get: { settings.agentTuning.agent.autoCompactThresholdPercent > 0 },
+            set: { enabled in
+                settings.agentTuning.agent.autoCompactThresholdPercent = enabled
+                    ? AgentPolicy.defaultAutoCompactThresholdPercent
+                    : 0
+            }
+        )
+    }
+
     var body: some View {
         let s = Bindable(settings)
         return Form {
@@ -634,6 +647,26 @@ struct AgentBehaviorSettingsView: View {
                     Text("Detailed").tag(AgentResponseStyle.detailed)
                 }
                 Toggle("Verify source changes", isOn: s.agentTuning.agent.verifiesChanges)
+            }
+
+            Section("Context") {
+                Toggle("Compact automatically", isOn: autoCompactEnabled)
+                if settings.agentTuning.agent.autoCompactThresholdPercent > 0 {
+                    // Discrete steps, not a slider: every settings change
+                    // rebuilds the model session, so dragging would rebuild
+                    // it once per intermediate value.
+                    Picker(
+                        "When context reaches",
+                        selection: s.agentTuning.agent.autoCompactThresholdPercent
+                    ) {
+                        ForEach(Array(stride(from: 50, through: 95, by: 5)), id: \.self) { percent in
+                            Text("\(percent)%").tag(percent)
+                        }
+                    }
+                }
+                Text("Local llama-server only. Before the next message, TurboCode replaces the conversation with the same summary as /compact.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Default Delegated Worker") {

@@ -1228,42 +1228,18 @@ public final class ChatStore {
             return
         }
 
-        guard let transcript = await sessionCoordinator.foundationModelsTranscript() else {
+        // The same compaction runs automatically before a send once the
+        // context passes the threshold in Settings; both share one path.
+        switch await messageSendCoordinator.compactLocalContext() {
+        case .noTranscript:
             error = "The active model session has no transcript checkpoint."
             return
-        }
-        let turnCount = SessionRebuildHistory.userTurnCount(in: transcript)
-        let maximumCharacters = SessionRebuildHistory.localCompactionCharacterLimit(
-            contextWindowTokens: activeRemoteModel?.contextWindowTokens
-        )
-        guard let compaction = SessionRebuildHistory.localCompaction(
-            from: blocks,
-            maximumCharacters: maximumCharacters
-        ) else {
+        case .nothingToCompact:
             error = "Nothing to compact yet."
             return
+        case .compacted:
+            error = nil
         }
-
-        error = nil
-        await ensureActiveThread()
-        timelineStore.presentCompaction(compaction.summary)
-        presentationViewModel.presentCompactionNotice(
-            LocalCompactionNotice(
-                sourceCharacters: compaction.sourceCharacters,
-                retainedCharacters: compaction.retainedCharacters
-            )
-        )
-        await rebuildSession(
-            restoringHistory: compaction.history,
-            restoringProjection: .empty
-        )
-
-        await AgentDiagnosticsRecorder.shared.recordLocalCompaction(
-            backend: activeBackend,
-            turnCount: turnCount,
-            sourceCharacters: compaction.sourceCharacters,
-            retainedCharacters: compaction.retainedCharacters
-        )
 
         if let threadID = activeThreadId {
             conversationStore.touchThread(id: threadID)
