@@ -14,7 +14,9 @@ nonisolated protocol CoworkVMRuntime: Sendable {
     /// from the running one. The writable layer persists across restarts.
     func start(_ configuration: CoworkVMConfiguration) async throws
     /// Runs one command in the guest. The stream yields output as it arrives
-    /// and always ends with exactly one `.exited` or `.timedOut` event.
+    /// and ends with exactly one `.exited` or `.timedOut` event, unless the VM
+    /// is stopped or reset meanwhile: then it throws
+    /// `CoworkVMError.interrupted`. Cancelling the consumer kills the process.
     func exec(_ request: CoworkExecRequest) async throws -> AsyncThrowingStream<CoworkExecEvent, any Error>
     func stop() async throws
     /// Stops the VM and discards the writable layer. The base image stays
@@ -102,15 +104,50 @@ nonisolated enum CoworkExecEvent: Sendable, Equatable {
 nonisolated enum CoworkVMError: LocalizedError, Equatable {
     case notInstalled(String)
     case notRunning
+    /// The VM was stopped or reset while the command ran. Kept apart from a
+    /// timeout so the model is not told its command was too slow.
+    case interrupted
     case invalidRequest(String)
     case unsafeInputFolder(String)
+    /// The VM or its guest agent failed during `stage`. `detail` is the
+    /// underlying error's full description (for a gRPC error, its code and
+    /// message), which a bridged `localizedDescription` would reduce to
+    /// "error 1".
+    case failed(stage: CoworkVMStage, detail: String)
 
     var errorDescription: String? {
         switch self {
         case .notInstalled(let detail): "Studio is not installed: \(detail)"
         case .notRunning: "The Studio VM is not running."
+        case .interrupted: "The Studio VM was stopped while the command ran."
         case .invalidRequest(let detail): detail
         case .unsafeInputFolder(let path): "\(path) cannot be shared with the Studio VM."
+        case .failed(let stage, let detail): "The Studio VM failed while \(stage.description): \(detail)"
+        }
+    }
+
+    /// Normalizes any runtime failure into a `CoworkVMError`, so tools report
+    /// it to the model as text and the turn continues. Cancellation passes
+    /// through unchanged: Stop must still end the turn.
+    static func normalizing(_ error: any Error, during stage: CoworkVMStage) -> any Error {
+        if error is CoworkVMError || error is CancellationError { return error }
+        return CoworkVMError.failed(stage: stage, detail: String(describing: error))
+    }
+}
+
+/// The runtime operation a `CoworkVMError.failed` happened in.
+nonisolated enum CoworkVMStage: String, Sendable, Equatable, CustomStringConvertible {
+    case booting
+    case startingCommand
+    case stopping
+    case resetting
+
+    var description: String {
+        switch self {
+        case .booting: "starting the VM"
+        case .startingCommand: "starting the command"
+        case .stopping: "stopping the VM"
+        case .resetting: "resetting the VM"
         }
     }
 }
@@ -135,6 +172,31 @@ nonisolated enum CoworkVMLifecycle {
             // needs a restart (≈0.4 s); the writable layer is preserved.
             running == requested ? .none : .restart
         }
+    }
+}
+
+/// Runs VM lifecycle operations one at a time, in arrival order.
+///
+/// The runtime is an actor, but actors are reentrant: while a boot awaits the
+/// hypervisor, a second `start` or a `reset` can enter and act on half-built
+/// state (a double boot of the one container ID, or the writable layer deleted
+/// while it is being mounted). Every operation that reads or changes the
+/// container goes through this queue instead.
+///
+/// Each operation runs in its own unstructured task, so a caller that is
+/// cancelled does not abandon a boot or a stop halfway; it still waits for
+/// its own result. A failed operation never blocks the ones queued after it.
+actor CoworkLifecycleQueue {
+    private var tail: Task<Void, Never>?
+
+    func run<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        let previous = tail
+        let task = Task<T, any Error> {
+            await previous?.value
+            return try await operation()
+        }
+        tail = Task { _ = await task.result }
+        return try await task.value
     }
 }
 

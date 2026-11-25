@@ -291,6 +291,14 @@ public struct ChatCompletionsLanguageModel: Sendable, LanguageModel {
       return existing + fragment
     }
 
+    /// TurboCode: the thinking text one streamed `data:` line carries, read
+    /// with the same decoder the stream uses. Exposed so tests can pin the
+    /// wire spellings each local server family sends.
+    public static func streamedReasoning(inLine line: String) throws -> String? {
+      try ChatCompletionsClient
+        .parseStreamLine(line)?.choices.first?.delta.reasoningContent
+    }
+
     private static func processChunks<ChunkSequence: AsyncSequence>(
       _ chunks: ChunkSequence,
       into channel: LanguageModelExecutorGenerationChannel,
@@ -627,7 +635,7 @@ private struct ChatCompletionsClient {
           }
 
           for try await line in stream.lines {
-            if let chunk = try parseStreamLine(line) {
+            if let chunk = try Self.parseStreamLine(line) {
               continuation.yield(chunk)
             }
           }
@@ -646,7 +654,7 @@ private struct ChatCompletionsClient {
 
           let body = String(data: data, encoding: .utf8) ?? ""
           for line in body.split(separator: "\n", omittingEmptySubsequences: false) {
-            if let chunk = try parseStreamLine(String(line)) {
+            if let chunk = try Self.parseStreamLine(String(line)) {
               continuation.yield(chunk)
             }
           }
@@ -677,7 +685,7 @@ private struct ChatCompletionsClient {
     return urlRequest
   }
 
-  func parseStreamLine(_ line: String) throws -> ChatCompletionChunk? {
+  static func parseStreamLine(_ line: String) throws -> ChatCompletionChunk? {
     let trimmedLine = line.trimmingCharacters(in: .whitespaces)
 
     // Skip empty lines and comments
@@ -886,7 +894,24 @@ private struct ChatCompletionsClient {
           case role
           case content
           case reasoningContent = "reasoning_content"
+          case reasoning
           case toolCalls = "tool_calls"
+        }
+
+        // TurboCode: llama-server and DeepSeek stream thinking as
+        // `reasoning_content`, while mlx_lm.server (and newer vLLM builds)
+        // use `reasoning`. `reasoning_content` wins when both are present so
+        // a server that mirrors the text in both fields is not shown twice.
+        // The fallback uses `try?` because some gateways send `reasoning` as
+        // an object; such a chunk must still decode its content.
+        init(from decoder: Decoder) throws {
+          let container = try decoder.container(keyedBy: CodingKeys.self)
+          role = try container.decodeIfPresent(String.self, forKey: .role)
+          content = try container.decodeIfPresent(String.self, forKey: .content)
+          reasoningContent =
+            try container.decodeIfPresent(String.self, forKey: .reasoningContent)
+            ?? (try? container.decodeIfPresent(String.self, forKey: .reasoning))
+          toolCalls = try container.decodeIfPresent([ToolCallDelta].self, forKey: .toolCalls)
         }
       }
     }

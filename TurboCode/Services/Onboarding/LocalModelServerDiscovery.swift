@@ -7,6 +7,12 @@ nonisolated enum LocalModelServerKind: String, Sendable, Equatable {
     /// llama.cpp's server: `/props` reports the loaded context window and
     /// vision, so nothing has to be typed during onboarding.
     case llamaServer
+    /// `mlx_vlm.server`: it has no `/props`, but its `/health` names the
+    /// loaded model. Every model it serves goes through a vision processor,
+    /// so images are on. Its reported context is the model's theoretical
+    /// maximum (524K for SenseNova), not what fits in memory, so the context
+    /// window is never taken from the server.
+    case mlxVLM
     /// Any other OpenAI-compatible server (LM Studio, Ollama, vLLM, …). Its
     /// context window cannot be read portably and is chosen by the user.
     case openAICompatible
@@ -169,6 +175,23 @@ nonisolated struct LocalModelServerDiscovery: Sendable {
                 supportsVision: LlamaServerRuntimeProbe.supportsVision(inProps: object)
             )
         }
+
+        // mlx_vlm.server answers `/health` beside `/v1`. Its loaded model goes
+        // first, because `/v1/models` may also list other cached models that
+        // are not in memory.
+        let healthURL = baseValue.deletingLastPathComponent().appendingPathComponent("health")
+        if let health = await http.get(healthURL, timeout: Self.listTimeout),
+           (200..<300).contains(health.status),
+           let loaded = Self.mlxVLMLoadedModel(fromHealth: health.body) {
+            return DiscoveredModelServer(
+                baseURL: base,
+                kind: .mlxVLM,
+                product: "MLX VLM",
+                modelIDs: [loaded] + modelIDs.filter { $0 != loaded },
+                contextWindowTokens: nil,
+                supportsVision: true
+            )
+        }
         return DiscoveredModelServer(
             baseURL: base,
             kind: .openAICompatible,
@@ -231,6 +254,18 @@ nonisolated struct LocalModelServerDiscovery: Sendable {
         guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let entries = object["data"] as? [[String: Any]] else { return [] }
         return entries.compactMap { $0["id"] as? String }.filter { !$0.isEmpty }
+    }
+
+    /// The loaded model from an mlx_vlm.server `/health` body, or nil when
+    /// the body is not mlx_vlm's. `model_ready` and `apc_enabled` together
+    /// are its signature; other servers' health checks carry neither.
+    static func mlxVLMLoadedModel(fromHealth data: Data) -> String? {
+        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              object["model_ready"] is Bool,
+              object["apc_enabled"] != nil,
+              let loaded = object["loaded_model"] as? String,
+              !loaded.isEmpty else { return nil }
+        return loaded
     }
 
     static func containsToolCall(_ data: Data) -> Bool {

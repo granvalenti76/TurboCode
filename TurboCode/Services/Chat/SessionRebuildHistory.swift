@@ -18,6 +18,23 @@ nonisolated enum SessionRebuildHistory {
     /// instead of carrying every completed call and raw output forward.
     static let onDeviceCompactionThreshold = 8
 
+    /// Whether a local llama-server conversation should be compacted before
+    /// the next message. `usage` is the fill reported by the previous turn;
+    /// it exists only for llama-server, whose `/props` gives the loaded
+    /// context, and it is cleared by every rebuild, so a compaction cannot
+    /// repeat until a new turn reports again. The check runs between turns
+    /// only: compacting inside a running tool loop would cut the turn.
+    static func shouldAutoCompact(
+        backend: ModelBackend,
+        usage: LlamaContextUsage?,
+        thresholdPercent: Int
+    ) -> Bool {
+        guard backend == .llamaServer, thresholdPercent > 0, let usage else {
+            return false
+        }
+        return usage.usedTokens * 100 >= thresholdPercent * usage.contextSize
+    }
+
     static func userTurnCount(in transcript: Transcript) -> Int {
         transcript.reduce(into: 0) { count, entry in
             guard case .prompt(let prompt) = entry else { return }
@@ -40,8 +57,13 @@ nonisolated enum SessionRebuildHistory {
 
     /// Builds a Llama-specific handoff. This is deliberately separate from
     /// `onDeviceCompaction` so Apple on-device behavior remains untouched.
+    ///
+    /// `toolEntries` is the model transcript the tool receipts come from: the
+    /// timeline does not hold native tool calls, only their widgets. Receipts
+    /// take at most a fifth of the budget so the conversation keeps the rest.
     static func localCompaction(
         from blocks: [ChatBlock],
+        toolEntries: [Transcript.Entry] = [],
         maximumCharacters: Int
     ) -> LocalCompaction? {
         let sourceCharacters = blocks
@@ -51,23 +73,135 @@ nonisolated enum SessionRebuildHistory {
         guard !fullRender.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
-        let rendered = RuntimeContextHandoff.render(
-            blocks: blocks,
-            maximumCharacters: maximumCharacters
+        let receipts = toolReceiptSection(
+            from: toolEntries,
+            maximumCharacters: maximumCharacters / 5
         )
+        let rendered = RuntimeContextHandoff.renderKeepingFirstRequest(
+            blocks: blocks,
+            maximumCharacters: maximumCharacters - receipts.count
+        )
+        let receiptPart = receipts.isEmpty ? "" : receipts + "\n\n"
         let summary = """
         Context compacted by TurboCode for the next local Llama turn.
         Preserve the user's goals, accepted decisions, and completed workspace outcomes.
-        Completed tool calls and their raw output were omitted.
+        Completed tool calls are listed without their raw output; read a file \
+        again before relying on its exact contents.
 
+        \(receiptPart)CONVERSATION:
         \(rendered)
         """
         return LocalCompaction(
             summary: summary,
             history: RuntimeContextHandoff.transcript(fromSummary: summary),
             sourceCharacters: max(sourceCharacters, fullRender.count),
-            retainedCharacters: rendered.count
+            retainedCharacters: rendered.count + receipts.count
         )
+    }
+
+    /// One line per completed tool call, newest kept when the budget is short.
+    ///
+    /// Without these lines a compacted model no longer knows which files it
+    /// read or which commands failed, and repeats that work. Only short
+    /// argument values are kept: long ones are file contents or patches.
+    static func toolReceiptSection(
+        from entries: [Transcript.Entry],
+        maximumCharacters: Int
+    ) -> String {
+        var outputs: [String: String] = [:]
+        for entry in entries {
+            if case .toolOutput(let output) = entry {
+                outputs[output.id] = segmentText(output.segments)
+            }
+        }
+        var receipts: [String] = []
+        for entry in entries {
+            guard case .toolCalls(let calls) = entry else { continue }
+            for call in calls {
+                // A call without an output never completed; it is not a receipt.
+                guard let output = outputs[call.id] else { continue }
+                receipts.append(toolReceipt(for: call, output: output))
+            }
+        }
+        guard !receipts.isEmpty else { return "" }
+
+        let header = "TOOLS USED (oldest first):"
+        var kept: [String] = []
+        var used = header.count
+        for receipt in receipts.reversed() {
+            let cost = receipt.count + 1
+            guard used + cost <= maximumCharacters else { break }
+            kept.insert(receipt, at: 0)
+            used += cost
+        }
+        guard !kept.isEmpty else { return "" }
+        var lines = [header]
+        if kept.count < receipts.count {
+            lines.append("- (\(receipts.count - kept.count) earlier calls omitted)")
+        }
+        return (lines + kept).joined(separator: "\n")
+    }
+
+    private static let receiptArgumentLimit = 120
+    private static let receiptOutcomeLimit = 80
+
+    private static func toolReceipt(
+        for call: Transcript.ToolCall,
+        output: String
+    ) -> String {
+        var line = "- \(call.toolName)"
+        let arguments = receiptArguments(call.arguments.jsonString)
+        if !arguments.isEmpty {
+            line += " " + arguments
+        }
+        let outcome = output
+            .split(whereSeparator: \.isNewline)
+            .lazy
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty } ?? ""
+        if !outcome.isEmpty {
+            line += " → " + clipped(outcome, to: receiptOutcomeLimit)
+        }
+        return line
+    }
+
+    /// Short scalar arguments in key order, so the same call always renders
+    /// the same line.
+    private static func receiptArguments(_ json: String) -> String {
+        guard let data = json.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return ""
+        }
+        var parts: [String] = []
+        for key in object.keys.sorted() {
+            let value: String
+            switch object[key] {
+            case let text as String:
+                let single = text.replacingOccurrences(of: "\n", with: " ")
+                guard !single.isEmpty, single.count <= receiptArgumentLimit else { continue }
+                value = single
+            case let number as NSNumber:
+                value = number.stringValue
+            default:
+                continue
+            }
+            parts.append("\(key): \(value)")
+        }
+        return clipped(parts.joined(separator: ", "), to: receiptArgumentLimit + 40)
+    }
+
+    private static func segmentText(_ segments: [Transcript.Segment]) -> String {
+        segments.compactMap { segment -> String? in
+            switch segment {
+            case .text(let text): text.content
+            case .structure(let structure): structure.content.jsonString
+            default: nil
+            }
+        }.joined(separator: "\n")
+    }
+
+    private static func clipped(_ text: String, to limit: Int) -> String {
+        text.count <= limit ? text : String(text.prefix(limit - 1)) + "…"
     }
 
     /// Produces a compact, model-readable handoff that keeps user requests,

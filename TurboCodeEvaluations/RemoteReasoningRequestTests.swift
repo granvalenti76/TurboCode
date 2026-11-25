@@ -113,4 +113,271 @@ struct RemoteReasoningRequestTests {
         #expect(restored.reasoningConfiguration == model.reasoningConfiguration)
     }
 
+    // MARK: - Server-declared effort levels
+
+    private static let effortConfiguration = RemoteReasoningConfiguration(
+        mode: .requestEffortLevel,
+        serverEffortLevels: ["low", "medium", "xhigh"]
+    )
+
+    @Test("Props effort levels are read only when the template declares support")
+    func propsEffortLevelsRequireDeclaredSupport() {
+        let supported: [String: Any] = [
+            "chat_template_caps": [
+                "supports_reasoning_effort": true,
+                "reasoning_effort_levels": ["low", "medium", "xhigh"],
+            ],
+        ]
+        let unsupported: [String: Any] = [
+            "chat_template_caps": [
+                "supports_reasoning_effort": false,
+                "reasoning_effort_levels": ["low"],
+            ],
+        ]
+
+        #expect(LlamaServerRuntimeProbe.reasoningEffortLevels(inProps: supported)
+            == ["low", "medium", "xhigh"])
+        #expect(LlamaServerRuntimeProbe.reasoningEffortLevels(inProps: unsupported) == nil)
+        #expect(LlamaServerRuntimeProbe.reasoningEffortLevels(inProps: [:]) == nil)
+    }
+
+    @Test("Effort-level mode offers only levels the server declared")
+    func effortLevelModeOffersDeclaredLevels() {
+        let configuration = Self.effortConfiguration
+
+        #expect(configuration.supportedEfforts == [.low, .medium, .xhigh])
+        #expect(configuration.requestDirective(for: .low) == .effortLevel("low"))
+        #expect(configuration.requestDirective(for: .xhigh) == .effortLevel("xhigh"))
+        #expect(configuration.requestDirective(for: nil) == .disabled)
+    }
+
+    @Test("An undeclared stored preference resolves to the nearest lower level")
+    func undeclaredPreferenceResolvesToNearestLowerLevel() {
+        let configuration = Self.effortConfiguration
+        let onlyHigh = RemoteReasoningConfiguration(
+            mode: .requestEffortLevel,
+            serverEffortLevels: ["xhigh"]
+        )
+
+        #expect(configuration.resolvedEffort(.high) == .medium)
+        #expect(configuration.requestDirective(for: .high) == .effortLevel("medium"))
+        #expect(onlyHigh.resolvedEffort(.low) == .xhigh)
+    }
+
+    @Test("Effort-level mode without detected levels sends nothing and fails validation")
+    func effortLevelModeWithoutLevelsIsInert() {
+        let configuration = RemoteReasoningConfiguration(mode: .requestEffortLevel)
+
+        #expect(configuration.requestDirective(for: .medium) == nil)
+        #expect(throws: (any Error).self) { try configuration.validated() }
+        #expect((try? Self.effortConfiguration.validated()) != nil)
+    }
+
+    @Test("Effort-level adaptation sends reasoning_effort and drops a stale budget")
+    func effortLevelAdaptationSendsTemplateArgument() throws {
+        let input: [String: Any] = [
+            "model": "configured-model",
+            "thinking_budget_tokens": 8_192,
+            "chat_template_kwargs": ["custom_option": "keep"],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: input)
+
+        let adapted = try RemoteReasoningRequestBody.adapt(
+            data,
+            directive: .effortLevel("medium")
+        )
+        let object = try #require(
+            JSONSerialization.jsonObject(with: adapted) as? [String: Any]
+        )
+        let templateArguments = try #require(
+            object["chat_template_kwargs"] as? [String: Any]
+        )
+
+        #expect(templateArguments["custom_option"] as? String == "keep")
+        #expect(templateArguments["enable_thinking"] as? Bool == true)
+        #expect(templateArguments["reasoning_effort"] as? String == "medium")
+        #expect(object["thinking_budget_tokens"] == nil)
+    }
+
+    @Test("Composer options follow the server-declared levels")
+    func composerOptionsFollowServerLevels() {
+        let model = RemoteModelConfig(
+            id: ProfileBaseModelID.llama.rawValue,
+            name: "Local",
+            url: "http://127.0.0.1:8080/v1",
+            modelName: "configured-model",
+            temperature: 0.6,
+            reasoningConfiguration: Self.effortConfiguration
+        )
+
+        #expect(ComposerProfileMenu.reasoningOptions(for: .llama, models: [model])
+            == [.low, .medium, .xhigh])
+    }
+
+    @Test("Detected effort levels persist with the model catalog")
+    func effortLevelsPersist() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = TurboCodeConfig(rootURL: root)
+        let model = RemoteModelConfig(
+            id: "local",
+            name: "Local",
+            url: "http://127.0.0.1:8080/v1",
+            modelName: "configured-model",
+            temperature: 0.6,
+            reasoningConfiguration: Self.effortConfiguration
+        )
+
+        try store.saveRemoteModels([model])
+        let restored = try #require(store.loadRemoteModels().first)
+
+        #expect(restored.reasoningConfiguration == Self.effortConfiguration)
+    }
+
+    @Test("Off disables server thinking and an explicit level re-enables it")
+    func serverReasoningOffIsClearedByLevelSelection() throws {
+        let suite = "RemoteReasoningRequestTests.\(UUID().uuidString)"
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let model = RemoteModelConfig(
+            id: ProfileBaseModelID.llama.rawValue,
+            name: "Local",
+            url: "http://127.0.0.1:8080/v1",
+            modelName: "configured-model",
+            temperature: 0.6,
+            reasoningConfiguration: Self.effortConfiguration
+        )
+        let store = ModelRuntimeStore(
+            models: [model],
+            profiles: [],
+            preferences: preferences,
+            dynamicRoutingAssetsPrepared: false
+        )
+
+        store.selectServerReasoningOff(for: .llama)
+        #expect(store.reasoningEffort == nil)
+        #expect(model.reasoningConfiguration.requestDirective(for: store.reasoningEffort)
+            == .disabled)
+
+        store.setReasoningEffort(.low)
+        #expect(store.serverReasoningOff == false)
+        #expect(store.reasoningEffort == .low)
+    }
+
+    // MARK: Server levels by name
+
+    /// The levels an Inkling GGUF template declares through llama-server.
+    private static let inklingLevels = ["none", "minimal", "low", "medium", "high", "max"]
+
+    private static func inklingModel() -> RemoteModelConfig {
+        RemoteModelConfig(
+            id: ProfileBaseModelID.llama.rawValue,
+            name: "Local",
+            url: "http://127.0.0.1:8080/v1",
+            modelName: "configured-model",
+            temperature: 0.6,
+            reasoningConfiguration: RemoteReasoningConfiguration(
+                mode: .requestEffortLevel,
+                serverEffortLevels: inklingLevels
+            )
+        )
+    }
+
+    private static func store(
+        models: [RemoteModelConfig]
+    ) throws -> (ModelRuntimeStore, UserDefaults, String) {
+        let suite = "RemoteReasoningRequestTests.\(UUID().uuidString)"
+        let preferences = try #require(UserDefaults(suiteName: suite))
+        let store = ModelRuntimeStore(
+            models: models,
+            profiles: [],
+            preferences: preferences,
+            dynamicRoutingAssetsPrepared: false
+        )
+        return (store, preferences, suite)
+    }
+
+    @Test("The composer lists the server's levels in its order and spelling")
+    func composerListsServerLevelsVerbatim() {
+        let levels = ComposerProfileMenu.serverLevels(for: .llama, models: [Self.inklingModel()])
+
+        #expect(levels == Self.inklingLevels)
+        #expect(levels.map(ComposerProfileMenu.displayName(forServerLevel:))
+            == ["None", "Minimal", "Low", "Medium", "High", "Max"])
+        #expect(ComposerProfileMenu.serverLevels(for: .onDevice, models: [Self.inklingModel()]).isEmpty)
+    }
+
+    @Test("Levels without a product counterpart are sent verbatim and move the shared preference")
+    func unsharedServerLevelsAreSentVerbatim() throws {
+        let model = Self.inklingModel()
+        let (store, preferences, suite) = try Self.store(models: [model])
+        defer { preferences.removePersistentDomain(forName: suite) }
+
+        store.selectServerReasoningLevel("max", for: .llama)
+        #expect(store.serverLevel(for: model) == "max")
+        // The product snapshot names the nearest level this template shares;
+        // the wire carries the server's own "max".
+        #expect(store.reasoningEffort == .high)
+        var sent = model.reasoningConfiguration
+        sent.selectedServerLevel = store.serverLevel(for: model)
+        #expect(sent.requestDirective(for: store.reasoningEffort) == .effortLevel("max"))
+
+        store.selectServerReasoningLevel("minimal", for: .llama)
+        #expect(store.serverLevel(for: model) == "minimal")
+        #expect(store.reasoningEffort == .low)
+
+        // A product level chosen elsewhere clears the server-named choice.
+        store.setReasoningEffort(.medium)
+        #expect(store.serverLevel(for: model) == "medium")
+    }
+
+    @Test("None turns thinking off through both template arguments")
+    func noneLevelTurnsThinkingOff() throws {
+        let model = Self.inklingModel()
+        let (store, preferences, suite) = try Self.store(models: [model])
+        defer { preferences.removePersistentDomain(forName: suite) }
+
+        store.selectServerReasoningLevel("none", for: .llama)
+        #expect(store.serverReasoningOff)
+        #expect(store.serverLevel(for: model) == "none")
+
+        let adapted = try RemoteReasoningRequestBody.adapt(
+            JSONSerialization.data(withJSONObject: ["model": "configured-model"]),
+            directive: .effortLevel("none")
+        )
+        let object = try #require(JSONSerialization.jsonObject(with: adapted) as? [String: Any])
+        let arguments = try #require(object["chat_template_kwargs"] as? [String: Any])
+        #expect(arguments["reasoning_effort"] as? String == "none")
+        #expect(arguments["enable_thinking"] as? Bool == false)
+    }
+
+    @Test("A level another server declared falls back to the nearest shared level")
+    func undeclaredServerLevelFallsBack() throws {
+        let inkling = Self.inklingModel()
+        var other = inkling
+        other.reasoningConfiguration.serverEffortLevels = ["low", "medium", "xhigh"]
+        let (store, preferences, suite) = try Self.store(models: [inkling])
+        defer { preferences.removePersistentDomain(forName: suite) }
+
+        store.selectServerReasoningLevel("max", for: .llama)
+
+        // "max" is unknown there; the shared preference (X-High) is used.
+        #expect(store.serverLevel(for: other) == "xhigh")
+        var sent = other.reasoningConfiguration
+        sent.selectedServerLevel = "max"
+        #expect(sent.requestDirective(for: .xhigh) == .effortLevel("xhigh"))
+    }
+
+    @Test("The chosen server level is never written to the model catalog")
+    func selectedServerLevelIsNotPersisted() throws {
+        var model = Self.inklingModel()
+        model.reasoningConfiguration.selectedServerLevel = "max"
+
+        let data = try JSONEncoder().encode(model)
+        let restored = try JSONDecoder().decode(RemoteModelConfig.self, from: data)
+
+        #expect(!String(decoding: data, as: UTF8.self).contains("selectedServerLevel"))
+        #expect(restored.reasoningConfiguration.selectedServerLevel == nil)
+    }
 }

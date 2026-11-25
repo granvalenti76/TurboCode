@@ -43,15 +43,15 @@ struct ChatArchitectureTests {
     @Test("Workbench profile presentation preserves the underlying route")
     func workbenchProfilePresentationIsModal() {
         let workbench = WorkbenchStore()
-        workbench.route = .tools
+        workbench.route = .connectors
         workbench.setRoute(.skills)
 
-        #expect(workbench.route == .tools)
+        #expect(workbench.route == .connectors)
         #expect(workbench.isCustomProfilesPresented)
 
         workbench.rightPanelMode = .changes
-        workbench.setRoute(.tools)
-        #expect(workbench.route == .tools)
+        workbench.setRoute(.connectors)
+        #expect(workbench.route == .connectors)
         #expect(workbench.rightPanelMode == nil)
     }
 
@@ -78,7 +78,7 @@ struct ChatArchitectureTests {
         #expect(workbench.rightPanelMode == .artifacts)
 
         // Another destination closes the inspector for good, as before.
-        workbench.setRoute(.tools)
+        workbench.setRoute(.connectors)
         workbench.setRoute(.chat)
         #expect(workbench.rightPanelMode == nil)
 
@@ -119,7 +119,7 @@ struct ChatArchitectureTests {
         #expect(workbench.rightPanelMode == .artifacts)
 
         workbench.setCoworkArtifactsExpanded(true)
-        workbench.setRoute(.tools)
+        workbench.setRoute(.connectors)
         workbench.setRoute(.chat)
         #expect(!workbench.coworkArtifactsExpanded)
         #expect(workbench.rightPanelMode == nil)
@@ -129,15 +129,51 @@ struct ChatArchitectureTests {
     func publicShellContainsOnlyImplementedSurfaces() {
         // These exact lists are the release-boundary tripwire: a new case must
         // arrive with a real consumer and an intentional test update.
-        #expect(AppRoute.allCases.map(\.rawValue) == ["chat", "tools", "skills", "artifacts"])
+        #expect(AppRoute.allCases.map(\.rawValue) == ["chat", "skills", "artifacts", "connectors", "systemPrompts"])
         #expect(
             RightPanelMode.allCases.map(\.rawValue)
                 == ["activity", "changes", "commit", "workspaceListing", "artifacts"]
         )
         #expect(
             SettingsSection.allCases.map(\.rawValue)
-                == ["general", "editorialDesk", "providers", "reasoning", "agents", "cowork", "shortcuts"]
+                == [
+                    "general", "shortcuts", "providers", "reasoning", "routing",
+                    "behavior", "execution", "cowork", "editorialDesk", "permissions",
+                ]
         )
+    }
+
+    @Test("Settings panes form five purpose groups in sidebar order")
+    func settingsPanesFormOrderedPurposeGroups() {
+        #expect(
+            SettingsGroup.allCases.map(\.rawValue)
+                == ["turboCode", "intelligence", "agents", "workspaces", "trust"]
+        )
+        // Flattening the groups must reproduce the case order exactly: every
+        // pane appears once, and no group interleaves with another.
+        #expect(SettingsGroup.allCases.flatMap(\.sections) == SettingsSection.allCases)
+        #expect(SettingsGroup.allCases.allSatisfy { !$0.sections.isEmpty })
+        #expect(SettingsSection.permissions.group == .trust)
+        // The Studio pane keeps its `cowork` source name but never shows it.
+        #expect(SettingsSection.cowork.title == "Studio")
+        #expect(SettingsSection.allCases.allSatisfy { !$0.summary.isEmpty })
+    }
+
+    @Test("Settings search finds the pane that owns a moved setting")
+    func settingsSearchFindsOwningPane() {
+        func panes(_ query: String) -> [SettingsSection] {
+            SettingsSection.allCases.filter { $0.matches(searchQuery: query) }
+        }
+        #expect(panes("") == SettingsSection.allCases)
+        #expect(panes("   ") == SettingsSection.allCases)
+        // Every term must match, case-insensitively.
+        #expect(panes("xcode MCP") == [.permissions])
+        #expect(panes("command timeout") == [.execution])
+        #expect(panes("api key") == [.providers])
+        // Studio is found by its user-visible name, not its source name.
+        #expect(panes("virtual machine") == [.cowork])
+        #expect(panes("cowork").isEmpty)
+        #expect(panes("zzz-no-such-setting").isEmpty)
     }
 
     @Test("Runtime rejects an incomplete skill command before inference")

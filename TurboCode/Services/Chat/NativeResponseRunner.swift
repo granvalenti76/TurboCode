@@ -440,6 +440,26 @@ nonisolated enum LlamaServerRuntimeProbe {
         return (modalities?["vision"] as? Bool) ?? false
     }
 
+    /// Reasoning-effort levels the loaded chat template accepts, in the
+    /// server's own spelling (for example `["low", "medium", "xhigh"]`).
+    /// Nil when the server is unreachable or the template does not declare
+    /// `supports_reasoning_effort`; callers must then not send the field,
+    /// because a template may reject unknown levels with an exception.
+    static func reasoningEffortLevels(from baseURL: String?) async -> [String]? {
+        guard let object = await props(from: baseURL) else { return nil }
+        return reasoningEffortLevels(inProps: object)
+    }
+
+    static func reasoningEffortLevels(inProps object: [String: Any]) -> [String]? {
+        guard let caps = object["chat_template_caps"] as? [String: Any],
+              (caps["supports_reasoning_effort"] as? Bool) == true,
+              let levels = caps["reasoning_effort_levels"] as? [String] else {
+            return nil
+        }
+        let cleaned = levels.filter { !$0.isEmpty }
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
     private static func props(from baseURL: String?) async -> [String: Any]? {
         guard let baseURL,
               let base = URL(string: baseURL) else { return nil }

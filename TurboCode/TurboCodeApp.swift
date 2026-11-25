@@ -5,6 +5,7 @@ import AppKit
 
 @main
 struct TurboCodeApp: App {
+    @NSApplicationDelegateAdaptor(TurboCodeAppDelegate.self) private var appDelegate
     @Environment(\.openWindow) private var openWindow
     @State private var chatStore: ChatStore
     @State private var settingsStore = SettingsStore()
@@ -20,6 +21,12 @@ struct TurboCodeApp: App {
         WindowGroup(id: "main") {
             WorkbenchSplitView()
                 .navigationTitle("")
+                // An external event, such as a click on a reply notification,
+                // would otherwise make the WindowGroup open a second main
+                // window on the same shared ChatStore. The open window claims
+                // every such event; the notification delegate then shows the
+                // chat in it.
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
                 .environment(chatStore)
                 .environment(settingsStore)
                 .environment(approvalStore)
@@ -37,6 +44,8 @@ struct TurboCodeApp: App {
                     // TurboCodeCore can remain independent of global UI stores.
                     await chatStore.applyAgentTuning(settingsStore.agentTuning)
                     chatStore.attachCowork(settingsStore.cowork)
+                    chatStore.attachReplyNotifications(settings: settingsStore)
+                    appDelegate.cowork = settingsStore.cowork
                     chatStore.restoreActiveDomain(allowsCowork: settingsStore.cowork.isAvailable)
                     await chatStore.reloadRemoteModels()
                 }
@@ -99,9 +108,6 @@ struct TurboCodeApp: App {
 
                 Button("Custom Profiles") { chatStore.setRoute(.skills) }
                     .keyboardShortcut("2", modifiers: [.command])
-
-                Button("Tools") { chatStore.setRoute(.tools) }
-                    .keyboardShortcut("3", modifiers: [.command])
             }
 
 #if DEBUG
@@ -176,9 +182,33 @@ struct TurboCodeApp: App {
 
         // Native macOS Settings window
         Settings {
-            SettingsTabView()
+            SettingsRootView()
                 .environment(chatStore)
                 .environment(settingsStore)
         }
+    }
+}
+
+// MARK: - Termination
+
+/// Stops the Studio VM before the app exits.
+///
+/// Without this the process exited with the guest still running, so its
+/// writable layer was never unmounted; repeated unclean exits corrupted that
+/// layer and made every later boot fail. Quitting waits for the stop, bounded
+/// by `CoworkStore.stopForTermination`. A forced kill (Xcode's Stop) skips
+/// this path; the layer's journal covers that case.
+@MainActor
+final class TurboCodeAppDelegate: NSObject, NSApplicationDelegate {
+    /// Set once the Studio store is attached; nil means nothing to stop.
+    var cowork: CoworkStore?
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let cowork else { return .terminateNow }
+        Task { @MainActor in
+            await cowork.stopForTermination()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 }

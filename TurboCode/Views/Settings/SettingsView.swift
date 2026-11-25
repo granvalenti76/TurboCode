@@ -1,49 +1,6 @@
 import SwiftUI
 import AppKit
 
-// MARK: - SettingsTabView — native macOS settings with a sidebar-style TabView
-
-struct SettingsTabView: View {
-    @Environment(SettingsStore.self) private var settings
-    @State private var selectedSection: SettingsSection = .general
-
-    var body: some View {
-        TabView(selection: $selectedSection) {
-            GeneralSettingsView()
-                .tabItem { Label("General", systemImage: "slider.horizontal.3") }
-                .tag(SettingsSection.general)
-
-            EditorialDeskSettingsView()
-                .tabItem { Label("Editorial Desk", systemImage: "newspaper") }
-                .tag(SettingsSection.editorialDesk)
-
-            ProviderSettingsView()
-                .tabItem { Label("Providers", systemImage: "network") }
-                .tag(SettingsSection.providers)
-
-            ReasoningSettingsView()
-                .tabItem { Label("Reasoning", systemImage: "brain") }
-                .tag(SettingsSection.reasoning)
-
-            AgentSettingsView()
-                .tabItem { Label("Agents", systemImage: "wand.and.stars") }
-                .tag(SettingsSection.agents)
-
-            CoworkSettingsView()
-                .tabItem { Label("Studio", systemImage: "shippingbox") }
-                .tag(SettingsSection.cowork)
-
-            ShortcutSettingsView()
-                .tabItem { Label("Shortcuts", systemImage: "keyboard") }
-                .tag(SettingsSection.shortcuts)
-
-        }
-        .tabViewStyle(.sidebarAdaptable)
-        .frame(minWidth: 600, minHeight: 400)
-        .environment(settings)
-    }
-}
-
 // MARK: - Editorial Desk Settings
 
 struct EditorialDeskSettingsView: View {
@@ -51,11 +8,7 @@ struct EditorialDeskSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
-                Text("Define the sections and article types available in the Editorial Desk metadata bar.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
+            SettingsPaneHeader(section: .editorialDesk)
 
             Section("Sections") {
                 if settings.editorialDeskCatalog.sections.isEmpty {
@@ -163,7 +116,6 @@ struct EditorialDeskSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .padding()
     }
 
     private func sectionNameBinding(_ id: UUID) -> Binding<String> {
@@ -357,6 +309,8 @@ struct GeneralSettingsView: View {
     var body: some View {
         let s = Bindable(settings)
         return Form {
+            SettingsPaneHeader(section: .general)
+            AgentIdentitySection()
             Section("Appearance") {
                 Picker("Theme", selection: s.theme) {
                     Text("System").tag(ThemePreference.system)
@@ -387,9 +341,27 @@ struct GeneralSettingsView: View {
                         .frame(width: 40)
                 }
             }
+
+            Section("Workbench") {
+                Toggle(isOn: s.projectTerminalEnabled) {
+                    Text("Show project terminal")
+                    Text("Adds a button that opens a shell in the current workspace.")
+                }
+            }
+
+            Section("Notifications") {
+                Toggle(isOn: s.replyNotificationsEnabled) {
+                    Text("Notify when a reply is ready")
+                    Text("Only while TurboCode is in the background.")
+                }
+                Toggle(isOn: s.replyNotificationExcerptEnabled) {
+                    Text("Show a preview of the reply")
+                    Text("Notifications can appear on the lock screen.")
+                }
+                .disabled(!settings.replyNotificationsEnabled)
+            }
         }
         .formStyle(.grouped)
-        .padding()
     }
 }
 
@@ -401,9 +373,11 @@ struct ReasoningSettingsView: View {
     @State private var selectedModelID = ""
     @State private var reasoningDraft: RemoteReasoningConfiguration = .serverManaged
     @State private var reasoningSaveError: String?
+    @State private var isDetectingEffortLevels = false
 
     var body: some View {
         Form {
+            SettingsPaneHeader(section: .reasoning)
             Section("Remote Reasoning") {
                 if configurableModels.isEmpty {
                     Text("No compatible remote models are configured.")
@@ -420,6 +394,26 @@ struct ReasoningSettingsView: View {
                             .tag(RemoteReasoningControlMode.serverManaged)
                         Text("Per-request token budget")
                             .tag(RemoteReasoningControlMode.requestTokenBudget)
+                        Text("Server effort levels (/props)")
+                            .tag(RemoteReasoningControlMode.requestEffortLevel)
+                    }
+
+                    if reasoningDraft.mode == .requestEffortLevel {
+                        LabeledContent("Levels") {
+                            if isDetectingEffortLevels {
+                                ProgressView().controlSize(.small)
+                            } else if let levels = reasoningDraft.serverEffortLevels {
+                                Text(levels.joined(separator: ", "))
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Not detected").foregroundStyle(.secondary)
+                            }
+                        }
+                        HStack {
+                            Spacer()
+                            Button("Detect Again") { detectEffortLevels() }
+                                .disabled(isDetectingEffortLevels)
+                        }
                     }
 
                     if reasoningDraft.mode == .requestTokenBudget {
@@ -461,12 +455,16 @@ struct ReasoningSettingsView: View {
 
         }
         .formStyle(.grouped)
-        .padding()
         .task {
             selectInitialReasoningModelIfNeeded()
         }
         .onChange(of: selectedModelID) {
             loadReasoningDraft()
+        }
+        .onChange(of: reasoningDraft.mode) { _, mode in
+            // Detect on every explicit selection so a model swapped on the
+            // server is picked up without editing `models.json`.
+            if mode == .requestEffortLevel { detectEffortLevels() }
         }
     }
 
@@ -491,6 +489,8 @@ struct ReasoningSettingsView: View {
             "TurboCode adds no reasoning fields. The endpoint uses its launch and template configuration."
         case .requestTokenBudget:
             "TurboCode sends a thinking switch and the selected token budget with each request."
+        case .requestEffortLevel:
+            "TurboCode reads the levels the chat template accepts from the server's /props and sends the selected one as reasoning_effort with each request."
         }
     }
 
@@ -533,6 +533,25 @@ struct ReasoningSettingsView: View {
         reasoningSaveError = nil
     }
 
+    /// Read-only probe of the selected endpoint. Levels are stored only in the
+    /// draft; nothing is persisted until the user presses Apply.
+    private func detectEffortLevels() {
+        guard let url = selectedReasoningModel?.url else { return }
+        let modelID = selectedModelID
+        isDetectingEffortLevels = true
+        reasoningSaveError = nil
+        Task {
+            let levels = await LlamaServerRuntimeProbe.reasoningEffortLevels(from: url)
+            isDetectingEffortLevels = false
+            guard selectedModelID == modelID,
+                  reasoningDraft.mode == .requestEffortLevel else { return }
+            reasoningDraft.serverEffortLevels = levels
+            if levels == nil {
+                reasoningSaveError = "The server does not report reasoning effort levels in /props."
+            }
+        }
+    }
+
     private func applyReasoningConfiguration() {
         do {
             try settings.updateReasoningConfiguration(
@@ -554,6 +573,8 @@ struct ProviderSettingsView: View {
     var body: some View {
         let s = Bindable(settings)
         return Form {
+            SettingsPaneHeader(section: .providers)
+            LocalServerSettingsSection()
             Section("DeepSeek") {
                 SecureField("API Key", text: s.deepseekAPIKey)
                     .textFieldStyle(.roundedBorder)
@@ -579,7 +600,6 @@ struct ProviderSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .padding()
         .task {
             settings.loadDeepSeekCredentialForSettings()
         }
@@ -594,15 +614,32 @@ struct ProviderSettingsView: View {
     }
 }
 
-// MARK: - Agent Settings
+// MARK: - Agent Behavior Settings
 
-struct AgentSettingsView: View {
+/// How agents answer, verify their edits, and delegate. Network and
+/// integration switches moved to `PermissionsSettingsView` so every option
+/// that widens access lives in one pane.
+struct AgentBehaviorSettingsView: View {
     @Environment(SettingsStore.self) private var settings
-    @Environment(ChatStore.self) private var chatStore
+
+    /// The threshold doubles as the switch: 0 is off, and turning it back on
+    /// restores the default rather than an arbitrary remembered value.
+    private var autoCompactEnabled: Binding<Bool> {
+        Binding(
+            get: { settings.agentTuning.agent.autoCompactThresholdPercent > 0 },
+            set: { enabled in
+                settings.agentTuning.agent.autoCompactThresholdPercent = enabled
+                    ? AgentPolicy.defaultAutoCompactThresholdPercent
+                    : 0
+            }
+        )
+    }
 
     var body: some View {
         let s = Bindable(settings)
         return Form {
+            SettingsPaneHeader(section: .behavior)
+
             Section("Responses") {
                 Picker("Detail", selection: s.agentTuning.agent.responseStyle) {
                     Text("Concise").tag(AgentResponseStyle.concise)
@@ -610,6 +647,26 @@ struct AgentSettingsView: View {
                     Text("Detailed").tag(AgentResponseStyle.detailed)
                 }
                 Toggle("Verify source changes", isOn: s.agentTuning.agent.verifiesChanges)
+            }
+
+            Section("Context") {
+                Toggle("Compact automatically", isOn: autoCompactEnabled)
+                if settings.agentTuning.agent.autoCompactThresholdPercent > 0 {
+                    // Discrete steps, not a slider: every settings change
+                    // rebuilds the model session, so dragging would rebuild
+                    // it once per intermediate value.
+                    Picker(
+                        "When context reaches",
+                        selection: s.agentTuning.agent.autoCompactThresholdPercent
+                    ) {
+                        ForEach(Array(stride(from: 50, through: 95, by: 5)), id: \.self) { percent in
+                            Text("\(percent)%").tag(percent)
+                        }
+                    }
+                }
+                Text("Local llama-server only. Before the next message, TurboCode replaces the conversation with the same summary as /compact.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Default Delegated Worker") {
@@ -660,7 +717,25 @@ struct AgentSettingsView: View {
                 }
             }
 
-            Section("Execution") {
+            Section("Skills") {
+                Toggle("Discover user skills", isOn: s.agentTuning.skills.discoversUserSkills)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+// MARK: - Agent Execution Settings
+
+struct AgentExecutionSettingsView: View {
+    @Environment(SettingsStore.self) private var settings
+
+    var body: some View {
+        let s = Bindable(settings)
+        return Form {
+            SettingsPaneHeader(section: .execution)
+
+            Section("Limits") {
                 Stepper(
                     value: s.agentTuning.execution.defaultCommandTimeoutSeconds,
                     in: 5...settings.agentTuning.execution.maximumCommandTimeoutSeconds,
@@ -682,15 +757,36 @@ struct AgentSettingsView: View {
                             .monospacedDigit()
                     }
                 }
-
-                Toggle("Allow command network access", isOn: s.agentTuning.execution.allowNetworkAccess)
             }
 
-            Section("Skills") {
-                Toggle("Discover user skills", isOn: s.agentTuning.skills.discoversUserSkills)
-            }
+            Section {
+                Button {
+                    settings.reloadAgentTuning()
+                } label: {
+                    Label("Reload Configuration", systemImage: "arrow.clockwise")
+                }
 
-            Section("Dynamic Routing") {
+                if let error = settings.agentTuningError {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
+// MARK: - Dynamic Routing Settings
+
+struct DynamicRoutingSettingsView: View {
+    @Environment(SettingsStore.self) private var settings
+    @Environment(ChatStore.self) private var chatStore
+
+    var body: some View {
+        Form {
+            SettingsPaneHeader(section: .routing)
+
+            Section {
                 Toggle("Enable Dynamic Routing", isOn: Binding(
                     get: { chatStore.dynamicRoutingFeatureEnabled },
                     set: { enabled in
@@ -737,52 +833,8 @@ struct AgentSettingsView: View {
                     .disabled(settings.anchorSignalAssets.state.isWorking)
                 }
             }
-
-            Section("Experimental") {
-                Toggle("Safari MCP", isOn: s.agentTuning.experimental.safariMCPEnabled)
-
-                Text("Allows an explicitly activated skill to control Safari through safaridriver MCP. Disabled by default.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Toggle("Xcode MCP", isOn: s.agentTuning.experimental.xcodeMCPEnabled)
-
-                Text("Allows the active model to discover and call Xcode's MCP tools through xcrun mcpbridge. Enable external agents in Xcode Intelligence settings first.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Toggle(
-                    "Allow third-party plugins",
-                    isOn: s.agentTuning.experimental.thirdPartyPluginsEnabled
-                )
-
-                Text("Allows installed Node.js plugins to start and expose tools to selected profiles. Plugins run as normal local processes with filesystem, network, and subprocess access.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
-                Button {
-                    settings.reloadAgentTuning()
-                } label: {
-                    Label("Reload Configuration", systemImage: "arrow.clockwise")
-                }
-
-                if let error = settings.agentTuningError {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.red)
-                }
-            }
         }
         .formStyle(.grouped)
-        .padding()
-        .task(id: settings.agentTuning) {
-            // Slider and stepper edits can arrive in bursts. The cancellable
-            // view task publishes only the settled configuration to runtime.
-            try? await Task.sleep(for: .milliseconds(150))
-            guard !Task.isCancelled else { return }
-            await chatStore.applyAgentTuning(settings.agentTuning)
-        }
         .task {
             settings.anchorSignalAssets.refreshStatus()
             if !settings.anchorSignalAssets.isReady,
@@ -820,6 +872,7 @@ struct AgentSettingsView: View {
 struct ShortcutSettingsView: View {
     var body: some View {
         Form {
+            SettingsPaneHeader(section: .shortcuts)
             Section("Navigation") {
                 ShortcutRow(label: "New Chat", shortcut: "⌘N")
                 ShortcutRow(label: "Toggle Sidebar", shortcut: "⌘S")
@@ -833,11 +886,9 @@ struct ShortcutSettingsView: View {
                 ShortcutRow(label: "Settings", shortcut: "⌘,")
                 ShortcutRow(label: "Chat", shortcut: "⌘1")
                 ShortcutRow(label: "Custom Profiles", shortcut: "⌘2")
-                ShortcutRow(label: "Tools", shortcut: "⌘3")
             }
         }
         .formStyle(.grouped)
-        .padding()
     }
 }
 

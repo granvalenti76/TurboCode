@@ -90,6 +90,8 @@ struct ProviderLanguageModel: LanguageModel {
                 headers[RemoteReasoningRequestAdapter.directiveHeader] = switch directive {
                 case .disabled: "disabled"
                 case .tokenBudget(let tokens): String(tokens)
+                case .effortLevel(let level):
+                    RemoteReasoningRequestAdapter.effortPrefix + level
                 }
                 sessionConfiguration.protocolClasses = [RemoteReasoningRequestAdapter.self]
             }

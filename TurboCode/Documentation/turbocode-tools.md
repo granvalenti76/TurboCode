@@ -3,8 +3,7 @@
 TurboCode gives each model only the tools supported by its runtime profile and
 the current workspace. The exact set therefore varies with the selected model,
 custom profile, installed skills, configured worker, repository-map support,
-and whether a workspace is open. The Tools screen shows the resolved set for
-the current configuration.
+and whether a workspace is open.
 
 Profiles are the only authority that enables runtime tools: every resolved
 tool is registered directly. Skills never reveal, hide, activate, or deactivate

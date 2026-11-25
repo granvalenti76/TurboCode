@@ -455,6 +455,7 @@ struct InputFieldView: View {
             && chatStore.activeBaseModelID == id
             && chatStore.orchestratorMode == .standalone
         let options = ComposerProfileMenu.reasoningOptions(for: id, models: chatStore.remoteModels)
+        let serverLevels = ComposerProfileMenu.serverLevels(for: id, models: chatStore.remoteModels)
         let available = id.remoteModelID.map { remoteID in
             chatStore.remoteModels.contains { $0.id == remoteID && $0.enabled }
         } ?? true
@@ -481,6 +482,30 @@ struct InputFieldView: View {
                         }
                     }
                 }
+            } else if !serverLevels.isEmpty {
+                // The template's own levels, spelled as it declares them and
+                // sent verbatim, so the menu matches the server ("Minimal",
+                // "Max"); "None" takes the place of Off.
+                if !serverLevels.contains(RemoteReasoningConfiguration.serverLevelOff) {
+                    Button {
+                        Task { await chatStore.selectBuiltInProfileWithReasoningOff(id) }
+                    } label: {
+                        reasoningOptionLabel(
+                            "Off",
+                            selected: isSelected && chatStore.activeServerReasoningOff
+                        )
+                    }
+                }
+                ForEach(serverLevels, id: \.self) { level in
+                    Button {
+                        Task { await chatStore.selectBuiltInProfile(id, serverReasoningLevel: level) }
+                    } label: {
+                        reasoningOptionLabel(
+                            ComposerProfileMenu.displayName(forServerLevel: level),
+                            selected: isSelected && chatStore.activeServerReasoningLevel == level
+                        )
+                    }
+                }
             } else if options.isEmpty {
                 Button {
                     Task { await chatStore.selectBuiltInProfile(id) }
@@ -488,13 +513,30 @@ struct InputFieldView: View {
                     reasoningOptionLabel("Automatic", selected: isSelected)
                 }
             } else {
+                // Only templates that declared levels in `/props` accept
+                // `enable_thinking: false` as an explicit choice.
+                let offersOff = id.remoteModelID.flatMap { remoteID in
+                    chatStore.remoteModels.first { $0.id == remoteID }
+                }.map { !$0.reasoningConfiguration.supportedEfforts.isEmpty } ?? false
+                if offersOff {
+                    Button {
+                        Task { await chatStore.selectBuiltInProfileWithReasoningOff(id) }
+                    } label: {
+                        reasoningOptionLabel(
+                            "Off",
+                            selected: isSelected && chatStore.activeServerReasoningOff
+                        )
+                    }
+                }
                 ForEach(options, id: \.self) { effort in
                     Button {
                         Task { await chatStore.selectBuiltInProfile(id, reasoning: effort) }
                     } label: {
                         reasoningOptionLabel(
                             effort.rawValue,
-                            selected: isSelected && effectiveReasoningEffort == effort
+                            selected: isSelected
+                                && !chatStore.activeServerReasoningOff
+                                && effectiveReasoningEffort == effort
                         )
                     }
                 }
@@ -522,12 +564,22 @@ struct InputFieldView: View {
         if chatStore.activeBackend == .codex {
             return chatStore.codexReasoningEffort.displayName
         }
+        if let level = chatStore.activeServerReasoningLevel {
+            return ComposerProfileMenu.displayName(forServerLevel: level)
+        }
+        if chatStore.activeServerReasoningOff { return "Off" }
         return effectiveReasoningEffort.rawValue
     }
 
     /// Preserve the local X-High preference while presenting the equivalent
     /// native High selection when the user temporarily switches providers.
     private var effectiveReasoningEffort: ReasoningEffort {
+        // A server that declared its own levels shows the level actually sent.
+        if chatStore.activeBackend == .llamaServer,
+           let configuration = chatStore.activeRemoteModel?.reasoningConfiguration,
+           !configuration.supportedEfforts.isEmpty {
+            return configuration.resolvedEffort(reasoningEffort)
+        }
         guard reasoningEffort == .xhigh else { return reasoningEffort }
         switch chatStore.activeBackend {
         case .llamaServer, .foundationApple:

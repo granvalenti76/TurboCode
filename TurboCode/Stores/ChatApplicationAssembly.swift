@@ -13,6 +13,7 @@ final class ChatApplicationAssembly {
     let liveToolCallStore: LiveToolCallStore
     let agentActivityStore: AgentActivityStore
     let agentRuntimeProjectionStore: AgentRuntimeProjectionStore
+    let backgroundTurnStore: BackgroundTurnStore
     let composerViewModel: ComposerViewModel
     let presentationViewModel: ChatPresentationViewModel
     let timelineStore: ChatTimelineStore
@@ -23,7 +24,6 @@ final class ChatApplicationAssembly {
     let modelRuntimeStore: ModelRuntimeStore
     let agentRuntime: AgentRuntime
     let llmRuntime: LLMRuntime
-    let onDeviceToolCallingSupported: Bool
     let responseCoordinator: ChatResponseCoordinator
     let sessionCoordinator: ConversationSessionCoordinator
     let conversationPersistence: ConversationPersistenceService
@@ -51,6 +51,7 @@ final class ChatApplicationAssembly {
         let reviewDraft = ReviewDraftStore()
         let modelRuntime = ModelRuntimeStore()
         let runtimeProjection = AgentRuntimeProjectionStore()
+        let backgroundTurns = BackgroundTurnStore()
         let composer = ComposerViewModel()
         let presentation = ChatPresentationViewModel()
         let statistics = ComposerSessionStatisticsStore(
@@ -59,6 +60,7 @@ final class ChatApplicationAssembly {
         let agentRuntime = AgentRuntime { snapshot in
             await runtimeProjection.apply(snapshot)
             await timeline.applyRuntimeSnapshot(snapshot)
+            await backgroundTurns.runtimeSnapshotChanged(snapshot)
         }
         timeline.applyRuntimeSnapshot(runtimeProjection.snapshot)
         let liveToolCalls = LiveToolCallStore()
@@ -283,6 +285,7 @@ final class ChatApplicationAssembly {
         self.liveToolCallStore = liveToolCalls
         self.agentActivityStore = agentActivity
         self.agentRuntimeProjectionStore = runtimeProjection
+        self.backgroundTurnStore = backgroundTurns
         self.composerViewModel = composer
         self.presentationViewModel = presentation
         self.timelineStore = timeline
@@ -293,8 +296,6 @@ final class ChatApplicationAssembly {
         self.modelRuntimeStore = modelRuntime
         self.agentRuntime = agentRuntime
         self.llmRuntime = llmRuntime
-        self.onDeviceToolCallingSupported =
-            FoundationModelsCapabilities.onDeviceSupportsToolCalling
         self.responseCoordinator = responseCoordinator
         self.sessionCoordinator = sessionCoordinator
         self.conversationPersistence = conversationPersistence

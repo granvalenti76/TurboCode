@@ -69,10 +69,31 @@ nonisolated enum ComposerProfileMenu {
     ) -> [ReasoningEffort] {
         if id == .onDevice { return ReasoningEffort.allCases }
         guard let model = models.first(where: { $0.id == id.remoteModelID }),
-              model.supportsReasoning,
-              model.reasoningTransport == .deepseekThinking
+              model.supportsReasoning else { return [] }
+        // Levels read from the server's `/props` are authoritative.
+        let serverLevels = model.reasoningConfiguration.supportedEfforts
+        if !serverLevels.isEmpty { return serverLevels }
+        guard model.reasoningTransport == .deepseekThinking
                 || model.reasoningConfiguration.mode == .requestTokenBudget else { return [] }
         return id == .llama ? ReasoningEffort.allCases : [.low, .medium, .high]
+    }
+
+    /// Levels the model's chat template declared in `/props`, in the
+    /// server's order and spelling; empty for every other kind of model.
+    static func serverLevels(
+        for id: ProfileBaseModelID,
+        models: [RemoteModelConfig]
+    ) -> [String] {
+        guard id != .onDevice, id != .codex,
+              let model = models.first(where: { $0.id == id.remoteModelID }),
+              model.supportsReasoning else { return [] }
+        return model.reasoningConfiguration.declaredServerLevels
+    }
+
+    /// A server level as the composer shows it: the server's own word with a
+    /// capital first letter ("max" → "Max").
+    static func displayName(forServerLevel level: String) -> String {
+        level.prefix(1).uppercased() + level.dropFirst()
     }
 }
 
@@ -168,6 +189,19 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
     /// built-in `ToolCapabilityID` catalog. Values use `pluginID/toolName`.
     var pluginToolIDs: [String]
     var skillIDs: [String]
+    /// Studio (Cowork) tool selection, independent of the Coding `toolIDs`.
+    ///
+    /// `nil` means "Studio's full default surface" so profiles written before
+    /// this field existed keep today's behavior. A list can only turn off
+    /// `ModelToolCatalog.studioOptionalToolIDs`; required tools stay on and
+    /// host tool IDs are discarded, so an edited file can never put a Mac tool
+    /// in a VM session.
+    var studioToolIDs: [String]?
+    /// Studio selection of the user's own skills, by name. `nil` keeps the
+    /// user skills the Coding selection allows. Bundled Studio skills (and a
+    /// user skill overriding one by name) are always offered and are not
+    /// governed by this list; connector skills follow the connector.
+    var studioSkillIDs: [String]?
     let createdAt: Date
     var updatedAt: Date
 
@@ -185,6 +219,8 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         toolIDs: [String] = [],
         pluginToolIDs: [String] = [],
         skillIDs: [String] = [],
+        studioToolIDs: [String]? = nil,
+        studioSkillIDs: [String]? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -201,6 +237,8 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         self.toolIDs = toolIDs.uniqued()
         self.pluginToolIDs = pluginToolIDs.uniqued()
         self.skillIDs = skillIDs.uniqued()
+        self.studioToolIDs = studioToolIDs?.uniqued()
+        self.studioSkillIDs = studioSkillIDs?.uniqued()
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -210,6 +248,7 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
         case codexModelID, codexReasoningEffort
         case workerToolIDs, workers
         case greedyMode, toolIDs, pluginToolIDs, skillIDs
+        case studioToolIDs, studioSkillIDs
         case createdAt, updatedAt
     }
 
@@ -240,6 +279,14 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
             forKey: .pluginToolIDs
         )?.uniqued() ?? []
         skillIDs = try values.decodeIfPresent([String].self, forKey: .skillIDs) ?? []
+        studioToolIDs = try values.decodeIfPresent(
+            [String].self,
+            forKey: .studioToolIDs
+        )?.uniqued()
+        studioSkillIDs = try values.decodeIfPresent(
+            [String].self,
+            forKey: .studioSkillIDs
+        )?.uniqued()
         createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt) ?? .now
         updatedAt = try values.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
     }
@@ -261,6 +308,55 @@ nonisolated struct UserDynamicProfile: Identifiable, Codable, Hashable, Sendable
             result.remove(.delegateTask)
         }
         return result
+    }
+
+    /// The Studio tools this profile keeps, or `nil` for the full default.
+    ///
+    /// Intersected with the VM catalog so the result can only remove tools
+    /// from `ModelToolCatalog.coworkPlan`; see `studioToolIDs`.
+    var resolvedStudioToolIDs: Set<ToolCapabilityID>? {
+        guard let studioToolIDs else { return nil }
+        return Set(studioToolIDs.compactMap(ToolCapabilityID.init(rawValue:)))
+            .intersection(ModelToolCatalog.studioSelectableToolIDs)
+    }
+
+    /// Whether the Studio selection keeps `id`. With no selection every
+    /// selectable Studio tool is kept.
+    func containsStudioTool(_ id: ToolCapabilityID) -> Bool {
+        if ModelToolCatalog.studioRequiredToolIDs.contains(id) { return true }
+        return resolvedStudioToolIDs?.contains(id)
+            ?? ModelToolCatalog.studioSelectableToolIDs.contains(id)
+    }
+
+    /// Adds or removes one Studio tool. The first edit materializes the full
+    /// default so removing one tool keeps the others; the stored order is the
+    /// catalog order so the file does not depend on click order.
+    mutating func setStudioTool(_ id: ToolCapabilityID, included: Bool) {
+        guard ModelToolCatalog.studioOptionalToolIDs.contains(id) else { return }
+        var selected = resolvedStudioToolIDs ?? ModelToolCatalog.studioSelectableToolIDs
+        if included { selected.insert(id) } else { selected.remove(id) }
+        studioToolIDs = ModelToolCatalog.studioSelectableToolOrder
+            .filter(selected.contains)
+            .map(\.rawValue)
+    }
+
+    /// Whether the Studio skill selection keeps `name`. `defaultNames` is
+    /// what an unselected profile offers today (see
+    /// `DynamicProfileRuntimeSelection.studioSkills`).
+    func containsStudioSkill(_ name: String, defaultNames: [String]) -> Bool {
+        (studioSkillIDs ?? defaultNames).contains(name)
+    }
+
+    /// Adds or removes one Studio skill, materializing `defaultNames` on the
+    /// first edit for the same reason as `setStudioTool`.
+    mutating func setStudioSkill(_ name: String, included: Bool, defaultNames: [String]) {
+        var selected = studioSkillIDs ?? defaultNames
+        if included, !selected.contains(name) {
+            selected.append(name)
+        } else if !included {
+            selected.removeAll { $0 == name }
+        }
+        studioSkillIDs = selected
     }
 
     /// Resolves only well-formed external capability IDs. Built-in IDs never

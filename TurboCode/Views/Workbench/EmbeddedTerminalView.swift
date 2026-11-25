@@ -10,12 +10,15 @@ struct EmbeddedTerminalLaunchConfiguration: Equatable, Sendable {
     let executable: String
     let arguments: [String]
 
+    /// Returns nil, so no shell is launched, when the terminal is turned off
+    /// in Settings or the workspace is not a readable directory.
     static func resolve(
+        isEnabled: Bool,
         workspacePath: String,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default
     ) -> EmbeddedTerminalLaunchConfiguration? {
-        guard !workspacePath.isEmpty else { return nil }
+        guard isEnabled, !workspacePath.isEmpty else { return nil }
 
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: workspacePath, isDirectory: &isDirectory),

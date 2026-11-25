@@ -148,6 +148,10 @@ struct CoworkSessionToolsTests {
         #expect(cowork.contains("A question gets an answer in the chat"))
         #expect(cowork.contains("look at it yourself"))
         #expect(cowork.contains("Use emoji sparingly"))
+        #expect(cowork.contains("may not be watching"))
+        #expect(cowork.contains("Research:"))
+        #expect(cowork.contains("chromium --headless --dump-dom URL > /tmp/page.html"))
+        #expect(cowork.contains("\"Sources:\""))
         #expect(cowork.contains("/home/cowork/sessions/abc"))
         #expect(cowork.contains("No user folder is shared"))
         #expect(!cowork.contains("Workspace:\n"))
@@ -162,6 +166,39 @@ struct CoworkSessionToolsTests {
         #expect(coding.contains("Work from evidence in the active workspace"))
         #expect(coding.contains("After changing source code"))
         #expect(!coding.contains("emoji"))
+        #expect(!coding.contains("Research:"))
+        #expect(!coding.contains("may not be watching"))
+    }
+
+    @Test("Prompts state the given product version, and only delegates skip the conversation register")
+    func productAndConversationSections() {
+        func prompt(_ role: TurboCodeSystemPromptRole, version: String?) -> String {
+            TurboCodeSystemPromptBuilder.build(TurboCodeSystemPromptContext(
+                role: role,
+                backend: .llamaServer,
+                workspaceRoot: "/tmp/project",
+                agentTuning: .default,
+                toolIDs: [],
+                toolNames: [],
+                availableSkills: [],
+                workspaceInstructions: nil,
+                productVersion: version
+            ))
+        }
+        let standalone = prompt(.standalone, version: "9.99")
+        #expect(standalone.contains("About TurboCode:"))
+        #expect(standalone.contains("TurboCode 9.99 is the most compact native macOS harness"))
+        #expect(standalone.contains("/props"))
+        #expect(standalone.contains("Conversation:"))
+
+        // A bundle without a version (the ACP helper) omits the number
+        // instead of printing a placeholder.
+        let unversioned = prompt(.standalone, version: nil)
+        #expect(unversioned.contains("TurboCode is the most compact native macOS harness"))
+
+        let delegate = prompt(.delegate, version: "9.99")
+        #expect(delegate.contains("About TurboCode:"))
+        #expect(!delegate.contains("Conversation:"))
     }
 
     // MARK: Tools against a fake runtime
@@ -280,6 +317,171 @@ struct CoworkSessionToolsTests {
         #expect(output.contains("limit"))
         #expect(await runtime.requests.isEmpty)
         #expect(await runtime.startCount == 0)
+    }
+
+    // MARK: vm_file partial edits and unchanged writes
+
+    static func fingerprint(_ text: String) -> String {
+        String(FileDigest.sha256(Data(text.utf8)).prefix(VMFileTool.fingerprintLength))
+    }
+
+    @Test("replace_lines rewrites only the chosen lines and reports the new fingerprint")
+    func vmFileReplaceLinesSplicesTheFile() async throws {
+        let original = "one\ntwo\nthree\nfour\n"
+        let runtime = RecordingRuntime(stdout: original)
+        let tool = VMFileTool(context: Self.context(runtime: runtime))
+
+        let output = try await tool.call(arguments: VMFileArguments(
+            action: "replace_lines", path: "game.js", content: "TWO\nTWO-B\n",
+            startLine: 2, lineCount: nil, depth: nil,
+            endLine: 3, fingerprint: Self.fingerprint(original)
+        ))
+
+        let edited = "one\nTWO\nTWO-B\nfour\n"
+        let write = try #require(await runtime.requests.first { $0.stdin != nil })
+        #expect(write.stdin == Data(edited.utf8))
+        #expect(output.contains("fingerprint \(Self.fingerprint(edited))"))
+        #expect(output.contains("     3  TWO-B"))
+    }
+
+    @Test("replace_lines refuses a stale or missing fingerprint without writing")
+    func vmFileReplaceLinesNeedsCurrentFingerprint() async throws {
+        let runtime = RecordingRuntime(stdout: "one\ntwo\n")
+        let tool = VMFileTool(context: Self.context(runtime: runtime))
+
+        let stale = try await tool.call(arguments: VMFileArguments(
+            action: "edit", path: "game.js", content: "x",
+            startLine: 1, lineCount: nil, depth: nil,
+            endLine: 1, fingerprint: Self.fingerprint("one\nold\n")
+        ))
+        let missing = try await tool.call(arguments: VMFileArguments(
+            action: "replace_lines", path: "game.js", content: "x",
+            startLine: 1, lineCount: nil, depth: nil, endLine: 1
+        ))
+
+        #expect(stale.contains("Read the file again"))
+        #expect(missing.contains("fingerprint"))
+        #expect(await runtime.requests.allSatisfy { $0.stdin == nil })
+    }
+
+    @Test("File actions without a path name the omission instead of using the session folder")
+    func vmFileActionsNeedPath() async throws {
+        let runtime = RecordingRuntime(stdout: "one\n")
+        let tool = VMFileTool(context: Self.context(runtime: runtime))
+
+        // The exact call a small model sent: everything right except path.
+        let edit = try await tool.call(arguments: VMFileArguments(
+            action: "replace_lines", path: nil, content: "\n*co-edit*\n",
+            startLine: 23, lineCount: nil, depth: nil,
+            endLine: 22, fingerprint: "a11706300829"
+        ))
+        let write = try await tool.call(arguments: VMFileArguments(
+            action: "write", path: " ", content: "x",
+            startLine: nil, lineCount: nil, depth: nil
+        ))
+
+        #expect(edit.contains("replace_lines needs path"))
+        #expect(write.contains("write needs path"))
+        #expect(await runtime.requests.isEmpty)
+    }
+
+    @Test("Line splices insert, delete, keep the final newline, and reject lines outside the file")
+    func lineSpliceEdgeCases() throws {
+        let file = "a\nb\nc\n"
+        let insert = try LineSplice.apply(to: file, startLine: 2, endLine: 1, content: "new").get()
+        #expect(insert.text == "a\nnew\nb\nc\n")
+        let delete = try LineSplice.apply(to: file, startLine: 2, endLine: 3, content: "").get()
+        #expect(delete.text == "a\n")
+        let append = try LineSplice.apply(to: "a\nb", startLine: 3, endLine: 2, content: "c").get()
+        #expect(append.text == "a\nb\nc")
+        #expect(throws: LineSplice.Failure.self) {
+            try LineSplice.apply(to: file, startLine: 5, endLine: 5, content: "x").get()
+        }
+        #expect(throws: LineSplice.Failure.self) {
+            try LineSplice.apply(to: file, startLine: 2, endLine: 9, content: "x").get()
+        }
+    }
+
+    @Test("Writing content a file already has writes nothing, and repeating it ends the turn")
+    func vmFileUnchangedWritesStopTheLoop() async throws {
+        let content = "same\n"
+        let runtime = RecordingRuntime(stdout: content)
+        let tool = VMFileTool(context: Self.context(runtime: runtime))
+        let arguments = VMFileArguments(
+            action: "write", path: "/tmp/map.txt", content: content,
+            startLine: nil, lineCount: nil, depth: nil
+        )
+
+        for _ in 1..<VMFileTool.maximumUnchangedWrites {
+            let output = try await tool.call(arguments: arguments)
+            #expect(output.contains("nothing was written"))
+        }
+        await #expect(throws: VMFileToolError.self) {
+            _ = try await tool.call(arguments: arguments)
+        }
+        #expect(await runtime.requests.allSatisfy { $0.stdin == nil })
+    }
+
+    @Test("VM tool calls of one session never overlap and run in arrival order")
+    func toolCallGateSerializesCalls() async throws {
+        let context = Self.context(runtime: RecordingRuntime())
+        let log = Mutex<[String]>([])
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for index in 0..<4 {
+                group.addTask {
+                    try await context.serialized {
+                        log.withLock { $0.append("start \(index)") }
+                        try await Task.sleep(for: .milliseconds(20))
+                        log.withLock { $0.append("end \(index)") }
+                    }
+                }
+                // Lets each call reach the gate before the next one starts.
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            try await group.waitForAll()
+        }
+
+        let events = log.withLock { $0 }
+        #expect(events == (0..<4).flatMap { ["start \($0)", "end \($0)"] })
+    }
+
+    @Test("A queued VM tool call that is cancelled leaves the queue without running")
+    func toolCallGateDropsCancelledWaiters() async throws {
+        let context = Self.context(runtime: RecordingRuntime())
+        let ran = Mutex(false)
+
+        let holder = Task {
+            try await context.serialized { try await Task.sleep(for: .milliseconds(100)) }
+        }
+        try await Task.sleep(for: .milliseconds(10))
+        let queued = Task {
+            try await context.serialized { ran.withLock { $0 = true } }
+        }
+        try await Task.sleep(for: .milliseconds(10))
+        queued.cancel()
+
+        await #expect(throws: CancellationError.self) { try await queued.value }
+        try await holder.value
+        #expect(ran.withLock { $0 } == false)
+        // The gate is free again after the holder and the cancelled waiter.
+        try await context.serialized { }
+    }
+
+    @Test("read reports the file fingerprint computed in the VM")
+    func vmFileReadReportsFingerprint() async throws {
+        let runtime = RecordingRuntime(stdout: "     1  hello\n__TOTAL_LINES__ 1\n__SHA256__ 0123456789ab\n")
+        let tool = VMFileTool(context: Self.context(runtime: runtime))
+
+        let output = try await tool.call(arguments: VMFileArguments(
+            action: "read", path: "a.txt", content: nil,
+            startLine: nil, lineCount: nil, depth: nil
+        ))
+
+        #expect(output.contains("lines 1–1 of 1. fingerprint 0123456789ab"))
+        #expect(!output.contains("__SHA256__"))
+        let request = try #require(await runtime.requests.first)
+        #expect(request.script.contains("sha256sum"))
     }
 
     @Test("Guest paths resolve from the session directory and IDs are sanitized")

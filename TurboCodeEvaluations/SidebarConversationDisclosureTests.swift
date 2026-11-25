@@ -4,10 +4,10 @@ import Testing
 @MainActor
 @Suite("Sidebar conversation disclosure")
 struct SidebarConversationDisclosureTests {
-    @Test("The initial Coding collection contains at most five chats")
+    @Test("Coding and Studio both start with at most five chats")
     func initialCollectionIsLimitedToFive() {
-        let threads = makeThreads(count: 8)
-        let batch = SidebarConversationDisclosure.batchSize(for: .coding)
+        let threads = makeThreads(count: 13)
+        let batch = SidebarConversationDisclosure.batchSize
 
         let visible = SidebarConversationDisclosure.visibleIDs(
             in: threads, limit: batch, batchSize: batch
@@ -15,21 +15,6 @@ struct SidebarConversationDisclosureTests {
 
         #expect(batch == 5)
         #expect(visible == threads.prefix(5).map(\.id))
-    }
-
-    @Test("Studio shows ten chats before collapsing, even from a smaller limit")
-    func studioCollectionIsLimitedToTen() {
-        let threads = makeThreads(count: 13)
-        let batch = SidebarConversationDisclosure.batchSize(for: .cowork)
-
-        // A limit left over from Coding must not shrink the Studio list.
-        let visible = SidebarConversationDisclosure.visibleIDs(
-            in: threads, limit: 5, batchSize: batch
-        )
-
-        #expect(batch == 10)
-        #expect(visible == threads.prefix(10).map(\.id))
-        #expect(SidebarConversationDisclosure.nextLimit(current: 10, total: 13, batchSize: batch) == 13)
     }
 
     @Test("Progressive disclosure reveals chats in five-row batches")
@@ -71,7 +56,7 @@ struct SidebarConversationDisclosureTests {
         store.timelineStore.restore([
             ChatBlock(kind: .assistant, text: "Stale timeline")
         ])
-        store.workbenchStore.route = .tools
+        store.workbenchStore.route = .connectors
 
         await store.openThread(conversation.id)
 

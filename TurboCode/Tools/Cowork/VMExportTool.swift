@@ -29,7 +29,12 @@ struct VMExportTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: VMExportArguments) async throws -> String {
-        // /out is the session outbox on the Mac; listing it needs no VM.
+        // /out is the session outbox on the Mac; listing it needs no VM, but
+        // it waits for VM tools of the same reply that may still be writing.
+        try await context.serialized { listDeliverables() }
+    }
+
+    private func listDeliverables() -> String {
         let files = CoworkExportPlanner.deliverables(in: context.configuration.outbox)
         guard !files.isEmpty else {
             return "No deliverables are in /out yet. Copy the finished files there first."

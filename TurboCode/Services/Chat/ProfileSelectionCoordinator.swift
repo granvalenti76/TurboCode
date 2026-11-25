@@ -73,9 +73,21 @@ final class ProfileSelectionCoordinator {
     private func applyConnectors(to configuration: inout ModelSessionConfiguration) {
         let connectors = activeConnectors()
         configuration.connectors = connectors
-        configuration.availableSkills = MCPConnectorCatalog.catalog(
-            adding: bundledSkills(connectors: connectors),
-            to: configuration.availableSkills
+        configuration.systemPromptBuilderEnabled = activeConversation.map {
+            SystemPromptBuilderFeature.isEnabled(ids: $0.connectors, domain: $0.domain)
+        } ?? false
+        // A "Try" chat runs the prompt under trial in place of its profile's,
+        // always at its current version. Applied here because, like the
+        // connectors, it belongs to the conversation, not to the profile.
+        if let conversation = activeConversation,
+           let trial = conversation.promptTrial,
+           let record = SystemPromptLibrary.live.record(for: trial) {
+            configuration.systemPrompts = configuration.systemPrompts
+                .applyingTrial(record.document, domain: conversation.domain)
+        }
+        configuration.availableSkills = sessionSkillCatalog(
+            codingSkills: configuration.availableSkills,
+            connectors: connectors
         )
     }
 
@@ -87,21 +99,30 @@ final class ProfileSelectionCoordinator {
     func activeSkillCatalog() -> [TurboCodeSkillDefinition] {
         let skills = modelRuntime.resolvedMarkdownSkills
         guard modelRuntime.activeBackend != .codex else { return skills }
-        return MCPConnectorCatalog.catalog(
-            adding: bundledSkills(connectors: activeConnectors()),
-            to: skills
-        )
+        return sessionSkillCatalog(codingSkills: skills, connectors: activeConnectors())
     }
 
-    /// Skills that ship with the app for the active conversation: the Studio
-    /// ones for a Studio session, then those of its enabled connectors. One
-    /// function feeds both the session and the composer so the two catalogs
-    /// cannot drift apart.
-    private func bundledSkills(
+    /// The skill catalog of the active conversation. A Studio session takes
+    /// the profile's Studio selection (user and bundled Studio skills); a
+    /// Coding session keeps `codingSkills`. Connector skills are added last
+    /// because they follow the connector, not the profile. One function
+    /// feeds both the session and the composer so the two cannot drift apart.
+    private func sessionSkillCatalog(
+        codingSkills: [TurboCodeSkillDefinition],
         connectors: [MCPConnector]
     ) -> [TurboCodeSkillDefinition] {
-        StudioSkillCatalog.skills(for: activeConversation?.domain ?? .coding)
-            + MCPConnectorCatalog.skills(for: connectors)
+        let domain = activeConversation?.domain ?? .coding
+        let base = domain == .cowork
+            ? DynamicProfileRuntimeSelection.studioSkills(
+                from: modelRuntime.availableSkills,
+                bundled: StudioSkillCatalog.skills(for: domain),
+                profile: modelRuntime.activeDynamicProfile
+            )
+            : codingSkills
+        return MCPConnectorCatalog.catalog(
+            adding: MCPConnectorCatalog.skills(for: connectors),
+            to: base
+        )
     }
 
     /// Every entry point that starts a turn asks this first. A rejected Cowork
@@ -273,6 +294,22 @@ final class ProfileSelectionCoordinator {
         }
         guard modelRuntime.selectBuiltInProfile(id, reasoning: reasoning) else { return }
         await rebuildSession(discardingCapabilityContext: true)
+    }
+
+    /// Selects a model with declared server levels and turns thinking off.
+    /// The flag is set before selection so a Codex handoff keeps it too.
+    func selectBuiltInProfileWithReasoningOff(_ id: ProfileBaseModelID) async {
+        guard !isBusy, id != .codex else { return }
+        modelRuntime.selectServerReasoningOff(for: id)
+        await selectBuiltInProfile(id)
+    }
+
+    /// Selects a model with declared server levels at one of those levels,
+    /// named as the server spells it (`minimal`, `max`, `none`).
+    func selectBuiltInProfile(_ id: ProfileBaseModelID, serverReasoningLevel level: String) async {
+        guard !isBusy, id != .codex else { return }
+        modelRuntime.selectServerReasoningLevel(level, for: id)
+        await selectBuiltInProfile(id)
     }
 
     func selectDynamicProfile(_ id: UUID) async {
@@ -456,13 +493,17 @@ final class ProfileSelectionCoordinator {
             restoringProjection: restoringProjection,
             events: responseCoordinator.modelSessionEvents
         )
-        if rebuilt, modelRuntime.dynamicRoutingEnabled,
-           let transcript = await llmRuntime.foundationModelsTranscript() {
-            let names = transcript.flatMap { entry -> [String] in
+        if rebuilt, let transcript = await llmRuntime.foundationModelsTranscript() {
+            let definitions = transcript.flatMap { entry -> [Transcript.ToolDefinition] in
                 guard case .instructions(let instructions) = entry else { return [] }
-                return instructions.toolDefinitions.map(\.name)
+                return instructions.toolDefinitions
             }
-            modelRuntime.recordDynamicRoutingTools(names)
+            // Feeds the context estimate in Profiles with the definitions the
+            // model really received, instead of guessing from catalog text.
+            ToolDefinitionSizeStore.shared.record(definitions)
+            if modelRuntime.dynamicRoutingEnabled {
+                modelRuntime.recordDynamicRoutingTools(definitions.map(\.name))
+            }
         }
         return rebuilt
     }

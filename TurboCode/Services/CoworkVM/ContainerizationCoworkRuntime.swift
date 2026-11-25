@@ -3,6 +3,7 @@ import ContainerizationEXT4
 import ContainerizationExtras
 import ContainerizationOCI
 import Foundation
+import os
 import Synchronization
 import SystemPackage
 
@@ -19,6 +20,7 @@ import SystemPackage
 /// this runtime only boots what is already installed.
 actor ContainerizationCoworkRuntime: CoworkVMRuntime {
     nonisolated static let containerID = "cowork"
+    nonisolated static let log = Logger(subsystem: "art.granvalenti.turbocode", category: "StudioVM")
     nonisolated static let hostname = "cowork"
     /// Sparse capacity of the writable layer; actual disk use grows on demand.
     nonisolated static let writableLayerBytes: UInt64 = 16 * 1_024 * 1_024 * 1_024
@@ -29,6 +31,14 @@ actor ContainerizationCoworkRuntime: CoworkVMRuntime {
     private var container: LinuxContainer?
     private var running: CoworkVMConfiguration?
     private var execCounter = 0
+    /// Serializes `start`, `stop`, `reset`, and the launch half of `exec`.
+    /// The private `perform…` methods assume they already run inside it and
+    /// must never enqueue again, or they would wait on themselves.
+    private let lifecycle = CoworkLifecycleQueue()
+    /// Guest processes still running, so a cancelled consumer can kill its own.
+    private var activeExecs: [Int: LinuxProcess] = [:]
+    /// Execs a stop or reset ended; they report `.interrupted`, not a timeout.
+    private var interruptedExecs: Set<Int> = []
 
     init(descriptor: CoworkImageDescriptor = .current, layout: CoworkSandboxLayout = .init()) {
         self.descriptor = descriptor
@@ -40,24 +50,102 @@ actor ContainerizationCoworkRuntime: CoworkVMRuntime {
     }
 
     func start(_ configuration: CoworkVMConfiguration) async throws {
+        try await reporting(.booting) {
+            try await self.lifecycle.run { try await self.performStart(configuration) }
+        }
+    }
+
+    /// Only the launch is queued, so a command never starts in a VM that is
+    /// still booting or already stopping. Its output streams outside the
+    /// queue: a stop must not wait for long-running commands, it ends them.
+    func exec(_ request: CoworkExecRequest) async throws -> AsyncThrowingStream<CoworkExecEvent, any Error> {
+        let request = try request.validated()
+        return try await reporting(.startingCommand) {
+            try await self.lifecycle.run { try await self.launch(request) }
+        }
+    }
+
+    func stop() async throws {
+        try await reporting(.stopping) {
+            try await self.lifecycle.run { try await self.performStop() }
+        }
+    }
+
+    func reset() async throws {
+        try await reporting(.resetting) {
+            try await self.lifecycle.run { try await self.performReset() }
+        }
+    }
+
+    /// Every public entry point goes through here. Containerization and its
+    /// guest agent throw gRPC errors whose bridged description is only "error
+    /// 1", which hid the cause of a failing `vm_exec`. The full description is
+    /// logged (`log show --predicate 'category == "StudioVM"'`) and returned
+    /// as `CoworkVMError.failed`, so no Containerization type leaves this
+    /// adapter. The script itself is never logged.
+    private func reporting<T: Sendable>(
+        _ stage: CoworkVMStage,
+        _ operation: () async throws -> T
+    ) async throws -> T {
+        do {
+            return try await operation()
+        } catch {
+            let normalized = CoworkVMError.normalizing(error, during: stage)
+            if case CoworkVMError.failed(_, let detail) = normalized {
+                Self.log.error("Studio VM failed while \(stage.description, privacy: .public): \(detail, privacy: .public)")
+            }
+            throw normalized
+        }
+    }
+
+    // MARK: - Queued operations
+
+    private func performStart(_ configuration: CoworkVMConfiguration) async throws {
         switch CoworkVMLifecycle.action(current: state(), requested: configuration) {
         case .none:
             return
         case .restart:
-            try await stop()
+            try await performStop()
         case .start:
             break
         }
         try await boot(configuration)
     }
 
-    func exec(_ request: CoworkExecRequest) async throws -> AsyncThrowingStream<CoworkExecEvent, any Error> {
-        let request = try request.validated()
+    private func performStop() async throws {
+        defer {
+            container = nil
+            running = nil
+        }
+        guard let container else { return }
+        // Marked before the guest goes down, because the stop is what makes
+        // their `wait` return or fail.
+        interruptedExecs.formUnion(activeExecs.keys)
+        do {
+            try await container.stop()
+        } catch {
+            // The guest may be half down, but the next boot reuses the same
+            // container ID and must find its network interface free.
+            try? manager?.releaseNetwork(Self.containerID)
+            throw error
+        }
+        try manager?.releaseNetwork(Self.containerID)
+    }
+
+    private func performReset() async throws {
+        try await performStop()
+        if FileManager.default.fileExists(atPath: layout.writableLayer.path) {
+            try FileManager.default.removeItem(at: layout.writableLayer)
+        }
+    }
+
+    private func launch(_ request: CoworkExecRequest) async throws -> AsyncThrowingStream<CoworkExecEvent, any Error> {
         guard let container else { throw CoworkVMError.notRunning }
         execCounter += 1
+        let id = execCounter
 
         let (stream, continuation) = AsyncThrowingStream<CoworkExecEvent, any Error>.makeStream()
-        let process = try await container.exec("turbocode-\(execCounter)") { config in
+        let process = try await container.exec("turbocode-\(id)") { config in
             config.arguments = ["/bin/bash", "-c", request.script]
             config.workingDirectory = request.workingDirectory
             switch request.user {
@@ -78,41 +166,97 @@ actor ContainerizationCoworkRuntime: CoworkVMRuntime {
             config.stdout = StreamWriter(continuation: continuation, kind: .stdout)
             config.stderr = StreamWriter(continuation: continuation, kind: .stderr)
         }
-        try await process.start()
+        do {
+            try await process.start()
+        } catch {
+            try? await process.delete()
+            throw error
+        }
+        activeExecs[id] = process
+
+        // `.cancelled` means the consumer went away (the user pressed Stop or
+        // the turn was torn down). Without this the guest process would keep
+        // running until its timeout, up to half an hour for `vm_exec`. A
+        // normal `finish()` reports `.finished` and kills nothing.
+        continuation.onTermination = { termination in
+            guard case .cancelled = termination else { return }
+            Task { await self.killExec(id) }
+        }
 
         let timeoutSeconds = Int64(max(1, request.timeout.components.seconds))
-        Task {
-            do {
-                let status = try await process.wait(timeoutInSeconds: timeoutSeconds)
-                continuation.yield(.exited(status.exitCode))
-            } catch {
+        Task { await self.supervise(id, process: process, timeoutSeconds: timeoutSeconds, continuation: continuation) }
+        return stream
+    }
+
+    // MARK: - Exec supervision
+
+    /// Waits for one guest process and ends its stream with exactly one
+    /// outcome: exit, timeout, or interruption by a stop or reset.
+    private func supervise(
+        _ id: Int,
+        process: LinuxProcess,
+        timeoutSeconds: Int64,
+        continuation: AsyncThrowingStream<CoworkExecEvent, any Error>.Continuation
+    ) async {
+        defer {
+            activeExecs[id] = nil
+            interruptedExecs.remove(id)
+        }
+        let outcome: CoworkExecEvent
+        do {
+            let status = try await process.wait(timeoutInSeconds: timeoutSeconds)
+            outcome = .exited(status.exitCode)
+        } catch {
+            if !interruptedExecs.contains(id) {
                 // Containerization reports an expired wait as an error; the
                 // process is still alive and must not outlive the request.
                 try? await process.kill(.kill)
                 _ = try? await process.wait(timeoutInSeconds: 5)
-                continuation.yield(.timedOut)
             }
-            try? await process.delete()
-            continuation.finish()
+            outcome = .timedOut
         }
-        return stream
+        // Checked after the wait whichever way it ended: a stopping guest can
+        // make `wait` return a kill status as well as throw.
+        if interruptedExecs.contains(id) {
+            continuation.finish(throwing: CoworkVMError.interrupted)
+            return
+        }
+        continuation.yield(outcome)
+        try? await process.delete()
+        continuation.finish()
     }
 
-    func stop() async throws {
-        defer {
-            container = nil
-            running = nil
-        }
-        guard let container else { return }
-        try await container.stop()
-        try manager?.releaseNetwork(Self.containerID)
+    private func killExec(_ id: Int) async {
+        guard let process = activeExecs[id] else { return }
+        try? await process.kill(.kill)
     }
 
-    func reset() async throws {
-        try await stop()
-        if FileManager.default.fileExists(atPath: layout.writableLayer.path) {
-            try FileManager.default.removeItem(at: layout.writableLayer)
-        }
+    // MARK: - Writable layer
+
+    /// Creates the guest's writable layer with an ordered JBD2 journal.
+    ///
+    /// The layer used to be formatted without a journal. The guest is often
+    /// killed without a clean unmount (Xcode's Stop, a crash, a forced quit),
+    /// and an unjournalled ext4 left that way corrupted its block bitmap; the
+    /// guest then mounted the overlay read-only and every boot failed at
+    /// `configureDns`. The journal lets the guest kernel replay or discard
+    /// unfinished writes on the next mount. Existing layers keep their format
+    /// until a Reset recreates them.
+    nonisolated static func formatWritableLayer(at url: URL, minimumBytes: UInt64) throws {
+        let formatter = try EXT4.Formatter(
+            FilePath(url.path),
+            minDiskSize: minimumBytes,
+            journal: EXT4.JournalConfig(defaultMode: .ordered)
+        )
+        try formatter.close()
+    }
+
+    /// Whether the ext4 image at `url` carries a journal. Lets tests check the
+    /// format without importing Containerization outside this adapter.
+    nonisolated static func writableLayerHasJournal(at url: URL) throws -> Bool {
+        let reader = try EXT4.EXT4Reader(blockDevice: FilePath(url.path))
+        let hasJournal: UInt32 = 0x4  // EXT4_FEATURE_COMPAT_HAS_JOURNAL
+        return reader.superBlock.featureCompat & hasJournal != 0
     }
 
     // MARK: - Boot
@@ -135,11 +279,7 @@ actor ContainerizationCoworkRuntime: CoworkVMRuntime {
             withIntermediateDirectories: true
         )
         if !fileManager.fileExists(atPath: layout.writableLayer.path) {
-            let formatter = try EXT4.Formatter(
-                FilePath(layout.writableLayer.path),
-                minDiskSize: Self.writableLayerBytes
-            )
-            try formatter.close()
+            try Self.formatWritableLayer(at: layout.writableLayer, minimumBytes: Self.writableLayerBytes)
         }
 
         var manager = try await ContainerManager(
@@ -164,7 +304,47 @@ actor ContainerizationCoworkRuntime: CoworkVMRuntime {
             options: []
         )
 
-        let container = try await manager.create(
+        // A boot that fails after this point has already reserved the
+        // container's network interface (and maybe a running guest). The
+        // runtime would forget both, and the next boot of the same container
+        // ID would fail until the app quits, so a failure releases them first.
+        let container: LinuxContainer
+        do {
+            container = try await createContainer(
+                manager: &manager,
+                image: image,
+                base: base,
+                overlay: overlay,
+                shares: shares,
+                configuration: configuration
+            )
+            try await container.create()
+        } catch {
+            try? manager.releaseNetwork(Self.containerID)
+            throw error
+        }
+        do {
+            try await container.start()
+        } catch {
+            try? await container.stop()
+            try? manager.releaseNetwork(Self.containerID)
+            throw error
+        }
+
+        self.manager = manager
+        self.container = container
+        self.running = configuration
+    }
+
+    private func createContainer(
+        manager: inout ContainerManager,
+        image: Containerization.Image,
+        base: Containerization.Mount,
+        overlay: Containerization.Mount,
+        shares: [CoworkMountPlan.Share],
+        configuration: CoworkVMConfiguration
+    ) async throws -> LinuxContainer {
+        try await manager.create(
             Self.containerID,
             image: image,
             rootfs: base,
@@ -191,12 +371,6 @@ actor ContainerizationCoworkRuntime: CoworkVMRuntime {
                 ))
             }
         }
-        try await container.create()
-        try await container.start()
-
-        self.manager = manager
-        self.container = container
-        self.running = configuration
     }
 
     nonisolated private static func environment(home: String, extra: [String: String]) -> [String] {

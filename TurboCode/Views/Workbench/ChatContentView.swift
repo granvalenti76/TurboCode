@@ -13,12 +13,25 @@ struct ChatContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             RuntimeBannerView()
+            PromptTrialBanner()
 
             if let error = presentation.errorMessage {
                 errorBanner(error)
             }
 
-            if chatStore.isFirstMessage {
+            if let previewID = chatStore.backgroundTurnStore.previewThreadID {
+                // Another chat is running; this one is shown read-only so
+                // the running turn is never interrupted.
+                ConversationPreviewView(
+                    title: chatStore.conversationStore.conversation(id: previewID)?.title ?? "Chat",
+                    blocks: chatStore.backgroundTurnStore.previewBlocks,
+                    runningTitle: chatStore.backgroundTurnStore.runningThreadID
+                        .flatMap { chatStore.conversationStore.conversation(id: $0)?.title },
+                    onOpen: { Task { await chatStore.openThread(previewID) } },
+                    onReturn: { chatStore.returnToRunningThread() }
+                )
+                .transition(.opacity)
+            } else if chatStore.isFirstMessage {
                 firstMessageLayout
                     .transition(.opacity)
             } else {
@@ -29,7 +42,11 @@ struct ChatContentView: View {
         .animation(.easeInOut(duration: 0.4), value: chatStore.isFirstMessage)
         .contentShape(Rectangle())
         .dropDestination(for: URL.self) { urls, _ in
-            guard !urls.isEmpty else { return false }
+            // Dropped files belong to the running chat's composer, which a
+            // preview does not show.
+            guard !urls.isEmpty, chatStore.backgroundTurnStore.previewThreadID == nil else {
+                return false
+            }
             acceptDroppedFiles(urls)
             return true
         } isTargeted: { isImageDropTargeted = $0 }

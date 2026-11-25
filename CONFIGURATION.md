@@ -16,7 +16,11 @@ layout and opens a setup sheet instead of writing a default model catalog:
 2. **Discovery.** TurboCode sends `GET /v1/models` to `127.0.0.1` on ports
    8080, 9931, 1234, 11434, 8000 and 1337, and to any address typed in
    **Another machine**. A server that also answers `GET /props` is listed as
-   llama-server: its context window and vision support are read from it.
+   llama-server: its context window and vision support are read from it. A
+   server whose `GET /health` names a `loaded_model` with `model_ready` and
+   `apc_enabled` is listed as MLX VLM (`mlx_vlm.server`): its loaded model is
+   preselected and images are on, but its reported context limit is the
+   model's maximum rather than what fits in memory, so the context is chosen.
 3. **Review.** For llama-server nothing has to be entered. For other
    OpenAI-compatible servers, choose the context window the model was loaded
    with. A short request asks the model to call a test tool; the result is
@@ -25,6 +29,25 @@ layout and opens a setup sheet instead of writing a default model catalog:
 **Create and Start** writes `models.json` with the chosen server as the `llama`
 entry and the built-in DeepSeek entry, which stays unused until a key is added.
 An existing `models.json` is never overwritten by this sheet.
+
+To start a llama-server with the recommended model and flags, see
+[LLAMA_SERVER.md](LLAMA_SERVER.md).
+
+## Local server in Settings
+
+**Settings → Providers → Local Server** points the `llama` entry at a running
+server without editing `models.json`. Choose the kind of server (llama-server,
+MLX VLM, or another OpenAI-compatible server) and its address; the same
+detection as the setup sheet fills in the loaded model and image support, and
+preselects the kind it recognizes. The context window starts at 32K and is
+read from the server only for llama-server.
+
+**Apply** rewrites only the entry's address, model, context window and
+`supportsVision` (unset for llama-server, `true` for MLX VLM, `false`
+otherwise). Its display name, temperature, reasoning control and every other
+model are kept; the display name follows the model only when the model
+changes. The file is re-read just before the write, so hand edits made while
+Settings was open are preserved.
 
 ## Configuration Boundaries
 
@@ -296,7 +319,8 @@ folder shared read-only at `/work`). Older TurboCode versions ignore both.
 {
   "agent": {
     "responseStyle": "balanced",
-    "verifiesChanges": true
+    "verifiesChanges": true,
+    "autoCompactThresholdPercent": 80
   },
   "execution": {
     "allowNetworkAccess": true,
@@ -356,6 +380,16 @@ adapts the response to the request and its actual complexity. `concise` and
 
 `verifiesChanges` tells the agent to run the most focused available build or test
 after changing source code. It does not bypass execution permissions.
+
+`autoCompactThresholdPercent` compacts a local llama-server conversation before
+the next message once the previous turn filled at least that share of the
+context window. It accepts `0` (off) or a value from `50` to `95`; the default
+is `80`, and files without the key get it. The compaction is the same as
+`/compact`: the first request and the newest exchanges are kept whole, completed
+tool calls become one-line receipts, and raw tool output is dropped. It runs only
+between turns, never inside a running tool loop, and only with llama-server,
+because the context fill is measured against the `n_ctx` it reports in `/props`.
+The same option is under **TurboCode > Settings > Agents > Context**.
 
 ## Orchestrator
 

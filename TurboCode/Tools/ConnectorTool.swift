@@ -1,16 +1,21 @@
 import Foundation
 import FoundationModels
 
+/// Arguments of the connector gateway.
+///
+/// Doc comments on a `@Generable` property never reach the model: only
+/// `@Guide` text and constraints become part of the schema. Without them a
+/// local model saw `operation: STRING` and kept writing the connector's tool
+/// name there instead of `call`, so every guide below is load-bearing.
 @Generable
 struct ConnectorArguments {
-    /// Identifier of the connector, as listed in the tool description. May be
-    /// omitted when the session has exactly one connector.
+    @Guide(description: "Connector id from the tool description. May be left out when the session has one connector.")
     var connector: String?
-    /// Use `list_tools` before the first call to a connector, then `call`.
+    @Guide(description: "Literally list_tools or call. Never a connector tool name: that goes in toolName.", .anyOf(["list_tools", "call"]))
     var operation: String
-    /// Exact tool name returned by `list_tools`.
+    @Guide(description: "With call: the exact tool name returned by list_tools.")
     var toolName: String?
-    /// JSON object passed to the selected tool.
+    @Guide(description: "With call: a JSON object with the tool's input, as a string.")
     var argumentsJSON: String?
 }
 
@@ -81,19 +86,24 @@ struct ConnectorTool: Tool {
         }
         let client = await clients.client(for: connector)
         do {
-            switch arguments.operation.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-            case "list_tools", "list", "discover":
+            switch Self.intent(operation: arguments.operation, toolName: arguments.toolName) {
+            case .listTools:
                 let tools = try await client.listTools()
                 guard !tools.isEmpty else { return .message("\(connector.name) advertised no tools.") }
-                return .message(tools.map { tool in
+                let listing = tools.map { tool in
                     "- \(tool.name): \(tool.description ?? "No description provided.")\n  input: \(tool.inputSchema?.jsonString ?? "{}")"
-                }.joined(separator: "\n"))
+                }.joined(separator: "\n")
+                // The call shape is repeated here because this is the text
+                // the model reads right before its first call.
+                return .message(listing + "\n\n" + Self.callExample(connector: connector.id, toolName: tools[0].name))
 
-            case "call":
-                let toolName = arguments.toolName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                guard !toolName.isEmpty else {
-                    return .message("A connector call requires toolName. Use list_tools first.")
-                }
+            case .missingToolName:
+                return .message("A connector call requires toolName. " + Self.callExample(connector: connector.id, toolName: "<name from list_tools>"))
+
+            case .unknown:
+                return .message("Unknown operation. " + Self.callExample(connector: connector.id, toolName: "<name from list_tools>"))
+
+            case .call(let toolName):
                 let trimmed = arguments.argumentsJSON?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 guard let value = try? JSONDecoder().decode(
                     MCPJSONValue.self,
@@ -106,8 +116,6 @@ struct ConnectorTool: Tool {
                     supportsVision: supportsVision
                 )
 
-            default:
-                return .message("Unknown operation. Use list_tools or call.")
             }
         } catch MCPLoopbackHTTPError.notRunning {
             // Reported as text so the model tells the user what to start
@@ -116,6 +124,43 @@ struct ConnectorTool: Tool {
         } catch {
             return .message("\(connector.name) connector failed: \(error.localizedDescription)")
         }
+    }
+
+    /// What a call asks the gateway to do.
+    enum Intent: Sendable, Equatable {
+        case listTools
+        case call(toolName: String)
+        case missingToolName
+        case unknown
+    }
+
+    /// Reads the operation leniently.
+    ///
+    /// Backends without guided generation ignore the `anyOf` constraint, and
+    /// models often name the connector tool as the operation. That intent is
+    /// unambiguous, so it is honoured instead of failing: an explicit
+    /// `toolName` wins, otherwise a one-word operation is taken as the tool
+    /// name. A wrong name is rejected by the connector's own server, which can
+    /// reach only the tools that connector advertises.
+    static func intent(operation: String, toolName: String?) -> Intent {
+        let operation = operation.trimmingCharacters(in: .whitespacesAndNewlines)
+        let toolName = toolName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        switch operation.lowercased() {
+        case "list_tools", "list", "discover":
+            return .listTools
+        case "call":
+            return toolName.isEmpty ? .missingToolName : .call(toolName: toolName)
+        default:
+            if !toolName.isEmpty { return .call(toolName: toolName) }
+            let isOneWord = !operation.isEmpty && !operation.contains(where: \.isWhitespace)
+            return isOneWord ? .call(toolName: operation) : .unknown
+        }
+    }
+
+    /// A literal call the model can copy, used wherever it got the shape wrong.
+    static func callExample(connector: String, toolName: String) -> String {
+        "To run a tool, set operation to call and put the tool name in toolName: "
+            + #"{"connector":"\#(connector)","operation":"call","toolName":"\#(toolName)","argumentsJSON":"{}"}"#
     }
 
     private func resolve(_ id: String?) -> MCPConnector? {

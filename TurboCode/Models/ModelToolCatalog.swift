@@ -356,25 +356,63 @@ nonisolated enum ModelToolCatalog {
         allDescriptors.first(where: { $0.id == id })!
     }
 
-    /// The fixed tool surface of a Cowork session. The domain decides the
-    /// tools; the active profile only chooses the model. Every capability that
-    /// can read or change the Mac is absent by construction.
+    /// The default Studio surface, in registration order. The connector is
+    /// absent on purpose: it is enabled per session, not per profile.
+    private static let coworkMemberships: [(ToolCapabilityID, ToolAvailabilityRequirement)] = [
+        (.turboCodeGuide, .always),
+        (.loadSkill, .skills),
+        (.vmExec, .coworkVM),
+        (.vmFile, .coworkVM),
+        (.vmExport, .coworkVM),
+        // Registered for every model because vision is only known from an
+        // asynchronous probe; the tool itself refuses when the model
+        // cannot see.
+        (.vmViewImage, .coworkVM)
+    ]
+
+    /// Every Studio tool, in display order. Anything outside this list never
+    /// reaches a Studio session.
+    static let studioSelectableToolOrder: [ToolCapabilityID] = coworkMemberships.map(\.0)
+
+    static var studioSelectableToolIDs: Set<ToolCapabilityID> {
+        Set(studioSelectableToolOrder)
+    }
+
+    /// Studio tools a profile override can turn off. The core VM tools are
+    /// not here: the Studio prompt names them and its workflow (work in the
+    /// VM, export from /out) depends on them, so they are locked on.
+    ///
+    /// Adding a tool here makes it removable in Profiles; the Studio prompt
+    /// must then mention it only when it is registered. The guide qualifies:
+    /// `coworkSection` already adds its line only when the tool is present.
+    static let studioOptionalToolIDs: Set<ToolCapabilityID> = [.turboCodeGuide]
+
+    static var studioRequiredToolIDs: Set<ToolCapabilityID> {
+        studioSelectableToolIDs.subtracting(studioOptionalToolIDs)
+    }
+
+    /// The tool surface of a Cowork session. The domain decides which tools
+    /// exist; a profile override may only drop optional ones. Every capability
+    /// that can read or change the Mac is absent by construction.
     ///
     /// The one addition is the connector gateway, and only for a session whose
     /// user enabled a connector: it reaches a named app through that app's own
     /// MCP operations, not the Mac's shell or files.
-    static func coworkPlan(tier: ModelToolTier, context: ToolAccessContext) -> ModelToolPlan {
-        var memberships: [(ToolCapabilityID, ToolAvailabilityRequirement)] = [
-            (.turboCodeGuide, .always),
-            (.loadSkill, .skills),
-            (.vmExec, .coworkVM),
-            (.vmFile, .coworkVM),
-            (.vmExport, .coworkVM),
-            // Registered for every model because vision is only known from an
-            // asynchronous probe; the tool itself refuses when the model
-            // cannot see.
-            (.vmViewImage, .coworkVM)
-        ]
+    ///
+    /// `selectedIDs` is a profile override's Studio selection. It can only
+    /// remove optional tools, never a required one and never add one: the
+    /// membership list stays the single source of what a Studio session may hold.
+    static func coworkPlan(
+        tier: ModelToolTier,
+        context: ToolAccessContext,
+        selectedIDs: Set<ToolCapabilityID>? = nil
+    ) -> ModelToolPlan {
+        var memberships = coworkMemberships
+        if let selectedIDs {
+            memberships.removeAll {
+                studioOptionalToolIDs.contains($0.0) && !selectedIDs.contains($0.0)
+            }
+        }
         if context.hasSessionConnectors {
             memberships.append((.connector, .connectors))
         }

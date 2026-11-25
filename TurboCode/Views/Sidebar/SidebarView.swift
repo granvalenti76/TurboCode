@@ -21,13 +21,14 @@ private struct SidebarWindowBackdrop: NSViewRepresentable {
 struct SidebarView: View {
     @Environment(ChatStore.self) private var chatStore
     @Environment(SettingsStore.self) private var settings
+    @Environment(\.openSettings) private var openSettings
     @State private var isSessionSearchPresented = false
     @State private var workspacePendingRemoval: String?
     @State private var workspacePathsBeingRemoved: Set<String> = []
     @State private var threadIDsBeingRemoved: Set<String> = []
     @State private var exportErrorMessage: String?
     @State private var sharePresenter = ConversationExportService.SharePresenter()
-    @State private var visibleChatLimit = SidebarConversationDisclosure.codingBatchSize
+    @State private var visibleChatLimit = SidebarConversationDisclosure.batchSize
     @State private var expandedWorkspacePath: String?
 
     var body: some View {
@@ -103,8 +104,7 @@ struct SidebarView: View {
 
     private var headerView: some View {
         HStack {
-            Text("TurboCode")
-                .font(AppTypography.sidebarHeader)
+            AgentIdentityLabel(identity: settings.agentIdentity)
 
             Spacer()
 
@@ -245,12 +245,16 @@ struct SidebarView: View {
         Section {
             ForEach(UtilityItem.allCases, id: \.self) { item in
                 Button {
-                    chatStore.setRoute(item.route)
+                    if let route = item.route {
+                        chatStore.setRoute(route)
+                    } else {
+                        openSettings()
+                    }
                 } label: {
                     navigationLabel(
                         icon: item.icon,
                         title: item.label,
-                        isSelected: chatStore.route == item.route
+                        isSelected: item.route.map { chatStore.route == $0 } ?? false
                     )
                 }
                 .buttonStyle(.plain)
@@ -264,31 +268,36 @@ struct SidebarView: View {
     }
 
     private enum UtilityItem: CaseIterable {
-        case tools
         case connectors
         case skills
+        case systemPrompts
+        case settings
 
         var label: String {
             switch self {
-            case .tools: "Tools"
             case .connectors: "Connectors"
             case .skills: "Profiles"
+            case .systemPrompts: "System Prompts"
+            case .settings: "Settings"
             }
         }
         var icon: String {
             switch self {
-            // Tools is a capability catalog and matrix, so a neutral grid is
-            // more faithful than a physical construction or settings metaphor.
-            case .tools: return "square.grid.2x2"
             case .connectors: return "powerplug"
             case .skills: return "doc.text"
+            case .systemPrompts: return "text.quote"
+            case .settings: return "gearshape"
             }
         }
-        var route: AppRoute {
+        /// The main-window destination, or nil for Settings, which opens its
+        /// own window and so is never shown as the selected row. It replaces
+        /// the former Tools catalog so Settings is reachable without the menu.
+        var route: AppRoute? {
             switch self {
-            case .tools: .tools
             case .connectors: .connectors
             case .skills: .skills
+            case .systemPrompts: .systemPrompts
+            case .settings: nil
             }
         }
     }
@@ -578,9 +587,9 @@ struct SidebarView: View {
         }
     }
 
-    /// Rows revealed per step in the active domain's chat list.
+    /// Rows revealed per step; the same in Coding and Studio.
     private var chatBatchSize: Int {
-        SidebarConversationDisclosure.batchSize(for: chatStore.activeDomain)
+        SidebarConversationDisclosure.batchSize
     }
 
     private func chatDisclosureButton(totalCount: Int, indented: Bool) -> some View {
@@ -665,7 +674,8 @@ struct SidebarView: View {
             thread: thread,
             // Only the currently visible destination receives source-list
             // selection; an open chat stays available while browsing utilities.
-            isSelected: chatStore.route == .chat && thread.id == chatStore.activeThreadId,
+            isSelected: chatStore.route == .chat && thread.id == chatStore.displayedThreadID,
+            activity: chatStore.sidebarActivity(for: thread.id),
             onSelect: {
                 openThread(thread)
             },
@@ -698,16 +708,11 @@ struct SidebarView: View {
 /// it independent from SwiftUI state makes the batch contract reviewable and
 /// prevents search results from opening without a visible selected row.
 ///
-/// The batch depends on the domain. Coding nests chats under each workspace,
-/// so a short five-row batch keeps several workspaces on screen. Studio has one
-/// flat list and nothing below it to protect, so it shows ten before collapsing.
+/// Both domains show five chats, then reveal five more per step. Studio used
+/// to show ten because its list is flat, but a long list pushed Configuration
+/// out of view and read as noise; one batch size keeps the sidebar uniform.
 nonisolated enum SidebarConversationDisclosure {
-    static let codingBatchSize = 5
-    static let studioBatchSize = 10
-
-    static func batchSize(for domain: SessionDomain) -> Int {
-        domain == .cowork ? studioBatchSize : codingBatchSize
-    }
+    static let batchSize = 5
 
     static func visibleIDs(in threads: [Conversation], limit: Int, batchSize: Int) -> [String] {
         Array(threads.prefix(max(batchSize, limit))).map(\.id)

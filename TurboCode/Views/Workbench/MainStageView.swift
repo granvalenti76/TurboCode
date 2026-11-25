@@ -19,12 +19,12 @@ struct MainStageView: View {
                             .background(AppSurface.canvas)
                     }
                 }
-            case .tools:
-                ToolsView()
             case .artifacts:
                 CoworkArtifactsLibraryView()
             case .connectors:
                 ConnectorsView()
+            case .systemPrompts:
+                SystemPromptsView()
             case .skills:
                 // Custom Profiles is presented modally over the current route;
                 // this fallback keeps restored legacy state on a working canvas.

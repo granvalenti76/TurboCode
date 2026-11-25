@@ -3,6 +3,8 @@ import Foundation
 nonisolated enum RemoteReasoningRequestDirective: Equatable, Sendable {
     case disabled
     case tokenBudget(Int)
+    /// A level name the server declared in `/props`, sent verbatim.
+    case effortLevel(String)
 }
 
 nonisolated extension RemoteReasoningConfiguration {
@@ -12,6 +14,20 @@ nonisolated extension RemoteReasoningConfiguration {
     func requestDirective(
         for effort: ReasoningEffort?
     ) -> RemoteReasoningRequestDirective? {
+        if mode == .requestEffortLevel {
+            // A level chosen by its server name is sent verbatim, so levels
+            // with no product counterpart (`minimal`, `max`) reach the
+            // template too. A choice the template does not declare (another
+            // model's level) falls through to the product mapping below.
+            if let level = selectedServerLevel, declaredServerLevels.contains(level) {
+                return .effortLevel(level)
+            }
+            // Without detected levels nothing is sent: the template would
+            // otherwise raise on an unknown level and fail the turn.
+            guard let effort else { return .disabled }
+            guard !supportedEfforts.isEmpty else { return nil }
+            return .effortLevel(resolvedEffort(effort).serverLevelName)
+        }
         guard mode == .requestTokenBudget else { return nil }
         return switch effort {
         case .low:
@@ -46,6 +62,12 @@ nonisolated enum RemoteReasoningRequestBody {
         case .tokenBudget(let tokens):
             templateArguments["enable_thinking"] = true
             object["thinking_budget_tokens"] = tokens
+        case .effortLevel(let level):
+            // "none" also clears the switch, so thinking stays off for a
+            // template that reads only `enable_thinking`.
+            templateArguments["enable_thinking"] = level != RemoteReasoningConfiguration.serverLevelOff
+            templateArguments["reasoning_effort"] = level
+            object.removeValue(forKey: "thinking_budget_tokens")
         }
         object["chat_template_kwargs"] = templateArguments
         return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
@@ -53,13 +75,15 @@ nonisolated enum RemoteReasoningRequestBody {
 }
 
 /// Request-scoped adapter for endpoints whose chat template accepts a thinking
-/// switch and token budget. The internal control headers are removed before
+/// switch plus either a token budget or a named effort level. The internal control headers are removed before
 /// forwarding and never reach the provider.
 nonisolated final class RemoteReasoningRequestAdapter: URLProtocol,
     URLSessionDataDelegate,
     @unchecked Sendable {
     static let adapterHeader = "X-TurboCode-Reasoning-Adapter"
     static let directiveHeader = "X-TurboCode-Reasoning-Directive"
+    /// Directive header prefix for `.effortLevel`; budgets stay plain integers.
+    static let effortPrefix = "effort:"
     private static let handledKey = "TurboCodeReasoningRequestHandled"
 
     private var dataTask: URLSessionDataTask?
@@ -145,6 +169,14 @@ nonisolated final class RemoteReasoningRequestAdapter: URLProtocol,
             throw RemoteReasoningRequestAdapterError.invalidDirective
         }
         if value == "disabled" { return .disabled }
+        if value.hasPrefix(effortPrefix) {
+            let level = String(value.dropFirst(effortPrefix.count))
+            guard !level.isEmpty,
+                  level.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }) else {
+                throw RemoteReasoningRequestAdapterError.invalidDirective
+            }
+            return .effortLevel(level)
+        }
         guard let tokens = Int(value), tokens == -1 || tokens > 0 else {
             throw RemoteReasoningRequestAdapterError.invalidDirective
         }

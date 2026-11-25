@@ -1,4 +1,5 @@
 import AppKit
+import FoundationModels
 import SwiftUI
 
 struct SkillsView: View {
@@ -13,6 +14,10 @@ struct SkillsView: View {
     @State private var suggestedCopyDefaults = false
     @State private var deleteConfirmationPresented = false
     @State private var capabilityKind: CapabilityKind = .tools
+    /// Which session type the capability editors show. Studio has its own
+    /// tool surface (the VM tools), so the same profile is shown twice
+    /// rather than mixing host and VM tools in one list.
+    @State private var capabilityDomain: CapabilityDomain = .coding
     @State private var includedDropTargeted = false
     @State private var availableDropTargeted = false
     @State private var hoveredTool: ToolHoverPresentation?
@@ -22,6 +27,12 @@ struct SkillsView: View {
     private enum CapabilityKind: String, CaseIterable, Identifiable {
         case tools = "Tools"
         case skills = "Skills"
+        var id: String { rawValue }
+    }
+
+    private enum CapabilityDomain: String, CaseIterable, Identifiable {
+        case coding = "Coding"
+        case studio = "Studio"
         var id: String { rawValue }
     }
 
@@ -491,8 +502,29 @@ struct SkillsView: View {
                     title: "Default Capabilities",
                     subtitle: modelID == .codex
                         ? "TurboCode tools added to Codex. Create an override and enable Delegate Task to configure up to four workers. Codex also manages its own built-in tools."
-                        : "These capabilities are managed by TurboCode and may evolve with the model."
+                        : showsStudio(for: modelID)
+                            ? "Studio runs these inside the isolated Linux VM. Create an override to turn off the optional ones."
+                            : "These capabilities are managed by TurboCode and may evolve with the model.",
+                    accessory: {
+                        if supportsStudio(modelID) { capabilityDomainPicker }
+                    }
                 ) {
+                    if showsStudio(for: modelID) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 8)], spacing: 8) {
+                            ForEach(studioDescriptors) { tool in
+                                capabilityBadge(icon: tool.systemImage, title: tool.name, subtitle: tool.id.runtimeName)
+                                    .toolInformationHoverCard(
+                                        tool,
+                                        availability: "Included in every Studio session by default",
+                                        isAvailable: true
+                                    )
+                            }
+                        }
+                        Divider()
+                        Text("Studio skills are available on demand. Connectors are enabled per session.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), spacing: 8)], spacing: 8) {
                         ForEach(defaultTools) { tool in
                             capabilityBadge(icon: tool.systemImage, title: tool.name, subtitle: tool.id.runtimeName)
@@ -508,6 +540,7 @@ struct SkillsView: View {
                         Text("All installed skills are available on demand.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
+                    }
                     }
                 }
 
@@ -676,14 +709,21 @@ struct SkillsView: View {
                     title: "Included Capabilities",
                     subtitle: "The saved list is explicit: everything outside Included is excluded."
                 ) {
-                    Picker("Capability", selection: $capabilityKind) {
-                        ForEach(CapabilityKind.allCases) { kind in Text(kind.rawValue).tag(kind) }
+                    HStack {
+                        Picker("Capability", selection: $capabilityKind) {
+                            ForEach(CapabilityKind.allCases) { kind in Text(kind.rawValue).tag(kind) }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .frame(maxWidth: 320)
+                        Spacer()
+                        if supportsStudio(draft.baseModelID) { capabilityDomainPicker }
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(maxWidth: 320)
 
                     capabilityComposer(option: option)
+
+                    Divider()
+                    contextEstimateRow(contextEstimate(for: draft))
                 }
             }
             .padding(28)
@@ -1251,7 +1291,9 @@ struct SkillsView: View {
                             ForEach(includedTools()) { tool in includedToolRow(tool, option: option) }
                             ForEach(missingToolIDs(), id: \.self) { toolID in
                                 missingCapabilityRow(toolID) {
-                                    if let id = ToolCapabilityID(rawValue: toolID) {
+                                    if editsStudio {
+                                        viewModel.updateDraft { $0.studioToolIDs?.removeAll { $0 == toolID } }
+                                    } else if let id = ToolCapabilityID(rawValue: toolID) {
                                         viewModel.setTool(id, included: false)
                                     } else {
                                         viewModel.updateDraft { $0.toolIDs.removeAll { $0 == toolID } }
@@ -1262,7 +1304,7 @@ struct SkillsView: View {
                             ForEach(includedSkills()) { skill in includedSkillRow(skill) }
                             ForEach(missingSkillIDs(), id: \.self) { skillID in
                                 missingCapabilityRow(skillID) {
-                                    viewModel.setSkill(skillID, included: false)
+                                    setSkill(skillID, included: false)
                                 }
                             }
                         }
@@ -1306,7 +1348,12 @@ struct SkillsView: View {
     }
 
     private func availableTools(option: ProfileModelOption, search: String) -> [ToolCapabilityDescriptor] {
-        ModelToolCatalog.descriptors.filter {
+        if editsStudio {
+            return studioDescriptors.filter {
+                !containsTool($0.id) && matches(search, $0.name, $0.id.rawValue)
+            }
+        }
+        return ModelToolCatalog.descriptors.filter {
             // Loading skills is derived from the selected skill set and legacy
             // delegation is not authorable. Structured delegate_task remains
             // visible because it is a supported override capability.
@@ -1319,39 +1366,235 @@ struct SkillsView: View {
     }
 
     private func includedTools() -> [ToolCapabilityDescriptor] {
-        ModelToolCatalog.descriptors.filter { viewModel.containsTool($0.id) }
+        (editsStudio ? studioDescriptors : ModelToolCatalog.descriptors).filter { containsTool($0.id) }
     }
 
     private func availableSkills(search: String) -> [TurboCodeSkillDefinition] {
-        viewModel.installedSkills.filter {
-            !viewModel.containsSkill($0.name)
-                && (search.isEmpty || $0.name.localizedCaseInsensitiveContains(search)
-                    || $0.description.localizedCaseInsensitiveContains(search))
+        skillCandidates.filter {
+            !containsSkill($0.name) && matches(search, $0.name, $0.description)
         }
     }
 
     private func includedSkills() -> [TurboCodeSkillDefinition] {
-        viewModel.installedSkills.filter { viewModel.containsSkill($0.name) }
+        skillCandidates.filter { containsSkill($0.name) }
     }
 
     private func missingToolIDs() -> [String] {
-        let known = Set(ModelToolCatalog.descriptors.map { $0.id.rawValue })
-        return viewModel.draft?.toolIDs.filter { !known.contains($0) } ?? []
+        let known = Set(ModelToolCatalog.allDescriptors.map { $0.id.rawValue })
+        let stored = editsStudio ? viewModel.draft?.studioToolIDs : viewModel.draft?.toolIDs
+        return stored?.filter { !known.contains($0) } ?? []
     }
 
     private func missingSkillIDs() -> [String] {
-        let installed = Set(viewModel.installedSkills.map(\.name))
-        return viewModel.draft?.skillIDs.filter { !installed.contains($0) } ?? []
+        let known = Set(skillCandidates.map(\.name))
+        let stored = editsStudio ? viewModel.draft?.studioSkillIDs : viewModel.draft?.skillIDs
+        return stored?.filter { !known.contains($0) } ?? []
     }
 
     private var includedCount: Int {
         capabilityKind == .tools
-            ? (viewModel.draft?.toolIDs.count ?? 0)
-            : (viewModel.draft?.skillIDs.count ?? 0)
+            ? includedTools().count + missingToolIDs().count
+            : includedSkills().count + missingSkillIDs().count
+    }
+
+    private func matches(_ search: String, _ first: String, _ second: String) -> Bool {
+        search.isEmpty
+            || first.localizedCaseInsensitiveContains(search)
+            || second.localizedCaseInsensitiveContains(search)
+    }
+
+    // MARK: Studio editing
+    //
+    // Studio reuses the Coding editor's columns, rows, drag and drop, and hover
+    // cards; only the data source and the persisted fields differ. Every
+    // mutation below goes through `studioToolIDs` / `studioSkillIDs`, which
+    // can only narrow Studio's default surface (see `coworkPlan`).
+
+    // MARK: Context estimate
+
+    /// What the editor's current selection costs before the first message.
+    /// It follows the Coding/Studio switch, not the Tools/Skills tab, so the
+    /// number does not jump while the user moves between the two lists.
+    private func contextEstimate(for draft: UserDynamicProfile) -> CapabilityContextEstimate {
+        let tools: [ToolCapabilityDescriptor]
+        if editsStudio {
+            tools = studioDescriptors.filter { draft.containsStudioTool($0.id) }
+        } else {
+            // `resolvedToolIDs` adds load_skill when skills are selected, as
+            // the runtime does.
+            let ids = draft.resolvedToolIDs
+            tools = ModelToolCatalog.descriptors.filter { ids.contains($0.id) }
+        }
+        return CapabilityContextEstimate(
+            tools: tools,
+            skills: includedSkills(),
+            measuredToolTokens: ToolDefinitionSizeStore.shared.tokensByToolName,
+            contextSize: contextWindow(for: draft.baseModelID)
+        )
+    }
+
+    /// The window the profile's model reports or is configured with; nil
+    /// when unknown (Codex, or an on-device model still loading).
+    private func contextWindow(for modelID: ProfileBaseModelID) -> Int? {
+        switch modelID {
+        case .codex:
+            return nil
+        case .onDevice:
+            let size = SystemLanguageModel.default.contextSize
+            return size > 0 ? size : nil
+        default:
+            return settings.remoteModels
+                .first { $0.id == modelID.remoteModelID }?
+                .contextWindowTokens
+        }
+    }
+
+    private func contextEstimateRow(_ estimate: CapabilityContextEstimate) -> some View {
+        let total = estimate.totalTokens.formatted(.number.notation(.compactName))
+        let tools = estimate.toolTokens.formatted(.number.notation(.compactName))
+        let skills = estimate.skillTokens.formatted(.number.notation(.compactName))
+        return HStack(spacing: 12) {
+            Image(systemName: "gauge.with.dots.needle.33percent")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Context before the first message: ≈ \(total) tokens")
+                    .font(.system(size: 12.5, weight: .semibold))
+                Text("Tools \(tools) · Skills \(skills)")
+                    .font(AppTypography.metadata)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let fraction = estimate.fraction, let size = estimate.contextSize {
+                ProgressView(value: fraction)
+                    .frame(width: 140)
+                    .tint(fraction > 0.5 ? .orange : .accentColor)
+                Text("\(Int((fraction * 100).rounded()))% of \(size.formatted(.number.notation(.compactName)))")
+                    .font(AppTypography.metadata)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        }
+        .help(
+            estimate.isApproximate
+                ? "Estimated at four characters per token. Some tools have not been used in a session yet, so their size is approximate."
+                : "Estimated at four characters per token from the tool definitions the model last received."
+        )
+        .accessibilityElement(children: .combine)
+    }
+
+    /// Codex never runs Studio sessions, so its profiles show no switch.
+    private func supportsStudio(_ modelID: ProfileBaseModelID) -> Bool {
+        modelID != .codex
+    }
+
+    private func showsStudio(for modelID: ProfileBaseModelID) -> Bool {
+        capabilityDomain == .studio && supportsStudio(modelID)
+    }
+
+    private var editsStudio: Bool {
+        guard let draft = viewModel.draft else { return false }
+        return showsStudio(for: draft.baseModelID)
+    }
+
+    private var capabilityDomainPicker: some View {
+        Picker("Session type", selection: $capabilityDomain) {
+            ForEach(CapabilityDomain.allCases) { domain in Text(domain.rawValue).tag(domain) }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+        .help("Show the capabilities used in Coding or in Studio sessions")
+    }
+
+    private var studioDescriptors: [ToolCapabilityDescriptor] {
+        ModelToolCatalog.studioSelectableToolOrder.map(ModelToolCatalog.descriptor(for:))
+    }
+
+    private var bundledStudioSkills: [TurboCodeSkillDefinition] {
+        StudioSkillCatalog.skills(for: .cowork)
+    }
+
+    /// Every skill the active editor can offer: installed skills in Coding;
+    /// installed skills plus the bundled Studio ones a user skill of the same
+    /// name does not override, in Studio.
+    private var skillCandidates: [TurboCodeSkillDefinition] {
+        guard editsStudio else { return viewModel.installedSkills }
+        return DynamicProfileRuntimeSelection.studioSkills(
+            from: viewModel.installedSkills,
+            bundled: bundledStudioSkills,
+            profile: nil
+        )
+    }
+
+    /// The user skills this profile offers in Studio before its first Studio
+    /// edit. Locked skills are left out: they are never stored.
+    private var studioDefaultSkillNames: [String] {
+        guard var profile = viewModel.draft else { return [] }
+        profile.studioSkillIDs = nil
+        let locked = DynamicProfileRuntimeSelection.lockedStudioSkillNames(bundled: bundledStudioSkills)
+        return DynamicProfileRuntimeSelection.studioSkills(
+            from: viewModel.installedSkills,
+            bundled: bundledStudioSkills,
+            profile: profile
+        ).map(\.name).filter { !locked.contains($0) }
+    }
+
+    private func isBundledStudioSkill(_ skill: TurboCodeSkillDefinition) -> Bool {
+        !viewModel.installedSkills.contains { $0.name == skill.name }
+            && bundledStudioSkills.contains { $0.name == skill.name }
+    }
+
+    /// Core Studio tools cannot be removed; see `studioOptionalToolIDs`.
+    private func isLockedTool(_ id: ToolCapabilityID) -> Bool {
+        editsStudio && ModelToolCatalog.studioRequiredToolIDs.contains(id)
+    }
+
+    /// Bundled Studio skills, or a user skill overriding one, cannot be removed.
+    private func isLockedSkill(_ name: String) -> Bool {
+        editsStudio
+            && DynamicProfileRuntimeSelection.lockedStudioSkillNames(bundled: bundledStudioSkills).contains(name)
+    }
+
+    private func containsTool(_ id: ToolCapabilityID) -> Bool {
+        editsStudio
+            ? viewModel.draft?.containsStudioTool(id) == true
+            : viewModel.containsTool(id)
+    }
+
+    private func setTool(_ id: ToolCapabilityID, included: Bool) {
+        guard !isLockedTool(id) else { return }
+        if editsStudio {
+            viewModel.updateDraft { $0.setStudioTool(id, included: included) }
+        } else {
+            viewModel.setTool(id, included: included)
+        }
+    }
+
+    private func containsSkill(_ name: String) -> Bool {
+        if isLockedSkill(name) { return true }
+        return editsStudio
+            ? viewModel.draft?.containsStudioSkill(name, defaultNames: studioDefaultSkillNames) == true
+            : viewModel.containsSkill(name)
+    }
+
+    private func setSkill(_ name: String, included: Bool) {
+        guard !isLockedSkill(name) else { return }
+        if editsStudio {
+            let defaults = studioDefaultSkillNames
+            viewModel.updateDraft { $0.setStudioSkill(name, included: included, defaultNames: defaults) }
+        } else {
+            viewModel.setSkill(name, included: included)
+        }
+    }
+
+    /// Studio tools are not filtered by the model's Coding compatibility:
+    /// the VM tools are registered for every model Studio admits.
+    private func isCompatible(_ id: ToolCapabilityID, option: ProfileModelOption) -> Bool {
+        editsStudio || option.compatibleToolIDs.contains(id)
     }
 
     private func availableToolRow(_ tool: ToolCapabilityDescriptor, option: ProfileModelOption) -> some View {
-        let compatible = option.compatibleToolIDs.contains(tool.id)
+        let compatible = isCompatible(tool.id, option: option)
         return capabilityRow(
             icon: tool.systemImage,
             title: tool.name,
@@ -1363,7 +1606,7 @@ struct SkillsView: View {
             compatible: compatible,
             actionIcon: compatible ? "plus.circle" : nil
         ) {
-            viewModel.setTool(tool.id, included: true)
+            setTool(tool.id, included: true)
         }
         .draggable(tool.id.rawValue)
         .opacity(compatible ? 1 : 0.55)
@@ -1371,7 +1614,7 @@ struct SkillsView: View {
             updateToolHover(
                 tool,
                 availability: compatible
-                    ? "Available for \(option.id.displayName)"
+                    ? (editsStudio ? "Available in Studio sessions" : "Available for \(option.id.displayName)")
                     : "Unavailable for \(option.id.displayName)",
                 isAvailable: compatible,
                 column: .available,
@@ -1381,22 +1624,26 @@ struct SkillsView: View {
     }
 
     private func includedToolRow(_ tool: ToolCapabilityDescriptor, option: ProfileModelOption) -> some View {
-        let compatible = option.compatibleToolIDs.contains(tool.id)
+        let compatible = isCompatible(tool.id, option: option)
+        let locked = isLockedTool(tool.id)
         return capabilityRow(
             icon: compatible ? tool.systemImage : "exclamationmark.triangle",
             title: tool.name,
             subtitle: compatible ? tool.id.runtimeName : "Not supported by \(option.id.displayName)",
             compatible: compatible,
-            actionIcon: "minus.circle"
+            actionIcon: locked ? nil : "minus.circle",
+            locked: locked
         ) {
-            viewModel.setTool(tool.id, included: false)
+            setTool(tool.id, included: false)
         }
         .draggable(tool.id.rawValue)
         .onHover { hovering in
             updateToolHover(
                 tool,
                 availability: compatible
-                    ? "Included for \(option.id.displayName)"
+                    ? (editsStudio
+                        ? (isLockedTool(tool.id) ? "Always on in Studio sessions" : "Included in Studio sessions")
+                        : "Included for \(option.id.displayName)")
                     : "Not supported by \(option.id.displayName)",
                 isAvailable: compatible,
                 column: .included,
@@ -1409,22 +1656,28 @@ struct SkillsView: View {
         capabilityRow(
             icon: "doc.text",
             title: skill.name,
-            subtitle: skill.description,
+            subtitle: skillSubtitle(skill),
             compatible: true,
             actionIcon: "plus.circle"
-        ) { viewModel.setSkill(skill.name, included: true) }
+        ) { setSkill(skill.name, included: true) }
         .draggable(skill.name)
     }
 
     private func includedSkillRow(_ skill: TurboCodeSkillDefinition) -> some View {
-        capabilityRow(
+        let locked = isLockedSkill(skill.name)
+        return capabilityRow(
             icon: "doc.text",
             title: skill.name,
-            subtitle: skill.description,
+            subtitle: skillSubtitle(skill),
             compatible: true,
-            actionIcon: "minus.circle"
-        ) { viewModel.setSkill(skill.name, included: false) }
+            actionIcon: locked ? nil : "minus.circle",
+            locked: locked
+        ) { setSkill(skill.name, included: false) }
         .draggable(skill.name)
+    }
+
+    private func skillSubtitle(_ skill: TurboCodeSkillDefinition) -> String {
+        isBundledStudioSkill(skill) ? "Built in · \(skill.description)" : skill.description
     }
 
     private func missingCapabilityRow(_ id: String, remove: @escaping () -> Void) -> some View {
@@ -1444,6 +1697,7 @@ struct SkillsView: View {
         subtitle: String,
         compatible: Bool,
         actionIcon: String?,
+        locked: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         HStack(spacing: 8) {
@@ -1455,7 +1709,12 @@ struct SkillsView: View {
                 Text(subtitle).font(AppTypography.metadata).foregroundStyle(.tertiary).lineLimit(2)
             }
             Spacer()
-            if let actionIcon {
+            if locked {
+                Image(systemName: "lock.fill")
+                    .foregroundStyle(.tertiary)
+                    .help("Always on in Studio sessions")
+                    .accessibilityLabel("Always on")
+            } else if let actionIcon {
                 Button(action: action) { Image(systemName: actionIcon) }
                     .buttonStyle(.borderless)
                     .disabled(!compatible && actionIcon == "plus.circle")
@@ -1491,14 +1750,15 @@ struct SkillsView: View {
         var changed = false
         if capabilityKind == .tools {
             for value in values {
-                guard let id = ToolCapabilityID(rawValue: value), option.compatibleToolIDs.contains(id) else { continue }
-                viewModel.setTool(id, included: true)
+                guard let id = ToolCapabilityID(rawValue: value), isCompatible(id, option: option),
+                      !editsStudio || ModelToolCatalog.studioSelectableToolIDs.contains(id) else { continue }
+                setTool(id, included: true)
                 changed = true
             }
         } else {
-            let names = Set(viewModel.installedSkills.map(\.name))
+            let names = Set(skillCandidates.map(\.name))
             for value in values where names.contains(value) {
-                viewModel.setSkill(value, included: true)
+                setSkill(value, included: true)
                 changed = true
             }
         }
@@ -1509,13 +1769,13 @@ struct SkillsView: View {
         var changed = false
         if capabilityKind == .tools {
             for value in values {
-                guard let id = ToolCapabilityID(rawValue: value), viewModel.containsTool(id) else { continue }
-                viewModel.setTool(id, included: false)
+                guard let id = ToolCapabilityID(rawValue: value), containsTool(id) else { continue }
+                setTool(id, included: false)
                 changed = true
             }
         } else {
-            for value in values where viewModel.containsSkill(value) {
-                viewModel.setSkill(value, included: false)
+            for value in values where containsSkill(value) {
+                setSkill(value, included: false)
                 changed = true
             }
         }
@@ -1527,10 +1787,25 @@ struct SkillsView: View {
         subtitle: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
+        sectionCard(title: title, subtitle: subtitle, accessory: { EmptyView() }, content: content)
+    }
+
+    /// A card whose `accessory` sits at the trailing end of the title row,
+    /// used for the Coding/Studio switch.
+    private func sectionCard<Accessory: View, Content: View>(
+        title: String,
+        subtitle: String,
+        @ViewBuilder accessory: () -> Accessory,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.system(size: 16, weight: .semibold))
-                Text(subtitle).font(.callout).foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.system(size: 16, weight: .semibold))
+                    Text(subtitle).font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                accessory()
             }
             content()
         }

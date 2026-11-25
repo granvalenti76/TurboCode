@@ -364,7 +364,8 @@ struct Turn: Identifiable {
     let blocks: [ChatBlock]
 }
 
-private func groupBlocks(_ blocks: [ChatBlock]) -> [Turn] {
+/// Internal so the read-only preview groups turns exactly like the live view.
+func groupBlocks(_ blocks: [ChatBlock]) -> [Turn] {
     var turns: [Turn] = []
     var currentGroup: [ChatBlock] = []
     var turnIndex = 0

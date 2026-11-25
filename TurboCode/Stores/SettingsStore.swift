@@ -27,7 +27,39 @@ public final class SettingsStore {
     public var maxChatWidth: Double = 1440.0 {
         didSet { UserDefaults.standard.set(maxChatWidth, forKey: "maxChatWidth") }
     }
+    /// Shows the project terminal button in Coding sessions. Off by default:
+    /// few users need a shell inside TurboCode, and the button was noise.
+    /// The shell itself starts only when the panel opens, so this setting
+    /// affects the toolbar, not idle memory.
+    public var projectTerminalEnabled = false {
+        didSet { UserDefaults.standard.set(projectTerminalEnabled, forKey: Self.projectTerminalKey) }
+    }
+    nonisolated static let projectTerminalKey = "projectTerminalEnabled"
+    /// Posts a system notification when a reply finishes while TurboCode is
+    /// in the background or another chat is on screen. On by default: it is
+    /// the only signal that a background reply is done.
+    public var replyNotificationsEnabled = true {
+        didSet { UserDefaults.standard.set(replyNotificationsEnabled, forKey: Self.replyNotificationsKey) }
+    }
+    nonisolated static let replyNotificationsKey = "replyNotificationsEnabled"
+    /// Includes a short excerpt of the reply. Notifications can appear on the
+    /// lock screen and in Notification Center, so the excerpt can be hidden.
+    public var replyNotificationExcerptEnabled = true {
+        didSet {
+            UserDefaults.standard.set(replyNotificationExcerptEnabled, forKey: Self.replyNotificationExcerptKey)
+        }
+    }
+    nonisolated static let replyNotificationExcerptKey = "replyNotificationExcerptEnabled"
     public var workspacePaths: [String] = []
+    /// The agent's name and sidebar icon. Saved with the system prompts
+    /// (`identity.json`) because the name is part of what the model reads;
+    /// the caller reloads the prompts after a change, once per commit.
+    var agentIdentity: AgentIdentity = SystemPromptLibrary.live.agentIdentity() {
+        didSet {
+            guard agentIdentity != oldValue else { return }
+            try? SystemPromptLibrary.live.saveAgentIdentity(agentIdentity)
+        }
+    }
     /// The newsroom taxonomy used by Editorial Desk metadata menus and
     /// persisted independently from provider and agent configuration.
     public var editorialDeskCatalog: EditorialDeskCatalog = .default {
@@ -128,6 +160,12 @@ public final class SettingsStore {
         } else {
             maxChatWidth = savedMaxWidth == 0 ? 1440.0 : savedMaxWidth
         }
+        // Absent means off: existing users also start without the button.
+        projectTerminalEnabled = defaults.bool(forKey: Self.projectTerminalKey)
+        // Absent means on, for existing users too.
+        replyNotificationsEnabled = defaults.object(forKey: Self.replyNotificationsKey) as? Bool ?? true
+        replyNotificationExcerptEnabled =
+            defaults.object(forKey: Self.replyNotificationExcerptKey) as? Bool ?? true
         reloadAgentTuning()
         reloadRemoteModels()
         loadEditorialDeskCatalog()
@@ -168,6 +206,28 @@ public final class SettingsStore {
 
     func updateRemoteModelDisplayName(_ name: String, for id: String) throws {
         remoteModels = try TurboCodeConfig.shared.updateRemoteModelDisplayName(name, for: id)
+    }
+
+    /// Points the local model at a server chosen in Settings → Providers.
+    /// Reloading immediately before the atomic write preserves hand edits
+    /// made to `models.json` while Settings was open; only the connection
+    /// fields of the local entry change (see `applyingLocalServer`).
+    func updateLocalServer(
+        baseURL: String,
+        kind: LocalModelServerKind,
+        modelID: String,
+        contextWindow: Int
+    ) throws {
+        let persistedModels = try TurboCodeConfig.shared.loadRemoteModels()
+        let updatedModels = OnboardingModelConfiguration.applyingLocalServer(
+            baseURL: baseURL,
+            kind: kind,
+            modelID: modelID,
+            contextWindow: contextWindow,
+            to: persistedModels.isEmpty ? remoteModels : persistedModels
+        )
+        try TurboCodeConfig.shared.saveRemoteModels(updatedModels)
+        remoteModels = updatedModels
     }
 
     /// Replaces only the reasoning request contract for one configured model.
@@ -211,6 +271,9 @@ public final class SettingsStore {
         defaults.set(language, forKey: "language")
         defaults.set(fontSize, forKey: "fontSize")
         defaults.set(maxChatWidth, forKey: "maxChatWidth")
+        defaults.set(projectTerminalEnabled, forKey: Self.projectTerminalKey)
+        defaults.set(replyNotificationsEnabled, forKey: Self.replyNotificationsKey)
+        defaults.set(replyNotificationExcerptEnabled, forKey: Self.replyNotificationExcerptKey)
     }
 
     private func loadEditorialDeskCatalog() {

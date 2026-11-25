@@ -24,6 +24,10 @@ nonisolated struct StandaloneProfile: LanguageModelSession.DynamicProfile {
     /// Created only when the experimental Safari gate is enabled. The
     /// prompt-based skill keeps activation content out of the cacheable prefix.
     let safariSkillActivations: SkillActivations?
+    /// Created only when the user turned on the System Prompt Builder for
+    /// this session. A separate `Skills` adapter from Safari's, so each keeps
+    /// its own activation tool and neither depends on the other being on.
+    var systemPromptBuilderActivations: SkillActivations? = nil
     let onToolStart: (@Sendable (Transcript.ToolCall) async -> Void)?
     let onToolEnd: (@Sendable (Transcript.ToolCall, Transcript.ToolOutput) async -> Void)?
     /// Supplies steering to inject between tool rounds. Nil for sessions
@@ -50,6 +54,16 @@ nonisolated struct StandaloneProfile: LanguageModelSession.DynamicProfile {
                     toolName: "activate_safari_skill",
                     instructions: Instructions(SafariMCPFeature.activationInstructions),
                     skills: [SafariMCPFeature.skill]
+                )
+            }
+            if let systemPromptBuilderActivations {
+                // The interview method and save_system_prompt enter the
+                // instructions only once the model activates the skill.
+                Skills(
+                    activations: systemPromptBuilderActivations,
+                    toolName: SystemPromptBuilderFeature.activationToolName,
+                    instructions: Instructions(SystemPromptBuilderFeature.activationInstructions),
+                    skills: [SystemPromptBuilderFeature.skill()]
                 )
             }
             if usesExclusiveToolSelection {

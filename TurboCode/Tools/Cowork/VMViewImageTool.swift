@@ -77,7 +77,10 @@ struct VMViewImageTool: Tool {
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: VMViewImageArguments) async throws -> Prompt {
-        switch await view(arguments: arguments) {
+        // Queued with the other VM tools so a screenshot written by a
+        // vm_exec in the same reply is complete before it is read.
+        let outcome = try await context.serialized { await view(arguments: arguments) }
+        return switch outcome {
         case .image(let text, let attachment):
             ComposerImageAttachment.prompt(text: text, attachments: [attachment])
         case .message(let text):

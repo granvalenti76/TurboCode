@@ -29,12 +29,17 @@ struct VMExecTool: Tool {
         """
         Run a bash command in the isolated Studio Linux VM. Commands start in \
         this session's directory. Use for builds, scripts, package installs, and \
-        headless rendering.
+        headless rendering. Tool calls in the same reply may run in any order: \
+        write a file first and run it in a later reply.
         """
     }
     var includesSchemaInInstructions: Bool { true }
 
     func call(arguments: VMExecArguments) async throws -> String {
+        try await context.serialized { try await execute(arguments) }
+    }
+
+    private func execute(_ arguments: VMExecArguments) async throws -> String {
         let seconds = min(
             max(1, arguments.timeoutSeconds ?? Self.defaultTimeoutSeconds),
             Self.maximumTimeoutSeconds

@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Observation
+import OSLog
 
 /// Temporary, non-invasive status shown after a local context compaction.
 public struct LocalCompactionNotice: Equatable, Sendable {
@@ -120,6 +121,7 @@ public final class ChatStore {
     var agentRuntimeProjectionStore: AgentRuntimeProjectionStore {
         assembly.agentRuntimeProjectionStore
     }
+    var backgroundTurnStore: BackgroundTurnStore { assembly.backgroundTurnStore }
     var composerViewModel: ComposerViewModel { assembly.composerViewModel }
     var presentationViewModel: ChatPresentationViewModel {
         assembly.presentationViewModel
@@ -134,9 +136,6 @@ public final class ChatStore {
     var modelRuntimeStore: ModelRuntimeStore { assembly.modelRuntimeStore }
     var agentRuntime: AgentRuntime { assembly.agentRuntime }
     private var llmRuntime: LLMRuntime { assembly.llmRuntime }
-    var onDeviceToolCallingSupported: Bool {
-        assembly.onDeviceToolCallingSupported
-    }
     var responseCoordinator: ChatResponseCoordinator {
         assembly.responseCoordinator
     }
@@ -344,6 +343,14 @@ public final class ChatStore {
         )
     }
 
+    func selectBuiltInProfileWithReasoningOff(_ id: ProfileBaseModelID) async {
+        await profileSelectionCoordinator.selectBuiltInProfileWithReasoningOff(id)
+    }
+
+    func selectBuiltInProfile(_ id: ProfileBaseModelID, serverReasoningLevel level: String) async {
+        await profileSelectionCoordinator.selectBuiltInProfile(id, serverReasoningLevel: level)
+    }
+
     /// Reflect a persisted label edit without rebuilding the provider session.
     func updateRemoteModelDisplayName(id: String, name: String) {
         modelRuntimeStore.updateRemoteModelDisplayName(id: id, name: name)
@@ -484,6 +491,7 @@ public final class ChatStore {
     }
 
     public func selectThread(_ id: String) async {
+        guard await openWithoutInterruptingTurn(id) else { return }
         await conversationLifecycleCoordinator.selectThread(id)
     }
 
@@ -491,7 +499,109 @@ public final class ChatStore {
     /// SwiftUI from building the previous, potentially large timeline merely to
     /// replace it one run-loop later when leaving a utility destination.
     public func openThread(_ id: String) async {
+        guard await openWithoutInterruptingTurn(id) else { return }
         await conversationLifecycleCoordinator.openThread(id)
+        backgroundTurnStore.markSeen(id)
+    }
+
+    /// While a turn runs, navigation must not install another chat: that
+    /// would cancel the turn. Returns true when the caller should open `id`
+    /// normally; otherwise the running chat or a read-only preview is shown.
+    private func openWithoutInterruptingTurn(_ id: String) async -> Bool {
+        let turns = backgroundTurnStore
+        switch BackgroundTurnPolicy.openDecision(target: id, runningThreadID: turns.runningThreadID) {
+        case .open:
+            turns.endPreview()
+            return true
+        case .returnToRunning:
+            turns.endPreview()
+            turns.markSeen(id)
+            setRoute(.chat)
+            return false
+        case .preview:
+            guard case .loaded(let snapshot) = await sessionCoordinator.load(id: id) else {
+                // A missing or unreadable file must not interrupt the turn
+                // either; the user can open it once the turn is done.
+                presentationViewModel.errorMessage =
+                    "This chat can be opened when the running reply has finished."
+                return false
+            }
+            turns.beginPreview(threadID: id, blocks: snapshot.blocks)
+            setRoute(.chat)
+            return false
+        }
+    }
+
+    /// The chat on screen: a read-only preview when one is open, otherwise
+    /// the installed chat. The sidebar highlights this one.
+    public var displayedThreadID: String? {
+        backgroundTurnStore.previewThreadID ?? activeThreadId
+    }
+
+    func sidebarActivity(for threadID: String) -> ThreadRowActivity {
+        if backgroundTurnStore.runningThreadID == threadID { return .running }
+        if backgroundTurnStore.unreadThreadIDs.contains(threadID) { return .unread }
+        return .idle
+    }
+
+    @ObservationIgnored private var replyNotifications: ReplyNotificationService?
+
+    /// Connects unseen turn endings to system notifications. Called once by
+    /// the app after settings load; settings are read when a turn ends, so
+    /// toggling them takes effect immediately.
+    func attachReplyNotifications(settings: SettingsStore) {
+        guard replyNotifications == nil else { return }
+        let service = ReplyNotificationService()
+        service.openThread = { [weak self] id in
+            Task { await self?.revealThreadFromNotification(id) }
+        }
+        replyNotifications = service
+        backgroundTurnStore.isAppActive = { NSApp.isActive }
+        backgroundTurnStore.turnFinishedInBackground = { [weak self, weak settings] threadID, outcome in
+            guard let self, let settings, settings.replyNotificationsEnabled else { return }
+            // The live timeline still belongs to the finished chat: previews
+            // never install another one, so its last answer is the reply.
+            let reply = self.timelineStore.blocks.last { $0.kind == .assistant }?.text
+            let content = ReplyNotificationContent(
+                chatTitle: self.conversationStore.conversation(id: threadID)?.title ?? "TurboCode",
+                outcome: outcome,
+                reply: reply,
+                includeExcerpt: settings.replyNotificationExcerptEnabled
+            )
+            service.post(content, threadID: threadID)
+        }
+    }
+
+    /// Opens the chat of a clicked notification. The chat may belong to the
+    /// other domain (Coding vs Studio) than the sidebar shows; the domain is
+    /// switched without opening its most recent chat first, so only this one
+    /// is installed.
+    func revealThreadFromNotification(_ id: String) async {
+        guard let conversation = conversationStore.conversation(id: id) else {
+            ReplyNotificationService.log.error("Clicked chat \(id, privacy: .public) no longer exists")
+            return
+        }
+        if conversation.domain != conversationStore.activeDomain {
+            conversationStore.activeDomain = conversation.domain
+            UserDefaults.standard.set(conversation.domain.rawValue, forKey: Self.activeDomainKey)
+            selectedProject = nil
+        }
+        await openThread(id)
+        setRoute(.chat)
+        ReplyNotificationService.log.info(
+            "Opened \(id, privacy: .public); active is \(self.activeThreadId ?? "none", privacy: .public)"
+        )
+    }
+
+    /// Leaves a read-only preview and shows the chat whose turn is running.
+    public func returnToRunningThread() {
+        guard let running = backgroundTurnStore.runningThreadID else {
+            backgroundTurnStore.endPreview()
+            return
+        }
+        backgroundTurnStore.endPreview()
+        backgroundTurnStore.markSeen(running)
+        setRoute(.chat)
     }
 
     // MARK: Coding | Cowork
@@ -578,6 +688,90 @@ public final class ChatStore {
         )
         await persistConversationMetadata(for: conversation.id)
         _ = await profileSelectionCoordinator.rebuildSession()
+        return true
+    }
+
+    /// Turns the built-in System Prompt Builder skill on or off for the
+    /// active session. Same rules as `setConnector` (no change mid-turn, the
+    /// session is rebuilt), but Coding only: its save tool writes to the
+    /// prompt library on the Mac, which a Studio session must never do.
+    @discardableResult
+    func setSystemPromptBuilder(enabled: Bool) async -> Bool {
+        guard !busy else { return false }
+        if activeConversation == nil { await ensureActiveThread() }
+        guard let conversation = activeConversation,
+              conversation.domain == .coding else { return false }
+        conversationStore.setConnectors(
+            MCPConnectorCatalog.ids(
+                conversation.connectors,
+                setting: SystemPromptBuilderFeature.id,
+                enabled: enabled
+            ),
+            for: conversation.id
+        )
+        await persistConversationMetadata(for: conversation.id)
+        _ = await profileSelectionCoordinator.rebuildSession()
+        return true
+    }
+
+    // MARK: System prompt trials
+
+    /// Opens a new chat, in the kind of session the user is in, that runs a
+    /// saved prompt instead of its profile's. Nothing else changes: other
+    /// chats and the profile keep their prompt until the user adopts this
+    /// one. Refused while a turn runs, because a new chat would cut it.
+    @discardableResult
+    func startPromptTrial(_ record: SystemPromptRecord) async -> Bool {
+        guard !busy, backgroundTurnStore.runningThreadID == nil else { return false }
+        await createThread(title: "Try: \(record.name)")
+        guard let conversation = activeConversation else { return false }
+        conversationStore.setPromptTrial(
+            PromptTrial(promptID: record.id.uuidString, version: record.version),
+            for: conversation.id
+        )
+        await persistConversationMetadata(for: conversation.id)
+        _ = await profileSelectionCoordinator.rebuildSession()
+        setRoute(.chat)
+        return true
+    }
+
+    /// The saved prompt the active chat is trying, at its current version,
+    /// or nil for an ordinary chat or a prompt deleted since.
+    var activePromptTrialRecord: SystemPromptRecord? {
+        activeConversation?.promptTrial.flatMap { SystemPromptLibrary.live.record(for: $0) }
+    }
+
+    /// Records a rating for the version the trial chat runs now. The rating
+    /// names this chat, so the evidence for it can be found again.
+    @discardableResult
+    func ratePromptTrial(stars: Int, tags: [String], note: String) -> Bool {
+        guard let conversation = activeConversation,
+              let record = activePromptTrialRecord else { return false }
+        do {
+            try SystemPromptLibrary.live.addRating(SystemPromptRating(
+                promptID: record.id,
+                version: record.version,
+                stars: stars,
+                tags: tags,
+                note: note,
+                conversationID: conversation.id
+            ))
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Makes the prompt under trial the one its kind of session uses.
+    @discardableResult
+    func adoptPromptTrial() async -> Bool {
+        guard let conversation = activeConversation,
+              let record = activePromptTrialRecord else { return false }
+        let library = SystemPromptLibrary.live
+        var assignments = library.assignments()
+        assignments.promptIDs[conversation.domain == .cowork ? .studio : .coding] = record.id
+        guard (try? library.saveAssignments(assignments)) != nil else { return false }
+        await reloadSystemPrompts()
         return true
     }
 
@@ -689,7 +883,27 @@ public final class ChatStore {
         set { workbenchStore.coworkExport = newValue }
     }
 
+    /// Set when New Chat was asked for while a turn runs. A new chat must be
+    /// installed, which cancels that turn, so the user confirms it first.
+    var pendingNewChatInterruption: (title: String, mode: ConversationMode)?
+
     public func createThread(title: String = "New Chat", mode: ConversationMode = .agent) async {
+        if backgroundTurnStore.runningThreadID != nil {
+            pendingNewChatInterruption = (title, mode)
+            return
+        }
+        await installNewThread(title: title, mode: mode)
+    }
+
+    /// Confirmed from the alert: stops the running turn and opens the chat.
+    func confirmNewChatInterruption() async {
+        guard let request = pendingNewChatInterruption else { return }
+        pendingNewChatInterruption = nil
+        await installNewThread(title: request.title, mode: request.mode)
+    }
+
+    private func installNewThread(title: String, mode: ConversationMode) async {
+        backgroundTurnStore.endPreview()
         await conversationLifecycleCoordinator.createThread(
             title: title,
             mode: mode
@@ -748,6 +962,7 @@ public final class ChatStore {
 
     /// Fully restores a past session with its blocks.
     public func restoreSession(id: String) async {
+        guard await openWithoutInterruptingTurn(id) else { return }
         await conversationLifecycleCoordinator.restoreSession(id: id)
     }
 
@@ -767,6 +982,7 @@ public final class ChatStore {
     }
 
     public func deleteThread(id: String) async {
+        if backgroundTurnStore.previewThreadID == id { backgroundTurnStore.endPreview() }
         await conversationLifecycleCoordinator.deleteThread(id: id)
     }
 
@@ -1012,42 +1228,18 @@ public final class ChatStore {
             return
         }
 
-        guard let transcript = await sessionCoordinator.foundationModelsTranscript() else {
+        // The same compaction runs automatically before a send once the
+        // context passes the threshold in Settings; both share one path.
+        switch await messageSendCoordinator.compactLocalContext() {
+        case .noTranscript:
             error = "The active model session has no transcript checkpoint."
             return
-        }
-        let turnCount = SessionRebuildHistory.userTurnCount(in: transcript)
-        let maximumCharacters = SessionRebuildHistory.localCompactionCharacterLimit(
-            contextWindowTokens: activeRemoteModel?.contextWindowTokens
-        )
-        guard let compaction = SessionRebuildHistory.localCompaction(
-            from: blocks,
-            maximumCharacters: maximumCharacters
-        ) else {
+        case .nothingToCompact:
             error = "Nothing to compact yet."
             return
+        case .compacted:
+            error = nil
         }
-
-        error = nil
-        await ensureActiveThread()
-        timelineStore.presentCompaction(compaction.summary)
-        presentationViewModel.presentCompactionNotice(
-            LocalCompactionNotice(
-                sourceCharacters: compaction.sourceCharacters,
-                retainedCharacters: compaction.retainedCharacters
-            )
-        )
-        await rebuildSession(
-            restoringHistory: compaction.history,
-            restoringProjection: .empty
-        )
-
-        await AgentDiagnosticsRecorder.shared.recordLocalCompaction(
-            backend: activeBackend,
-            turnCount: turnCount,
-            sourceCharacters: compaction.sourceCharacters,
-            retainedCharacters: compaction.retainedCharacters
-        )
 
         if let threadID = activeThreadId {
             conversationStore.touchThread(id: threadID)
@@ -1152,6 +1344,14 @@ public final class ChatStore {
         await profileSelectionCoordinator.rebuildSession(
             discardingCapabilityContext: true
         )
+    }
+
+    /// Re-reads the saved system prompts after a Settings change and rebuilds
+    /// the session once if a profile's prompt changed. The rebuild discards
+    /// the provider's prompt cache, which the next reply recomputes.
+    func reloadSystemPrompts() async {
+        guard modelRuntimeStore.applySystemPrompts(SystemPromptLibrary.live.resolved()) else { return }
+        await profileSelectionCoordinator.rebuildSession(discardingCapabilityContext: false)
     }
 
     /// Loads every valid installed plugin when the global setting permits it.

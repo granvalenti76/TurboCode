@@ -39,6 +39,62 @@ nonisolated enum RuntimeContextHandoff {
             + String(context.suffix(maximumCharacters))
     }
 
+    static let compactionOmissionMarker = "[Earlier context omitted during compaction]"
+
+    /// Renders a conversation for local compaction within `maximumCharacters`.
+    ///
+    /// Unlike `render`, which keeps only the newest characters, this keeps the
+    /// first user request whole and fills the rest with the newest sections.
+    /// The first request usually states the task; repeated automatic
+    /// compactions would otherwise drop it first and leave the model knowing
+    /// what it did recently but not why. Cuts fall between sections, never
+    /// inside one, except when the newest section alone exceeds the budget.
+    static func renderKeepingFirstRequest(
+        blocks: [ChatBlock],
+        maximumCharacters: Int
+    ) -> String {
+        let sections = blocks.compactMap { block in
+            renderBlock(block).map { (kind: block.kind, text: $0) }
+        }
+        let separator = "\n\n"
+        let full = sections.map(\.text).joined(separator: separator)
+        guard full.count > maximumCharacters else { return full }
+
+        // A first request larger than half the budget is itself shortened, so
+        // the newest state always keeps at least half of the space.
+        let firstIndex = sections.firstIndex { $0.kind == .user }
+        var pinned = firstIndex.map { sections[$0].text } ?? ""
+        let pinnedLimit = maximumCharacters / 2
+        if pinned.count > pinnedLimit {
+            pinned = String(pinned.prefix(max(0, pinnedLimit - 1))) + "…"
+        }
+        let head = pinned.isEmpty
+            ? compactionOmissionMarker
+            : pinned + separator + compactionOmissionMarker
+        var remaining = maximumCharacters - head.count - separator.count
+
+        var tail: [String] = []
+        var index = sections.endIndex
+        let lowerBound = firstIndex.map { $0 + 1 } ?? sections.startIndex
+        while index > lowerBound, remaining > 0 {
+            index -= 1
+            let text = sections[index].text
+            let cost = text.count + (tail.isEmpty ? 0 : separator.count)
+            if cost <= remaining {
+                tail.insert(text, at: 0)
+                remaining -= cost
+            } else {
+                if tail.isEmpty {
+                    // The newest section alone is too large: keep its end,
+                    // where the latest state of a long message usually is.
+                    tail.insert("…" + String(text.suffix(max(0, remaining - 1))), at: 0)
+                }
+                break
+            }
+        }
+        return ([head] + tail).joined(separator: separator)
+    }
+
     static func transcript(from blocks: [ChatBlock]) -> [Transcript.Entry] {
         SessionRebuildHistory.fromVisibleBlocks(blocks)
     }

@@ -47,7 +47,16 @@ final class FirstLaunchOnboardingStore {
     /// Servers in discovery order; a typed address is appended once found.
     private(set) var servers: [DiscoveredModelServer] = []
     private(set) var isScanning = false
-    var selectedServerID: String?
+    /// Set by the sheet when the user picks a row, or by a typed address.
+    /// Any assignment outside `preselect()` counts as the user's choice.
+    var selectedServerID: String? {
+        didSet { if !isPreselecting { userChoseServer = true } }
+    }
+    /// Scan results arrive in whatever order the ports answer, so an
+    /// automatic pick must stay revisable until the user chooses: otherwise a
+    /// generic server that answers first would hide a later llama-server.
+    @ObservationIgnored private var userChoseServer = false
+    @ObservationIgnored private var isPreselecting = false
 
     var manualAddress = ""
     private(set) var addressCheck: AddressCheck = .idle
@@ -141,8 +150,13 @@ final class FirstLaunchOnboardingStore {
     /// Keeps a user's choice; otherwise prefers llama-server because it needs
     /// no manual settings.
     private func preselect() {
-        if let selectedServerID, servers.contains(where: { $0.id == selectedServerID }) { return }
-        selectedServerID = (llamaServers.first ?? servers.first)?.id
+        if userChoseServer, let selectedServerID,
+           servers.contains(where: { $0.id == selectedServerID }) { return }
+        let preferred = (llamaServers.first ?? servers.first)?.id
+        guard preferred != selectedServerID else { return }
+        isPreselecting = true
+        selectedServerID = preferred
+        isPreselecting = false
     }
 
     func checkManualAddress() async {

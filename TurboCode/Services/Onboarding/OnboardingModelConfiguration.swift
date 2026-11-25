@@ -20,11 +20,76 @@ nonisolated enum OnboardingModelConfiguration {
         return trimmed.isEmpty ? "Local model" : trimmed
     }
 
+    /// What each server kind means for the persisted vision override.
+    /// llama-server stays unset so the runtime keeps asking `/props` and
+    /// follows a model reload; mlx_vlm has no `/props`, so its answer is
+    /// written down; other servers cannot be asked and default to no images.
+    static func supportsVision(for kind: LocalModelServerKind) -> Bool? {
+        switch kind {
+        case .llamaServer: nil
+        case .mlxVLM: true
+        case .openAICompatible: false
+        }
+    }
+
+    /// Points the local entry at a server chosen in Settings.
+    ///
+    /// Only the connection fields change: address, model, context window and
+    /// vision. The display name, temperature, reasoning contract and every
+    /// other model are kept, because they may have been tuned by hand. The
+    /// display name follows the model only when the model itself changes, so
+    /// the sidebar never shows the name of a model that is no longer loaded.
+    /// Without a local entry one is appended with the onboarding defaults.
+    static func applyingLocalServer(
+        baseURL: String,
+        kind: LocalModelServerKind,
+        modelID: String,
+        contextWindow: Int,
+        to models: [RemoteModelConfig]
+    ) -> [RemoteModelConfig] {
+        var models = models
+        guard let index = models.firstIndex(where: { $0.id == localModelID }) else {
+            models.append(RemoteModelConfig(
+                id: localModelID,
+                name: displayName(forModelID: modelID),
+                url: baseURL,
+                modelName: modelID,
+                temperature: 0.6,
+                supportsVision: supportsVision(for: kind),
+                contextWindowTokens: contextWindow
+            ))
+            return models
+        }
+        var entry = models[index]
+        if entry.modelName != modelID {
+            entry.name = displayName(forModelID: modelID)
+        }
+        entry.url = baseURL
+        entry.modelName = modelID
+        entry.contextWindowTokens = contextWindow
+        entry.supportsVision = supportsVision(for: kind)
+        // Named effort levels come from llama-server's `/props`. Any other
+        // server cannot declare them, and levels stored for an earlier
+        // llama-server would be sent to a template that ignores them, so
+        // reasoning returns to the server's own default. Token budgets are
+        // left alone: they are a deliberate choice, not a detected value.
+        if kind != .llamaServer, entry.reasoningConfiguration.mode == .requestEffortLevel {
+            entry.reasoningConfiguration.mode = .serverManaged
+            entry.reasoningConfiguration.serverEffortLevels = nil
+        }
+        entry.enabled = true
+        models[index] = entry
+        return models
+    }
+
     /// Builds the persisted entry.
     ///
     /// - For llama-server the context comes from `/props` and vision stays
     ///   unset, so the runtime keeps asking the server and follows a model
     ///   reload without another onboarding.
+    /// - For mlx_vlm the user's context choice is stored (its reported limit
+    ///   is the model maximum, not what fits in memory) and vision is written
+    ///   as `true`, because the runtime probe only understands `/props`.
     /// - For other servers the user's context choice is stored and vision is
     ///   written as `false`, as CONFIGURATION.md advises for servers without
     ///   `/props`, so image drops do not wait on a probe that cannot answer.
@@ -39,7 +104,7 @@ nonisolated enum OnboardingModelConfiguration {
         switch server.kind {
         case .llamaServer:
             context = server.contextWindowTokens ?? chosenContextWindow ?? defaultContextWindow
-        case .openAICompatible:
+        case .mlxVLM, .openAICompatible:
             context = chosenContextWindow ?? defaultContextWindow
         }
         return RemoteModelConfig(
@@ -48,7 +113,7 @@ nonisolated enum OnboardingModelConfiguration {
             url: server.baseURL,
             modelName: modelID,
             temperature: 0.6,
-            supportsVision: server.kind == .llamaServer ? nil : false,
+            supportsVision: supportsVision(for: server.kind),
             contextWindowTokens: context
         )
     }

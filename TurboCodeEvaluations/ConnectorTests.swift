@@ -195,6 +195,32 @@ struct ConnectorTests {
         #expect(badArguments == .message("argumentsJSON must be a valid JSON object."))
     }
 
+    @Test("A connector tool named as the operation is still read as a call")
+    func operationNamingTheToolIsACall() {
+        // The shape a local model kept sending to Prassitele in a real session.
+        #expect(ConnectorTool.intent(operation: "set_reference", toolName: "set_reference") == .call(toolName: "set_reference"))
+        #expect(ConnectorTool.intent(operation: "set_reference", toolName: nil) == .call(toolName: "set_reference"))
+        #expect(ConnectorTool.intent(operation: " Call ", toolName: "get_scene") == .call(toolName: "get_scene"))
+        #expect(ConnectorTool.intent(operation: "list", toolName: "get_scene") == .listTools)
+        #expect(ConnectorTool.intent(operation: "call", toolName: "  ") == .missingToolName)
+        #expect(ConnectorTool.intent(operation: "run the tool", toolName: nil) == .unknown)
+        #expect(ConnectorTool.intent(operation: "", toolName: nil) == .unknown)
+    }
+
+    @Test("A malformed call is answered with a literal call to copy")
+    func malformedCallShowsTheShape() async {
+        let tool = ConnectorTool(connectors: [MCPConnectorCatalog.prassitele], supportsVision: { false })
+        let outcome = await tool.run(arguments: ConnectorArguments(
+            connector: nil, operation: "call", toolName: nil, argumentsJSON: nil
+        ))
+        guard case .message(let text) = outcome else {
+            Issue.record("Expected a text answer")
+            return
+        }
+        #expect(text.contains(#""operation":"call""#))
+        #expect(text.contains(#""connector":"prassitele""#))
+    }
+
     // MARK: Skills
 
     @Test("A connector's skill is bundled, parses, and never tells the model to use a host shell")

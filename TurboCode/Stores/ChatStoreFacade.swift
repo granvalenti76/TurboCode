@@ -213,8 +213,6 @@ extension ChatStore {
         modelRuntimeStore.dynamicRoutingPresentationRevision
     }
 
-    var dynamicRoutingToolNames: [String] { modelRuntimeStore.dynamicRoutingToolNames }
-
     var dynamicRoutingPresentedToolNames: [String] {
         modelRuntimeStore.dynamicRoutingPresentedToolNames
     }
@@ -233,6 +231,19 @@ extension ChatStore {
 
     public var activeModelOffersReasoningControl: Bool {
         modelRuntimeStore.activeModelOffersReasoningControl
+    }
+
+    /// True when "Off" is the active choice for a model with server levels.
+    var activeServerReasoningOff: Bool {
+        modelRuntimeStore.serverReasoningOff
+            && !(modelRuntimeStore.activeRemoteModel?.reasoningConfiguration
+                .supportedEfforts.isEmpty ?? true)
+    }
+
+    /// The server level the active model's requests send, in the server's
+    /// spelling; nil when the model does not declare levels.
+    var activeServerReasoningLevel: String? {
+        modelRuntimeStore.serverLevel(for: modelRuntimeStore.activeRemoteModel)
     }
 
     var codexConnectionState: CodexConnectionState {
@@ -277,10 +288,6 @@ extension ChatStore {
     /// conversation, including the skills of its enabled connectors.
     var availableSkills: [TurboCodeSkillDefinition] {
         activeSkillCatalog
-    }
-
-    var onDeviceSupportsToolCalling: Bool {
-        onDeviceToolCallingSupported
     }
 
     public var isDelegating: Bool {
