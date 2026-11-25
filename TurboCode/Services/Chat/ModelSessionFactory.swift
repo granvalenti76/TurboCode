@@ -73,6 +73,14 @@ nonisolated struct ModelSessionConfiguration: Sendable {
     /// the session's domain. Set by the caller that knows the conversation;
     /// background and delegated sessions keep the empty default.
     var connectors: [MCPConnector] = []
+    /// True when the user turned on the System Prompt Builder skill for this
+    /// Coding session. Background and delegated sessions keep it off.
+    var systemPromptBuilderEnabled = false
+    /// The user's system prompt for each profile, resolved by
+    /// `ModelRuntimeStore`. A configuration built elsewhere keeps the built-in
+    /// prompt. The Coding and Studio choices apply wherever the store builds
+    /// sessions, ACP included.
+    var systemPrompts: ResolvedSystemPrompts = .builtIn
 
     init(
         backend: ModelBackend,
@@ -476,6 +484,14 @@ nonisolated enum ModelSessionFactory {
                     && configuration.agentTuning.experimental.safariMCPEnabled
                     ? SkillActivations()
                     : nil,
+                // Like Safari, off under dynamic routing: that mode rebuilds
+                // the session per request and would forget the activation.
+                // The cowork check repeats the Coding-only rule as a guard.
+                systemPromptBuilderActivations: configuration.systemPromptBuilderEnabled
+                    && configuration.cowork == nil
+                    && !configuration.dynamicRoutingEnabled
+                    ? SkillActivations()
+                    : nil,
                 onToolStart: { call in
                     await events.toolStarted(
                         call,
@@ -718,7 +734,9 @@ nonisolated enum ModelSessionFactory {
                 cowork: CoworkPromptFacts(
                     sessionDirectory: cowork.sessionDirectory,
                     sharesInputFolder: cowork.configuration.inputFolder != nil
-                )
+                ),
+                promptDocument: configuration.systemPrompts.studio,
+                agentName: configuration.systemPrompts.agentName
             )
         )
     }
@@ -1172,7 +1190,9 @@ nonisolated enum ModelSessionFactory {
                     for: configuration,
                     backend: backend
                 ),
-                workers: workers
+                workers: workers,
+                promptDocument: configuration.systemPrompts.document(forCodingRole: role),
+                agentName: configuration.systemPrompts.agentName
             )
         )
     }

@@ -691,6 +691,90 @@ public final class ChatStore {
         return true
     }
 
+    /// Turns the built-in System Prompt Builder skill on or off for the
+    /// active session. Same rules as `setConnector` (no change mid-turn, the
+    /// session is rebuilt), but Coding only: its save tool writes to the
+    /// prompt library on the Mac, which a Studio session must never do.
+    @discardableResult
+    func setSystemPromptBuilder(enabled: Bool) async -> Bool {
+        guard !busy else { return false }
+        if activeConversation == nil { await ensureActiveThread() }
+        guard let conversation = activeConversation,
+              conversation.domain == .coding else { return false }
+        conversationStore.setConnectors(
+            MCPConnectorCatalog.ids(
+                conversation.connectors,
+                setting: SystemPromptBuilderFeature.id,
+                enabled: enabled
+            ),
+            for: conversation.id
+        )
+        await persistConversationMetadata(for: conversation.id)
+        _ = await profileSelectionCoordinator.rebuildSession()
+        return true
+    }
+
+    // MARK: System prompt trials
+
+    /// Opens a new chat, in the kind of session the user is in, that runs a
+    /// saved prompt instead of its profile's. Nothing else changes: other
+    /// chats and the profile keep their prompt until the user adopts this
+    /// one. Refused while a turn runs, because a new chat would cut it.
+    @discardableResult
+    func startPromptTrial(_ record: SystemPromptRecord) async -> Bool {
+        guard !busy, backgroundTurnStore.runningThreadID == nil else { return false }
+        await createThread(title: "Try: \(record.name)")
+        guard let conversation = activeConversation else { return false }
+        conversationStore.setPromptTrial(
+            PromptTrial(promptID: record.id.uuidString, version: record.version),
+            for: conversation.id
+        )
+        await persistConversationMetadata(for: conversation.id)
+        _ = await profileSelectionCoordinator.rebuildSession()
+        setRoute(.chat)
+        return true
+    }
+
+    /// The saved prompt the active chat is trying, at its current version,
+    /// or nil for an ordinary chat or a prompt deleted since.
+    var activePromptTrialRecord: SystemPromptRecord? {
+        activeConversation?.promptTrial.flatMap { SystemPromptLibrary.live.record(for: $0) }
+    }
+
+    /// Records a rating for the version the trial chat runs now. The rating
+    /// names this chat, so the evidence for it can be found again.
+    @discardableResult
+    func ratePromptTrial(stars: Int, tags: [String], note: String) -> Bool {
+        guard let conversation = activeConversation,
+              let record = activePromptTrialRecord else { return false }
+        do {
+            try SystemPromptLibrary.live.addRating(SystemPromptRating(
+                promptID: record.id,
+                version: record.version,
+                stars: stars,
+                tags: tags,
+                note: note,
+                conversationID: conversation.id
+            ))
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Makes the prompt under trial the one its kind of session uses.
+    @discardableResult
+    func adoptPromptTrial() async -> Bool {
+        guard let conversation = activeConversation,
+              let record = activePromptTrialRecord else { return false }
+        let library = SystemPromptLibrary.live
+        var assignments = library.assignments()
+        assignments.promptIDs[conversation.domain == .cowork ? .studio : .coding] = record.id
+        guard (try? library.saveAssignments(assignments)) != nil else { return false }
+        await reloadSystemPrompts()
+        return true
+    }
+
     /// Opens the export review for the active Cowork session. The default
     /// destination is the session's shared folder when it still exists.
     func presentCoworkExport() {
@@ -1260,6 +1344,14 @@ public final class ChatStore {
         await profileSelectionCoordinator.rebuildSession(
             discardingCapabilityContext: true
         )
+    }
+
+    /// Re-reads the saved system prompts after a Settings change and rebuilds
+    /// the session once if a profile's prompt changed. The rebuild discards
+    /// the provider's prompt cache, which the next reply recomputes.
+    func reloadSystemPrompts() async {
+        guard modelRuntimeStore.applySystemPrompts(SystemPromptLibrary.live.resolved()) else { return }
+        await profileSelectionCoordinator.rebuildSession(discardingCapabilityContext: false)
     }
 
     /// Loads every valid installed plugin when the global setting permits it.

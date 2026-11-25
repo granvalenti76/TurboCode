@@ -123,6 +123,12 @@ nonisolated enum MCPConnectorCatalog {
         var selection = Set(ids)
         if enabled { selection.insert(id) } else { selection.remove(id) }
         // Catalog order keeps the stored value stable whatever the click order.
-        return all.map(\.id).filter(selection.contains)
+        // Identifiers outside the MCP catalog (the System Prompt Builder
+        // switch shares this list) are kept after it, so toggling a
+        // connector never turns another feature off.
+        let catalogIDs = all.map(\.id)
+        let others = ids.filter { !catalogIDs.contains($0) && selection.contains($0) }
+        let added = catalogIDs.contains(id) || others.contains(id) || !enabled ? [] : [id]
+        return catalogIDs.filter(selection.contains) + others + added
     }
 }

@@ -27,6 +27,10 @@ nonisolated public struct Conversation: Identifiable, Sendable, Hashable {
     /// no longer name a built-in connector are ignored when the session is
     /// built.
     public var connectors: [String]
+    /// Set only for a chat opened with "Try" from System Prompts: the saved
+    /// prompt this chat runs instead of its profile's. The profile itself is
+    /// untouched, so other chats keep their prompt.
+    public var promptTrial: PromptTrial?
 
     public init(
         id: String = UUID().uuidString,
@@ -39,7 +43,8 @@ nonisolated public struct Conversation: Identifiable, Sendable, Hashable {
         mode: ConversationMode = .agent,
         domain: SessionDomain = .coding,
         coworkFolder: String? = nil,
-        connectors: [String] = []
+        connectors: [String] = [],
+        promptTrial: PromptTrial? = nil
     ) {
         self.id = id
         self.title = title
@@ -52,6 +57,21 @@ nonisolated public struct Conversation: Identifiable, Sendable, Hashable {
         self.domain = domain
         self.coworkFolder = coworkFolder
         self.connectors = connectors
+        self.promptTrial = promptTrial
+    }
+}
+
+/// A saved system prompt under trial in one chat. The identifier is a
+/// string so this core type does not depend on the app's prompt library.
+/// `version` is the version the chat started on; ratings are recorded for
+/// the version that actually answered, which the app resolves at build time.
+nonisolated public struct PromptTrial: Codable, Sendable, Hashable {
+    public var promptID: String
+    public var version: Int
+
+    public init(promptID: String, version: Int) {
+        self.promptID = promptID
+        self.version = version
     }
 }
 

@@ -10,6 +10,9 @@ import Observation
 @Observable
 final class ModelRuntimeStore {
     private(set) var agentTuning: AgentTuningConfig = .default
+    /// Read from `~/.turbocode/prompts` at launch and after every change made
+    /// in Settings, so building a session never reads the disk.
+    private(set) var systemPrompts: ResolvedSystemPrompts = .builtIn
     private(set) var remoteModels: [RemoteModelConfig]
     private(set) var activeRemoteModelID: String
     private(set) var dynamicProfiles: [UserDynamicProfile]
@@ -147,9 +150,11 @@ final class ModelRuntimeStore {
         models: [RemoteModelConfig]? = nil,
         profiles: [UserDynamicProfile]? = nil,
         preferences: UserDefaults = .standard,
-        dynamicRoutingAssetsPrepared: Bool? = nil
+        dynamicRoutingAssetsPrepared: Bool? = nil,
+        systemPrompts: ResolvedSystemPrompts? = nil
     ) {
         self.preferences = preferences
+        self.systemPrompts = systemPrompts ?? SystemPromptLibrary.live.resolved()
         self.serverReasoningOff = preferences.bool(forKey: "serverReasoningOff")
         self.serverReasoningLevel = preferences.string(forKey: "serverReasoningLevel")
         self.dynamicRouter = AnchorSignalClassifier()
@@ -671,7 +676,7 @@ final class ModelRuntimeStore {
         let usesDynamicTools = cowork == nil
             && dynamicRoutingEnabled && dynamicRoutingSupported
             && dynamicRoutingDecision?.source != .fallback
-        return ModelSessionConfiguration(
+        var configuration = ModelSessionConfiguration(
             backend: activeBackend,
             activeRemoteModel: sessionModel(activeRemoteModel),
             delegateRemoteModel: sessionModel(delegateModel),
@@ -698,6 +703,16 @@ final class ModelRuntimeStore {
                 : [],
             cowork: cowork
         )
+        configuration.systemPrompts = systemPrompts
+        return configuration
+    }
+
+    /// Replaces the prompts sessions are built with. Returns whether they
+    /// changed, so the caller rebuilds the session only when it must.
+    func applySystemPrompts(_ value: ResolvedSystemPrompts) -> Bool {
+        guard value != systemPrompts else { return false }
+        systemPrompts = value
+        return true
     }
 
     /// Replaces the provider-neutral activation snapshot without changing the

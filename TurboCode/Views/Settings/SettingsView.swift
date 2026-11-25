@@ -310,6 +310,7 @@ struct GeneralSettingsView: View {
         let s = Bindable(settings)
         return Form {
             SettingsPaneHeader(section: .general)
+            AgentIdentitySection()
             Section("Appearance") {
                 Picker("Theme", selection: s.theme) {
                     Text("System").tag(ThemePreference.system)

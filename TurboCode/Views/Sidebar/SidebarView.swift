@@ -104,8 +104,7 @@ struct SidebarView: View {
 
     private var headerView: some View {
         HStack {
-            Text("TurboCode")
-                .font(AppTypography.sidebarHeader)
+            AgentIdentityLabel(identity: settings.agentIdentity)
 
             Spacer()
 
@@ -271,12 +270,14 @@ struct SidebarView: View {
     private enum UtilityItem: CaseIterable {
         case connectors
         case skills
+        case systemPrompts
         case settings
 
         var label: String {
             switch self {
             case .connectors: "Connectors"
             case .skills: "Profiles"
+            case .systemPrompts: "System Prompts"
             case .settings: "Settings"
             }
         }
@@ -284,6 +285,7 @@ struct SidebarView: View {
             switch self {
             case .connectors: return "powerplug"
             case .skills: return "doc.text"
+            case .systemPrompts: return "text.quote"
             case .settings: return "gearshape"
             }
         }
@@ -294,6 +296,7 @@ struct SidebarView: View {
             switch self {
             case .connectors: .connectors
             case .skills: .skills
+            case .systemPrompts: .systemPrompts
             case .settings: nil
             }
         }

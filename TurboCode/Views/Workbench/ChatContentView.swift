@@ -13,6 +13,7 @@ struct ChatContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             RuntimeBannerView()
+            PromptTrialBanner()
 
             if let error = presentation.errorMessage {
                 errorBanner(error)
