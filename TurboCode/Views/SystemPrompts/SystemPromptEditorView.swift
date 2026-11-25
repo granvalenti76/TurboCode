@@ -29,6 +29,8 @@ struct SystemPromptEditorView: View {
     @State private var draft = SystemPromptDocument()
     @State private var selection: SystemPromptEditorItem.ID?
     @State private var confirmingClose = false
+    @State private var titleHovered = false
+    @FocusState private var titleFocused: Bool
 
     private var record: SystemPromptRecord? {
         if case .record(let id) = target { model.record(id) } else { nil }
@@ -49,9 +51,13 @@ struct SystemPromptEditorView: View {
         )
         VStack(alignment: .leading, spacing: 14) {
             breadcrumb
-            header(layout)
-            SystemPromptSquare(layout: layout, selection: $selection)
-                .frame(height: 460)
+            header
+            SystemPromptSquare(
+                layout: layout,
+                selection: $selection,
+                onAddBlock: isReadOnly ? nil : { addBlock(to: $0, layout: layout) }
+            )
+            .frame(height: 460)
             SystemPromptBlockStrip(
                 item: layout.item(selection),
                 isReadOnly: isReadOnly,
@@ -62,8 +68,14 @@ struct SystemPromptEditorView: View {
         }
         .padding(.horizontal, 32)
         .padding(.vertical, 28)
-        .onAppear(perform: loadDraft)
+        .onAppear {
+            loadDraft()
+            // A fresh prompt still has its placeholder name: start there, so
+            // naming it is the obvious first step.
+            if record?.version == 1, name.hasPrefix("Untitled") { titleFocused = true }
+        }
         .onChange(of: target) { loadDraft() }
+        .toolbar { toolbarActions }
         .confirmationDialog("Save changes to “\(name)”?", isPresented: $confirmingClose) {
             Button("Save") { save(); onClose() }
             Button("Discard Changes", role: .destructive) { onClose() }
@@ -86,68 +98,150 @@ struct SystemPromptEditorView: View {
         }
     }
 
-    private func header(_ layout: SystemPromptEditorLayout) -> some View {
-        HStack(spacing: 12) {
+    /// Title, state, and the switch that puts the prompt to use. Actions that
+    /// change the file (Save, Revert, Duplicate) live in the window toolbar;
+    /// adding a block lives on the blocks column. The header only describes.
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 if isReadOnly {
                     Text("TurboCode default").font(AppTypography.pageTitle)
                 } else {
-                    TextField("Prompt name", text: $name)
-                        .textFieldStyle(.plain)
-                        .font(AppTypography.pageTitle)
+                    titleField
                 }
                 Text(subtitle)
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
-            Spacer()
-            if isReadOnly {
-                Button("Duplicate to Edit") {
-                    model.create(.duplicateDefault, tuning: settings.agentTuning)
-                    onClose()
-                }
-                .buttonStyle(.borderedProminent)
-            } else {
-                Menu("Add Block") {
-                    ForEach(SystemPromptArea.editableAreas, id: \.self) { area in
-                        Button(area.title) { addBlock(to: area, layout: layout) }
-                    }
-                }
-                .fixedSize()
-                useForProfileMenu
-                Button("Revert") { loadDraft() }
-                    .disabled(!hasChanges)
-                Button("Save") { save() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut("s", modifiers: .command)
-                    .disabled(!hasChanges)
+            HStack(spacing: 16) {
+                enableToggle
+                Spacer()
+                Text(usedByText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .help("Pick the prompt of each kind of session in the System Prompts gallery.")
             }
         }
+    }
+
+    /// The name is edited in place. A plain text field gives no hint that it
+    /// is editable, so it shows a pencil and a field background on hover and
+    /// while focused, the way Finder and Xcode reveal an editable name.
+    private var titleField: some View {
+        HStack(spacing: 8) {
+            TextField("Prompt name", text: $name)
+                .textFieldStyle(.plain)
+                .font(AppTypography.pageTitle)
+                .focused($titleFocused)
+                .fixedSize()
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(titleFocused || titleHovered ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear))
+                }
+                .padding(.horizontal, -6)
+                .accessibilityLabel("Prompt name")
+            Button {
+                titleFocused = true
+            } label: {
+                Image(systemName: "pencil")
+                    .font(.title3)
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .opacity(titleFocused ? 0 : 1)
+            .help("Rename")
+            .accessibilityLabel("Rename")
+        }
+        .onHover { titleHovered = $0 }
     }
 
     private var subtitle: String {
         guard let record else { return "Built in · read-only · always available to fall back on" }
         var parts = ["v\(record.version)"]
         if record.basedOnDefault { parts.append("from TurboCode default") }
-        if hasChanges { parts.append("unsaved changes") }
-        return parts.joined(separator: " · ")
+        let text = parts.joined(separator: " · ")
+        // "— Edited" is how a macOS document title says it has unsaved changes.
+        return hasChanges ? "\(text) — Edited" : text
     }
 
-    /// Assigns the saved version to a profile. Disabled while there are
-    /// unsaved edits, so a profile never silently gets an older version.
-    private var useForProfileMenu: some View {
-        Menu("Use for Profile") {
-            ForEach(SystemPromptProfile.allCases, id: \.self) { profile in
-                let inUse = record.map { model.profiles(using: $0.id).contains(profile) } ?? false
-                Toggle(profile.title, isOn: Binding(
-                    get: { inUse },
-                    set: { model.assign(profile, to: $0 ? record?.id : nil) }
-                ))
+    /// Every profile that uses the shown prompt, Delegate included, since
+    /// the checkbox only covers the current kind of session.
+    private var usedByText: String {
+        let profiles = SystemPromptProfile.allCases.filter {
+            model.assignments.promptIDs[$0] == shownPromptID
+        }
+        return profiles.isEmpty
+            ? "Not used by any profile"
+            : "Used by " + profiles.map(\.title).joined(separator: " · ")
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarActions: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            if isReadOnly {
+                Button("Duplicate to Edit") {
+                    model.create(.duplicateDefault, tuning: settings.agentTuning)
+                    onClose()
+                }
+                .help("Make an editable copy of the default prompt")
+            } else {
+                // A split button: Save is the click, Revert to Saved is in
+                // its menu, so no control sits disabled most of the time.
+                Menu {
+                    Button("Revert to Saved") { loadDraft() }
+                        .disabled(!hasChanges)
+                } label: {
+                    Text("Save")
+                } primaryAction: {
+                    save()
+                }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(!hasChanges)
+                .help(hasChanges ? "Save changes (⌘S)" : "No unsaved changes")
             }
         }
-        .fixedSize()
-        .disabled(hasChanges)
-        .help(hasChanges ? "Save first, so the profile uses what you see." : "Choose the profiles that use this prompt.")
+    }
+
+    /// The profile the user is working in: the one this page's main switch
+    /// changes. Delegate is picked in the library gallery, since no
+    /// session the user sees runs as a delegate.
+    private var currentProfile: SystemPromptProfile {
+        chatStore.activeDomain == .cowork ? .studio : .coding
+    }
+
+    /// The prompt this page shows, as an assignment value: nil is the default.
+    private var shownPromptID: UUID? { record?.id }
+
+    /// One switch for the common case: use this prompt in the current kind of
+    /// session. On the default prompt it is the way back: turning it on
+    /// returns the profile to the default. It cannot be turned off there,
+    /// because "no prompt" is not a choice; enabling another prompt is.
+    private var enableToggle: some View {
+        let profile = currentProfile
+        let isEnabled = model.assignments.promptIDs[profile] == shownPromptID
+        return HStack(spacing: 8) {
+            Toggle(isOn: Binding(
+                get: { isEnabled },
+                set: { model.assign(profile, to: $0 ? shownPromptID : nil) }
+            )) {
+                Text("Enable this system prompt")
+                    .fontWeight(.medium)
+            }
+            .toggleStyle(.checkbox)
+            .disabled(hasChanges || (isReadOnly && isEnabled))
+            Text(enableToggleDetail(profile: profile, isEnabled: isEnabled))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .help(hasChanges ? "Save first, so the sessions use what you see." : "")
+    }
+
+    private func enableToggleDetail(profile: SystemPromptProfile, isEnabled: Bool) -> String {
+        if isEnabled { return "for \(profile.title) sessions, from the next reply" }
+        if isReadOnly { return "Turn on to return \(profile.title) sessions to the default." }
+        return "for \(profile.title) sessions"
     }
 
     // MARK: Draft
@@ -319,6 +413,8 @@ struct SystemPromptEditorLayout {
 private struct SystemPromptSquare: View {
     let layout: SystemPromptEditorLayout
     @Binding var selection: SystemPromptEditorItem.ID?
+    /// Nil for the read-only default, which hides the add control.
+    var onAddBlock: ((SystemPromptArea) -> Void)? = nil
 
     private let labelWidth: CGFloat = 200
     private let labelHeight: CGFloat = 36
@@ -377,10 +473,28 @@ private struct SystemPromptSquare: View {
                     label(item).offset(x: width - 16 - labelWidth, y: right[index])
                 }
 
-                Text("Your blocks · in reading order")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .offset(x: 16, y: 10)
+                HStack(spacing: 6) {
+                    Text("Your blocks · in reading order")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    // Adding belongs to this column, so the control sits on
+                    // its header, like the + under a list in System Settings.
+                    if let onAddBlock {
+                        Menu {
+                            ForEach(SystemPromptArea.editableAreas, id: \.self) { area in
+                                Button(area.title) { onAddBlock(area) }
+                            }
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                        .help("Add a block to an area")
+                        .accessibilityLabel("Add Block")
+                    }
+                }
+                .offset(x: 16, y: 6)
                 HStack(spacing: 8) {
                     Label("Managed by TurboCode", systemImage: "lock.fill")
                         .font(.caption.weight(.semibold))

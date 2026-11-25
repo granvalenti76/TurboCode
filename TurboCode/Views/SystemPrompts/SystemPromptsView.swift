@@ -18,6 +18,11 @@ struct SystemPromptsView: View {
     @State private var renameText = ""
     @State private var deleting: SystemPromptRecord?
     @State private var editing: SystemPromptEditorView.Target?
+    /// The profile segment the user picked; nil follows the current session.
+    @State private var scope: SystemPromptProfile?
+    /// Hidden for good once the user closes it: the page is visited often
+    /// and the explanation is only needed the first times.
+    @AppStorage("systemPrompts.introDismissed") private var introDismissed = false
 
     var body: some View {
         ScrollView {
@@ -46,20 +51,20 @@ struct SystemPromptsView: View {
     @ViewBuilder
     private func content(_ model: SystemPromptLibraryViewModel) -> some View {
         @Bindable var model = model
+        let scope = scope ?? currentProfile
         VStack(alignment: .leading, spacing: 16) {
-            header(model)
-            SystemPromptAssignmentsCard(model: model)
+            header(scope: scope)
+            if !introDismissed { introCard }
 
-            HStack(alignment: .firstTextBaseline) {
-                Text("Prompts").font(.headline)
+            HStack {
                 Spacer()
-                Picker("Sort", selection: $model.sortOrder) {
-                    ForEach(SystemPromptLibraryViewModel.SortOrder.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.menu)
-                .fixedSize()
+                SortMenu(selection: $model.sortOrder)
             }
 
+            // Pick-to-use, like the wallpaper gallery in System Settings: the
+            // ringed card is what `scope` sessions use, a click on another
+            // card switches to it, and the default is one card among them so
+            // going back is the same gesture.
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 12)], spacing: 12) {
                 SystemPromptCard(
                     name: "TurboCode default",
@@ -67,10 +72,12 @@ struct SystemPromptsView: View {
                     isBuiltIn: true,
                     areaTokens: SystemPromptTemplates.editableTokenEstimates(.turboCodeDefault, tuning: settings.agentTuning),
                     totalTokens: defaultTotal,
-                    profiles: model.profiles(using: nil)
+                    inUseFor: model.assignments.promptIDs[scope] == nil ? scope : nil,
+                    onUse: { model.assign(scope, to: nil) },
+                    onEdit: { editing = .builtIn }
                 )
-                .onTapGesture { editing = .builtIn }
                 .contextMenu {
+                    Button("Open") { editing = .builtIn }
                     Button("Duplicate") { model.create(.duplicateDefault, tuning: settings.agentTuning) }
                 }
 
@@ -82,10 +89,12 @@ struct SystemPromptsView: View {
                         isBuiltIn: false,
                         areaTokens: SystemPromptTemplates.editableTokenEstimates(record.document, tuning: settings.agentTuning),
                         totalTokens: total,
-                        profiles: model.profiles(using: record.id)
+                        inUseFor: model.assignments.promptIDs[scope] == record.id ? scope : nil,
+                        onUse: { model.assign(scope, to: record.id) },
+                        onEdit: { editing = .record(record.id) }
                     )
-                    .onTapGesture { editing = .record(record.id) }
                     .contextMenu {
+                        Button("Edit") { editing = .record(record.id) }
                         Button("Rename…") {
                             renameText = record.name
                             renaming = record
@@ -95,6 +104,8 @@ struct SystemPromptsView: View {
                         Button("Delete…", role: .destructive) { deleting = record }
                     }
                 }
+
+                newPromptCard(model)
             }
         }
         .frame(maxWidth: 1100, alignment: .leading)
@@ -137,11 +148,17 @@ struct SystemPromptsView: View {
         }
     }
 
-    private func header(_ model: SystemPromptLibraryViewModel) -> some View {
+    /// The profile whose prompt the gallery shows: the kind of session the
+    /// user is in, until they pick another segment.
+    private var currentProfile: SystemPromptProfile {
+        chatStore.activeDomain == .cowork ? .studio : .coding
+    }
+
+    private func header(scope: SystemPromptProfile) -> some View {
         HStack(alignment: .top, spacing: 20) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("System Prompts").font(AppTypography.pageTitle)
-                Text("Build your own prompts from blocks. Each profile uses one; the TurboCode default is always there to fall back on.")
+                Text("Choose the prompt each kind of session uses. \(scope.detail).")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -149,31 +166,99 @@ struct SystemPromptsView: View {
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
             Spacer()
-            Menu("New Prompt") {
-                Button {
-                    open(model.create(.duplicateDefault, tuning: settings.agentTuning))
-                } label: {
-                    Text("Duplicate TurboCode default")
-                    Text("Start from the blocks it ships with")
-                }
-                Button {
-                    open(model.create(.blank, tuning: settings.agentTuning))
-                } label: {
-                    Text("Blank prompt")
-                    Text("Identity block only; managed parts are added")
-                }
-                Divider()
-                Button {
-                    importing = true
-                } label: {
-                    Text("Import Markdown…")
-                    Text("Each ## heading becomes a block")
-                }
+            Picker("Profile", selection: Binding(
+                get: { scope },
+                set: { self.scope = $0 }
+            )) {
+                ForEach(SystemPromptProfile.allCases, id: \.self) { Text($0.title).tag($0) }
             }
-            .menuStyle(.button)
-            .buttonStyle(.borderedProminent)
+            .pickerStyle(.segmented)
+            .labelsHidden()
             .fixedSize()
         }
+    }
+
+    /// What a system prompt is for and what it cannot change. The limits
+    /// matter as much as the uses: the prompt steers the model but never
+    /// adds tools or loosens approvals, which stay in the managed areas.
+    private var introCard: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "text.badge.star")
+                .font(.title2)
+                .foregroundStyle(Color.accentColor)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Make TurboCode work your way")
+                    .fontWeight(.semibold)
+                Text("A system prompt is what the model reads before every conversation. Write your own to give it a personality, a routine to follow (for example, \u{201C}at the start of a session, read MEMORY.md\u{201D}), or rules about which tools to prefer and when. TurboCode keeps its tool rules, approvals and session details in the gray, locked part: your prompt shapes how the model works, not what it\u{2019}s allowed to do.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 4) {
+                    Text("To write one with the model\u{2019}s help, turn on System Prompt Builder in")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Button("Connectors") { chatStore.workbenchStore.setRoute(.connectors) }
+                        .buttonStyle(.link)
+                        .font(.callout)
+                }
+            }
+            Spacer(minLength: 0)
+            Button {
+                introDismissed = true
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("Hide this explanation")
+            .accessibilityLabel("Hide explanation")
+        }
+        .padding(16)
+        .background(AppSurface.card, in: .rect(cornerRadius: AppSurface.cardCornerRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: AppSurface.cardCornerRadius)
+                .strokeBorder(.separator)
+        }
+    }
+
+    /// The last tile of the grid. Creating a prompt is an act on the
+    /// library, so it sits with the prompts instead of as a page button.
+    private func newPromptCard(_ model: SystemPromptLibraryViewModel) -> some View {
+        Menu {
+            Button {
+                open(model.create(.duplicateDefault, tuning: settings.agentTuning))
+            } label: {
+                Text("Duplicate TurboCode default")
+                Text("Start from the blocks it ships with")
+            }
+            Button {
+                open(model.create(.blank, tuning: settings.agentTuning))
+            } label: {
+                Text("Blank prompt")
+                Text("Identity block only; managed parts are added")
+            }
+            Divider()
+            Button {
+                importing = true
+            } label: {
+                Text("Import Markdown…")
+                Text("Each ## heading becomes a block")
+            }
+        } label: {
+            Label("New Prompt", systemImage: "plus")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 128)
+                .contentShape(.rect)
+                .overlay {
+                    RoundedRectangle(cornerRadius: AppSurface.cardCornerRadius)
+                        .strokeBorder(.separator, style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+                }
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
     }
 
     private func open(_ record: SystemPromptRecord?) {
@@ -186,53 +271,6 @@ struct SystemPromptsView: View {
 
     private func tokenText(_ tokens: Int) -> String {
         "\(tokens.formatted()) tok"
-    }
-}
-
-// MARK: - Assignments
-
-/// "Used by profiles": one row per profile with a picker of every prompt.
-private struct SystemPromptAssignmentsCard: View {
-    let model: SystemPromptLibraryViewModel
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Used by profiles")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-            ForEach(Array(SystemPromptProfile.allCases.enumerated()), id: \.element) { index, profile in
-                if index > 0 { Divider().padding(.leading, 16) }
-                HStack(spacing: 12) {
-                    Text(profile.title)
-                        .fontWeight(.medium)
-                        .frame(width: 90, alignment: .leading)
-                    Text(profile.detail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Picker("Prompt for \(profile.title)", selection: Binding(
-                        get: { model.assignments.promptIDs[profile] },
-                        set: { model.assign(profile, to: $0) }
-                    )) {
-                        Text("TurboCode default").tag(UUID?.none)
-                        if !model.records.isEmpty { Divider() }
-                        ForEach(model.records) { Text($0.name).tag(Optional($0.id)) }
-                    }
-                    .labelsHidden()
-                    .frame(width: 220)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 7)
-            }
-        }
-        .padding(.bottom, 4)
-        .background(AppSurface.card, in: .rect(cornerRadius: AppSurface.cardCornerRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: AppSurface.cardCornerRadius)
-                .strokeBorder(.separator)
-        }
     }
 }
 
@@ -258,21 +296,28 @@ extension SystemPromptProfile {
 // MARK: - Card
 
 /// One prompt in the library grid: thumbnail of the context square, name,
-/// size and version, and the profiles that use it.
+/// size and version. A click puts it in use for the profile the page shows
+/// (a ring marks that one); a double click or the hover button opens it.
 private struct SystemPromptCard: View {
     let name: String
     let meta: String
     let isBuiltIn: Bool
     let areaTokens: [(area: SystemPromptArea, tokens: Int)]
     let totalTokens: Int
-    let profiles: [SystemPromptProfile]
+    /// The profile this card is in use for, or nil.
+    let inUseFor: SystemPromptProfile?
+    let onUse: () -> Void
+    let onEdit: () -> Void
+
+    @State private var hovered = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             SystemPromptThumbnail(areaTokens: areaTokens, managedTokens: managedTokens)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(name).fontWeight(.semibold).lineLimit(1)
+                    Text(name).fontWeight(.semibold).lineLimit(2)
+                        .help(name)
                     if isBuiltIn {
                         Image(systemName: "lock.fill")
                             .font(.caption2)
@@ -283,23 +328,17 @@ private struct SystemPromptCard: View {
                 Text(meta)
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
-                // Ratings arrive with Try & Rate; until then the card says how
-                // to get one instead of showing empty stars.
-                Text(isBuiltIn ? "Not rated" : "Try it to rate")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
-                if !profiles.isEmpty {
-                    HStack(spacing: 4) {
-                        ForEach(profiles, id: \.self) { profile in
-                            Text(profile.title)
-                                .font(.caption2.weight(.medium))
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 1)
-                                .background(Color.accentColor.opacity(0.12), in: .capsule)
-                                .foregroundStyle(Color.accentColor)
-                        }
-                    }
+                if let inUseFor {
+                    Label("In use for \(inUseFor.title)", systemImage: "checkmark")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.accentColor)
+                        .lineLimit(1)
+                } else if hovered {
+                    Text("Click to use · double-click to open")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
                 }
             }
             Spacer(minLength: 0)
@@ -309,9 +348,27 @@ private struct SystemPromptCard: View {
         .background(AppSurface.card, in: .rect(cornerRadius: AppSurface.cardCornerRadius))
         .overlay {
             RoundedRectangle(cornerRadius: AppSurface.cardCornerRadius)
-                .strokeBorder(.separator)
+                .strokeBorder(
+                    inUseFor == nil ? AnyShapeStyle(.separator) : AnyShapeStyle(Color.accentColor),
+                    lineWidth: inUseFor == nil ? 1 : 2
+                )
         }
+        .overlay(alignment: .topTrailing) {
+            if hovered {
+                Button(isBuiltIn ? "Open" : "Edit", action: onEdit)
+                    .controlSize(.small)
+                    .padding(8)
+            }
+        }
+        .contentShape(.rect(cornerRadius: AppSurface.cardCornerRadius))
+        // Double click first, so a single click waits to tell them apart.
+        .onTapGesture(count: 2, perform: onEdit)
+        .onTapGesture(perform: onUse)
+        .onHover { hovered = $0 }
         .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(inUseFor == nil ? .isButton : [.isButton, .isSelected])
+        .accessibilityHint("Uses this prompt. Double-click to open it.")
+        .accessibilityAction(named: isBuiltIn ? "Open" : "Edit", onEdit)
     }
 
     private var managedTokens: Int {
@@ -407,5 +464,32 @@ extension SystemPromptArea {
         case .session: "folder"
         case .finalReminder: "bell"
         }
+    }
+}
+
+/// Sort order as quiet text with a trailing chevron. One `Text` holds both,
+/// so the chevron cannot be moved before the value as a menu label's
+/// separate image was.
+private struct SortMenu: View {
+    @Binding var selection: SystemPromptLibraryViewModel.SortOrder
+
+    var body: some View {
+        Menu {
+            Picker("Sort", selection: $selection) {
+                ForEach(SystemPromptLibraryViewModel.SortOrder.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Text("Sort by \(selection.rawValue) \(Image(systemName: "chevron.down"))")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel("Sort")
+        .accessibilityValue(selection.rawValue)
     }
 }
