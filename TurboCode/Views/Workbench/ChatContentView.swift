@@ -109,7 +109,8 @@ struct ChatContentView: View {
             Spacer()
 
             // Studio (the Cowork domain) explains itself above the composer;
-            // Coding keeps its plain prompt and must not change with it.
+            // Coding keeps its plain prompt and only gains the connector
+            // switches, so a connector is one click away in both.
             if chatStore.activeDomain == .cowork {
                 StudioHomeView()
                     .frame(maxWidth: min(CGFloat(settings.maxChatWidth), 720))
@@ -122,6 +123,12 @@ struct ChatContentView: View {
                     Text("Ask anything or describe what you want to create")
                         .font(AppTypography.emptyStateSubtitle)
                         .foregroundStyle(.secondary)
+                }
+
+                // Codex sessions never receive connectors, so no switch.
+                if chatStore.activeBackend != .codex {
+                    HomeConnectorRow(domain: .coding)
+                        .frame(maxWidth: min(CGFloat(settings.maxChatWidth), 720))
                 }
             }
 
