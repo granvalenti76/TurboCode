@@ -21,12 +21,37 @@ nonisolated struct MCPConnector: Identifiable, Sendable, Hashable {
     let domains: Set<SessionDomain>
     /// Shown when the app does not answer, so the user knows what to start.
     let startHint: String
-    /// Base name of a bundled `SKILL.md`-style file that teaches the app's
-    /// working method, or `nil`. The skill is only offered through
-    /// `load_skill` while the connector is enabled: the model loads it when a
-    /// request matches, so a session that merely enabled the connector does
-    /// not pay for the instructions.
-    var skillResource: String? = nil
+    /// Bundled `SKILL.md`-style files that teach the app's working method.
+    /// A skill is only offered through `load_skill` while the connector is
+    /// enabled: the model loads it when a request matches, so a session that
+    /// merely enabled the connector does not pay for the instructions.
+    var skills: [MCPConnectorSkill] = []
+
+    /// The skill files a session of `domain` receives, in declaration order.
+    func skills(for domain: SessionDomain) -> [MCPConnectorSkill] {
+        skills.filter { $0.domains.contains(domain) }
+    }
+
+    /// The skill names the connector can add, once each, for the Connectors page.
+    var skillNames: [String] {
+        skills.map(\.name).reduce(into: []) { names, name in
+            if !names.contains(name) { names.append(name) }
+        }
+    }
+}
+
+/// One bundled skill file of a connector and the session domains it serves.
+///
+/// A skill may exist in one version per domain under the same `name`: a Coding
+/// session runs on the Mac and may drive the app with bundled scripts through
+/// Bash, while a Studio session must reach it only through the `connector`
+/// tool, because its shell is inside the VM.
+nonisolated struct MCPConnectorSkill: Sendable, Hashable {
+    /// The skill name from the file's front matter, shown on the Connectors page.
+    let name: String
+    /// Base name of the `.md` file in the app bundle.
+    let resource: String
+    let domains: Set<SessionDomain>
 }
 
 /// An MCP endpoint served by an app on this Mac.
@@ -68,10 +93,17 @@ nonisolated enum MCPConnectorCatalog {
         endpoint: MCPLoopbackEndpoint(port: 48_765, path: "/mcp")!,
         domains: [.coding, .cowork],
         startHint: "Open Prassitele and turn on Agent › Agent Server (MCP).",
-        // A copy of Prassitele's own blockout skill, adapted to connector
-        // calls: the original drives the app with a script on the Mac, which
-        // a TurboCode session, and a Studio session above all, cannot run.
-        skillResource: "prassitele-sculpting"
+        skills: [
+            // Prassitele's head and torso skills, each in two versions. On the
+            // Mac they keep their Python scripts (bundled next to them, one
+            // Bash command per stage); in Studio the VM cannot reach the app,
+            // so every part is one connector call. All four are adapted copies
+            // of the skills in Prassitele's repository and can go stale.
+            MCPConnectorSkill(name: "prassitele-sculpting", resource: "prassitele-sculpting", domains: [.coding]),
+            MCPConnectorSkill(name: "prassitele-sculpting", resource: "prassitele-sculpting-studio", domains: [.cowork]),
+            MCPConnectorSkill(name: "prassitele-torso", resource: "prassitele-torso", domains: [.coding]),
+            MCPConnectorSkill(name: "prassitele-torso", resource: "prassitele-torso-studio", domains: [.cowork])
+        ]
     )
 
     static let all: [MCPConnector] = [prassitele]
@@ -87,22 +119,36 @@ nonisolated enum MCPConnectorCatalog {
         all.filter { ids.contains($0.id) && $0.domains.contains(domain) }
     }
 
-    /// The skills the enabled connectors add to a session's `load_skill`
-    /// catalog. A missing or malformed resource only removes that skill; the
-    /// connector itself keeps working. Main-actor only because skill
-    /// definitions are parsed there, like the user's own catalog.
+    /// The skills the enabled connectors add to a `domain` session's
+    /// `load_skill` catalog. A missing or malformed resource only removes that
+    /// skill; the connector itself keeps working. Main-actor only because
+    /// skill definitions are parsed there, like the user's own catalog.
     @MainActor
-    static func skills(for connectors: [MCPConnector], bundle: Bundle = .main) -> [TurboCodeSkillDefinition] {
-        connectors.compactMap { connector in
-            guard let name = connector.skillResource else { return nil }
+    static func skills(
+        for connectors: [MCPConnector],
+        domain: SessionDomain,
+        bundle: Bundle = .main
+    ) -> [TurboCodeSkillDefinition] {
+        connectors.flatMap { $0.skills(for: domain) }.compactMap { entry in
+            let name = entry.resource
             if bundle == .main, let cached = bundledSkills[name] { return cached }
             guard let url = bundle.url(forResource: name, withExtension: "md")
                     ?? bundle.url(forResource: name, withExtension: "md", subdirectory: "ConnectorSkills"),
-                  let skill = try? TurboCodeSkillDefinition(contentsOf: url) else { return nil }
+                  let parsed = try? TurboCodeSkillDefinition(contentsOf: url) else { return nil }
+            // A skill that ships scripts names them through this placeholder:
+            // they are bundled in the same folder as the file, which differs
+            // between an installed app and a debug build.
+            let skill = parsed.replacingInPrompt(
+                skillDirectoryPlaceholder,
+                with: url.deletingLastPathComponent().path
+            )
             if bundle == .main { bundledSkills[name] = skill }
             return skill
         }
     }
+
+    /// Replaced in a bundled skill with the folder that holds it.
+    static let skillDirectoryPlaceholder = "{{SKILL_DIR}}"
 
     /// Bundled skills never change while the app runs, and the composer asks
     /// for the catalog while the user types, so each file is parsed once.

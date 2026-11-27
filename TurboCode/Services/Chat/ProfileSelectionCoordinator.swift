@@ -120,7 +120,7 @@ final class ProfileSelectionCoordinator {
             )
             : codingSkills
         return MCPConnectorCatalog.catalog(
-            adding: MCPConnectorCatalog.skills(for: connectors),
+            adding: MCPConnectorCatalog.skills(for: connectors, domain: domain),
             to: base
         )
     }

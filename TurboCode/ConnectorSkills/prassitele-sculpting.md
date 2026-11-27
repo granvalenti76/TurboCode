@@ -16,21 +16,31 @@ Axes, in mm: +X is the viewer's right in the front view, +Y up, +Z toward the vi
 1. **Skull** of boxes, cranium a sphere.
 2. **Soft masses** (spheres) in front of the bone, as flesh lies over it.
 3. **Ears and neck** (and a bust, if asked).
-4. **Merge and remesh** with `close_mm` and `blend_mm`: one closed surface.
-5. **Eyes** as separate spheres in dug sockets.
-6. **Proportions** from the photo, with broad moves, then stop.
+4. **Ask before the merge.** Show the blockout and ask the user whether they want the merge and remesh, or whether the separate parts are enough. Parts can still be moved one by one; after the remesh they are gone. Merge only on a yes.
+5. **Merge and remesh** with `close_mm` and `blend_mm`: one closed surface.
+6. **Eyes** as separate spheres in dug sockets.
+7. **Proportions** from the photo, with broad moves, then stop.
 
-**Every Prassitele tool is called through the `connector` tool**: `operation` `call`, `toolName` the name used here (`add_primitive`, `remesh`, ...), `argumentsJSON` its arguments. Call `list_tools` once first to read the exact argument names.
+**Build the parts with the bundled script, not one tool call at a time.** `prassitele_bust.py` in `{{SKILL_DIR}}` calls the Prassitele agent server on this Mac directly, so a dozen parts go in a few seconds, one stage per Bash command:
 
-**Build the parts one `add_primitive` call per row of the tables below.** There is no script and no shell on the user's Mac here. Work one stage at a time (skull, then soft masses, ...) and look between stages with `observe` and `measure_sections`. Look at `right` and `three_quarter` after each stage: they show the rhythm of the masses better than the front. When a part is wrong, fix that part instead of starting over.
+```
+PYTHONPATH="{{SKILL_DIR}}" python3 "{{SKILL_DIR}}/prassitele_bust.py" 48765 skull
+PYTHONPATH="{{SKILL_DIR}}" python3 "{{SKILL_DIR}}/prassitele_bust.py" 48765 soft
+PYTHONPATH="{{SKILL_DIR}}" python3 "{{SKILL_DIR}}/prassitele_bust.py" 48765 bust          # only for a bust
+PYTHONPATH="{{SKILL_DIR}}" python3 "{{SKILL_DIR}}/prassitele_bust.py" 48765 remesh 48000 13 10
+PYTHONPATH="{{SKILL_DIR}}" python3 "{{SKILL_DIR}}/prassitele_bust.py" 48765 eyes
+```
+
+The script builds one bust from a photo (its first lines give the proportions), and its numbers differ a little from the tables below. To change numbers, copy it into `$TMPDIR`, edit the copy and run that: `PYTHONPATH` lets the copy find `prassitele_mcp.py`. For a head without a bust, skip `bust` and remesh with `17000 9 8`. Use the `connector` tool between stages to look (`observe`, `measure_sections`) and for single fixes. When something is wrong, change a number and rerun from `skull`, which moves the old parts out of the way (rerunning a later stage alone adds its parts twice): a lost scene costs nothing. Look at `right` and `three_quarter` after each stage: they show the rhythm of the masses better than the front.
 
 **Fix proportions before the merge, on the parts.** Every part is its own SubTool until `merge_subtools`, and a mirrored pair (both cheekbones, both rami) is one SubTool centered on x = 0. So `select_subtool` and `transform_subtool` change a pair at once and keep it symmetric:
 
 - `scale` [1.1, 1, 1] widens the pair: the two parts move apart and grow. The default pivot is the center of the SubTool, x = 0 for a pair.
 - `translate_mm` only in Y and Z. A translation in X moves both parts to the same side and breaks the symmetry.
-- No `rotate_deg` on a pair, except around X: the two halves would turn the same way. To turn the parts, remove the SubTool with `delete_subtool` and add it again with the new rotation.
+- No `rotate_deg` on a pair, except around X: the two halves would turn the same way. To turn the parts, change the rotation in the script and rerun the stage.
+- When the change is right, put the new numbers back in the script, so that a rebuild keeps it.
 
-After the merge the parts are gone: proportions change only with soft moves (step 6).
+After the merge the parts are gone: proportions change only with soft moves (step 7).
 
 Start from a fresh scene. Move anything already there out of the way with `transform_subtool` and tell the user.
 
@@ -79,9 +89,12 @@ Spheres of 600 quads, 5 to 12 mm **in front of** the bone blocks. A mouth inside
 
 - Ears: a box 9 × 58 × 28 at x = 61 (mirror), from the brow to the base of the nose, rotation -15, 15, 0. Thicker or more flared, they read as headphones.
 - Neck: a cylinder about 96 × 130 × 90, center 0, -95, -25, rotation 14, 0, 0. Its top goes up into the base of the skull at the back; in front it stays behind and below the mandible, or the fusion fills the corner under the jaw. A neck that stops short of the skull leaves a gap.
-- A bust: trapezius boxes from the neck to the shoulders, chest boxes, and a box turned 45 degrees around Z for a V at the bottom.
+- A bust: trapezius boxes from the neck to the shoulders, chest boxes, and a box turned 45 degrees around Z for a V at the bottom (see the `bust` stage of `prassitele_bust.py`).
+- A whole torso (neck to upper thighs): use the `prassitele-torso` skill.
 
 ## 4. Merge and remesh
+
+Only after the user said yes to it (step 4 of the method). If they keep the blockout, stop here and tell them what is left.
 
 `merge_subtools` with every part, then `remesh`:
 

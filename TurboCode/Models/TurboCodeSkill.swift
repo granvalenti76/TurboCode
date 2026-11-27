@@ -5,7 +5,7 @@ import Foundation
 struct TurboCodeSkillDefinition: Identifiable, Hashable, Sendable {
     let name: String
     let description: String
-    let prompt: String
+    private(set) var prompt: String
     let sourceURL: URL
 
     var id: String { name }
@@ -52,6 +52,14 @@ struct TurboCodeSkillDefinition: Identifiable, Hashable, Sendable {
         self.description = description
         self.prompt = prompt
         self.sourceURL = url
+    }
+
+    /// A copy whose instructions have every `placeholder` replaced. Bundled
+    /// skills use it to name their own folder, which is only known at run time.
+    func replacingInPrompt(_ placeholder: String, with value: String) -> Self {
+        var copy = self
+        copy.prompt = prompt.replacingOccurrences(of: placeholder, with: value)
+        return copy
     }
 
     private static func parseMetadata(_ lines: [String]) -> [String: String] {

@@ -223,23 +223,63 @@ struct ConnectorTests {
 
     // MARK: Skills
 
-    @Test("A connector's skill is bundled, parses, and never tells the model to use a host shell")
+    @Test("Studio receives Prassitele's skills in connector-only versions that never mention a host shell")
     @MainActor
-    func connectorSkillIsBundledAndHostFree() throws {
-        let skills = MCPConnectorCatalog.skills(for: [MCPConnectorCatalog.prassitele])
-        let skill = try #require(skills.first)
-        #expect(skill.name == "prassitele-sculpting")
-        #expect(skill.prompt.contains("`connector` tool"))
-        for forbidden in ["bust.py", "sessions.py", "with Bash", "python3"] {
-            #expect(!skill.prompt.contains(forbidden), "The skill still mentions \(forbidden)")
+    func studioConnectorSkillsAreHostFree() throws {
+        let skills = MCPConnectorCatalog.skills(for: [MCPConnectorCatalog.prassitele], domain: .cowork)
+        #expect(skills.map(\.name) == ["prassitele-sculpting", "prassitele-torso"])
+        for skill in skills {
+            #expect(skill.prompt.contains("`connector` tool"), "\(skill.name) does not teach the connector")
+            for forbidden in ["bust.py", "torso.py", "sessions.py", "with Bash", "python3", "{{SKILL_DIR}}"] {
+                #expect(!skill.prompt.contains(forbidden), "\(skill.name) still mentions \(forbidden)")
+            }
         }
-        #expect(MCPConnectorCatalog.skills(for: []).isEmpty)
+        #expect(MCPConnectorCatalog.skills(for: [], domain: .cowork).isEmpty)
+    }
+
+    @Test("Every Prassitele skill asks the user before the merge and remesh")
+    @MainActor
+    func prassiteleSkillsAskBeforeTheRemesh() throws {
+        for domain in [SessionDomain.coding, .cowork] {
+            for skill in MCPConnectorCatalog.skills(for: [MCPConnectorCatalog.prassitele], domain: domain) {
+                #expect(skill.prompt.contains("Ask before the merge"), "\(skill.name) in \(domain) merges without asking")
+            }
+        }
+    }
+
+    @Test("A Coding session's Prassitele skills point at their bundled scripts")
+    @MainActor
+    func codingPrassiteleSkillsNameTheirBundledScripts() throws {
+        let skills = MCPConnectorCatalog.skills(for: [MCPConnectorCatalog.prassitele], domain: .coding)
+        #expect(skills.map(\.name) == ["prassitele-sculpting", "prassitele-torso"])
+        let scripts = [
+            "prassitele-sculpting": "prassitele_bust.py",
+            "prassitele-torso": "prassitele_torso.py"
+        ]
+        for skill in skills {
+            #expect(!skill.prompt.contains(MCPConnectorCatalog.skillDirectoryPlaceholder))
+            #expect(!skill.prompt.contains("sessions.py"), "\(skill.name) still needs Prassitele's repository")
+            let folder = skill.sourceURL.deletingLastPathComponent()
+            #expect(skill.prompt.contains(folder.path))
+            for script in ["prassitele_mcp.py", try #require(scripts[skill.name])] {
+                #expect(skill.prompt.contains(script), "\(skill.name) does not name \(script)")
+                #expect(
+                    FileManager.default.fileExists(atPath: folder.appendingPathComponent(script).path),
+                    "\(script) is not bundled next to \(skill.name)"
+                )
+            }
+        }
+        // The offset comes before the remesh numbers: left out, 110000 was
+        // read as the offset and the torso was fused into about 20 quads.
+        let torso = try #require(skills.first { $0.name == "prassitele-torso" })
+        #expect(torso.prompt.contains("remesh 0 110000 30 16"))
+        #expect(!torso.prompt.contains("[x_offset]"))
     }
 
     @Test("Connector skills join the catalog without replacing a skill the user installed")
     @MainActor
     func connectorSkillsDoNotReplaceUserSkills() throws {
-        let offered = try #require(MCPConnectorCatalog.skills(for: [MCPConnectorCatalog.prassitele]).first)
+        let offered = try #require(MCPConnectorCatalog.skills(for: [MCPConnectorCatalog.prassitele], domain: .coding).first)
         #expect(MCPConnectorCatalog.catalog(adding: [offered], to: []).map(\.name) == ["prassitele-sculpting"])
         #expect(MCPConnectorCatalog.catalog(adding: [offered], to: [offered]).count == 1)
     }

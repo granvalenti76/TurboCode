@@ -27,9 +27,7 @@ struct ConnectorsView: View {
                         ConnectorCard(
                             systemImage: connector.systemImage,
                             name: connector.name,
-                            summary: connector.skillResource.map {
-                                "\(connector.summary) Adds the skill \($0), loaded only when a request needs it."
-                            } ?? connector.summary,
+                            summary: summary(for: connector),
                             status: status(for: connector),
                             scope: "This session",
                             isOn: sessionBinding(for: connector),
@@ -88,6 +86,15 @@ struct ConnectorsView: View {
         // Changing the list rebuilds the session, which would cut a running
         // turn. Without a session yet, the switch creates one in this domain.
         !chatStore.busy && connector.domains.contains(chatStore.activeDomain)
+    }
+
+    /// The card text, naming the skills the connector adds. A skill with one
+    /// version per session type is still one skill to the user.
+    private func summary(for connector: MCPConnector) -> String {
+        let names = connector.skillNames
+        guard !names.isEmpty else { return connector.summary }
+        let noun = names.count == 1 ? "the skill" : "the skills"
+        return "\(connector.summary) Adds \(noun) \(names.joined(separator: " and ")), loaded only when a request needs it."
     }
 
     private func status(for connector: MCPConnector) -> ConnectorCard.Status {
